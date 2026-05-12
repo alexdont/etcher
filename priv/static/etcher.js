@@ -106,7 +106,9 @@
       ".etcher-shape.is-editing {",
       "  stroke: #f59e0b; stroke-dasharray: 5 4;",
       "  fill: rgba(245, 158, 11, 0.12);",
+      "  cursor: grab;",
       "}",
+      ".etcher-shape.is-editing.is-moving { cursor: grabbing; }",
       ".etcher-handle {",
       "  fill: #fff; stroke: #f59e0b; stroke-width: 2;",
       "  pointer-events: auto; cursor: grab;",
@@ -724,6 +726,17 @@
         }
         self.pushEventTo(self.el, "etcher:selected", { uuid: id });
       });
+
+      // When the shape is the active edit target, its body becomes a
+      // grab-handle for translating the whole annotation. The early
+      // return covers every other state (not editing, drawing tool
+      // active, etc.) so the listener is cheap to leave always-on.
+      el.addEventListener("pointerdown", function(e) {
+        if (self.editingShape !== shape) return;
+        if (e.button !== 0) return;
+        e.stopPropagation();
+        self._startShapeMove(shape, e);
+      });
     },
 
     _showTooltipFor: function(shape) {
@@ -1190,6 +1203,73 @@
       handleEl.addEventListener("pointermove", onMove);
       handleEl.addEventListener("pointerup", onUp);
       handleEl.addEventListener("pointercancel", onUp);
+    },
+
+    // Translate the whole shape via a body grab. Mirrors the handle-drag
+    // flow but applies a uniform offset to every geometry field. Uses a
+    // small dead-zone so a stationary click on the shape body doesn't
+    // emit a no-op `etcher:updated` event.
+    _startShapeMove: function(shape, e) {
+      var self = this;
+      var el = shape.el;
+      var startPt = self._toImage(e);
+      var startGeom = JSON.parse(JSON.stringify(shape.geometry));
+      var dragged = false;
+      try { el.setPointerCapture(e.pointerId); } catch (_) {}
+
+      function onMove(ev) {
+        var pt = self._toImage(ev);
+        if (!dragged) {
+          var a = self._imageToContainer(startPt);
+          var b = self._imageToContainer(pt);
+          var sdx = b.x - a.x, sdy = b.y - a.y;
+          // 3px screen-space dead zone — distinguishes "drag to move"
+          // from "I'm just hovering" so a stationary click on an
+          // already-editing shape doesn't fire a network round-trip.
+          if (sdx * sdx + sdy * sdy < 9) return;
+          dragged = true;
+          el.classList.add("is-moving");
+        }
+        shape.geometry = self._translateGeometry(
+          shape.kind, startGeom, pt.x - startPt.x, pt.y - startPt.y
+        );
+        self._renderShape(shape);
+        self._positionAllHandles(shape);
+      }
+      function onUp(ev) {
+        el.classList.remove("is-moving");
+        el.removeEventListener("pointermove", onMove);
+        el.removeEventListener("pointerup", onUp);
+        el.removeEventListener("pointercancel", onUp);
+        try { el.releasePointerCapture(ev.pointerId); } catch (_) {}
+        if (dragged && shape.uuid) {
+          self.pushEventTo(self.el, "etcher:updated", {
+            uuid: shape.uuid,
+            geometry: shape.geometry
+          });
+        }
+      }
+      el.addEventListener("pointermove", onMove);
+      el.addEventListener("pointerup", onUp);
+      el.addEventListener("pointercancel", onUp);
+    },
+
+    _translateGeometry: function(kind, geom, dx, dy) {
+      switch (kind) {
+        case "rectangle":
+          return { x: geom.x + dx, y: geom.y + dy, w: geom.w, h: geom.h };
+        case "circle":
+          return { cx: geom.cx + dx, cy: geom.cy + dy, r: geom.r };
+        case "polygon":
+        case "freehand":
+          return {
+            points: (geom.points || []).map(function(p) {
+              return [p[0] + dx, p[1] + dy];
+            })
+          };
+        default:
+          return geom;
+      }
     },
 
     _applyHandleDrag: function(shape, idx, pt, startGeom) {

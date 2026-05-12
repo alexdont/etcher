@@ -168,9 +168,6 @@
       ".etcher-tooltip-kind {",
       "  font-weight: 600; text-transform: capitalize; flex: 1;",
       "}",
-      ".etcher-tooltip-meta {",
-      "  margin-top: 2px; opacity: 0.72; font-size: 11px;",
-      "}",
       ".etcher-tooltip-delete {",
       "  background: rgba(255, 255, 255, 0.08); border: none;",
       "  color: rgba(252, 165, 165, 0.95);",
@@ -785,7 +782,6 @@
       this._tooltipShape = shape;
 
       var label = (shape.metadata && shape.metadata.label) || shape.label || null;
-      var id = (shape.uuid || shape.tmpId || "").toString().slice(0, 8);
 
       var html = '<div class="etcher-tooltip-header">';
       html += '<span class="etcher-tooltip-kind">' + escapeHtml(shape.kind) + '</span>';
@@ -799,7 +795,6 @@
       }
       html += '</div>';
       if (label) html += '<div>' + escapeHtml(label) + '</div>';
-      if (id)    html += '<div class="etcher-tooltip-meta">#' + escapeHtml(id) + '</div>';
       tip.innerHTML = html;
 
       // Anchor the tooltip just above the shape's bounding rect, in

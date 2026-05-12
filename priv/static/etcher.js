@@ -35,6 +35,7 @@
   var ICONS = {
     pencil:   '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125"/></svg>',
     trash:    '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/></svg>',
+    paperclip:'<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m18.375 12.739-7.693 7.693a4.5 4.5 0 0 1-6.364-6.364l10.94-10.94A3 3 0 1 1 19.5 7.372L8.552 18.32m.009-.01-.01.01m5.699-9.941-7.81 7.81a1.5 1.5 0 0 0 2.112 2.13"/></svg>',
     cursor:   '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15 15 9 9m6 6-2.625 6.75M15 15l6.75-2.625M9 9 2.25 11.625M9 9l2.625-6.75"/></svg>',
     rectangle:'<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><rect x="4" y="6" width="16" height="12" rx="1.5"/></svg>',
     circle:   '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><circle cx="12" cy="12" r="7.5"/></svg>',
@@ -160,7 +161,7 @@
       "  padding: 6px 10px; border-radius: 6px;",
       "  font-size: 12px; line-height: 1.35; max-width: 260px;",
       "  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);",
-      "  display: none; white-space: nowrap;",
+      "  display: none;",
       "}",
       ".etcher-tooltip-header {",
       "  display: flex; align-items: center; gap: 10px;",
@@ -182,7 +183,50 @@
       ".etcher-tooltip-delete:focus-visible {",
       "  outline: 2px solid rgba(255, 255, 255, 0.7); outline-offset: 1px;",
       "}",
-      ".etcher-tooltip-delete svg { width: 14px; height: 14px; }"
+      ".etcher-tooltip-delete svg { width: 14px; height: 14px; }",
+      // Comment-preview slots — filled from `shape.metadata.comment_*`
+      // fields the server passes when an annotation has a thread.
+      ".etcher-tooltip-body {",
+      "  display: flex; gap: 8px; margin-top: 6px; max-width: 260px;",
+      "}",
+      ".etcher-tooltip-thumb {",
+      "  flex: 0 0 40px; width: 40px; height: 40px;",
+      "  border-radius: 4px; object-fit: cover;",
+      "  background: rgba(255, 255, 255, 0.08);",
+      "}",
+      // Paperclip fallback when the comment has an attachment but no
+      // image thumbnail to render. Same 40x40 box; centered icon.
+      ".etcher-tooltip-thumb-icon {",
+      "  display: inline-flex; align-items: center; justify-content: center;",
+      "  color: rgba(255, 255, 255, 0.85);",
+      "}",
+      ".etcher-tooltip-thumb-icon svg { width: 20px; height: 20px; }",
+      ".etcher-tooltip-text { flex: 1; min-width: 0; }",
+      ".etcher-tooltip-quote {",
+      "  font-style: italic; opacity: 0.9;",
+      "  display: -webkit-box; -webkit-box-orient: vertical;",
+      "  -webkit-line-clamp: 2; overflow: hidden;",
+      "  word-break: break-word;",
+      "}",
+      ".etcher-tooltip-author {",
+      "  margin-top: 2px; opacity: 0.7; font-size: 11px;",
+      "}",
+      ".etcher-tooltip-count {",
+      "  margin-top: 4px; display: inline-block;",
+      "  padding: 1px 6px; border-radius: 999px;",
+      "  background: rgba(255, 255, 255, 0.15);",
+      "  font-size: 10px; font-weight: 500;",
+      "}",
+      // Cross-component highlight: when an annotation is pinned, the
+      // comments that reference it (via `data-annotation-uuid` from
+      // PhoenixKitComments) glow orange so the user can see the
+      // discussion thread in the sidebar at the same time.
+      ".etcher-comment-highlight {",
+      "  outline: 2px solid #f59e0b; outline-offset: 2px;",
+      "  border-radius: 0.5rem;",
+      "  background-color: rgba(245, 158, 11, 0.12);",
+      "  transition: background-color 200ms ease, outline-color 200ms ease;",
+      "}"
     ].join("\n");
 
     var style = document.createElement("style");
@@ -295,6 +339,8 @@
 
     destroyed: function() {
       this._exitEditMode();
+      this._removeTooltipOutsideClickHandler();
+      this._clearCommentHighlights();
       if (this.removeNavBtn) { try { this.removeNavBtn(); } catch (_) {} }
       if (this.toolbar && this.toolbar.parentNode) {
         this.toolbar.parentNode.removeChild(this.toolbar);
@@ -734,10 +780,15 @@
 
       el.addEventListener("mouseenter", function() {
         if (self.annotationMode && self.activeTool != null) return;
+        // While a different tooltip is pinned, hover is suppressed so
+        // the pin stays in control. Click switches the pin.
+        if (self.tooltipPinned) return;
         el.classList.add("is-hovered");
         self._showTooltipFor(shape);
       });
       el.addEventListener("mouseleave", function() {
+        // Pinned tooltips ignore mouseleave entirely.
+        if (self.tooltipPinned) return;
         el.classList.remove("is-hovered");
         // Don't snap closed — give the cursor time to travel from shape
         // to tooltip so the delete button stays reachable.
@@ -753,11 +804,19 @@
         e.stopPropagation();
         e.preventDefault();
         var id = shape.uuid || shape.tmpId;
-        // Edit handles only appear in annotation mode + cursor tool.
-        // Outside annotation mode the click is a passive selection —
-        // the consumer's LiveView decides what to do with it.
         if (self.annotationMode) {
+          // Edit handles only appear in annotation mode + cursor tool.
           self._enterEditMode(shape);
+        } else {
+          // Outside annotation mode: pin the tooltip so the user can
+          // dwell on the comment preview without it timing out.
+          // Clicking the same shape again unpins; clicking another
+          // shape switches the pin.
+          if (self.tooltipPinned && self._tooltipShape === shape) {
+            self._unpinTooltip();
+          } else {
+            self._pinTooltipFor(shape);
+          }
         }
         self.pushEventTo(self.el, "etcher:selected", { uuid: id });
       });
@@ -781,7 +840,13 @@
       this._cancelHideTooltip();
       this._tooltipShape = shape;
 
-      var label = (shape.metadata && shape.metadata.label) || shape.label || null;
+      var meta = shape.metadata || {};
+      var label = meta.label || shape.label || null;
+      var commentText = meta.comment_text || null;
+      var commentAuthor = meta.comment_author || null;
+      var commentThumb = meta.comment_thumbnail_url || null;
+      var commentHasAttachment = meta.comment_has_attachment === true;
+      var commentCount = meta.comment_count || 0;
 
       var html = '<div class="etcher-tooltip-header">';
       html += '<span class="etcher-tooltip-kind">' + escapeHtml(shape.kind) + '</span>';
@@ -795,7 +860,55 @@
       }
       html += '</div>';
       if (label) html += '<div>' + escapeHtml(label) + '</div>';
+
+      // Comment preview block — renders when there's text / thumb /
+      // author / attachment info. The thumb slot is either:
+      //   (a) the image URL, with an onerror that swaps to a paperclip
+      //       if the image fails to load (broken URL, 404, CSP block)
+      //   (b) a paperclip icon when the comment has an attachment but
+      //       no preview-able image (PDFs, audio, zips)
+      //   (c) skipped entirely when there's no attachment + no image
+      if (commentText || commentThumb || commentAuthor || commentHasAttachment) {
+        html += '<div class="etcher-tooltip-body">';
+        if (commentThumb) {
+          html += '<img class="etcher-tooltip-thumb" src="' +
+                  escapeHtml(commentThumb) + '" alt="">';
+        } else if (commentHasAttachment) {
+          html += '<span class="etcher-tooltip-thumb etcher-tooltip-thumb-icon">' +
+                  ICONS.paperclip + '</span>';
+        }
+        html += '<div class="etcher-tooltip-text">';
+        if (commentText) {
+          html += '<div class="etcher-tooltip-quote">' + escapeHtml(commentText) + '</div>';
+        }
+        if (commentAuthor) {
+          html += '<div class="etcher-tooltip-author">— ' +
+                  escapeHtml(commentAuthor) + '</div>';
+        }
+        html += '</div></div>';
+      }
+
+      if (commentCount > 1) {
+        html += '<span class="etcher-tooltip-count">' +
+                commentCount + ' ' + (commentCount === 1 ? 'comment' : 'comments') +
+                '</span>';
+      }
+
       tip.innerHTML = html;
+
+      // If the thumbnail image is broken (variant URL 404'd, blocked by
+      // CSP, etc.), swap it for the paperclip placeholder rather than
+      // leaving the user-agent's broken-image icon. Wired up after
+      // innerHTML so the JS we attach isn't inlined and HTML-escaped.
+      var thumbImg = tip.querySelector("img.etcher-tooltip-thumb");
+      if (thumbImg) {
+        thumbImg.addEventListener("error", function() {
+          var span = document.createElement("span");
+          span.className = "etcher-tooltip-thumb etcher-tooltip-thumb-icon";
+          span.innerHTML = ICONS.paperclip;
+          if (thumbImg.parentNode) thumbImg.parentNode.replaceChild(span, thumbImg);
+        });
+      }
 
       // Anchor the tooltip just above the shape's bounding rect, in
       // container px. `getBoundingClientRect` reflects the current
@@ -812,6 +925,9 @@
     },
 
     _scheduleHideTooltip: function() {
+      // Pinned tooltips never auto-close — only an explicit click action
+      // (same shape again, another shape, or outside) closes them.
+      if (this.tooltipPinned) return;
       var self = this;
       self._cancelHideTooltip();
       // 180ms is long enough for a Fitts'-friendly diagonal move from
@@ -832,8 +948,75 @@
 
     _hideTooltip: function() {
       this._cancelHideTooltip();
+      // _hideTooltip is the universal teardown; make sure pin state is
+      // also reset so the next click-to-pin starts clean.
+      this.tooltipPinned = false;
+      this._removeTooltipOutsideClickHandler();
       this._tooltipShape = null;
       if (this.tooltipEl) this.tooltipEl.style.display = "none";
+    },
+
+    // Pin / unpin — click-to-stick UX. Pinned tooltips ignore hover
+    // events and only close on (a) clicking the same shape again,
+    // (b) clicking another shape (which switches the pin), or
+    // (c) clicking anywhere else on the page.
+    _pinTooltipFor: function(shape) {
+      this._showTooltipFor(shape);
+      this.tooltipPinned = true;
+      this._installTooltipOutsideClickHandler();
+      this._highlightCommentsFor(shape.uuid);
+    },
+
+    _unpinTooltip: function() {
+      this.tooltipPinned = false;
+      this._removeTooltipOutsideClickHandler();
+      this._clearCommentHighlights();
+      this._hideTooltip();
+    },
+
+    // PhoenixKitComments stamps each rendered comment with
+    // `data-annotation-uuid` when the comment has one. We find those in
+    // the document (the comments thread lives in the sidebar, outside
+    // our viewer container) and highlight them. Scroll the first match
+    // into view so the user doesn't have to hunt for the thread.
+    _highlightCommentsFor: function(annotationUuid) {
+      this._clearCommentHighlights();
+      if (!annotationUuid) return;
+      var matches = document.querySelectorAll(
+        '[data-annotation-uuid="' + annotationUuid + '"]'
+      );
+      if (matches.length === 0) return;
+      matches.forEach(function(el) { el.classList.add("etcher-comment-highlight"); });
+      try {
+        matches[0].scrollIntoView({ behavior: "smooth", block: "center" });
+      } catch (_) {}
+    },
+
+    _clearCommentHighlights: function() {
+      document.querySelectorAll(".etcher-comment-highlight").forEach(function(el) {
+        el.classList.remove("etcher-comment-highlight");
+      });
+    },
+
+    _installTooltipOutsideClickHandler: function() {
+      if (this._tooltipOutsideClick) return;
+      var self = this;
+      this._tooltipOutsideClick = function(e) {
+        // Clicks on a shape, on the tooltip itself, or on an edit-mode
+        // handle keep the pin alive. Anything else unpins.
+        if (e.target.closest(".etcher-shape, .etcher-tooltip, .etcher-handle")) return;
+        self._unpinTooltip();
+      };
+      // Capture phase so we run before any inner stopPropagation can
+      // swallow the click.
+      document.addEventListener("click", this._tooltipOutsideClick, true);
+    },
+
+    _removeTooltipOutsideClickHandler: function() {
+      if (this._tooltipOutsideClick) {
+        document.removeEventListener("click", this._tooltipOutsideClick, true);
+        this._tooltipOutsideClick = null;
+      }
     },
 
     _deleteShape: function(shape) {
@@ -1078,16 +1261,39 @@
       this._renderShape(shape);
       this._attachShapeInteractions(shape);
 
+      // Anchor for the consumer's "spawn a composer / popover next to
+      // the new shape" UI: shape's bottom-left in container px, with
+      // an 8px gap below. Lets the host LV position a floating widget
+      // anchored to where the user just drew.
+      var anchor = this._shapeAnchorBottomLeft(shape);
+
       this.pushEventTo(this.el, "etcher:created", {
         target_type: this.targetType,
         target_uuid: this.targetUuid,
         kind: kind,
         geometry: geometry,
-        tmp_id: tmpId
+        tmp_id: tmpId,
+        anchor_x: anchor.x,
+        anchor_y: anchor.y
       });
 
       this.draftState = null;
       this._syncDraftHandles();
+    },
+
+    // Returns the shape's bottom-left corner in container px (the
+    // coordinate space the host LV's overlay div uses). Falls back to
+    // the viewer center if the shape's bounding rect isn't available
+    // yet for some reason.
+    _shapeAnchorBottomLeft: function(shape) {
+      try {
+        var sr = shape.el.getBoundingClientRect();
+        var cr = this.handle.container.getBoundingClientRect();
+        return { x: sr.left - cr.left, y: sr.bottom - cr.top + 8 };
+      } catch (_) {
+        var cr2 = this.handle.container.getBoundingClientRect();
+        return { x: cr2.width / 2 - 160, y: cr2.height / 2 };
+      }
     },
 
     _cancelDraft: function() {

@@ -208,14 +208,11 @@
       "  -webkit-line-clamp: 2; overflow: hidden;",
       "  word-break: break-word;",
       "}",
-      ".etcher-tooltip-author {",
+      // Date · count subheader, sits between the header and the
+      // comment body. Subtle so it doesn't compete with the comment
+      // preview's actual content.
+      ".etcher-tooltip-meta {",
       "  margin-top: 2px; opacity: 0.7; font-size: 11px;",
-      "}",
-      ".etcher-tooltip-count {",
-      "  margin-top: 4px; display: inline-block;",
-      "  padding: 1px 6px; border-radius: 999px;",
-      "  background: rgba(255, 255, 255, 0.15);",
-      "  font-size: 10px; font-weight: 500;",
       "}",
       // Cross-component highlight: when an annotation is pinned, the
       // comments that reference it (via `data-annotation-uuid` from
@@ -870,9 +867,14 @@
       var commentThumb = meta.comment_thumbnail_url || null;
       var commentHasAttachment = meta.comment_has_attachment === true;
       var commentCount = meta.comment_count || 0;
+      var commentDate = meta.comment_created_at || null;
+
+      // Header label: author name when a comment is attached, else
+      // fall back to the shape kind so the slot is never empty.
+      var headerLabel = commentAuthor || shape.kind;
 
       var html = '<div class="etcher-tooltip-header">';
-      html += '<span class="etcher-tooltip-kind">' + escapeHtml(shape.kind) + '</span>';
+      html += '<span class="etcher-tooltip-kind">' + escapeHtml(headerLabel) + '</span>';
       // Only show delete for persisted annotations — temp shapes that
       // haven't been ack'd by the server yet shouldn't be deletable
       // through the server-side path.
@@ -884,14 +886,25 @@
       html += '</div>';
       if (label) html += '<div>' + escapeHtml(label) + '</div>';
 
+      // Sub-header: date · activity count. Both are optional; if both
+      // present they're joined with a middle-dot separator.
+      if (commentDate || commentCount > 0) {
+        var parts = [];
+        if (commentDate) parts.push(escapeHtml(commentDate));
+        if (commentCount > 0) {
+          parts.push(commentCount + " " + (commentCount === 1 ? "comment" : "comments"));
+        }
+        html += '<div class="etcher-tooltip-meta">' + parts.join(" · ") + '</div>';
+      }
+
       // Comment preview block — renders when there's text / thumb /
-      // author / attachment info. The thumb slot is either:
+      // attachment info. The thumb slot is either:
       //   (a) the image URL, with an onerror that swaps to a paperclip
       //       if the image fails to load (broken URL, 404, CSP block)
       //   (b) a paperclip icon when the comment has an attachment but
       //       no preview-able image (PDFs, audio, zips)
       //   (c) skipped entirely when there's no attachment + no image
-      if (commentText || commentThumb || commentAuthor || commentHasAttachment) {
+      if (commentText || commentThumb || commentHasAttachment) {
         html += '<div class="etcher-tooltip-body">';
         if (commentThumb) {
           html += '<img class="etcher-tooltip-thumb" src="' +
@@ -904,17 +917,7 @@
         if (commentText) {
           html += '<div class="etcher-tooltip-quote">' + escapeHtml(commentText) + '</div>';
         }
-        if (commentAuthor) {
-          html += '<div class="etcher-tooltip-author">— ' +
-                  escapeHtml(commentAuthor) + '</div>';
-        }
         html += '</div></div>';
-      }
-
-      if (commentCount > 1) {
-        html += '<span class="etcher-tooltip-count">' +
-                commentCount + ' ' + (commentCount === 1 ? 'comment' : 'comments') +
-                '</span>';
       }
 
       tip.innerHTML = html;

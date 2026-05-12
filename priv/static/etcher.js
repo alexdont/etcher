@@ -31,21 +31,49 @@
   // ===========================================================================
   // Public extension surface — `window.Etcher`
   //
-  // Consumers register slot overrides for the hover tooltip via
-  // `window.Etcher.tooltipSlots = { header, body, footer }`. Each slot
-  // is a function `(shape) => string | null` and returning null/undefined
-  // falls back to Etcher's neutral default. Etcher controls everything
-  // around the slots — positioning, hover bridge, click-to-pin, the
-  // delete trash button, the cross-component highlight — so the core
-  // UX stays consistent. See README "Customizing the tooltip" for
-  // worked examples.
+  // Consumer-facing API surface, all optional. None of these need to be
+  // set for a basic install to work — they're hooks for layered consumers
+  // (PhoenixKit, future apps) to customize Etcher without forking.
   //
-  // `escapeHtml` is exposed so consumer slots have a stable escape
-  // helper without duplicating it.
+  //   window.Etcher.tooltipSlots = { header, body, footer }
+  //     Override tooltip content per-slot. See "Customizing the tooltip"
+  //     in the README. Returning null falls back to Etcher's default.
+  //
+  //   window.Etcher.colorSwatches = [{ key, color, title }, ...]
+  //     Replace the color picker palette. Falls back to the bundled
+  //     pastel rainbow + white + black if not set.
+  //
+  //   window.Etcher.defaultColor = "#93c5fd"
+  //     Initial active color. Falls back to the first swatch's color.
+  //
+  //   window.Etcher.escapeHtml(value) → escaped string
+  //     Stable escape helper consumer slot impls can reuse.
+  //
+  //   window.Etcher.layerFor(frescoId) → { ... } | null
+  //     Programmatic control surface for a mounted layer. Returns null
+  //     for unknown ids. Methods: exitDrawing(), setMode(bool),
+  //     selectShape(uuid), getShapes(). See README "Programmatic control".
+  //
+  // Lifecycle CustomEvents are dispatched on the layer's host element
+  // (the `<div phx-hook="EtcherLayer">`), bubbling up so consumers can
+  // listen at any ancestor:
+  //   etcher:tooltip-show / -hide / -pin / -unpin
+  //   etcher:mode-changed   { detail: { annotationMode } }
+  //   etcher:tool-changed   { detail: { tool } }
+  //   etcher:color-changed  { detail: { color } }
   // ===========================================================================
 
   window.Etcher = window.Etcher || {};
   window.Etcher.tooltipSlots = window.Etcher.tooltipSlots || {};
+
+  // Registry of mounted layers, keyed by fresco_id. Populated on hook
+  // mount, cleared on destroyed. `layerFor` reads this.
+  var layerRegistry = {};
+
+  window.Etcher.layerFor = function(frescoId) {
+    var entry = layerRegistry[frescoId];
+    return entry ? entry.api : null;
+  };
 
   // ===========================================================================
   // Icons (Heroicons, outline, 24×24, stroke="currentColor")
@@ -277,11 +305,12 @@
     freehand:  { icon: ICONS.freehand,  title: "Freehand" }
   };
 
-  // Color palette for the optional shape-color picker — pastel rainbow
-  // plus monochrome bookends. Default state (no swatch selected) keeps
-  // the existing CSS blue, so consumers who don't use the picker see
-  // no behavior change.
-  var COLOR_SWATCHES = [
+  // Default color palette — pastel rainbow plus monochrome bookends.
+  // Consumers override via `window.Etcher.colorSwatches`. The default
+  // active color is the blue pastel so the picker has a non-empty
+  // selected state on first open; consumers override via
+  // `window.Etcher.defaultColor`.
+  var DEFAULT_COLOR_SWATCHES = [
     { key: "red",    color: "#fca5a5", title: "Red" },
     { key: "orange", color: "#fdba74", title: "Orange" },
     { key: "yellow", color: "#fde68a", title: "Yellow" },
@@ -292,6 +321,22 @@
     { key: "white",  color: "#ffffff", title: "White" },
     { key: "black",  color: "#000000", title: "Black" }
   ];
+
+  function resolveColorSwatches() {
+    var custom = window.Etcher && window.Etcher.colorSwatches;
+    return Array.isArray(custom) && custom.length ? custom : DEFAULT_COLOR_SWATCHES;
+  }
+
+  function resolveDefaultColor() {
+    var swatches = resolveColorSwatches();
+    if (window.Etcher && typeof window.Etcher.defaultColor === "string") {
+      return window.Etcher.defaultColor;
+    }
+    // Prefer the blue swatch (back-compat with the pre-pluggable
+    // default), then fall back to the first swatch.
+    var blue = swatches.find(function(s) { return s.key === "blue"; });
+    return blue ? blue.color : swatches[0].color;
+  }
 
   var SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -390,10 +435,11 @@
       self.shapes = [];           // { uuid|tmpId, kind, geometry, el }
       self.activeTool = null;     // null = cursor mode
       self.annotationMode = false;
-      // Default color matches the "blue" swatch so the picker has a
-      // visibly-selected starting state. Override in `data-default-color`
-      // (future) or via `_selectColor` at runtime.
-      self.activeColor = "#93c5fd";
+      // Default color comes from `window.Etcher.defaultColor` (else the
+      // blue swatch in the active palette, else the first swatch) so
+      // the picker has a non-empty selected state on first open and
+      // consumers can override the starting color.
+      self.activeColor = resolveDefaultColor();
       self.draftState = null;     // per-tool drawing state
       self.gestureBackup = null;  // OSD gesture flags to restore on exit
 
@@ -431,6 +477,18 @@
         self._removeShape(payload.uuid);
       });
 
+      // Server pushed a NEW annotation that wasn't drawn locally — e.g.
+      // another user added one in a collaboration session. Payload mirrors
+      // the shape of `initial_annotations` entries: `{uuid, kind,
+      // geometry, style?, metadata?}`. No-ops if the shape already
+      // exists locally (idempotent).
+      self.handleEvent("etcher:annotation-added", function(payload) {
+        if (!payload || !payload.uuid || !payload.kind || !payload.geometry) return;
+        var existing = self.shapes.find(function(s) { return s.uuid === payload.uuid; });
+        if (existing) return;
+        self._renderAnnotation(payload);
+      });
+
       // Server pushed new tooltip metadata for an existing shape — e.g.
       // after a comment was posted/edited that the tooltip should now
       // surface. Merge the new metadata into the in-memory shape and
@@ -453,6 +511,30 @@
       self.handleEvent("etcher:exit-drawing", function() {
         if (self.annotationMode) self._selectTool(null);
       });
+
+      // Register this layer in the public `window.Etcher.layerFor`
+      // registry so external code can drive it programmatically.
+      layerRegistry[self.frescoId] = {
+        api: {
+          exitDrawing: function() { self._selectTool(null); },
+          setMode: function(on) { self._setAnnotationMode(!!on); },
+          selectShape: function(uuid) {
+            var shape = self.shapes.find(function(s) { return s.uuid === uuid; });
+            if (shape) self._pinTooltipFor(shape);
+          },
+          getShapes: function() {
+            return self.shapes.map(function(s) {
+              return {
+                uuid: s.uuid,
+                kind: s.kind,
+                geometry: s.geometry,
+                style: s.style || null,
+                metadata: s.metadata || null
+              };
+            });
+          }
+        }
+      };
     },
 
     destroyed: function() {
@@ -470,6 +552,7 @@
         this._unsubViewport.forEach(function(fn) { try { fn(); } catch (_) {} });
         this._unsubViewport = null;
       }
+      if (this.frescoId) delete layerRegistry[this.frescoId];
       this._setAnnotationMode(false);
     },
 
@@ -622,7 +705,7 @@
       // color future shapes start with. CSS handles the "no selection"
       // state — without an inline style the shape inherits the default
       // blue from `.etcher-shape`.
-      self.swatchEls = COLOR_SWATCHES.map(function(s) {
+      self.swatchEls = resolveColorSwatches().map(function(s) {
         var b = document.createElement("button");
         b.type = "button";
         b.className = "etcher-swatch";
@@ -687,6 +770,18 @@
     // Mode + tool selection
     // -------------------------------------------------------------------------
 
+    // Dispatch a bubbling CustomEvent on the layer host so consumer JS
+    // can react without forking etcher.js. Documented in the README.
+    _dispatch: function(name, detail) {
+      if (!this.el || typeof CustomEvent !== "function") return;
+      try {
+        this.el.dispatchEvent(new CustomEvent(name, {
+          detail: detail || {},
+          bubbles: true
+        }));
+      } catch (_) {}
+    },
+
     _setAnnotationMode: function(on) {
       var self = this;
       if (self.annotationMode === on) return;
@@ -735,6 +830,8 @@
         self._cancelDraft();
         self._exitEditMode();
       }
+
+      self._dispatch("etcher:mode-changed", { annotationMode: on });
     },
 
     _selectTool: function(toolKey) {
@@ -764,6 +861,8 @@
         self.overlayWrapper.classList.toggle("is-drawing", drawing);
         if (drawing) self._hideTooltip();
       }
+
+      self._dispatch("etcher:tool-changed", { tool: toolKey });
     },
 
     // Color picker — affects the active draft if drawing, the editing
@@ -771,6 +870,7 @@
     // `null` resets to the CSS default blue.
     _selectColor: function(color) {
       this.activeColor = color;
+      this._dispatch("etcher:color-changed", { color: color });
 
       if (this.swatchEls) {
         this.swatchEls.forEach(function(el) {
@@ -1093,6 +1193,11 @@
       tip.style.top = y + "px";
       tip.style.transform = "translate(-50%, -100%)";
       tip.style.display = "block";
+
+      this._dispatch("etcher:tooltip-show", {
+        uuid: shape.uuid || null,
+        anchor: { x: x, y: y }
+      });
     },
 
     _scheduleHideTooltip: function() {
@@ -1118,6 +1223,8 @@
     },
 
     _hideTooltip: function() {
+      var wasVisible = this.tooltipEl && this.tooltipEl.style.display !== "none";
+      var hidShape = this._tooltipShape;
       this._cancelHideTooltip();
       // _hideTooltip is the universal teardown; make sure pin state is
       // also reset so the next click-to-pin starts clean.
@@ -1125,6 +1232,12 @@
       this._removeTooltipOutsideClickHandler();
       this._tooltipShape = null;
       if (this.tooltipEl) this.tooltipEl.style.display = "none";
+
+      if (wasVisible) {
+        this._dispatch("etcher:tooltip-hide", {
+          uuid: (hidShape && hidShape.uuid) || null
+        });
+      }
     },
 
     // Pin / unpin — click-to-stick UX. Pinned tooltips ignore hover
@@ -1136,13 +1249,18 @@
       this.tooltipPinned = true;
       this._installTooltipOutsideClickHandler();
       this._highlightCommentsFor(shape.uuid);
+      this._dispatch("etcher:tooltip-pin", { uuid: shape.uuid || null });
     },
 
     _unpinTooltip: function() {
+      var pinned = this._tooltipShape;
       this.tooltipPinned = false;
       this._removeTooltipOutsideClickHandler();
       this._clearCommentHighlights();
       this._hideTooltip();
+      this._dispatch("etcher:tooltip-unpin", {
+        uuid: (pinned && pinned.uuid) || null
+      });
     },
 
     // PhoenixKitComments stamps each rendered comment with

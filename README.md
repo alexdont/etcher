@@ -264,6 +264,85 @@ Slot APIs cover content. For interaction wiring the existing LiveView events sti
 
 `etcher:tooltip-show` / `-hide` / `-pin` events would be a natural follow-up if a consumer needs them; not in v0.1.
 
+## Hooks reference
+
+All extension points beyond the LiveView events listed above. None are required — Etcher works with zero configuration.
+
+### `window.Etcher.colorSwatches` — palette override
+
+Replace the bundled pastel rainbow + monochrome bookends with your own swatches:
+
+```js
+window.Etcher.colorSwatches = [
+  { key: "brand",   color: "#ff6f00", title: "Brand orange" },
+  { key: "muted",   color: "#9ca3af", title: "Muted gray" },
+  { key: "ink",     color: "#0f172a", title: "Ink" }
+];
+```
+
+Falls back to the default palette if unset or not an array.
+
+### `window.Etcher.defaultColor` — initial active color
+
+Override which swatch starts pre-selected when annotation mode opens:
+
+```js
+window.Etcher.defaultColor = "#ff6f00";
+```
+
+Falls back to the "blue" swatch in the active palette (back-compat) or the first swatch.
+
+### `window.Etcher.layerFor(frescoId)` — programmatic control
+
+Returns the layer's control surface, or `null` if no layer is mounted for that fresco id. Lets you drive Etcher from outside (URL handlers, keyboard shortcuts, command palettes):
+
+```js
+const layer = window.Etcher.layerFor("photo");
+if (layer) {
+  layer.setMode(true);           // enter annotation mode (toolbar opens)
+  layer.exitDrawing();           // back to cursor (annotation mode stays on)
+  layer.selectShape("uuid-…");   // pin the tooltip for that shape
+  const shapes = layer.getShapes();
+  // → [{ uuid, kind, geometry, style, metadata }, ...]
+}
+```
+
+### Lifecycle DOM events
+
+Etcher dispatches bubbling `CustomEvent`s on the layer's host element so consumer JS can react without reaching into the hook. Listen on the host or any ancestor:
+
+```js
+document.addEventListener("etcher:tooltip-show", (e) => {
+  console.log("Tooltip showing for", e.detail.uuid, "at", e.detail.anchor);
+});
+```
+
+| Event | `detail` | When |
+|-------|----------|------|
+| `etcher:tooltip-show`  | `{ uuid, anchor: {x, y} }`  | Tooltip rendered (hover or pin) |
+| `etcher:tooltip-hide`  | `{ uuid }`                  | Tooltip closes (hover-away timeout or pin dismissed) |
+| `etcher:tooltip-pin`   | `{ uuid }`                  | User clicked a shape to pin its tooltip |
+| `etcher:tooltip-unpin` | `{ uuid }`                  | User clicked elsewhere / re-clicked to unpin |
+| `etcher:mode-changed`  | `{ annotationMode: bool }`  | User toggled annotation mode |
+| `etcher:tool-changed`  | `{ tool: string \| null }`  | User picked a drawing tool (null = cursor) |
+| `etcher:color-changed` | `{ color: string }`         | User picked a swatch |
+
+### Server → client LiveView events
+
+In addition to the create / update / delete / selected client→server events documented above, the server can push state into a running viewer via `Phoenix.LiveView.push_event/3`:
+
+| Event | Payload | Behavior |
+|-------|---------|----------|
+| `etcher:annotation-saved`   | `{ tmp_id, uuid }`                | Client adopts the persisted uuid for a temp shape |
+| `etcher:annotation-added`   | `{ uuid, kind, geometry, style?, metadata? }` | Renders a new shape locally (collaboration / external create) |
+| `etcher:annotation-updated` | `{ uuid, metadata }`              | Merges fresh tooltip metadata into an existing shape |
+| `etcher:annotation-removed` | `{ uuid }`                        | Removes a shape from the overlay |
+| `etcher:exit-drawing`       | `{}`                              | Switches to cursor mode (annotation mode stays on) |
+
+### `window.Etcher.escapeHtml(value)` — escape helper
+
+Stable helper exposed for use inside consumer slot functions. HTML-escapes `&`, `<`, `>`, `"`, `'`.
+
 ## How it fits with Fresco
 
 Etcher uses Fresco 0.2's `handle.appendNavButton/3` extension point to add the pencil button — no other extension surface required. Drawing input is delivered as plain `pointerdown` / `pointermove` / `pointerup` events on an SVG overlay anchored to Fresco's image coordinate space, so shapes stay locked to image pixels through pan and zoom.

@@ -335,6 +335,29 @@
         if (!payload || !payload.uuid) return;
         self._removeShape(payload.uuid);
       });
+
+      // Server pushed new tooltip metadata for an existing shape — e.g.
+      // after a comment was posted/edited that the tooltip should now
+      // surface. Merge the new metadata into the in-memory shape and
+      // re-render the tooltip if it's currently showing this shape.
+      self.handleEvent("etcher:annotation-updated", function(payload) {
+        if (!payload || !payload.uuid) return;
+        var shape = self.shapes.find(function(s) { return s.uuid === payload.uuid; });
+        if (!shape) return;
+        shape.metadata = payload.metadata || {};
+        if (self._tooltipShape === shape && self.tooltipEl &&
+            self.tooltipEl.style.display !== "none") {
+          self._showTooltipFor(shape);
+        }
+      });
+
+      // Server signals "drop out of the active drawing tool" — fired
+      // after a successful Post so the user doesn't accidentally start
+      // drawing another shape. Annotation mode itself stays on; we
+      // just switch to the cursor tool (toolKey = null).
+      self.handleEvent("etcher:exit-drawing", function() {
+        if (self.annotationMode) self._selectTool(null);
+      });
     },
 
     destroyed: function() {

@@ -78,6 +78,18 @@
       ".etcher-toolbar .etcher-divider {",
       "  width: 1px; background: rgba(255, 255, 255, 0.2); margin: 4px 2px;",
       "}",
+      // Color swatches — small circles inline in the toolbar. Picked
+      // swatch gets a white ring so the choice is visible even when
+      // the swatch is pastel-blue and the highlight is subtle.
+      ".etcher-swatch {",
+      "  width: 22px; height: 22px; border-radius: 999px;",
+      "  border: 1px solid rgba(255, 255, 255, 0.4); padding: 0;",
+      "  cursor: pointer; transition: transform 80ms ease;",
+      "}",
+      ".etcher-swatch:hover { transform: scale(1.15); }",
+      ".etcher-swatch.is-selected {",
+      "  box-shadow: 0 0 0 2px #fff, 0 0 0 4px rgba(0, 0, 0, 0.5);",
+      "}",
       ".etcher-overlay {",
       "  position: absolute; inset: 0; pointer-events: none;",
       "}",
@@ -243,6 +255,22 @@
     freehand:  { icon: ICONS.freehand,  title: "Freehand" }
   };
 
+  // Color palette for the optional shape-color picker — pastel rainbow
+  // plus monochrome bookends. Default state (no swatch selected) keeps
+  // the existing CSS blue, so consumers who don't use the picker see
+  // no behavior change.
+  var COLOR_SWATCHES = [
+    { key: "red",    color: "#fca5a5", title: "Red" },
+    { key: "orange", color: "#fdba74", title: "Orange" },
+    { key: "yellow", color: "#fde68a", title: "Yellow" },
+    { key: "green",  color: "#86efac", title: "Green" },
+    { key: "blue",   color: "#93c5fd", title: "Blue" },
+    { key: "indigo", color: "#a5b4fc", title: "Indigo" },
+    { key: "violet", color: "#d8b4fe", title: "Violet" },
+    { key: "white",  color: "#ffffff", title: "White" },
+    { key: "black",  color: "#000000", title: "Black" }
+  ];
+
   var SVG_NS = "http://www.w3.org/2000/svg";
 
   function svgEl(name, attrs) {
@@ -296,6 +324,10 @@
       self.shapes = [];           // { uuid|tmpId, kind, geometry, el }
       self.activeTool = null;     // null = cursor mode
       self.annotationMode = false;
+      // Default color matches the "blue" swatch so the picker has a
+      // visibly-selected starting state. Override in `data-default-color`
+      // (future) or via `_selectColor` at runtime.
+      self.activeColor = "#93c5fd";
       self.draftState = null;     // per-tool drawing state
       self.gestureBackup = null;  // OSD gesture flags to restore on exit
 
@@ -519,6 +551,35 @@
       divider2.className = "etcher-divider";
       bar.appendChild(divider2);
 
+      // Color swatches. Affects: (a) the active draft if drawing,
+      // (b) the editing shape if one is being edited, (c) the default
+      // color future shapes start with. CSS handles the "no selection"
+      // state — without an inline style the shape inherits the default
+      // blue from `.etcher-shape`.
+      self.swatchEls = COLOR_SWATCHES.map(function(s) {
+        var b = document.createElement("button");
+        b.type = "button";
+        b.className = "etcher-swatch";
+        b.dataset.color = s.color;
+        b.title = s.title;
+        b.setAttribute("aria-label", "Color: " + s.title);
+        b.style.background = s.color;
+        // Mark the swatch matching the initial `activeColor` as the
+        // selected starting state — gives the picker a non-empty look
+        // when annotation mode opens for the first time.
+        if (s.color === self.activeColor) b.classList.add("is-selected");
+        b.addEventListener("click", function(e) {
+          e.preventDefault();
+          self._selectColor(s.color);
+        });
+        bar.appendChild(b);
+        return b;
+      });
+
+      var divider3 = document.createElement("div");
+      divider3.className = "etcher-divider";
+      bar.appendChild(divider3);
+
       var closeBtn = document.createElement("button");
       closeBtn.type = "button";
       closeBtn.title = "Exit annotation mode";
@@ -636,6 +697,54 @@
         self.overlayWrapper.style.pointerEvents = drawing ? "auto" : "none";
         self.overlayWrapper.classList.toggle("is-drawing", drawing);
         if (drawing) self._hideTooltip();
+      }
+    },
+
+    // Color picker — affects the active draft if drawing, the editing
+    // shape if one is being edited, and the default for future shapes.
+    // `null` resets to the CSS default blue.
+    _selectColor: function(color) {
+      this.activeColor = color;
+
+      if (this.swatchEls) {
+        this.swatchEls.forEach(function(el) {
+          el.classList.toggle("is-selected", el.dataset.color === color);
+        });
+      }
+
+      // Apply to the in-flight draft (if any) so the user sees the new
+      // color while still drawing.
+      if (this.draftState) {
+        this._applyShapeColor(this.draftState.el, color);
+      }
+      if (this.draftPolygon) {
+        this._applyShapeColor(this.draftPolygon.el, color);
+      }
+
+      // Apply to the currently-edited shape and commit upstream so the
+      // server's `style` field reflects the change.
+      var shape = this.editingShape;
+      if (shape && shape.uuid) {
+        shape.style = Object.assign({}, shape.style || {}, { color: color });
+        this._applyShapeColor(shape.el, color);
+        this.pushEventTo(this.el, "etcher:updated", {
+          uuid: shape.uuid,
+          geometry: shape.geometry,
+          style: shape.style
+        });
+      }
+    },
+
+    _applyShapeColor: function(el, color) {
+      if (!el) return;
+      if (color) {
+        el.style.stroke = color;
+        el.style.fill = color;
+        el.style.fillOpacity = "0.18";
+      } else {
+        el.style.stroke = "";
+        el.style.fill = "";
+        el.style.fillOpacity = "";
       }
     },
 
@@ -1069,6 +1178,7 @@
     _startRectangle: function(pt, e) {
       var rect = svgEl("rect", { "stroke-width": "2" });
       rect.classList.add("etcher-shape", "is-draft");
+      this._applyShapeColor(rect, this.activeColor);
       this.svg.appendChild(rect);
       var geom = { x: pt.x, y: pt.y, w: 0, h: 0 };
       this.draftState = { kind: "rectangle", anchor: pt, geometry: geom, el: rect };
@@ -1111,6 +1221,7 @@
     _startCircle: function(pt, e) {
       var circle = svgEl("circle", { "stroke-width": "2" });
       circle.classList.add("etcher-shape", "is-draft");
+      this._applyShapeColor(circle, this.activeColor);
       this.svg.appendChild(circle);
       var geom = { cx: pt.x, cy: pt.y, r: 0 };
       this.draftState = { kind: "circle", center: pt, geometry: geom, el: circle };
@@ -1149,6 +1260,9 @@
       if (!this.draftPolygon) {
         var poly = svgEl("polyline", { "stroke-width": "2", fill: "none" });
         poly.classList.add("etcher-shape", "is-draft");
+        // Polyline preview has fill: none; color only affects stroke,
+        // but use the same helper for consistency.
+        this._applyShapeColor(poly, this.activeColor);
         this.svg.appendChild(poly);
         this.draftPolygon = { points: [[pt.x, pt.y]], el: poly };
         this._lastHover = null;
@@ -1231,9 +1345,11 @@
       }
       var el = this.draftPolygon.el;
       // Convert polyline preview into a closed polygon element so it
-      // fills properly.
+      // fills properly. Carry the active color over (the polyline only
+      // showed stroke; the polygon now also fills).
       var polygon = svgEl("polygon", { "stroke-width": "2" });
       polygon.classList.add("etcher-shape");
+      this._applyShapeColor(polygon, this.activeColor);
       this.svg.replaceChild(polygon, el);
       this.draftPolygon = null;
       this._lastHover = null;
@@ -1248,6 +1364,7 @@
     _startFreehand: function(pt, e) {
       var path = svgEl("polyline", { "stroke-width": "2", fill: "none" });
       path.classList.add("etcher-shape", "is-draft");
+      this._applyShapeColor(path, this.activeColor);
       this.svg.appendChild(path);
       var geom = { points: [[pt.x, pt.y]] };
       this.draftState = { kind: "freehand", geometry: geom, el: path };
@@ -1282,7 +1399,14 @@
     _finalizeShape: function(kind, geometry, el) {
       var tmpId = genTmpId();
       el.setAttribute("data-tmp-id", tmpId);
-      var shape = { tmpId: tmpId, kind: kind, geometry: geometry, el: el };
+      var style = this.activeColor ? { color: this.activeColor } : null;
+      var shape = {
+        tmpId: tmpId,
+        kind: kind,
+        geometry: geometry,
+        style: style,
+        el: el
+      };
       this.shapes.push(shape);
       this._renderShape(shape);
       this._attachShapeInteractions(shape);
@@ -1293,7 +1417,7 @@
       // anchored to where the user just drew.
       var anchor = this._shapeAnchorBottomLeft(shape);
 
-      this.pushEventTo(this.el, "etcher:created", {
+      var payload = {
         target_type: this.targetType,
         target_uuid: this.targetUuid,
         kind: kind,
@@ -1301,7 +1425,10 @@
         tmp_id: tmpId,
         anchor_x: anchor.x,
         anchor_y: anchor.y
-      });
+      };
+      if (style) payload.style = style;
+
+      this.pushEventTo(this.el, "etcher:created", payload);
 
       this.draftState = null;
       this._syncDraftHandles();
@@ -1368,10 +1495,17 @@
         geometry: ann.geometry,
         metadata: ann.metadata || null,
         label: ann.label || null,
+        style: ann.style || null,
         el: el
       };
       this.shapes.push(shape);
       this._renderShape(shape);
+      // Apply persisted color (if any) — the `style` field carries
+      // `%{color: "#fca5a5"}` for shapes that were drawn with a swatch
+      // selected. Shapes without a style fall back to the CSS default.
+      if (shape.style && shape.style.color) {
+        this._applyShapeColor(el, shape.style.color);
+      }
       this._attachShapeInteractions(shape);
     },
 

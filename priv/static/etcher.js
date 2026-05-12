@@ -192,8 +192,12 @@
       if (this.toolbar && this.toolbar.parentNode) {
         this.toolbar.parentNode.removeChild(this.toolbar);
       }
-      if (this.overlayWrapper && this.handle && this.handle.viewer) {
-        try { this.handle.viewer.removeOverlay(this.overlayWrapper); } catch (_) {}
+      if (this.overlayWrapper && this.overlayWrapper.parentNode) {
+        this.overlayWrapper.parentNode.removeChild(this.overlayWrapper);
+      }
+      if (this._unsubViewport) {
+        this._unsubViewport.forEach(function(fn) { try { fn(); } catch (_) {} });
+        this._unsubViewport = null;
       }
       this._setAnnotationMode(false);
     },
@@ -226,39 +230,44 @@
     },
 
     // -------------------------------------------------------------------------
-    // SVG overlay — one big OSD overlay covering the image rect; SVG viewBox
-    // is in image pixels so shape coords are stored natively.
+    // SVG overlay — absolutely positioned over the viewer container, rendered
+    // in *screen pixels*. Shape geometry is stored in image px and converted
+    // to screen px on every viewport change via `handle.imageToScreen`.
+    //
+    // (We don't use OSD's `viewer.addOverlay` because OSD's MouseTracker
+    // captures pointer events on the canvas before they reach DOM overlays,
+    // which silently breaks drawing input.)
     // -------------------------------------------------------------------------
 
     _buildOverlay: function() {
       var self = this;
       var handle = self.handle;
-      var w = self.imageSize.x;
-      var h = self.imageSize.y;
+      var container = handle.container;
+
+      if (getComputedStyle(container).position === "static") {
+        container.style.position = "relative";
+      }
 
       var wrapper = document.createElement("div");
       wrapper.className = "etcher-overlay";
-      wrapper.style.width = "100%";
-      wrapper.style.height = "100%";
+      // `inset: 0` from CSS already covers the container; absolute + top/left
+      // are belt-and-braces for older browsers.
+      wrapper.style.position = "absolute";
+      wrapper.style.top = "0";
+      wrapper.style.left = "0";
+      wrapper.style.right = "0";
+      wrapper.style.bottom = "0";
 
-      var svg = svgEl("svg", {
-        viewBox: "0 0 " + w + " " + h,
-        preserveAspectRatio: "none",
-        width: "100%",
-        height: "100%"
-      });
+      var svg = svgEl("svg", { width: "100%", height: "100%" });
+      svg.style.position = "absolute";
+      svg.style.inset = "0";
       svg.style.overflow = "visible";
       wrapper.appendChild(svg);
 
       self.overlayWrapper = wrapper;
       self.svg = svg;
 
-      var aspect = h / w;
-      var Rect = window.OpenSeadragon.Rect;
-      handle.viewer.addOverlay({
-        element: wrapper,
-        location: new Rect(0, 0, 1, aspect)
-      });
+      container.appendChild(wrapper);
 
       // Drawing input — only listens when we're in annotation mode with a
       // tool other than cursor. `pointer-events: auto` is toggled on the
@@ -269,6 +278,18 @@
       wrapper.addEventListener("dblclick",    function(e) { self._onDoubleClick(e); });
       // Click-on-shape selection (cursor tool).
       svg.addEventListener("click", function(e) { self._onSvgClick(e); });
+
+      // Re-render shapes in lockstep with the viewer. `animation` fires on
+      // every spring-interpolation tick during a zoom or pan, so the
+      // annotations follow OSD's smooth motion frame-for-frame. The other
+      // events catch one-off cases (resize, source swap) that don't go
+      // through the animation loop.
+      function render() { self._renderAll(); }
+      self._unsubViewport = [
+        handle.on("animation", render),
+        handle.on("resize",    render),
+        handle.on("open",      render)
+      ];
     },
 
     // -------------------------------------------------------------------------
@@ -350,20 +371,40 @@
       self.annotationMode = on;
       if (self.toolbar) self.toolbar.classList.toggle("is-active", on);
 
-      var settings = self.handle && self.handle.viewer && self.handle.viewer.gestureSettingsMouse;
-      if (on && settings) {
-        self.gestureBackup = {
-          dragToPan: settings.dragToPan,
-          clickToZoom: settings.clickToZoom,
-          dblClickToZoom: settings.dblClickToZoom
+      var viewer = self.handle && self.handle.viewer;
+      var mouse = viewer && viewer.gestureSettingsMouse;
+      var touch = viewer && viewer.gestureSettingsTouch;
+
+      function snap(gs) {
+        return gs && {
+          dragToPan: gs.dragToPan,
+          clickToZoom: gs.clickToZoom,
+          dblClickToZoom: gs.dblClickToZoom,
+          pinchToZoom: gs.pinchToZoom
         };
-        settings.dragToPan = false;
-        settings.clickToZoom = false;
-        settings.dblClickToZoom = false;
-      } else if (!on && settings && self.gestureBackup) {
-        settings.dragToPan = self.gestureBackup.dragToPan;
-        settings.clickToZoom = self.gestureBackup.clickToZoom;
-        settings.dblClickToZoom = self.gestureBackup.dblClickToZoom;
+      }
+      function freeze(gs) {
+        if (!gs) return;
+        gs.dragToPan = false;
+        gs.clickToZoom = false;
+        gs.dblClickToZoom = false;
+        gs.pinchToZoom = false;
+      }
+      function restore(gs, snapshot) {
+        if (!gs || !snapshot) return;
+        gs.dragToPan = snapshot.dragToPan;
+        gs.clickToZoom = snapshot.clickToZoom;
+        gs.dblClickToZoom = snapshot.dblClickToZoom;
+        gs.pinchToZoom = snapshot.pinchToZoom;
+      }
+
+      if (on) {
+        self.gestureBackup = { mouse: snap(mouse), touch: snap(touch) };
+        freeze(mouse);
+        freeze(touch);
+      } else if (self.gestureBackup) {
+        restore(mouse, self.gestureBackup.mouse);
+        restore(touch, self.gestureBackup.touch);
         self.gestureBackup = null;
       }
 
@@ -401,19 +442,94 @@
     },
 
     // -------------------------------------------------------------------------
-    // Pointer → image coords
+    // Coord helpers — image px ↔ container px (the SVG's coordinate space)
+    //
+    // Two reasons we don't use `handle.screenToImage` / `handle.imageToScreen`:
+    //
+    //   1. They route through OSD's `imageToViewportCoordinates`, which
+    //      depends on the *current* tile source's content size. When Tessera
+    //      swaps sources at higher zoom levels (medium → large → DZI), every
+    //      previously-drawn annotation shifts because the "image pixel" axis
+    //      just resized under us. Solution: snapshot `imageSize` once at
+    //      init and do the conversion ourselves in viewport space (which is
+    //      source-independent — the image's viewport rect is always
+    //      `(0, 0, 1, aspect)`).
+    //
+    //   2. They route through `windowToViewportCoordinates` /
+    //      `viewportToWindowCoordinates`, which use OSD's `getElementPosition`
+    //      (offsetParent traversal). Inside a `position: fixed` modal with
+    //      flex centering (daisyUI's pattern) those traversals can give values
+    //      that don't agree with `getBoundingClientRect`, so the round-trip
+    //      drifts and the drift compounds with zoom. Solution: stay in OSD's
+    //      element-pixel space the whole time. The Etcher overlay is
+    //      `inset: 0` of the viewer element, so element-pixel coords *are*
+    //      the SVG coords.
     // -------------------------------------------------------------------------
 
     _toImage: function(e) {
-      var p = this.handle.screenToImage({ x: e.clientX, y: e.clientY });
-      return { x: p.x, y: p.y };
+      var Point = window.OpenSeadragon.Point;
+      var r = this.handle.container.getBoundingClientRect();
+      var pixel = new Point(e.clientX - r.left, e.clientY - r.top);
+      var vp = this.handle.viewer.viewport.pointFromPixel(pixel, true);
+      // viewport unit = imageSize.x pixels on both axes (OSD normalizes by
+      // image width, so y uses the same scale factor).
+      return { x: vp.x * this.imageSize.x, y: vp.y * this.imageSize.x };
     },
 
-    _clamp: function(pt) {
-      return {
-        x: Math.max(0, Math.min(this.imageSize.x, pt.x)),
-        y: Math.max(0, Math.min(this.imageSize.y, pt.y))
-      };
+    _imageToContainer: function(pt) {
+      var Point = window.OpenSeadragon.Point;
+      var vp = new Point(pt.x / this.imageSize.x, pt.y / this.imageSize.x);
+      var pixel = this.handle.viewer.viewport.pixelFromPoint(vp, true);
+      return { x: pixel.x, y: pixel.y };
+    },
+
+    // Render one shape (or draft) by projecting its image-px geometry into
+    // container-px coordinates and writing the result onto its SVG element.
+    _renderShape: function(shape) {
+      if (!shape || !shape.el) return;
+      var self = this;
+      var g = shape.geometry;
+      var el = shape.el;
+
+      switch (shape.kind) {
+        case "rectangle": {
+          var tl = self._imageToContainer({ x: g.x,         y: g.y });
+          var br = self._imageToContainer({ x: g.x + g.w,   y: g.y + g.h });
+          el.setAttribute("x", Math.min(tl.x, br.x));
+          el.setAttribute("y", Math.min(tl.y, br.y));
+          el.setAttribute("width",  Math.abs(br.x - tl.x));
+          el.setAttribute("height", Math.abs(br.y - tl.y));
+          break;
+        }
+        case "circle": {
+          var c  = self._imageToContainer({ x: g.cx, y: g.cy });
+          var rp = self._imageToContainer({ x: g.cx + g.r, y: g.cy });
+          el.setAttribute("cx", c.x);
+          el.setAttribute("cy", c.y);
+          el.setAttribute("r", Math.abs(rp.x - c.x));
+          break;
+        }
+        case "polygon":
+        case "freehand": {
+          var pts = (g.points || []).map(function(p) {
+            var s = self._imageToContainer({ x: p[0], y: p[1] });
+            return s.x + "," + s.y;
+          }).join(" ");
+          el.setAttribute("points", pts);
+          break;
+        }
+      }
+    },
+
+    _renderAll: function() {
+      var self = this;
+      this.shapes.forEach(function(s) { self._renderShape(s); });
+      if (this.draftState && this.draftState.kind !== "polygon") {
+        this._renderShape(this.draftState);
+      }
+      if (this.draftPolygon) {
+        this._renderPolygonPreview(this._lastHover);
+      }
     },
 
     // -------------------------------------------------------------------------
@@ -423,7 +539,7 @@
     _onPointerDown: function(e) {
       if (!this.annotationMode || !this.activeTool) return;
       if (e.button !== 0) return;
-      var pt = this._clamp(this._toImage(e));
+      var pt = this._toImage(e);
 
       switch (this.activeTool) {
         case "rectangle": this._startRectangle(pt, e); break;
@@ -436,11 +552,11 @@
     _onPointerMove: function(e) {
       if (!this.draftState) {
         if (this.activeTool === "polygon" && this.draftPolygon) {
-          this._polygonHover(this._clamp(this._toImage(e)));
+          this._polygonHover(this._toImage(e));
         }
         return;
       }
-      var pt = this._clamp(this._toImage(e));
+      var pt = this._toImage(e);
       switch (this.draftState.kind) {
         case "rectangle": this._updateRectangle(pt); break;
         case "circle":    this._updateCircle(pt); break;
@@ -450,7 +566,7 @@
 
     _onPointerUp: function(e) {
       if (!this.draftState) return;
-      var pt = this._clamp(this._toImage(e));
+      var pt = this._toImage(e);
       switch (this.draftState.kind) {
         case "rectangle": this._commitRectangle(pt); break;
         case "circle":    this._commitCircle(pt); break;
@@ -482,24 +598,22 @@
     // -------------------------------------------------------------------------
 
     _startRectangle: function(pt, e) {
-      var rect = svgEl("rect", {
-        x: pt.x, y: pt.y, width: 0, height: 0,
-        "vector-effect": "non-scaling-stroke",
-        "stroke-width": "2"
-      });
+      var rect = svgEl("rect", { "stroke-width": "2" });
       rect.classList.add("etcher-shape", "is-draft");
       this.svg.appendChild(rect);
-      this.draftState = { kind: "rectangle", anchor: pt, el: rect };
+      var geom = { x: pt.x, y: pt.y, w: 0, h: 0 };
+      this.draftState = { kind: "rectangle", anchor: pt, geometry: geom, el: rect };
+      this._renderShape(this.draftState);
       try { e.target.setPointerCapture(e.pointerId); } catch (_) {}
     },
 
     _updateRectangle: function(pt) {
       var a = this.draftState.anchor;
-      var x = Math.min(a.x, pt.x), y = Math.min(a.y, pt.y);
-      var w = Math.abs(pt.x - a.x), h = Math.abs(pt.y - a.y);
-      var el = this.draftState.el;
-      el.setAttribute("x", x); el.setAttribute("y", y);
-      el.setAttribute("width", w); el.setAttribute("height", h);
+      this.draftState.geometry = {
+        x: Math.min(a.x, pt.x), y: Math.min(a.y, pt.y),
+        w: Math.abs(pt.x - a.x), h: Math.abs(pt.y - a.y)
+      };
+      this._renderShape(this.draftState);
     },
 
     _commitRectangle: function(pt) {
@@ -524,22 +638,20 @@
     // -------------------------------------------------------------------------
 
     _startCircle: function(pt, e) {
-      var circle = svgEl("circle", {
-        cx: pt.x, cy: pt.y, r: 0,
-        "vector-effect": "non-scaling-stroke",
-        "stroke-width": "2"
-      });
+      var circle = svgEl("circle", { "stroke-width": "2" });
       circle.classList.add("etcher-shape", "is-draft");
       this.svg.appendChild(circle);
-      this.draftState = { kind: "circle", center: pt, el: circle };
+      var geom = { cx: pt.x, cy: pt.y, r: 0 };
+      this.draftState = { kind: "circle", center: pt, geometry: geom, el: circle };
+      this._renderShape(this.draftState);
       try { e.target.setPointerCapture(e.pointerId); } catch (_) {}
     },
 
     _updateCircle: function(pt) {
       var c = this.draftState.center;
       var dx = pt.x - c.x, dy = pt.y - c.y;
-      var r = Math.sqrt(dx * dx + dy * dy);
-      this.draftState.el.setAttribute("r", r);
+      this.draftState.geometry = { cx: c.x, cy: c.y, r: Math.sqrt(dx * dx + dy * dy) };
+      this._renderShape(this.draftState);
     },
 
     _commitCircle: function(pt) {
@@ -562,15 +674,12 @@
 
     _polygonClick: function(pt) {
       if (!this.draftPolygon) {
-        var poly = svgEl("polyline", {
-          points: pt.x + "," + pt.y,
-          "vector-effect": "non-scaling-stroke",
-          "stroke-width": "2",
-          fill: "none"
-        });
+        var poly = svgEl("polyline", { "stroke-width": "2", fill: "none" });
         poly.classList.add("etcher-shape", "is-draft");
         this.svg.appendChild(poly);
         this.draftPolygon = { points: [[pt.x, pt.y]], el: poly };
+        this._lastHover = null;
+        this._renderPolygonPreview(null);
         return;
       }
       this.draftPolygon.points.push([pt.x, pt.y]);
@@ -578,14 +687,20 @@
     },
 
     _polygonHover: function(pt) {
+      this._lastHover = pt;
       this._renderPolygonPreview(pt);
     },
 
     _renderPolygonPreview: function(hover) {
+      if (!this.draftPolygon) return;
+      var self = this;
       var pts = this.draftPolygon.points.slice();
       if (hover) pts.push([hover.x, hover.y]);
-      this.draftPolygon.el.setAttribute("points",
-        pts.map(function(p) { return p[0] + "," + p[1]; }).join(" "));
+      var screen = pts.map(function(p) {
+        var s = self._imageToContainer({ x: p[0], y: p[1] });
+        return s.x + "," + s.y;
+      }).join(" ");
+      this.draftPolygon.el.setAttribute("points", screen);
     },
 
     _commitPolygon: function() {
@@ -595,16 +710,15 @@
         return;
       }
       var el = this.draftPolygon.el;
-      // Convert polyline preview to closed polygon.
-      var polygon = svgEl("polygon", {
-        points: pts.map(function(p) { return p[0] + "," + p[1]; }).join(" "),
-        "vector-effect": "non-scaling-stroke",
-        "stroke-width": "2"
-      });
+      // Convert polyline preview into a closed polygon element so it
+      // fills properly.
+      var polygon = svgEl("polygon", { "stroke-width": "2" });
       polygon.classList.add("etcher-shape");
       this.svg.replaceChild(polygon, el);
       this.draftPolygon = null;
+      this._lastHover = null;
       this._finalizeShape("polygon", { points: pts }, polygon);
+      this._renderShape({ kind: "polygon", geometry: { points: pts }, el: polygon });
     },
 
     // -------------------------------------------------------------------------
@@ -612,30 +726,26 @@
     // -------------------------------------------------------------------------
 
     _startFreehand: function(pt, e) {
-      var path = svgEl("polyline", {
-        points: pt.x + "," + pt.y,
-        "vector-effect": "non-scaling-stroke",
-        "stroke-width": "2",
-        fill: "none"
-      });
+      var path = svgEl("polyline", { "stroke-width": "2", fill: "none" });
       path.classList.add("etcher-shape", "is-draft");
       this.svg.appendChild(path);
-      this.draftState = { kind: "freehand", points: [[pt.x, pt.y]], el: path };
+      var geom = { points: [[pt.x, pt.y]] };
+      this.draftState = { kind: "freehand", geometry: geom, el: path };
+      this._renderShape(this.draftState);
       try { e.target.setPointerCapture(e.pointerId); } catch (_) {}
     },
 
     _appendFreehand: function(pt) {
-      var pts = this.draftState.points;
+      var pts = this.draftState.geometry.points;
       var last = pts[pts.length - 1];
       var dx = pt.x - last[0], dy = pt.y - last[1];
-      if (dx * dx + dy * dy < 4) return; // throttle: skip sub-2px moves
+      if (dx * dx + dy * dy < 4) return; // throttle: skip sub-2px moves in image px
       pts.push([pt.x, pt.y]);
-      this.draftState.el.setAttribute("points",
-        pts.map(function(p) { return p[0] + "," + p[1]; }).join(" "));
+      this._renderShape(this.draftState);
     },
 
     _commitFreehand: function(_pt) {
-      var pts = this.draftState.points;
+      var pts = this.draftState.geometry.points;
       if (pts.length < 2) {
         this._cancelDraft();
         return;
@@ -652,7 +762,9 @@
     _finalizeShape: function(kind, geometry, el) {
       var tmpId = genTmpId();
       el.setAttribute("data-tmp-id", tmpId);
-      this.shapes.push({ tmpId: tmpId, kind: kind, geometry: geometry, el: el });
+      var shape = { tmpId: tmpId, kind: kind, geometry: geometry, el: el };
+      this.shapes.push(shape);
+      this._renderShape(shape);
 
       this.pushEventTo(this.el, "etcher:created", {
         target_type: this.targetType,
@@ -689,37 +801,24 @@
 
     _renderAnnotation: function(ann) {
       if (!ann || !ann.kind || !ann.geometry) return;
-      var g = ann.geometry, el;
+      var el;
 
       switch (ann.kind) {
-        case "rectangle":
-          el = svgEl("rect", { x: g.x, y: g.y, width: g.w, height: g.h });
-          break;
-        case "circle":
-          el = svgEl("circle", { cx: g.cx, cy: g.cy, r: g.r });
-          break;
-        case "polygon":
-          el = svgEl("polygon", {
-            points: (g.points || []).map(function(p) { return p[0] + "," + p[1]; }).join(" ")
-          });
-          break;
-        case "freehand":
-          el = svgEl("polyline", {
-            points: (g.points || []).map(function(p) { return p[0] + "," + p[1]; }).join(" "),
-            fill: "none"
-          });
-          break;
-        default:
-          return;
+        case "rectangle": el = svgEl("rect");                       break;
+        case "circle":    el = svgEl("circle");                     break;
+        case "polygon":   el = svgEl("polygon");                    break;
+        case "freehand":  el = svgEl("polyline", { fill: "none" }); break;
+        default: return;
       }
 
-      el.setAttribute("vector-effect", "non-scaling-stroke");
       el.setAttribute("stroke-width", "2");
       el.classList.add("etcher-shape");
       if (ann.uuid) el.setAttribute("data-uuid", ann.uuid);
       this.svg.appendChild(el);
 
-      this.shapes.push({ uuid: ann.uuid, kind: ann.kind, geometry: g, el: el });
+      var shape = { uuid: ann.uuid, kind: ann.kind, geometry: ann.geometry, el: el };
+      this.shapes.push(shape);
+      this._renderShape(shape);
     },
 
     _selectShape: function(uuid) {

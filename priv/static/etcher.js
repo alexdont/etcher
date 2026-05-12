@@ -96,7 +96,13 @@
       ".etcher-overlay.is-drawing .etcher-shape {",
       "  pointer-events: none; cursor: crosshair;",
       "}",
-      ".etcher-shape.is-draft { pointer-events: none; }",
+      // Draft + edit share the same orange styling so the user has a
+      // single visual language for "this shape is currently mine".
+      ".etcher-shape.is-draft {",
+      "  pointer-events: none;",
+      "  stroke: #f59e0b; stroke-dasharray: 5 4;",
+      "  fill: rgba(245, 158, 11, 0.15);",
+      "}",
       ".etcher-shape.is-hovered {",
       "  fill: rgba(59, 130, 246, 0.22); stroke-width: 3;",
       "}",
@@ -116,6 +122,13 @@
       "}",
       ".etcher-handle:hover { r: 7; }",
       ".etcher-handle.is-dragging { cursor: grabbing; r: 8; }",
+      // While a drawing tool is active, vector dots on the in-progress
+      // draft are markers, not grab targets — let pointer events fall
+      // through to the wrapper so the user can keep dragging the
+      // active tool over them.
+      ".etcher-overlay.is-drawing .etcher-handle {",
+      "  pointer-events: none; cursor: crosshair;",
+      "}",
       ".etcher-tooltip {",
       // pointer-events: auto so the user can move from shape to tooltip
       // and interact with the delete button. The tooltip is positioned
@@ -631,9 +644,13 @@
       if (this.draftPolygon) {
         this._renderPolygonPreview(this._lastHover);
       }
-      // Keep edit handles glued to the shape during pan/zoom animations.
+      // Keep handles glued to whichever shape currently "owns" them —
+      // edit-mode target if any, otherwise the active draft.
       if (this.editingShape) {
         this._positionAllHandles(this.editingShape);
+      } else {
+        var d = this._draftActive();
+        if (d) this._positionAllHandles(d);
       }
     },
 
@@ -831,6 +848,7 @@
       var geom = { x: pt.x, y: pt.y, w: 0, h: 0 };
       this.draftState = { kind: "rectangle", anchor: pt, geometry: geom, el: rect };
       this._renderShape(this.draftState);
+      this._syncDraftHandles();
       try { e.target.setPointerCapture(e.pointerId); } catch (_) {}
     },
 
@@ -841,6 +859,7 @@
         w: Math.abs(pt.x - a.x), h: Math.abs(pt.y - a.y)
       };
       this._renderShape(this.draftState);
+      this._positionAllHandles(this.draftState);
     },
 
     _commitRectangle: function(pt) {
@@ -871,6 +890,7 @@
       var geom = { cx: pt.x, cy: pt.y, r: 0 };
       this.draftState = { kind: "circle", center: pt, geometry: geom, el: circle };
       this._renderShape(this.draftState);
+      this._syncDraftHandles();
       try { e.target.setPointerCapture(e.pointerId); } catch (_) {}
     },
 
@@ -879,6 +899,7 @@
       var dx = pt.x - c.x, dy = pt.y - c.y;
       this.draftState.geometry = { cx: c.x, cy: c.y, r: Math.sqrt(dx * dx + dy * dy) };
       this._renderShape(this.draftState);
+      this._positionAllHandles(this.draftState);
     },
 
     _commitCircle: function(pt) {
@@ -907,10 +928,13 @@
         this.draftPolygon = { points: [[pt.x, pt.y]], el: poly };
         this._lastHover = null;
         this._renderPolygonPreview(null);
+        this._syncDraftHandles();
         return;
       }
       this.draftPolygon.points.push([pt.x, pt.y]);
       this._renderPolygonPreview(null);
+      // Vertex count grew — recreate handles so the new one shows up.
+      this._syncDraftHandles();
     },
 
     _polygonHover: function(pt) {
@@ -1003,6 +1027,7 @@
       });
 
       this.draftState = null;
+      this._syncDraftHandles();
     },
 
     _cancelDraft: function() {
@@ -1014,6 +1039,7 @@
         this.draftPolygon.el.parentNode.removeChild(this.draftPolygon.el);
       }
       this.draftPolygon = null;
+      this._syncDraftHandles();
     },
 
     // -------------------------------------------------------------------------
@@ -1107,7 +1133,8 @@
       }
     },
 
-    _renderHandles: function(shape) {
+    _renderHandles: function(shape, opts) {
+      opts = opts || { interactive: true };
       this._removeHandles();
       var self = this;
       var positions = this._handlePositions(shape);
@@ -1118,11 +1145,42 @@
         h.dataset.index = idx;
         self.svg.appendChild(h);
         self._positionHandle(h, pt);
-        h.addEventListener("pointerdown", function(e) {
-          self._startHandleDrag(shape, idx, h, e);
-        });
+        if (opts.interactive) {
+          h.addEventListener("pointerdown", function(e) {
+            self._startHandleDrag(shape, idx, h, e);
+          });
+        }
         return h;
       });
+    },
+
+    // Returns the currently-in-progress draft shape as a shape-like
+    // object suitable for `_handlePositions` — unifying the rectangle/
+    // circle/freehand draftState and the polygon draftPolygon code
+    // paths so renderers can treat them the same way.
+    _draftActive: function() {
+      if (this.draftState) return this.draftState;
+      if (this.draftPolygon) {
+        return {
+          kind: "polygon",
+          geometry: { points: this.draftPolygon.points },
+          el: this.draftPolygon.el
+        };
+      }
+      return null;
+    },
+
+    _syncDraftHandles: function() {
+      var d = this._draftActive();
+      if (!d) {
+        if (!this.editingShape) this._removeHandles();
+        return;
+      }
+      // Recreate (rather than reposition) because polygon clicks grow
+      // the vertex count between calls. Cheap enough — drafts cap at a
+      // few dozen vertices and `_renderAll`'s per-frame path uses
+      // `_positionAllHandles` instead.
+      this._renderHandles(d, { interactive: false });
     },
 
     _positionAllHandles: function(shape) {
@@ -1175,6 +1233,10 @@
       e.stopPropagation();
       try { handleEl.setPointerCapture(e.pointerId); } catch (_) {}
       handleEl.classList.add("is-dragging");
+      // Drag starts under the cursor — the tooltip is now anchored to a
+      // stale shape position, so hide it for the duration and bring it
+      // back on release.
+      this._hideTooltip();
 
       var self = this;
       // Snapshot the starting geometry so corner drags derive from the
@@ -1199,6 +1261,7 @@
             geometry: shape.geometry
           });
         }
+        self._showTooltipFor(shape);
       }
       handleEl.addEventListener("pointermove", onMove);
       handleEl.addEventListener("pointerup", onUp);
@@ -1229,6 +1292,10 @@
           if (sdx * sdx + sdy * sdy < 9) return;
           dragged = true;
           el.classList.add("is-moving");
+          // The tooltip is anchored to the shape's old position — it
+          // would float orphaned while the shape moves underneath.
+          // Hide it for the duration; reshow on release.
+          self._hideTooltip();
         }
         shape.geometry = self._translateGeometry(
           shape.kind, startGeom, pt.x - startPt.x, pt.y - startPt.y
@@ -1242,11 +1309,16 @@
         el.removeEventListener("pointerup", onUp);
         el.removeEventListener("pointercancel", onUp);
         try { el.releasePointerCapture(ev.pointerId); } catch (_) {}
-        if (dragged && shape.uuid) {
-          self.pushEventTo(self.el, "etcher:updated", {
-            uuid: shape.uuid,
-            geometry: shape.geometry
-          });
+        if (dragged) {
+          if (shape.uuid) {
+            self.pushEventTo(self.el, "etcher:updated", {
+              uuid: shape.uuid,
+              geometry: shape.geometry
+            });
+          }
+          // Cursor is still over the shape (we just released it there),
+          // so the user expects the tooltip to come back.
+          self._showTooltipFor(shape);
         }
       }
       el.addEventListener("pointermove", onMove);

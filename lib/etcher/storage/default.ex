@@ -17,7 +17,12 @@ defmodule Etcher.Storage.Default do
 
   alias Etcher.Annotation
 
-  @impl true
+  @doc """
+  Insert a new annotation row. Returns `{:ok, annotation}` on success,
+  `{:error, :no_repo_configured}` when `config :etcher, :repo` isn't
+  set, or `{:error, changeset}` on validation failure.
+  """
+  @impl Etcher.Storage
   def create(attrs) do
     with {:ok, repo} <- repo() do
       %Annotation{}
@@ -26,7 +31,11 @@ defmodule Etcher.Storage.Default do
     end
   end
 
-  @impl true
+  @doc """
+  List annotations for a target, ordered by `position` ascending then
+  `inserted_at` ascending. Returns `[]` if no Repo is configured.
+  """
+  @impl Etcher.Storage
   def list_for(target_type, target_uuid) do
     case repo() do
       {:ok, repo} ->
@@ -42,7 +51,12 @@ defmodule Etcher.Storage.Default do
     end
   end
 
-  @impl true
+  @doc """
+  Update an annotation by UUID. Returns `{:ok, annotation}` on success,
+  `{:error, :no_repo_configured}`, `{:error, :not_found}`, or
+  `{:error, changeset}` on validation failure.
+  """
+  @impl Etcher.Storage
   def update(uuid, attrs) do
     with {:ok, repo} <- repo(),
          %Annotation{} = annotation <- repo.get(Annotation, uuid) do
@@ -55,7 +69,12 @@ defmodule Etcher.Storage.Default do
     end
   end
 
-  @impl true
+  @doc """
+  Delete an annotation by UUID. Returns `:ok`,
+  `{:error, :no_repo_configured}`, `{:error, :not_found}`, or
+  `{:error, changeset}` if the delete fails.
+  """
+  @impl Etcher.Storage
   def delete(uuid) do
     with {:ok, repo} <- repo(),
          %Annotation{} = annotation <- repo.get(Annotation, uuid) do

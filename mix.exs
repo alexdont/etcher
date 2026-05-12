@@ -24,9 +24,7 @@ defmodule Etcher.MixProject do
 
   defp deps do
     [
-      # Path dep during local development; switch to hex `{:fresco, "~> 0.2"}`
-      # before publishing.
-      {:fresco, path: "../fresco"},
+      {:fresco, "~> 0.1"},
       {:phoenix_live_view, "~> 1.1"},
       {:phoenix_html, "~> 4.0"},
       {:jason, "~> 1.4"},

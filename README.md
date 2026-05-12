@@ -215,6 +215,55 @@ end
 
 Etcher's component doesn't run any persistence itself — it fires events and trusts the consumer. The bundled `Etcher.create_annotation/1` is just a shortcut for `Etcher.Storage.Default.create/1`.
 
+## Customizing the tooltip
+
+Hovering or clicking an annotation pops up a small tooltip with a trash button (for persisted shapes) and three content slots: **header**, **footer**, and **body**. The defaults read a few generic `metadata` keys and degrade to just the shape kind if those are absent, but a consumer can replace any slot with its own rendering by setting `window.Etcher.tooltipSlots`:
+
+```js
+window.Etcher.tooltipSlots = {
+  header: (shape) => Etcher.escapeHtml(shape.metadata.author || shape.kind),
+  footer: (shape) => shape.metadata.last_edited || null,
+  body:   (shape) => `<p>${Etcher.escapeHtml(shape.metadata.note || "")}</p>`
+};
+```
+
+- Slots are functions `(shape) => string | null`.
+- Returning `null` or `undefined` falls back to Etcher's default for that slot. An empty return for `body` / `footer` omits the row entirely.
+- The whole `shape` object is passed (`{uuid, kind, geometry, style, metadata, …}`) so consumers can build whatever HTML their data supports.
+- Etcher controls the wrapper, positioning, hover bridge, click-to-pin, and the trash button — slots only own content. This keeps delete + pin behavior consistent across consumers.
+- `window.Etcher.escapeHtml(value)` is exposed as a stable escape helper.
+
+### Default slot keys
+
+If you don't register custom slots but want a meaningful tooltip, populate these on each annotation's `metadata` (server-side, in `initial_annotations`):
+
+| Slot   | Read from              | Fallback                          |
+|--------|------------------------|-----------------------------------|
+| header | `metadata.title`       | capitalized `shape.kind`          |
+| body   | `metadata.body`        | (none — row omitted)              |
+| footer | `metadata.subtitle`    | (none — row omitted)              |
+
+### Styling primitives
+
+Etcher's stylesheet ships a handful of opt-in classes consumers can use inside their slot HTML for a layout consistent with the default look:
+
+- `.etcher-tooltip-body` — flex row, thumbnail on the left, text column on the right (`gap: 8px`, `max-width: 260px`)
+- `.etcher-tooltip-thumb` — 40×40 rounded box for an `<img>` or icon span
+- `.etcher-tooltip-thumb-icon` — modifier that centers an SVG icon inside the thumb box (paperclip-style fallback)
+- `.etcher-tooltip-text` — flex column container for the right-hand text
+- `.etcher-tooltip-quote` — italic, two-line clamp for a quoted text preview
+
+These are entirely optional. A slot that just returns `<p>plain text</p>` lays out fine without any of them.
+
+### Lifecycle events
+
+Slot APIs cover content. For interaction wiring the existing LiveView events still fire:
+
+- `etcher:selected {uuid}` on click (also pins the tooltip)
+- `etcher:deleted {uuid}` when the user hits the trash button
+
+`etcher:tooltip-show` / `-hide` / `-pin` events would be a natural follow-up if a consumer needs them; not in v0.1.
+
 ## How it fits with Fresco
 
 Etcher uses Fresco 0.2's `handle.appendNavButton/3` extension point to add the pencil button — no other extension surface required. Drawing input is delivered as plain `pointerdown` / `pointermove` / `pointerup` events on an SVG overlay anchored to Fresco's image coordinate space, so shapes stay locked to image pixels through pan and zoom.

@@ -29,6 +29,25 @@
   window.EtcherLoaded = true;
 
   // ===========================================================================
+  // Public extension surface — `window.Etcher`
+  //
+  // Consumers register slot overrides for the hover tooltip via
+  // `window.Etcher.tooltipSlots = { header, body, footer }`. Each slot
+  // is a function `(shape) => string | null` and returning null/undefined
+  // falls back to Etcher's neutral default. Etcher controls everything
+  // around the slots — positioning, hover bridge, click-to-pin, the
+  // delete trash button, the cross-component highlight — so the core
+  // UX stays consistent. See README "Customizing the tooltip" for
+  // worked examples.
+  //
+  // `escapeHtml` is exposed so consumer slots have a stable escape
+  // helper without duplicating it.
+  // ===========================================================================
+
+  window.Etcher = window.Etcher || {};
+  window.Etcher.tooltipSlots = window.Etcher.tooltipSlots || {};
+
+  // ===========================================================================
   // Icons (Heroicons, outline, 24×24, stroke="currentColor")
   // ===========================================================================
 
@@ -36,7 +55,7 @@
     pencil:   '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125"/></svg>',
     trash:    '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/></svg>',
     paperclip:'<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m18.375 12.739-7.693 7.693a4.5 4.5 0 0 1-6.364-6.364l10.94-10.94A3 3 0 1 1 19.5 7.372L8.552 18.32m.009-.01-.01.01m5.699-9.941-7.81 7.81a1.5 1.5 0 0 0 2.112 2.13"/></svg>',
-    cursor:   '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15 15 9 9m6 6-2.625 6.75M15 15l6.75-2.625M9 9 2.25 11.625M9 9l2.625-6.75"/></svg>',
+    cursor:   '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4 11.07 21l2.51-7.39L20.97 11.1 4 4Z"/></svg>',
     rectangle:'<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><rect x="4" y="6" width="16" height="12" rx="1.5"/></svg>',
     circle:   '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><circle cx="12" cy="12" r="7.5"/></svg>',
     polygon:  '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3.5 21 9.5 18 20H6L3 9.5 12 3.5Z"/></svg>',
@@ -196,8 +215,11 @@
       "  outline: 2px solid rgba(255, 255, 255, 0.7); outline-offset: 1px;",
       "}",
       ".etcher-tooltip-delete svg { width: 14px; height: 14px; }",
-      // Comment-preview slots — filled from `shape.metadata.comment_*`
-      // fields the server passes when an annotation has a thread.
+      // Opt-in styling primitives consumers can use inside their
+      // `tooltipSlots.body` HTML — Etcher's defaults don't apply
+      // these automatically, so a consumer slot returning plain HTML
+      // is laid out plainly. Used as `<div class="etcher-tooltip-body">`
+      // → flex row with thumb + text columns.
       ".etcher-tooltip-body {",
       "  display: flex; gap: 8px; margin-top: 6px; max-width: 260px;",
       "}",
@@ -296,6 +318,50 @@
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#39;");
+  }
+
+  // Stable escape helper for consumer slot impls so they don't have to
+  // duplicate one.
+  window.Etcher.escapeHtml = escapeHtml;
+
+  // Neutral defaults read from generic, non-comment-specific metadata
+  // keys — a consumer who just populates these gets a working tooltip
+  // without registering any custom slots.
+  //   metadata.title    → header (else capitalized shape.kind)
+  //   metadata.body     → body (raw HTML; the consumer owns escaping)
+  //   metadata.subtitle → footer ("date · count"-style sub-line)
+  var DEFAULT_TOOLTIP_SLOTS = {
+    header: function(shape) {
+      var m = shape.metadata || {};
+      return escapeHtml(m.title || shape.kind || "");
+    },
+    body: function(shape) {
+      var m = shape.metadata || {};
+      return m.body || null;
+    },
+    footer: function(shape) {
+      var m = shape.metadata || {};
+      return m.subtitle ? escapeHtml(m.subtitle) : null;
+    }
+  };
+
+  // Slot resolver: custom > default > null. Errors in consumer slots
+  // are swallowed (warn-only) so a broken override can't take down
+  // the whole tooltip; the corresponding default kicks in instead.
+  function resolveSlot(name, shape) {
+    var slots = window.Etcher.tooltipSlots || {};
+    var custom = slots[name];
+    if (typeof custom === "function") {
+      try {
+        var result = custom(shape);
+        if (result != null) return result;
+      } catch (e) {
+        if (window.console && console.warn) {
+          console.warn("[Etcher] tooltipSlots." + name + " threw:", e);
+        }
+      }
+    }
+    return DEFAULT_TOOLTIP_SLOTS[name](shape);
   }
 
   // ===========================================================================
@@ -969,64 +1035,34 @@
       this._cancelHideTooltip();
       this._tooltipShape = shape;
 
-      var meta = shape.metadata || {};
-      var label = meta.label || shape.label || null;
-      var commentText = meta.comment_text || null;
-      var commentAuthor = meta.comment_author || null;
-      var commentThumb = meta.comment_thumbnail_url || null;
-      var commentHasAttachment = meta.comment_has_attachment === true;
-      var commentCount = meta.comment_count || 0;
-      var commentDate = meta.comment_created_at || null;
-
-      // Header label: author name when a comment is attached, else
-      // fall back to the shape kind so the slot is never empty.
-      var headerLabel = commentAuthor || shape.kind;
+      // Delegate the three content regions to slot functions. Consumer
+      // overrides win over defaults; a slot returning null/undefined
+      // omits its row entirely.
+      var headerHtml = resolveSlot("header", shape);
+      var bodyHtml = resolveSlot("body", shape);
+      var footerHtml = resolveSlot("footer", shape);
 
       var html = '<div class="etcher-tooltip-header">';
-      html += '<span class="etcher-tooltip-kind">' + escapeHtml(headerLabel) + '</span>';
-      // Only show delete for persisted annotations — temp shapes that
-      // haven't been ack'd by the server yet shouldn't be deletable
-      // through the server-side path.
+      html += '<span class="etcher-tooltip-kind">' + (headerHtml || "") + '</span>';
+      // Trash button stays Etcher-controlled — delete is a core UX,
+      // consumers shouldn't have to reimplement it. Only shown for
+      // persisted shapes (temp drafts have no server-side uuid yet).
       if (shape.uuid) {
         html += '<button type="button" class="etcher-tooltip-delete"' +
                 ' data-etcher-action="delete" title="Delete annotation"' +
                 ' aria-label="Delete annotation">' + ICONS.trash + '</button>';
       }
       html += '</div>';
-      if (label) html += '<div>' + escapeHtml(label) + '</div>';
 
-      // Sub-header: date · activity count. Both are optional; if both
-      // present they're joined with a middle-dot separator.
-      if (commentDate || commentCount > 0) {
-        var parts = [];
-        if (commentDate) parts.push(escapeHtml(commentDate));
-        if (commentCount > 0) {
-          parts.push(commentCount + " " + (commentCount === 1 ? "comment" : "comments"));
-        }
-        html += '<div class="etcher-tooltip-meta">' + parts.join(" · ") + '</div>';
+      if (footerHtml) {
+        html += '<div class="etcher-tooltip-meta">' + footerHtml + '</div>';
       }
-
-      // Comment preview block — renders when there's text / thumb /
-      // attachment info. The thumb slot is either:
-      //   (a) the image URL, with an onerror that swaps to a paperclip
-      //       if the image fails to load (broken URL, 404, CSP block)
-      //   (b) a paperclip icon when the comment has an attachment but
-      //       no preview-able image (PDFs, audio, zips)
-      //   (c) skipped entirely when there's no attachment + no image
-      if (commentText || commentThumb || commentHasAttachment) {
-        html += '<div class="etcher-tooltip-body">';
-        if (commentThumb) {
-          html += '<img class="etcher-tooltip-thumb" src="' +
-                  escapeHtml(commentThumb) + '" alt="">';
-        } else if (commentHasAttachment) {
-          html += '<span class="etcher-tooltip-thumb etcher-tooltip-thumb-icon">' +
-                  ICONS.paperclip + '</span>';
-        }
-        html += '<div class="etcher-tooltip-text">';
-        if (commentText) {
-          html += '<div class="etcher-tooltip-quote">' + escapeHtml(commentText) + '</div>';
-        }
-        html += '</div></div>';
+      // Body slot HTML is injected as-is. Consumers can wrap it in
+      // any layout they want; Etcher exposes `.etcher-tooltip-body`,
+      // `.etcher-tooltip-thumb`, `.etcher-tooltip-text`, and
+      // `.etcher-tooltip-quote` as opt-in styling primitives.
+      if (bodyHtml) {
+        html += bodyHtml;
       }
 
       tip.innerHTML = html;

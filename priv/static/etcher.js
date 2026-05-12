@@ -118,10 +118,31 @@
       ".etcher-handle {",
       "  fill: #fff; stroke: #f59e0b; stroke-width: 2;",
       "  pointer-events: auto; cursor: grab;",
-      "  transition: r 80ms ease;",
+      // `transform-box: fill-box` anchors `transform-origin` to the
+      // element's own box rather than the SVG viewport, so `scale()`
+      // grows the dot around its own center instead of warping it
+      // toward (0, 0). Bumping `transform` rather than `r` because
+      // CSS-set `r` doesn't always win over the attribute-set `r="5"`
+      // across all browsers.
+      "  transform-box: fill-box; transform-origin: center;",
+      "  transition: transform 80ms ease, stroke-width 80ms ease, fill 80ms ease;",
       "}",
-      ".etcher-handle:hover { r: 7; }",
-      ".etcher-handle.is-dragging { cursor: grabbing; r: 8; }",
+      ".etcher-handle:hover {",
+      "  transform: scale(1.6); stroke-width: 3;",
+      "  fill: rgba(245, 158, 11, 0.35);",
+      "}",
+      ".etcher-handle.is-dragging {",
+      "  cursor: grabbing; transform: scale(1.8); stroke-width: 3;",
+      "  fill: rgba(245, 158, 11, 0.55);",
+      "}",
+      // While drafting a polygon the first vertex doubles as the close
+      // button — highlight it when the cursor is near so the user knows
+      // a click there finishes the shape. Same look as `:hover` for
+      // consistency.
+      ".etcher-handle.is-close-target {",
+      "  transform: scale(1.6); stroke-width: 3;",
+      "  fill: rgba(245, 158, 11, 0.4);",
+      "}",
       // While a drawing tool is active, vector dots on the in-progress
       // draft are markers, not grab targets — let pointer events fall
       // through to the wrapper so the user can keep dragging the
@@ -931,7 +952,32 @@
         this._syncDraftHandles();
         return;
       }
-      this.draftPolygon.points.push([pt.x, pt.y]);
+
+      var pts = this.draftPolygon.points;
+      var here = this._imageToContainer(pt);
+
+      // Click on (or very near) the first vertex closes the polygon —
+      // standard vector-tool UX. Requires at least 3 vertices already so
+      // we close into a real triangle, not a degenerate line.
+      if (pts.length >= 3) {
+        var first = this._imageToContainer({ x: pts[0][0], y: pts[0][1] });
+        var fdx = here.x - first.x, fdy = here.y - first.y;
+        if (fdx * fdx + fdy * fdy < 144) { // 12px radius around the start dot
+          this._commitPolygon();
+          return;
+        }
+      }
+
+      // Ignore a click that lands on top of the last vertex — covers both
+      // the second click of a double-click and a jittery hand. Otherwise
+      // we'd stack two dots at the same point and the user would have to
+      // notice and back out.
+      var last = pts[pts.length - 1];
+      var lastScreen = this._imageToContainer({ x: last[0], y: last[1] });
+      var ldx = here.x - lastScreen.x, ldy = here.y - lastScreen.y;
+      if (ldx * ldx + ldy * ldy < 9) return; // 3px duplicate threshold
+
+      pts.push([pt.x, pt.y]);
       this._renderPolygonPreview(null);
       // Vertex count grew — recreate handles so the new one shows up.
       this._syncDraftHandles();
@@ -940,6 +986,25 @@
     _polygonHover: function(pt) {
       this._lastHover = pt;
       this._renderPolygonPreview(pt);
+      this._updatePolygonCloseHint(pt);
+    },
+
+    // Toggle the close-target class on the first vertex's handle when
+    // the cursor is within the same 12px radius the click handler uses
+    // for the close action. Matches the threshold so the visual hint
+    // and the actual click target line up exactly.
+    _updatePolygonCloseHint: function(pt) {
+      if (!this.handles || this.handles.length === 0) return;
+      var firstHandle = this.handles[0];
+      if (!this.draftPolygon || this.draftPolygon.points.length < 3) {
+        firstHandle.classList.remove("is-close-target");
+        return;
+      }
+      var pts = this.draftPolygon.points;
+      var first = this._imageToContainer({ x: pts[0][0], y: pts[0][1] });
+      var here = this._imageToContainer(pt);
+      var dx = here.x - first.x, dy = here.y - first.y;
+      firstHandle.classList.toggle("is-close-target", dx * dx + dy * dy < 144);
     },
 
     _renderPolygonPreview: function(hover) {

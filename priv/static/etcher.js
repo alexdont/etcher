@@ -34,6 +34,7 @@
 
   var ICONS = {
     pencil:   '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125"/></svg>',
+    trash:    '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/></svg>',
     cursor:   '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15 15 9 9m6 6-2.625 6.75M15 15l6.75-2.625M9 9 2.25 11.625M9 9l2.625-6.75"/></svg>',
     rectangle:'<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><rect x="4" y="6" width="16" height="12" rx="1.5"/></svg>',
     circle:   '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><circle cx="12" cy="12" r="7.5"/></svg>',
@@ -82,10 +83,73 @@
       ".etcher-overlay.is-drawing { cursor: crosshair; }",
       ".etcher-shape {",
       "  fill: rgba(59, 130, 246, 0.12); stroke: #3b82f6;",
+      // Shapes catch hover + click independently of the wrapper, so
+      // annotations remain interactive when annotation mode is off and
+      // the wrapper is `pointer-events: none` (events pass through to
+      // OSD). Setting `pointer-events: visiblePainted` on freehand
+      // polylines means the user can hover the thin line itself.
+      "  pointer-events: visiblePainted; cursor: pointer;",
+      "}",
+      // While a drawing tool is active, shapes step out of the way so a
+      // drag started over an existing shape opens a new one instead of
+      // getting trapped by the shape's pointer-events.
+      ".etcher-overlay.is-drawing .etcher-shape {",
+      "  pointer-events: none; cursor: crosshair;",
+      "}",
+      ".etcher-shape.is-draft { pointer-events: none; }",
+      ".etcher-shape.is-hovered {",
+      "  fill: rgba(59, 130, 246, 0.22); stroke-width: 3;",
       "}",
       ".etcher-shape.is-selected {",
       "  stroke: #f59e0b; fill: rgba(245, 158, 11, 0.18);",
-      "}"
+      "}",
+      ".etcher-shape.is-editing {",
+      "  stroke: #f59e0b; stroke-dasharray: 5 4;",
+      "  fill: rgba(245, 158, 11, 0.12);",
+      "}",
+      ".etcher-handle {",
+      "  fill: #fff; stroke: #f59e0b; stroke-width: 2;",
+      "  pointer-events: auto; cursor: grab;",
+      "  transition: r 80ms ease;",
+      "}",
+      ".etcher-handle:hover { r: 7; }",
+      ".etcher-handle.is-dragging { cursor: grabbing; r: 8; }",
+      ".etcher-tooltip {",
+      // pointer-events: auto so the user can move from shape to tooltip
+      // and interact with the delete button. The tooltip is positioned
+      // above the shape so it doesn't normally block hover on the shape
+      // itself.
+      "  position: absolute; z-index: 12; pointer-events: auto;",
+      "  background: rgba(0, 0, 0, 0.85); color: #fff;",
+      "  padding: 6px 10px; border-radius: 6px;",
+      "  font-size: 12px; line-height: 1.35; max-width: 260px;",
+      "  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);",
+      "  display: none; white-space: nowrap;",
+      "}",
+      ".etcher-tooltip-header {",
+      "  display: flex; align-items: center; gap: 10px;",
+      "}",
+      ".etcher-tooltip-kind {",
+      "  font-weight: 600; text-transform: capitalize; flex: 1;",
+      "}",
+      ".etcher-tooltip-meta {",
+      "  margin-top: 2px; opacity: 0.72; font-size: 11px;",
+      "}",
+      ".etcher-tooltip-delete {",
+      "  background: rgba(255, 255, 255, 0.08); border: none;",
+      "  color: rgba(252, 165, 165, 0.95);",
+      "  width: 24px; height: 24px; padding: 0;",
+      "  border-radius: 4px; cursor: pointer;",
+      "  display: inline-flex; align-items: center; justify-content: center;",
+      "  transition: background 120ms ease, color 120ms ease;",
+      "}",
+      ".etcher-tooltip-delete:hover {",
+      "  background: rgba(239, 68, 68, 0.32); color: #fff;",
+      "}",
+      ".etcher-tooltip-delete:focus-visible {",
+      "  outline: 2px solid rgba(255, 255, 255, 0.7); outline-offset: 1px;",
+      "}",
+      ".etcher-tooltip-delete svg { width: 14px; height: 14px; }"
     ].join("\n");
 
     var style = document.createElement("style");
@@ -121,6 +185,15 @@
 
   function genTmpId() {
     return "tmp-" + Math.random().toString(36).slice(2, 10) + "-" + Date.now().toString(36);
+  }
+
+  function escapeHtml(value) {
+    return String(value == null ? "" : value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
   }
 
   // ===========================================================================
@@ -188,6 +261,7 @@
     },
 
     destroyed: function() {
+      this._exitEditMode();
       if (this.removeNavBtn) { try { this.removeNavBtn(); } catch (_) {} }
       if (this.toolbar && this.toolbar.parentNode) {
         this.toolbar.parentNode.removeChild(this.toolbar);
@@ -269,6 +343,30 @@
 
       container.appendChild(wrapper);
 
+      // Tooltip — sibling of the SVG, positioned in container-px so it
+      // doesn't move with the image (it follows the cursor's shape, but
+      // is anchored to the viewport, not the annotation). Interactive
+      // (`pointer-events: auto`) so the user can move from the shape to
+      // the tooltip and click the delete button — a short hide-delay
+      // bridges the gap so the tooltip doesn't snap closed mid-traverse.
+      var tip = document.createElement("div");
+      tip.className = "etcher-tooltip";
+      wrapper.appendChild(tip);
+      self.tooltipEl = tip;
+
+      tip.addEventListener("mouseenter", function() { self._cancelHideTooltip(); });
+      tip.addEventListener("mouseleave", function() { self._scheduleHideTooltip(); });
+      tip.addEventListener("click", function(e) {
+        // Keep clicks from bubbling to OSD's mouse tracker so the
+        // delete button never doubles as a click-to-zoom.
+        e.stopPropagation();
+        var btn = e.target.closest("[data-etcher-action]");
+        if (!btn) return;
+        if (btn.dataset.etcherAction === "delete") {
+          self._deleteShape(self._tooltipShape);
+        }
+      });
+
       // Drawing input — only listens when we're in annotation mode with a
       // tool other than cursor. `pointer-events: auto` is toggled on the
       // wrapper to gate this.
@@ -276,8 +374,6 @@
       wrapper.addEventListener("pointermove", function(e) { self._onPointerMove(e); });
       wrapper.addEventListener("pointerup",   function(e) { self._onPointerUp(e); });
       wrapper.addEventListener("dblclick",    function(e) { self._onDoubleClick(e); });
-      // Click-on-shape selection (cursor tool).
-      svg.addEventListener("click", function(e) { self._onSvgClick(e); });
 
       // Re-render shapes in lockstep with the viewer. `animation` fires on
       // every spring-interpolation tick during a zoom or pan, so the
@@ -411,6 +507,7 @@
       if (!on) {
         self._selectTool(null);
         self._cancelDraft();
+        self._exitEditMode();
       }
     },
 
@@ -418,6 +515,9 @@
       var self = this;
       if (self.activeTool !== toolKey) self._cancelDraft();
       self.activeTool = toolKey;
+      // Drawing and editing are mutually exclusive — picking a tool
+      // means we're done admiring the current edit.
+      if (toolKey != null) self._exitEditMode();
 
       if (self.toolbar) {
         var btns = self.toolbar.querySelectorAll("button[data-tool]");
@@ -428,17 +528,16 @@
         });
       }
 
+      // Wrapper catches input only while a drawing tool is active. Shapes
+      // catch their own hover + click independently via CSS, so the
+      // wrapper can stay `pointer-events: none` in every other state and
+      // let background clicks pass through to OSD's canvas.
       if (self.overlayWrapper) {
         var drawing = toolKey != null;
-        self.overlayWrapper.style.pointerEvents = drawing || self._hasSelectableShapes()
-          ? "auto"
-          : "none";
+        self.overlayWrapper.style.pointerEvents = drawing ? "auto" : "none";
         self.overlayWrapper.classList.toggle("is-drawing", drawing);
+        if (drawing) self._hideTooltip();
       }
-    },
-
-    _hasSelectableShapes: function() {
-      return this.annotationMode && this.shapes.length > 0;
     },
 
     // -------------------------------------------------------------------------
@@ -530,6 +629,10 @@
       if (this.draftPolygon) {
         this._renderPolygonPreview(this._lastHover);
       }
+      // Keep edit handles glued to the shape during pan/zoom animations.
+      if (this.editingShape) {
+        this._positionAllHandles(this.editingShape);
+      }
     },
 
     // -------------------------------------------------------------------------
@@ -582,15 +685,126 @@
       }
     },
 
-    _onSvgClick: function(e) {
-      if (!this.annotationMode || this.activeTool !== null) return;
-      var target = e.target.closest(".etcher-shape");
-      if (!target) return;
-      var uuid = target.getAttribute("data-uuid");
-      if (!uuid) return;
+    // Attach hover + click handlers to a single shape's SVG element.
+    // Tooltip + selection work in any state except an active drawing
+    // tool (CSS turns shape pointer-events off in that mode anyway, so
+    // these handlers won't fire — the safety check is just defensive).
+    _attachShapeInteractions: function(shape) {
+      var self = this;
+      var el = shape.el;
+      if (!el || el._etcherWired) return;
+      el._etcherWired = true;
 
-      this._selectShape(uuid);
-      this.pushEventTo(this.el, "etcher:selected", { uuid: uuid });
+      el.addEventListener("mouseenter", function() {
+        if (self.annotationMode && self.activeTool != null) return;
+        el.classList.add("is-hovered");
+        self._showTooltipFor(shape);
+      });
+      el.addEventListener("mouseleave", function() {
+        el.classList.remove("is-hovered");
+        // Don't snap closed — give the cursor time to travel from shape
+        // to tooltip so the delete button stays reachable.
+        self._scheduleHideTooltip();
+      });
+      el.addEventListener("click", function(e) {
+        // While a drawing tool is active, let the click pass through to
+        // the wrapper so the user can drag-draw over an existing shape.
+        if (self.annotationMode && self.activeTool != null) return;
+        // Otherwise: this is a selection. Stop propagation so OSD's
+        // canvas (which lives next to us in the container) doesn't
+        // also receive the click and trigger a click-to-zoom.
+        e.stopPropagation();
+        e.preventDefault();
+        var id = shape.uuid || shape.tmpId;
+        // Edit handles only appear in annotation mode + cursor tool.
+        // Outside annotation mode the click is a passive selection —
+        // the consumer's LiveView decides what to do with it.
+        if (self.annotationMode) {
+          self._enterEditMode(shape);
+        }
+        self.pushEventTo(self.el, "etcher:selected", { uuid: id });
+      });
+    },
+
+    _showTooltipFor: function(shape) {
+      var tip = this.tooltipEl;
+      if (!tip) return;
+
+      this._cancelHideTooltip();
+      this._tooltipShape = shape;
+
+      var label = (shape.metadata && shape.metadata.label) || shape.label || null;
+      var id = (shape.uuid || shape.tmpId || "").toString().slice(0, 8);
+
+      var html = '<div class="etcher-tooltip-header">';
+      html += '<span class="etcher-tooltip-kind">' + escapeHtml(shape.kind) + '</span>';
+      // Only show delete for persisted annotations — temp shapes that
+      // haven't been ack'd by the server yet shouldn't be deletable
+      // through the server-side path.
+      if (shape.uuid) {
+        html += '<button type="button" class="etcher-tooltip-delete"' +
+                ' data-etcher-action="delete" title="Delete annotation"' +
+                ' aria-label="Delete annotation">' + ICONS.trash + '</button>';
+      }
+      html += '</div>';
+      if (label) html += '<div>' + escapeHtml(label) + '</div>';
+      if (id)    html += '<div class="etcher-tooltip-meta">#' + escapeHtml(id) + '</div>';
+      tip.innerHTML = html;
+
+      // Anchor the tooltip just above the shape's bounding rect, in
+      // container px. `getBoundingClientRect` reflects the current
+      // post-animation position so the tooltip sits where the shape is
+      // *now*, not where it started.
+      var shapeRect = shape.el.getBoundingClientRect();
+      var containerRect = this.handle.container.getBoundingClientRect();
+      var x = shapeRect.left + shapeRect.width / 2 - containerRect.left;
+      var y = shapeRect.top - containerRect.top - 8;
+      tip.style.left = x + "px";
+      tip.style.top = y + "px";
+      tip.style.transform = "translate(-50%, -100%)";
+      tip.style.display = "block";
+    },
+
+    _scheduleHideTooltip: function() {
+      var self = this;
+      self._cancelHideTooltip();
+      // 180ms is long enough for a Fitts'-friendly diagonal move from
+      // a small shape edge up to the tooltip without feeling laggy when
+      // intentionally moving away.
+      self._tooltipTimer = setTimeout(function() {
+        self._tooltipTimer = null;
+        self._hideTooltip();
+      }, 180);
+    },
+
+    _cancelHideTooltip: function() {
+      if (this._tooltipTimer) {
+        clearTimeout(this._tooltipTimer);
+        this._tooltipTimer = null;
+      }
+    },
+
+    _hideTooltip: function() {
+      this._cancelHideTooltip();
+      this._tooltipShape = null;
+      if (this.tooltipEl) this.tooltipEl.style.display = "none";
+    },
+
+    _deleteShape: function(shape) {
+      if (!shape) return;
+      var uuid = shape.uuid;
+      if (this.editingShape === shape) this._exitEditMode();
+      // Optimistic local removal so the UI feels instant. Server still
+      // gets the etcher:deleted event below to persist the change.
+      var idx = this.shapes.indexOf(shape);
+      if (idx !== -1) {
+        if (shape.el && shape.el.parentNode) shape.el.parentNode.removeChild(shape.el);
+        this.shapes.splice(idx, 1);
+      }
+      this._hideTooltip();
+      if (uuid) {
+        this.pushEventTo(this.el, "etcher:deleted", { uuid: uuid });
+      }
     },
 
     // -------------------------------------------------------------------------
@@ -765,6 +979,7 @@
       var shape = { tmpId: tmpId, kind: kind, geometry: geometry, el: el };
       this.shapes.push(shape);
       this._renderShape(shape);
+      this._attachShapeInteractions(shape);
 
       this.pushEventTo(this.el, "etcher:created", {
         target_type: this.targetType,
@@ -816,9 +1031,17 @@
       if (ann.uuid) el.setAttribute("data-uuid", ann.uuid);
       this.svg.appendChild(el);
 
-      var shape = { uuid: ann.uuid, kind: ann.kind, geometry: ann.geometry, el: el };
+      var shape = {
+        uuid: ann.uuid,
+        kind: ann.kind,
+        geometry: ann.geometry,
+        metadata: ann.metadata || null,
+        label: ann.label || null,
+        el: el
+      };
       this.shapes.push(shape);
       this._renderShape(shape);
+      this._attachShapeInteractions(shape);
     },
 
     _selectShape: function(uuid) {
@@ -829,12 +1052,193 @@
       if (hit) hit.classList.add("is-selected");
     },
 
+    // -------------------------------------------------------------------------
+    // Edit mode — click a shape to show vertex handles; drag a handle to
+    // reshape; release to commit. Only one shape edits at a time.
+    // -------------------------------------------------------------------------
+
+    _enterEditMode: function(shape) {
+      // Only persisted shapes are editable — temp shapes haven't been
+      // ack'd by the server yet so an `etcher:updated` event for them
+      // would point at a non-existent uuid.
+      if (!shape || !shape.uuid) return;
+      if (this.editingShape === shape) return;
+      this._exitEditMode();
+
+      this.editingShape = shape;
+      shape.el.classList.add("is-editing");
+      this._hideTooltip();
+      this._renderHandles(shape);
+
+      // Dismiss on any click outside the shape, its handles, the
+      // tooltip, or the toolbar. Capture phase so we run before stop-
+      // propagation handlers on inner elements.
+      var self = this;
+      this._outsideClickHandler = function(e) {
+        var inside = e.target.closest(
+          ".etcher-shape, .etcher-handle, .etcher-tooltip, .etcher-toolbar"
+        );
+        if (!inside) self._exitEditMode();
+      };
+      document.addEventListener("click", this._outsideClickHandler, true);
+    },
+
+    _exitEditMode: function() {
+      if (!this.editingShape) return;
+      this.editingShape.el.classList.remove("is-editing");
+      this._removeHandles();
+      this.editingShape = null;
+      if (this._outsideClickHandler) {
+        document.removeEventListener("click", this._outsideClickHandler, true);
+        this._outsideClickHandler = null;
+      }
+    },
+
+    _renderHandles: function(shape) {
+      this._removeHandles();
+      var self = this;
+      var positions = this._handlePositions(shape);
+
+      this.handles = positions.map(function(pt, idx) {
+        var h = svgEl("circle", { r: 5 });
+        h.classList.add("etcher-handle");
+        h.dataset.index = idx;
+        self.svg.appendChild(h);
+        self._positionHandle(h, pt);
+        h.addEventListener("pointerdown", function(e) {
+          self._startHandleDrag(shape, idx, h, e);
+        });
+        return h;
+      });
+    },
+
+    _positionAllHandles: function(shape) {
+      if (!this.handles || !this.handles.length) return;
+      var positions = this._handlePositions(shape);
+      var self = this;
+      this.handles.forEach(function(h, idx) {
+        if (positions[idx]) self._positionHandle(h, positions[idx]);
+      });
+    },
+
+    _positionHandle: function(h, imagePt) {
+      var c = this._imageToContainer(imagePt);
+      h.setAttribute("cx", c.x);
+      h.setAttribute("cy", c.y);
+    },
+
+    _removeHandles: function() {
+      (this.handles || []).forEach(function(h) {
+        if (h.parentNode) h.parentNode.removeChild(h);
+      });
+      this.handles = [];
+    },
+
+    // Returns image-px positions for each handle, in an order each kind's
+    // drag handler can reference by index.
+    _handlePositions: function(shape) {
+      var g = shape.geometry;
+      switch (shape.kind) {
+        case "rectangle":
+          return [
+            { x: g.x,         y: g.y },          // 0: top-left
+            { x: g.x + g.w,   y: g.y },          // 1: top-right
+            { x: g.x + g.w,   y: g.y + g.h },    // 2: bottom-right
+            { x: g.x,         y: g.y + g.h }     // 3: bottom-left
+          ];
+        case "circle":
+          return [{ x: g.cx + g.r, y: g.cy }];   // 0: east, controls radius
+        case "polygon":
+          return (g.points || []).map(function(p) { return { x: p[0], y: p[1] }; });
+        // Freehand has too many points to edit individually for v1 —
+        // delete and redraw.
+        default:
+          return [];
+      }
+    },
+
+    _startHandleDrag: function(shape, idx, handleEl, e) {
+      e.preventDefault();
+      e.stopPropagation();
+      try { handleEl.setPointerCapture(e.pointerId); } catch (_) {}
+      handleEl.classList.add("is-dragging");
+
+      var self = this;
+      // Snapshot the starting geometry so corner drags derive from the
+      // *original* opposite corner, not the live one that's moving.
+      var startGeom = JSON.parse(JSON.stringify(shape.geometry));
+
+      function onMove(ev) {
+        var pt = self._toImage(ev);
+        self._applyHandleDrag(shape, idx, pt, startGeom);
+        self._renderShape(shape);
+        self._positionAllHandles(shape);
+      }
+      function onUp(ev) {
+        handleEl.classList.remove("is-dragging");
+        handleEl.removeEventListener("pointermove", onMove);
+        handleEl.removeEventListener("pointerup", onUp);
+        handleEl.removeEventListener("pointercancel", onUp);
+        try { handleEl.releasePointerCapture(ev.pointerId); } catch (_) {}
+        if (shape.uuid) {
+          self.pushEventTo(self.el, "etcher:updated", {
+            uuid: shape.uuid,
+            geometry: shape.geometry
+          });
+        }
+      }
+      handleEl.addEventListener("pointermove", onMove);
+      handleEl.addEventListener("pointerup", onUp);
+      handleEl.addEventListener("pointercancel", onUp);
+    },
+
+    _applyHandleDrag: function(shape, idx, pt, startGeom) {
+      switch (shape.kind) {
+        case "rectangle": {
+          var g = startGeom;
+          var right = g.x + g.w, bottom = g.y + g.h;
+          var nx, ny, nw, nh;
+          switch (idx) {
+            case 0: nx = pt.x;  ny = pt.y;  nw = right - pt.x;  nh = bottom - pt.y; break;
+            case 1: nx = g.x;   ny = pt.y;  nw = pt.x - g.x;    nh = bottom - pt.y; break;
+            case 2: nx = g.x;   ny = g.y;   nw = pt.x - g.x;    nh = pt.y - g.y;    break;
+            case 3: nx = pt.x;  ny = g.y;   nw = right - pt.x;  nh = pt.y - g.y;    break;
+            default: return;
+          }
+          // Normalize when the user drags a corner past its opposite.
+          if (nw < 0) { nx += nw; nw = -nw; }
+          if (nh < 0) { ny += nh; nh = -nh; }
+          shape.geometry = { x: nx, y: ny, w: nw, h: nh };
+          break;
+        }
+        case "circle": {
+          var dx = pt.x - startGeom.cx, dy = pt.y - startGeom.cy;
+          shape.geometry = {
+            cx: startGeom.cx,
+            cy: startGeom.cy,
+            r: Math.max(1, Math.sqrt(dx * dx + dy * dy))
+          };
+          break;
+        }
+        case "polygon": {
+          var pts = (startGeom.points || []).map(function(p) { return [p[0], p[1]]; });
+          if (pts[idx]) pts[idx] = [pt.x, pt.y];
+          shape.geometry = { points: pts };
+          break;
+        }
+      }
+    },
+
     _removeShape: function(uuid) {
       var idx = this.shapes.findIndex(function(s) { return s.uuid === uuid; });
       if (idx === -1) return;
       var shape = this.shapes[idx];
+      if (this.editingShape === shape) this._exitEditMode();
       if (shape.el && shape.el.parentNode) shape.el.parentNode.removeChild(shape.el);
       this.shapes.splice(idx, 1);
+      // Removed shape's element can no longer fire mouseleave, so close
+      // any tooltip that was anchored to it.
+      this._hideTooltip();
     }
   };
 })();

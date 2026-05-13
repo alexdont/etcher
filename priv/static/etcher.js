@@ -92,10 +92,15 @@
     // diagonal line, and a sample "T" at the text endpoint. Mimics
     // the blueprint-callout shape so the toolbar icon advertises what
     // the tool draws.
-    callout:  '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><circle cx="5" cy="19" r="1.6" fill="currentColor" stroke="none"/><line x1="5.7" y1="18.3" x2="14" y2="10" stroke-linecap="round"/><text x="14" y="10" font-size="6.5" font-weight="600" fill="currentColor" stroke="none">Aa</text></svg>',
-    // Text tool — a stylized "T" glyph above an underline-bar so the
-    // toolbar button reads as "drop a text label" regardless of locale.
-    text:     '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M5 5h14M12 5v14M9 19h6"/></svg>',
+    // Callout — anchor dot at the bottom-left, leader line up to the
+    // bottom-left of an underlined "Aa" label. Mirrors the shape the
+    // tool now draws (leader + underline + text bbox) so the toolbar
+    // button matches the on-canvas output.
+    callout:  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="3.5" cy="20" r="1.5" fill="currentColor" stroke="none"/><path d="M4 19.5 L8.5 14 L21 14"/><text x="9" y="13" font-size="9.5" font-weight="700" fill="currentColor" stroke="none">Aa</text></svg>',
+    // Text tool — bold, serif-less "T" so the button reads cleanly at
+    // toolbar sizes (the previous version had pinched serifs that
+    // muddied the silhouette).
+    text:     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 6 L19 6 M12 6 L12 18"/></svg>',
     close:    '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>'
   };
 

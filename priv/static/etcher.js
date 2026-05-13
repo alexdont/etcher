@@ -831,6 +831,7 @@
       wrapper.addEventListener("pointerdown", function(e) { self._onPointerDown(e); });
       wrapper.addEventListener("pointermove", function(e) { self._onPointerMove(e); });
       wrapper.addEventListener("pointerup",   function(e) { self._onPointerUp(e); });
+      wrapper.addEventListener("pointerleave", function() { self._onPointerLeave(); });
       wrapper.addEventListener("dblclick",    function(e) { self._onDoubleClick(e); });
 
       // Re-render shapes in lockstep with the viewer. `animation` fires on
@@ -1046,6 +1047,12 @@
     _selectTool: function(toolKey) {
       var self = this;
       if (self.activeTool !== toolKey) self._cancelDraft();
+      // Leaving the eraser tool clears any in-flight hover preview
+      // so a grayed shape doesn't get stuck looking "about to delete"
+      // after the user picks a different tool.
+      if (self.activeTool === "eraser" && toolKey !== "eraser") {
+        self._clearEraserHover();
+      }
       self.activeTool = toolKey;
       // Drawing and editing are mutually exclusive — picking a tool
       // means we're done admiring the current edit.
@@ -2066,6 +2073,9 @@
           this._calloutHover(this._toImage(e));
         } else if (this.activeTool === "eraser" && this._erasingActive) {
           this._eraserMove(this._toImage(e));
+        } else if (this.activeTool === "eraser") {
+          // Idle hover — preview the single shape under the cursor.
+          this._eraserHover(this._toImage(e));
         }
         return;
       }
@@ -2833,9 +2843,48 @@
       this._erasingActive = true;
       this._erasingHits = [];
       this._erasingHitSet = new Set();
+      // Adopt the hover-preview shape into the active sweep so the
+      // user doesn't have to "re-hit" it on press.
+      if (this._eraserHovered) {
+        this._erasingHitSet.add(this._eraserHovered);
+        this._erasingHits.push(this._eraserHovered);
+        this._eraserHovered = null;
+      }
       try { e.target.setPointerCapture(e.pointerId); } catch (_) {}
       this._hideTooltip();
       this._eraserMove(pt);
+    },
+
+    // Mouseover preview while the eraser is idle (no button held).
+    // Grays out the single shape under the cursor so the user sees
+    // what would be erased on click. Limited to one shape at a time;
+    // sweep mode (press-and-drag) accumulates multiple.
+    _eraserHover: function(pt) {
+      var hit = null;
+      for (var i = 0; i < this.shapes.length; i++) {
+        var s = this.shapes[i];
+        if (!s.uuid) continue;
+        if (this._eraserHit(s, pt)) { hit = s; break; }
+      }
+      if (this._eraserHovered === hit) return;
+      this._clearEraserHover();
+      if (hit) {
+        if (hit.el) hit.el.classList.add("is-erasing");
+        if (hit.titleGroup) hit.titleGroup.classList.add("is-erasing");
+        this._eraserHovered = hit;
+      }
+    },
+
+    _clearEraserHover: function() {
+      var prev = this._eraserHovered;
+      if (!prev) return;
+      if (prev.el) prev.el.classList.remove("is-erasing");
+      if (prev.titleGroup) prev.titleGroup.classList.remove("is-erasing");
+      this._eraserHovered = null;
+    },
+
+    _onPointerLeave: function() {
+      this._clearEraserHover();
     },
 
     _eraserMove: function(pt) {

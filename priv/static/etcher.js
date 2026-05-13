@@ -51,16 +51,30 @@
   //
   //   window.Etcher.layerFor(frescoId) → { ... } | null
   //     Programmatic control surface for a mounted layer. Returns null
-  //     for unknown ids. Methods: exitDrawing(), setMode(bool),
-  //     selectShape(uuid), getShapes(). See README "Programmatic control".
+  //     for unknown ids. Every built-in button / nav button delegates
+  //     to a method on this object so consumers can drive the layer
+  //     headlessly (e.g. render their own toolbar):
+  //
+  //       mode:        getMode(), setMode(on), toggleMode()
+  //       visibility:  isVisible(), setVisible(on), toggleVisible()
+  //       tool:        getTool(), selectTool(toolKey), tools(),
+  //                    exitDrawing()  // alias for selectTool(null)
+  //       color:       getColor(), setColor(c), swatches()
+  //       history:     undo(), redo(), canUndo(), canRedo()
+  //       shapes:      getShapes(), getShape(uuid),
+  //                    selectShape(uuid), unselectShape(),
+  //                    enterEditMode(uuid), exitEditMode(),
+  //                    deleteShape(uuid)
   //
   // Lifecycle CustomEvents are dispatched on the layer's host element
   // (the `<div phx-hook="EtcherLayer">`), bubbling up so consumers can
   // listen at any ancestor:
   //   etcher:tooltip-show / -hide / -pin / -unpin
-  //   etcher:mode-changed   { detail: { annotationMode } }
-  //   etcher:tool-changed   { detail: { tool } }
-  //   etcher:color-changed  { detail: { color } }
+  //   etcher:mode-changed       { detail: { annotationMode } }
+  //   etcher:tool-changed       { detail: { tool } }
+  //   etcher:color-changed      { detail: { color } }
+  //   etcher:visibility-changed { detail: { visible } }
+  //   etcher:history-changed    { detail: { canUndo, canRedo } }
   // ===========================================================================
 
   window.Etcher = window.Etcher || {};
@@ -163,14 +177,21 @@
       "  position: absolute; inset: 0; pointer-events: none;",
       "}",
       ".etcher-overlay.is-drawing { cursor: crosshair; }",
+      // Document-level hit-test marks the overlay with this class
+      // when the cursor is over a shape, so the cursor changes to a
+      // pointer without the SVG itself catching events (which would
+      // block OSD's wheel + drag-pan from reaching the canvas below).
+      ".etcher-overlay.is-shape-hovered { cursor: pointer; }",
       ".etcher-shape {",
       "  fill: rgba(59, 130, 246, 0.12); stroke: #3b82f6;",
-      // Shapes catch hover + click independently of the wrapper, so
-      // annotations remain interactive when annotation mode is off and
-      // the wrapper is `pointer-events: none` (events pass through to
-      // OSD). Setting `pointer-events: visiblePainted` on freehand
-      // polylines means the user can hover the thin line itself.
-      "  pointer-events: visiblePainted; cursor: pointer;",
+      // Shapes are non-interactive at the DOM level — `pointer-events:
+      // none` lets every mouse/wheel/touch event fall through to OSD's
+      // canvas sibling, so scroll-zoom and click-drag pan work even
+      // when the cursor is over an annotation. Hover styling, tooltips,
+      // and click-to-edit are driven by document-level mousemove +
+      // pointerdown listeners (`_wireGlobalShapeListeners`) that
+      // hit-test the cursor against `self.shapes` in image-px space.
+      "  pointer-events: none;",
       "}",
       // Callout: the <g> container picks up `color` (default blue,
       // overridden by the picker via `style.color`); children resolve
@@ -713,14 +734,49 @@
 
       // Register this layer in the public `window.Etcher.layerFor`
       // registry so external code can drive it programmatically.
+      // Every toolbar / nav button delegates to the same primitives
+      // these methods call, so a consumer can run the whole layer
+      // without rendering the built-in UI if they want.
       layerRegistry[self.frescoId] = {
         api: {
-          exitDrawing: function() { self._selectTool(null); },
+          // Mode + visibility ----------------------------------------
+          getMode: function() { return self.annotationMode; },
           setMode: function(on) { self._setAnnotationMode(!!on); },
-          selectShape: function(uuid) {
-            var shape = self.shapes.find(function(s) { return s.uuid === uuid; });
-            if (shape) self._pinTooltipFor(shape);
+          toggleMode: function() { self._setAnnotationMode(!self.annotationMode); },
+          isVisible: function() { return self.annotationsVisible !== false; },
+          setVisible: function(on) {
+            var want = !!on;
+            if ((self.annotationsVisible !== false) !== want) {
+              self._toggleAnnotationsVisible();
+            }
           },
+          toggleVisible: function() { self._toggleAnnotationsVisible(); },
+
+          // Tool select -----------------------------------------------
+          // `null` selects the cursor (no drawing tool active).
+          getTool: function() { return self.activeTool; },
+          selectTool: function(toolKey) {
+            self._selectTool(toolKey == null ? null : toolKey);
+          },
+          tools: function() { return (self.tools || []).slice(); },
+          exitDrawing: function() { self._selectTool(null); },
+
+          // Color -----------------------------------------------------
+          getColor: function() { return self.activeColor; },
+          setColor: function(color) { self._selectColor(color); },
+          swatches: function() {
+            return resolveColorSwatches().map(function(s) {
+              return { color: s.color, title: s.title };
+            });
+          },
+
+          // History ---------------------------------------------------
+          undo: function() { self._undo(); },
+          redo: function() { self._redo(); },
+          canUndo: function() { return (self._undoStack || []).length > 0; },
+          canRedo: function() { return (self._redoStack || []).length > 0; },
+
+          // Shape selection + edit ------------------------------------
           getShapes: function() {
             return self.shapes.map(function(s) {
               return {
@@ -731,6 +787,31 @@
                 metadata: s.metadata || null
               };
             });
+          },
+          getShape: function(uuid) {
+            var s = self.shapes.find(function(x) { return x.uuid === uuid; });
+            if (!s) return null;
+            return {
+              uuid: s.uuid,
+              kind: s.kind,
+              geometry: s.geometry,
+              style: s.style || null,
+              metadata: s.metadata || null
+            };
+          },
+          selectShape: function(uuid) {
+            var shape = self.shapes.find(function(s) { return s.uuid === uuid; });
+            if (shape) self._pinTooltipFor(shape);
+          },
+          unselectShape: function() { self._unpinTooltip(); },
+          enterEditMode: function(uuid) {
+            var shape = self.shapes.find(function(s) { return s.uuid === uuid; });
+            if (shape) self._enterEditMode(shape);
+          },
+          exitEditMode: function() { self._exitEditMode(); },
+          deleteShape: function(uuid) {
+            var shape = self.shapes.find(function(s) { return s.uuid === uuid; });
+            if (shape) self._deleteShape(shape);
           }
         }
       };
@@ -740,6 +821,7 @@
       this._exitEditMode();
       this._removeTooltipOutsideClickHandler();
       this._clearCommentHighlights();
+      this._unwireGlobalShapeListeners();
       if (this._undoKeyHandler) {
         document.removeEventListener("keydown", this._undoKeyHandler);
         this._undoKeyHandler = null;
@@ -788,6 +870,7 @@
       self._buildVisibilityButton();
       self._buildNavButton();
       self._wireUndoKeyboard();
+      self._wireGlobalShapeListeners();
       self._renderInitial();
     },
 
@@ -1826,7 +1909,15 @@
         var inside = e.target.closest(
           ".etcher-shape, .etcher-handle, .etcher-title-group, .etcher-text-editor, .etcher-tooltip, .etcher-toolbar"
         );
-        if (!inside) self._exitTitleEditMode();
+        if (inside) return;
+        // Shapes are `pointer-events: none`; fall back to image-px
+        // hit-test so a click on a sibling shape doesn't tear down
+        // title-edit mode before its own handler can react.
+        try {
+          var pt = self._toImage(e);
+          if (self._shapeAt(pt)) return;
+        } catch (_) {}
+        self._exitTitleEditMode();
       };
       document.addEventListener("click", this._titleOutsideClickHandler, true);
     },
@@ -2262,30 +2353,19 @@
         self._scheduleHideTooltip();
       });
       el.addEventListener("click", function(e) {
-        // While a drawing tool is active, let the click pass through to
-        // the wrapper so the user can drag-draw over an existing shape.
+        // Direct DOM clicks on shapes are mostly historical now —
+        // `.etcher-shape` is `pointer-events: none` so this rarely
+        // fires. The doc-level tap handler in
+        // `_wireGlobalShapeListeners` drives the common path. Kept
+        // as a fallback in case a future caller temporarily flips
+        // shape pointer events back on.
         if (self.annotationMode && self.activeTool != null) return;
-        // Otherwise: this is a selection. Stop propagation so OSD's
-        // canvas (which lives next to us in the container) doesn't
-        // also receive the click and trigger a click-to-zoom.
+        // Stop propagation so OSD's canvas (which lives next to us
+        // in the container) doesn't also receive the click and
+        // trigger a click-to-zoom.
         e.stopPropagation();
         e.preventDefault();
-        var id = shape.uuid || shape.tmpId;
-        if (self.annotationMode) {
-          // Edit handles only appear in annotation mode + cursor tool.
-          self._enterEditMode(shape);
-        } else {
-          // Outside annotation mode: pin the tooltip so the user can
-          // dwell on the comment preview without it timing out.
-          // Clicking the same shape again unpins; clicking another
-          // shape switches the pin.
-          if (self.tooltipPinned && self._tooltipShape === shape) {
-            self._unpinTooltip();
-          } else {
-            self._pinTooltipFor(shape);
-          }
-        }
-        self.pushEventTo(self.el, "etcher:selected", { uuid: id });
+        self._onShapeTap(shape);
       });
 
       // Double-click on a text or callout (in annotation mode, cursor
@@ -2312,6 +2392,172 @@
         e.stopPropagation();
         self._startShapeMove(shape, e);
       });
+    },
+
+    // Shape "tap" — fired either from a direct DOM click on the
+    // shape (rare, fallback) or from the doc-level tap detector
+    // when the user clicked without dragging. Selects/edits the
+    // shape per current mode.
+    _onShapeTap: function(shape) {
+      if (!shape) return;
+      var id = shape.uuid || shape.tmpId;
+      if (this.annotationMode) {
+        // Edit handles only appear in annotation mode + cursor tool.
+        this._enterEditMode(shape);
+      } else {
+        // Outside annotation mode: pin the tooltip so the user can
+        // dwell on the comment preview without it timing out.
+        // Clicking the same shape again unpins; clicking another
+        // shape switches the pin.
+        if (this.tooltipPinned && this._tooltipShape === shape) {
+          this._unpinTooltip();
+        } else {
+          this._pinTooltipFor(shape);
+        }
+      }
+      this.pushEventTo(this.el, "etcher:selected", { uuid: id });
+    },
+
+    // -------------------------------------------------------------------------
+    // Global shape listeners — let pan/zoom pass through shapes by
+    // making `.etcher-shape` `pointer-events: none` and re-detecting
+    // hover + tap at the document level via image-px hit-testing.
+    //
+    // Without this, OSD's MouseTracker on the canvas sibling never
+    // sees the wheel/pointerdown when the cursor is over a shape
+    // (events bubble UP the DOM, not sideways), so scroll-zoom and
+    // drag-pan stop working over annotations.
+    // -------------------------------------------------------------------------
+
+    _wireGlobalShapeListeners: function() {
+      var self = this;
+      if (self._globalShapeListenersWired) return;
+      self._globalShapeListenersWired = true;
+
+      // Gate every handler on "cursor is over the viewer's container."
+      // Cheap to compute, keeps us off the hot path of unrelated
+      // document mousemoves.
+      function overContainer(e) {
+        if (!self.handle || !self.handle.container) return false;
+        var r = self.handle.container.getBoundingClientRect();
+        return e.clientX >= r.left && e.clientX <= r.right &&
+               e.clientY >= r.top && e.clientY <= r.bottom;
+      }
+
+      self._docMouseMove = function(e) {
+        if (!overContainer(e)) {
+          if (self._hoveredShape) self._setHoveredShape(null);
+          return;
+        }
+        var pt;
+        try { pt = self._toImage(e); } catch (_) { return; }
+        var hit = self._shapeAt(pt);
+        if (hit !== self._hoveredShape) self._setHoveredShape(hit);
+      };
+
+      // Tap-vs-drag tracker for shape clicks. Records pointerdown
+      // over a shape; if the pointer doesn't move past the dead-zone
+      // before pointerup, treat it as a tap and fire `_onShapeTap`.
+      // If the pointer moves further (a pan-drag), the gesture
+      // converts to a drag and we don't fire the tap. OSD owns the
+      // actual pan since shapes are `pointer-events: none`.
+      self._docPointerDown = function(e) {
+        if (e.button !== 0) return;
+        if (!overContainer(e)) return;
+        // A handle/title/toolbar element under the cursor handles its
+        // own event; don't shadow it with a shape tap.
+        var inside = e.target && e.target.closest &&
+          e.target.closest(".etcher-handle, .etcher-title-group, .etcher-tooltip, .etcher-toolbar, .etcher-text-editor");
+        if (inside) return;
+        var hit = self._hoveredShape;
+        if (!hit) return;
+        self._pendingTap = {
+          shape: hit,
+          startX: e.clientX,
+          startY: e.clientY,
+          startedAt: Date.now()
+        };
+      };
+      self._docPointerMove = function(e) {
+        if (!self._pendingTap) return;
+        var dx = e.clientX - self._pendingTap.startX;
+        var dy = e.clientY - self._pendingTap.startY;
+        if (dx * dx + dy * dy > 25) self._pendingTap = null; // 5px dead-zone
+      };
+      self._docPointerUp = function(e) {
+        var tap = self._pendingTap;
+        self._pendingTap = null;
+        if (!tap) return;
+        if (Date.now() - tap.startedAt > 500) return;
+        // Re-verify the cursor is still over the same shape — guards
+        // against the user dragging just under the dead-zone then
+        // releasing far from the original shape.
+        var pt;
+        try { pt = self._toImage(e); } catch (_) { return; }
+        if (self._shapeAt(pt) !== tap.shape) return;
+        self._onShapeTap(tap.shape);
+      };
+
+      // Double-click on text/callout in annotation mode → inline edit.
+      // Same container gate + hit-test pattern as the tap handler.
+      self._docDblClick = function(e) {
+        if (!self.annotationMode || self.activeTool != null) return;
+        if (!overContainer(e)) return;
+        var pt;
+        try { pt = self._toImage(e); } catch (_) { return; }
+        var hit = self._shapeAt(pt);
+        if (!hit) return;
+        if (hit.kind !== "text" && hit.kind !== "callout") return;
+        self._enterEditMode(hit);
+        self._startTextEdit(hit);
+      };
+
+      document.addEventListener("pointermove", self._docMouseMove);
+      document.addEventListener("pointerdown", self._docPointerDown);
+      document.addEventListener("pointermove", self._docPointerMove);
+      document.addEventListener("pointerup", self._docPointerUp);
+      document.addEventListener("dblclick", self._docDblClick);
+    },
+
+    _unwireGlobalShapeListeners: function() {
+      if (!this._globalShapeListenersWired) return;
+      this._globalShapeListenersWired = false;
+      if (this._docMouseMove)
+        document.removeEventListener("pointermove", this._docMouseMove);
+      if (this._docPointerDown)
+        document.removeEventListener("pointerdown", this._docPointerDown);
+      if (this._docPointerMove)
+        document.removeEventListener("pointermove", this._docPointerMove);
+      if (this._docPointerUp)
+        document.removeEventListener("pointerup", this._docPointerUp);
+      if (this._docDblClick)
+        document.removeEventListener("dblclick", this._docDblClick);
+      this._docMouseMove = this._docPointerDown = null;
+      this._docPointerMove = this._docPointerUp = this._docDblClick = null;
+      this._pendingTap = null;
+      this._setHoveredShape(null);
+    },
+
+    // Diff the currently-hovered shape against the new one. Fires
+    // mouseenter/leave-style transitions: removes `.is-hovered` +
+    // schedules tooltip hide on the previous shape; adds
+    // `.is-hovered` + shows tooltip on the new one. Pinned tooltips
+    // are left alone.
+    _setHoveredShape: function(next) {
+      var prev = this._hoveredShape;
+      if (prev === next) return;
+      if (prev && prev.el) {
+        prev.el.classList.remove("is-hovered");
+        if (!this.tooltipPinned) this._scheduleHideTooltip();
+      }
+      if (next && next.el) {
+        next.el.classList.add("is-hovered");
+        if (!this.tooltipPinned) this._showTooltipFor(next);
+      }
+      this._hoveredShape = next;
+      if (this.overlayWrapper) {
+        this.overlayWrapper.classList.toggle("is-shape-hovered", !!next);
+      }
     },
 
     _showTooltipFor: function(shape) {
@@ -2497,8 +2743,14 @@
       var self = this;
       this._tooltipOutsideClick = function(e) {
         // Clicks on a shape, on the tooltip itself, or on an edit-mode
-        // handle keep the pin alive. Anything else unpins.
+        // handle keep the pin alive. Anything else unpins. Shapes are
+        // `pointer-events: none`, so a click on a shape lands on OSD's
+        // canvas at the DOM level — fall back to image-px hit-test.
         if (e.target.closest(".etcher-shape, .etcher-tooltip, .etcher-handle")) return;
+        try {
+          var pt = self._toImage(e);
+          if (self._shapeAt(pt)) return;
+        } catch (_) {}
         self._unpinTooltip();
       };
       // Capture phase so we run before any inner stopPropagation can
@@ -3050,6 +3302,34 @@
     // full visible footprint so users don't have to nick the exact
     // glyph or vertex to erase.
     _eraserHit: function(shape, pt) {
+      // Eraser delegates to the shared per-kind point-in-shape test.
+      // Kept as a thin alias so the eraser's call sites stay readable
+      // ("hit one shape during a sweep") even though the underlying
+      // logic now also drives the doc-level hover hit-test.
+      return this._shapeContainsPoint(shape, pt);
+    },
+
+    // Returns the topmost persisted shape whose footprint contains
+    // the image-px point, or `null`. Walks `self.shapes` in reverse
+    // so visually-on-top shapes win when footprints overlap. Skips
+    // shapes without a uuid (drafts, mid-create, recently-deleted).
+    _shapeAt: function(pt) {
+      if (!this.shapes) return null;
+      for (var i = this.shapes.length - 1; i >= 0; i--) {
+        var s = this.shapes[i];
+        if (!s.uuid) continue;
+        if (this._shapeContainsPoint(s, pt)) return s;
+      }
+      return null;
+    },
+
+    // Per-kind hit-test for "does this image-px point land on the
+    // shape?". Used by the eraser sweep, the polygon midpoint
+    // hover gate, and (now) the doc-level hover + click detection
+    // that lets pan/zoom pass through shapes. Permissive — covers
+    // the full visible footprint plus a title group when present,
+    // so users don't have to nick the exact glyph or vertex.
+    _shapeContainsPoint: function(shape, pt) {
       function inRect(box) {
         if (!box) return false;
         return pt.x >= box.x && pt.x <= box.x + box.w &&
@@ -3569,13 +3849,23 @@
 
       // Dismiss on any click outside the shape, its handles, the
       // tooltip, or the toolbar. Capture phase so we run before stop-
-      // propagation handlers on inner elements.
+      // propagation handlers on inner elements. Shapes are
+      // `pointer-events: none`, so a click on a shape lands on OSD's
+      // canvas at the DOM level — fall back to an image-px hit-test
+      // against the currently-edited shape (and the shape we'd
+      // re-enter edit mode on next) so the user can click a NEW
+      // shape without the handler tearing down edit mode in between.
       var self = this;
       this._outsideClickHandler = function(e) {
         var inside = e.target.closest(
           ".etcher-shape, .etcher-handle, .etcher-text-editor, .etcher-tooltip, .etcher-toolbar"
         );
-        if (!inside) self._exitEditMode();
+        if (inside) return;
+        try {
+          var pt = self._toImage(e);
+          if (self._shapeAt(pt)) return;
+        } catch (_) {}
+        self._exitEditMode();
       };
       document.addEventListener("click", this._outsideClickHandler, true);
     },
@@ -4549,6 +4839,10 @@
       var r = (this._redoStack || []).length;
       if (this.undoBtn) this.undoBtn.disabled = u === 0;
       if (this.redoBtn) this.redoBtn.disabled = r === 0;
+      // Fire a state-change event so consumers driving their own UI
+      // off the public API can keep external undo/redo buttons in
+      // sync without polling.
+      this._dispatch("etcher:history-changed", { canUndo: u > 0, canRedo: r > 0 });
     }
   };
 })();

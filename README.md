@@ -294,17 +294,40 @@ Falls back to the "blue" swatch in the active palette (back-compat) or the first
 
 ### `window.Etcher.layerFor(frescoId)` — programmatic control
 
-Returns the layer's control surface, or `null` if no layer is mounted for that fresco id. Lets you drive Etcher from outside (URL handlers, keyboard shortcuts, command palettes):
+Returns the layer's control surface, or `null` if no layer is mounted for that fresco id. Every built-in button (toolbar tools, color swatches, undo/redo, the eye visibility toggle, the pencil annotation-mode toggle) delegates to a method on this object — so you can drive Etcher headlessly (custom toolbar, keyboard shortcuts, command palette, URL handlers, automated tests):
 
 ```js
 const layer = window.Etcher.layerFor("photo");
-if (layer) {
-  layer.setMode(true);           // enter annotation mode (toolbar opens)
-  layer.exitDrawing();           // back to cursor (annotation mode stays on)
-  layer.selectShape("uuid-…");   // pin the tooltip for that shape
-  const shapes = layer.getShapes();
-  // → [{ uuid, kind, geometry, style, metadata }, ...]
-}
+if (!layer) return;
+
+// Mode / visibility
+layer.setMode(true);          // enter annotation mode
+layer.toggleVisible();        // show / hide annotations
+layer.isVisible();            // → boolean
+
+// Tools
+layer.tools();                // → ["rectangle", "circle", ...]
+layer.selectTool("rectangle");
+layer.selectTool(null);       // back to cursor (alias: exitDrawing())
+layer.getTool();              // → "rectangle" | null
+
+// Color
+layer.swatches();             // → [{ color, title }, ...]
+layer.setColor("#fca5a5");
+layer.getColor();             // → "#fca5a5" | null
+
+// History
+if (layer.canUndo()) layer.undo();
+if (layer.canRedo()) layer.redo();
+
+// Shapes
+const shapes = layer.getShapes();
+// → [{ uuid, kind, geometry, style, metadata }, ...]
+const one = layer.getShape("uuid-…");
+layer.selectShape("uuid-…");  // pins the tooltip
+layer.enterEditMode("uuid-…");
+layer.exitEditMode();
+layer.deleteShape("uuid-…");
 ```
 
 ### Lifecycle DOM events
@@ -323,9 +346,11 @@ document.addEventListener("etcher:tooltip-show", (e) => {
 | `etcher:tooltip-hide`  | `{ uuid }`                  | Tooltip closes (hover-away timeout or pin dismissed) |
 | `etcher:tooltip-pin`   | `{ uuid }`                  | User clicked a shape to pin its tooltip |
 | `etcher:tooltip-unpin` | `{ uuid }`                  | User clicked elsewhere / re-clicked to unpin |
-| `etcher:mode-changed`  | `{ annotationMode: bool }`  | User toggled annotation mode |
-| `etcher:tool-changed`  | `{ tool: string \| null }`  | User picked a drawing tool (null = cursor) |
-| `etcher:color-changed` | `{ color: string }`         | User picked a swatch |
+| `etcher:mode-changed`       | `{ annotationMode: bool }`     | User (or API) toggled annotation mode |
+| `etcher:tool-changed`       | `{ tool: string \| null }`     | Drawing tool changed (null = cursor) |
+| `etcher:color-changed`      | `{ color: string }`            | Active color changed |
+| `etcher:visibility-changed` | `{ visible: bool }`            | Annotations hidden / shown |
+| `etcher:history-changed`    | `{ canUndo: bool, canRedo: bool }` | Undo/redo stack updated — useful for keeping a custom toolbar in sync |
 
 ### Server → client LiveView events
 

@@ -331,6 +331,30 @@
       "  fill: currentColor; fill-opacity: 0.55;",
       "  transform: scale(1.6); stroke-width: 2;",
       "}",
+      // Rectangle edge "grabbers" — small rounded rect aligned along
+      // the edge. Different visual + cursor from polygon midpoints
+      // (`+`/copy) so the UX reads as "drag this edge to resize",
+      // not "add a vertex here". Same closest-only highlight via
+      // `.is-active` driven by `_updateClosestMidpoint`.
+      ".etcher-handle-edge {",
+      "  fill: currentColor; fill-opacity: 0;",
+      "  stroke: currentColor; stroke-width: 1.25; stroke-opacity: 0;",
+      "  pointer-events: all;",
+      "  transition: stroke-opacity 80ms ease, fill-opacity 80ms ease, transform 80ms ease;",
+      "}",
+      ".etcher-handle-edge--h { cursor: ns-resize; }",
+      ".etcher-handle-edge--v { cursor: ew-resize; }",
+      ".etcher-handle-edge.is-active {",
+      "  fill-opacity: 0.35; stroke-opacity: 0.9;",
+      "}",
+      ".etcher-handle-edge:hover {",
+      "  fill-opacity: 0.7; stroke-opacity: 1;",
+      "  transform: scale(1.1);",
+      "}",
+      ".etcher-handle-edge.is-dragging {",
+      "  fill-opacity: 0.85; stroke-opacity: 1;",
+      "  transform: scale(1.15);",
+      "}",
       // While a drawing tool is active, vector dots on the in-progress
       // draft are markers, not grab targets — let pointer events fall
       // through to the wrapper so the user can keep dragging the
@@ -2103,10 +2127,13 @@
           // Idle hover — preview the single shape under the cursor.
           this._eraserHover(this._toImage(e));
         }
-        // While editing a polygon, only the midpoint closest to the
-        // cursor is shown — keeps the edges from looking cluttered
-        // and points the user at a single "add vertex here" target.
-        if (this.editingShape && this.editingShape.kind === "polygon" &&
+        // While editing a polygon or rectangle, only the midpoint
+        // closest to the cursor is shown. Polygons → "add vertex"
+        // dots; rectangles → "drag this edge" dots. Same machinery,
+        // different drag semantics.
+        if (this.editingShape &&
+            (this.editingShape.kind === "polygon" ||
+             this.editingShape.kind === "rectangle") &&
             this.midpointHandles && this.midpointHandles.length) {
           this._updateClosestMidpoint(this._toImage(e));
         }
@@ -3479,12 +3506,14 @@
       this._hideTooltip();
       this._renderHandles(shape);
 
-      // Polygons need cursor tracking even outside their body so the
-      // closest-midpoint highlight lights up when the user
-      // approaches an edge from outside the shape. The wrapper has
-      // pointer-events: none in cursor mode, so pointermove there
-      // doesn't fire — listen on document instead.
-      if (shape.kind === "polygon") this._wireMidpointTracker();
+      // Polygons + rectangles use midpoint handles that follow the
+      // cursor's nearest edge. The wrapper has pointer-events: none
+      // in cursor mode, so pointermove there doesn't fire when the
+      // user is outside the shape's filled body — listen on document
+      // instead so the highlight tracks the cursor everywhere.
+      if (shape.kind === "polygon" || shape.kind === "rectangle") {
+        this._wireMidpointTracker();
+      }
 
       // Dismiss on any click outside the shape, its handles, the
       // tooltip, or the toolbar. Capture phase so we run before stop-
@@ -3515,7 +3544,9 @@
       var self = this;
       if (self._midpointTracker) return;
       self._midpointTracker = function(e) {
-        if (!self.editingShape || self.editingShape.kind !== "polygon") return;
+        if (!self.editingShape) return;
+        var k = self.editingShape.kind;
+        if (k !== "polygon" && k !== "rectangle") return;
         if (!self.midpointHandles || !self.midpointHandles.length) return;
         try { self._updateClosestMidpoint(self._toImage(e)); } catch (_) {}
       };
@@ -3552,13 +3583,18 @@
         return h;
       });
 
-      // Polygons grow vertex-by-vertex: render an invisible "ghost"
-      // dot on the midpoint of each edge so the user can grab it to
-      // insert a new vertex there. Drafts skip this — they're being
-      // built one click at a time and don't need a side-channel for
-      // edits.
-      if (opts.interactive && shape.kind === "polygon") {
-        self._renderMidpointHandles(shape);
+      // Per-kind edge midpoint helpers — rendered as a single shared
+      // set of "midpoint" handles that follow the same closest-only
+      // highlight behavior driven by `_updateClosestMidpoint`.
+      // Polygons get insert-new-vertex semantics; rectangles get
+      // resize-one-edge semantics. Drafts skip both (the shape is
+      // still being built).
+      if (opts.interactive) {
+        if (shape.kind === "polygon") {
+          self._renderMidpointHandles(shape);
+        } else if (shape.kind === "rectangle") {
+          self._renderRectEdgeHandles(shape);
+        }
       }
     },
 
@@ -3603,6 +3639,108 @@
       this.midpointHandles = [];
     },
 
+    // Edge-midpoint handles for a rectangle in edit mode: one dot at
+    // the center of each of the four sides. Grabbing one slides that
+    // edge — the two corners on that side travel with the drag while
+    // the opposite edge stays anchored. Reuses the same shared
+    // `midpointHandles` array so the closest-to-cursor highlight,
+    // pan/zoom positioning, and `_updateClosestMidpoint` machinery
+    // work without per-kind branching at the call sites.
+    _renderRectEdgeHandles: function(shape) {
+      this._removeMidpointHandles();
+      if (!shape || shape.kind !== "rectangle") return;
+      var g = shape.geometry;
+      var positions = this._rectEdgeMidpoints(g);
+      var self = this;
+      var handleColor = self._handleColor(shape);
+      this.midpointHandles = positions.map(function(pt, idx) {
+        var horizontal = idx === 0 || idx === 2;
+        var w = horizontal ? 18 : 6;
+        var hgt = horizontal ? 6 : 18;
+        var rect = svgEl("rect", { width: w, height: hgt, rx: 1.5, ry: 1.5 });
+        rect.classList.add(
+          "etcher-handle",
+          "etcher-handle-edge",
+          horizontal ? "etcher-handle-edge--h" : "etcher-handle-edge--v"
+        );
+        rect.style.color = handleColor;
+        rect.dataset.edgeIndex = idx;
+        self.svg.appendChild(rect);
+        self._positionHandle(rect, pt);
+        (function(edgeIdx, handleEl) {
+          handleEl.addEventListener("pointerdown", function(e) {
+            self._startRectEdgeDrag(shape, edgeIdx, handleEl, e);
+          });
+        })(idx, rect);
+        return rect;
+      });
+    },
+
+    // Image-px midpoints of a rect's 4 sides. Order: top, right,
+    // bottom, left. Used both at handle-creation time and by the
+    // closest-midpoint highlight + pan/zoom reposition.
+    _rectEdgeMidpoints: function(g) {
+      return [
+        { x: g.x + g.w / 2, y: g.y           }, // 0: top
+        { x: g.x + g.w,     y: g.y + g.h / 2 }, // 1: right
+        { x: g.x + g.w / 2, y: g.y + g.h     }, // 2: bottom
+        { x: g.x,           y: g.y + g.h / 2 }  // 3: left
+      ];
+    },
+
+    // Drag a single rect edge. The opposite edge stays put; the two
+    // corners on the grabbed edge slide along the perpendicular
+    // axis. Normalizes negatives so a user dragging an edge past
+    // its opposite still produces a sane rectangle.
+    _startRectEdgeDrag: function(shape, edgeIdx, handleEl, e) {
+      e.preventDefault();
+      e.stopPropagation();
+      try { handleEl.setPointerCapture(e.pointerId); } catch (_) {}
+      handleEl.classList.add("is-dragging");
+      this._hideTooltip();
+
+      var self = this;
+      var historyBefore = self._snapshotShape(shape);
+      var g0 = JSON.parse(JSON.stringify(shape.geometry));
+      var startTitleBox =
+        shape.metadata && shape.metadata.title_box
+          ? Object.assign({}, shape.metadata.title_box)
+          : null;
+
+      function onMove(ev) {
+        var pt = self._toImage(ev);
+        var nx = g0.x, ny = g0.y, nw = g0.w, nh = g0.h;
+        switch (edgeIdx) {
+          case 0: ny = pt.y;        nh = (g0.y + g0.h) - pt.y; break; // top
+          case 1: nw = pt.x - g0.x; break;                             // right
+          case 2: nh = pt.y - g0.y; break;                             // bottom
+          case 3: nx = pt.x;        nw = (g0.x + g0.w) - pt.x; break; // left
+        }
+        if (nw < 0) { nx += nw; nw = -nw; }
+        if (nh < 0) { ny += nh; nh = -nh; }
+        shape.geometry = { x: nx, y: ny, w: nw, h: nh };
+        self._renderShape(shape);
+        self._positionAllHandles(shape);
+      }
+      function onUp(ev) {
+        handleEl.classList.remove("is-dragging");
+        handleEl.removeEventListener("pointermove", onMove);
+        handleEl.removeEventListener("pointerup", onUp);
+        handleEl.removeEventListener("pointercancel", onUp);
+        try { handleEl.releasePointerCapture(ev.pointerId); } catch (_) {}
+        if (shape.uuid) {
+          var payload = { uuid: shape.uuid, geometry: shape.geometry };
+          if (startTitleBox) payload.metadata = shape.metadata;
+          self.pushEventTo(self.el, "etcher:updated", payload);
+          self._pushUndo(shape.uuid, historyBefore, self._snapshotShape(shape));
+        }
+        self._showTooltipFor(shape);
+      }
+      handleEl.addEventListener("pointermove", onMove);
+      handleEl.addEventListener("pointerup", onUp);
+      handleEl.addEventListener("pointercancel", onUp);
+    },
+
     // Mark the midpoint closest to the cursor as `.is-active` so its
     // CSS rule reveals it. Threshold gates the highlight: if the
     // cursor is far away from every midpoint the polygon's edges
@@ -3610,17 +3748,13 @@
     // has `.is-dragging` and tracks the pointer directly.
     _updateClosestMidpoint: function(pt) {
       if (!this.midpointHandles || !this.midpointHandles.length) return;
-      var shape = this.editingShape;
-      if (!shape || shape.kind !== "polygon") return;
-      var pts = (shape.geometry && shape.geometry.points) || [];
+      var positions = this._midpointPositionsForShape(this.editingShape);
+      if (!positions || !positions.length) return;
       var closestIdx = -1;
       var closestDist = Infinity;
-      for (var i = 0; i < pts.length; i++) {
-        var next = pts[(i + 1) % pts.length];
-        var mx = (pts[i][0] + next[0]) / 2;
-        var my = (pts[i][1] + next[1]) / 2;
-        var dx = pt.x - mx;
-        var dy = pt.y - my;
+      for (var i = 0; i < positions.length; i++) {
+        var dx = pt.x - positions[i].x;
+        var dy = pt.y - positions[i].y;
         var d2 = dx * dx + dy * dy;
         if (d2 < closestDist) { closestDist = d2; closestIdx = i; }
       }
@@ -3630,6 +3764,27 @@
       this.midpointHandles.forEach(function(h, i) {
         h.classList.toggle("is-active", i === closestIdx);
       });
+    },
+
+    // Image-px positions of every midpoint a shape currently
+    // exposes. Polygons → edge midpoints (one per edge). Rectangles
+    // → four edge midpoints (top/right/bottom/left). Other kinds
+    // return [].
+    _midpointPositionsForShape: function(shape) {
+      if (!shape) return [];
+      if (shape.kind === "polygon") {
+        var pts = (shape.geometry && shape.geometry.points) || [];
+        var out = [];
+        for (var i = 0; i < pts.length; i++) {
+          var next = pts[(i + 1) % pts.length];
+          out.push({ x: (pts[i][0] + next[0]) / 2, y: (pts[i][1] + next[1]) / 2 });
+        }
+        return out;
+      }
+      if (shape.kind === "rectangle") {
+        return this._rectEdgeMidpoints(shape.geometry);
+      }
+      return [];
     },
 
     // Convert a generous container-px radius (~80px on screen) into
@@ -3655,17 +3810,10 @@
 
     _positionAllMidpointHandles: function(shape) {
       if (!this.midpointHandles || !this.midpointHandles.length) return;
-      if (!shape || shape.kind !== "polygon") return;
-      var pts = (shape.geometry && shape.geometry.points) || [];
+      var positions = this._midpointPositionsForShape(shape);
       var self = this;
       this.midpointHandles.forEach(function(h, i) {
-        if (i >= pts.length) return;
-        var next = pts[(i + 1) % pts.length];
-        var midImage = {
-          x: (pts[i][0] + next[0]) / 2,
-          y: (pts[i][1] + next[1]) / 2
-        };
-        self._positionHandle(h, midImage);
+        if (positions[i]) self._positionHandle(h, positions[i]);
       });
     },
 
@@ -3788,8 +3936,18 @@
 
     _positionHandle: function(h, imagePt) {
       var c = this._imageToContainer(imagePt);
-      h.setAttribute("cx", c.x);
-      h.setAttribute("cy", c.y);
+      // Circles use cx/cy; rect-shaped edge handles position by their
+      // top-left so we offset by half their dimensions to keep them
+      // centered on the supplied image point.
+      if (h.tagName && h.tagName.toLowerCase() === "rect") {
+        var w = parseFloat(h.getAttribute("width")) || 0;
+        var hgt = parseFloat(h.getAttribute("height")) || 0;
+        h.setAttribute("x", c.x - w / 2);
+        h.setAttribute("y", c.y - hgt / 2);
+      } else {
+        h.setAttribute("cx", c.x);
+        h.setAttribute("cy", c.y);
+      }
     },
 
     _removeHandles: function() {

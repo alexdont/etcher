@@ -86,6 +86,9 @@
     cursor:   '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4 11.07 21l2.51-7.39L20.97 11.1 4 4Z"/></svg>',
     undo:     '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 15 4 10l5-5"/><path d="M4 10h11a5 5 0 0 1 0 10h-4"/></svg>',
     redo:     '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 15l5-5-5-5"/><path d="M20 10H9a5 5 0 0 0 0 10h4"/></svg>',
+    // Heroicons eye / eye-slash.
+    eye:      '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/></svg>',
+    eyeSlash: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 0 0 1.934 11.683a1.012 1.012 0 0 0 0 .639C3.423 16.49 7.36 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.451 10.451 0 0 1 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639a10.51 10.51 0 0 1-4.193 5.371M6.228 6.228 3 3m3.228 3.228 3.65 3.65m7.894 7.894L21 21m-3.228-3.228-3.65-3.65m0 0a3 3 0 1 0-4.243-4.243m4.242 4.242L9.88 9.88"/></svg>',
     rectangle:'<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><rect x="4" y="6" width="16" height="12" rx="1.5"/></svg>',
     circle:   '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><circle cx="12" cy="12" r="7.5"/></svg>',
     polygon:  '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3.5 21 9.5 18 20H6L3 9.5 12 3.5Z"/></svg>',
@@ -742,6 +745,7 @@
         this._undoKeyHandler = null;
       }
       if (this.removeNavBtn) { try { this.removeNavBtn(); } catch (_) {} }
+      if (this.visibilityBtn) { try { this.visibilityBtn(); } catch (_) {} }
       if (this.toolbar && this.toolbar.parentNode) {
         this.toolbar.parentNode.removeChild(this.toolbar);
       }
@@ -779,6 +783,9 @@
 
       self._buildOverlay();
       self._buildToolbar();
+      // Visibility toggle goes above the annotation-mode pencil so
+      // it reads "look first, edit second" top-to-bottom.
+      self._buildVisibilityButton();
       self._buildNavButton();
       self._wireUndoKeyboard();
       self._renderInitial();
@@ -1023,6 +1030,51 @@
       var self = this;
       self.removeNavBtn = self.handle.appendNavButton(ICONS.pencil, "Annotate", function() {
         self._setAnnotationMode(!self.annotationMode);
+      });
+    },
+
+    // Eye toggle — show/hide all annotations on the image. Lives
+    // above the pencil button so the user reads "look (eye) → edit
+    // (pencil)" top to bottom. While hidden, the entire SVG overlay
+    // is display:none which automatically hides shapes, handles, the
+    // tooltip, title groups, midpoint dots, and any in-flight draft.
+    _buildVisibilityButton: function() {
+      var self = this;
+      self.annotationsVisible = self.annotationsVisible !== false;
+      self.visibilityBtn = self.handle.appendNavButton(
+        self.annotationsVisible ? ICONS.eye : ICONS.eyeSlash,
+        self.annotationsVisible ? "Hide annotations" : "Show annotations",
+        function() { self._toggleAnnotationsVisible(); }
+      );
+    },
+
+    _toggleAnnotationsVisible: function() {
+      this.annotationsVisible = !this.annotationsVisible;
+      if (this.svg) {
+        this.svg.style.display = this.annotationsVisible ? "" : "none";
+      }
+      // Tooltip and the composer popover live OUTSIDE the SVG (the
+      // host page positions them via assigns), so the consumer
+      // governs those — we just hide our own painted overlay.
+      if (this.tooltipEl) {
+        this.tooltipEl.style.display = this.annotationsVisible
+          ? this.tooltipEl.style.display
+          : "none";
+      }
+      if (this.visibilityBtn) {
+        if (this.visibilityBtn.setIcon) {
+          this.visibilityBtn.setIcon(
+            this.annotationsVisible ? ICONS.eye : ICONS.eyeSlash
+          );
+        }
+        if (this.visibilityBtn.setTitle) {
+          this.visibilityBtn.setTitle(
+            this.annotationsVisible ? "Hide annotations" : "Show annotations"
+          );
+        }
+      }
+      this._dispatch("etcher:visibility-changed", {
+        visible: this.annotationsVisible
       });
     },
 

@@ -1342,15 +1342,62 @@
         this._fillTextWithWrappedTspans(textEl, trimmed, tw - pad * 2, fontSize);
       }
       if (lineEl) {
-        // Leader goes from the title-bbox bottom-center to the
-        // closest point on the parent shape's perimeter — gives a
-        // clear visual link without needing extra user input.
-        var titleAnchor = { x: tx + tw / 2, y: ty + th };
-        var parentAnchor = this._shapeNearestPoint(shape, titleAnchor);
-        lineEl.setAttribute("x1", titleAnchor.x);
-        lineEl.setAttribute("y1", titleAnchor.y);
-        lineEl.setAttribute("x2", parentAnchor.x);
-        lineEl.setAttribute("y2", parentAnchor.y);
+        // If the title sits inside the parent shape, the leader is
+        // redundant — the title visibly IS part of the shape. Hide it.
+        // Otherwise draw from the title-bbox bottom-center to the
+        // closest point on the parent's perimeter for a clean link.
+        var titleCenterImage = {
+          x: titleBox.x + titleBox.w / 2,
+          y: titleBox.y + titleBox.h / 2
+        };
+        if (this._shapeContainsImagePoint(shape, titleCenterImage)) {
+          lineEl.setAttribute("visibility", "hidden");
+        } else {
+          lineEl.removeAttribute("visibility");
+          var titleAnchor = { x: tx + tw / 2, y: ty + th };
+          var parentAnchor = this._shapeNearestPoint(shape, titleAnchor);
+          lineEl.setAttribute("x1", titleAnchor.x);
+          lineEl.setAttribute("y1", titleAnchor.y);
+          lineEl.setAttribute("x2", parentAnchor.x);
+          lineEl.setAttribute("y2", parentAnchor.y);
+        }
+      }
+    },
+
+    // Image-px point-in-shape test for rect / circle / polygon.
+    // Freehand falls through to the polygon test since its geometry
+    // is also a points-array. Used by _renderTitleSibling to decide
+    // whether the leader line adds value.
+    _shapeContainsImagePoint: function(shape, pt) {
+      var g = shape.geometry;
+      switch (shape.kind) {
+        case "rectangle":
+          return (
+            pt.x >= g.x && pt.x <= g.x + g.w &&
+            pt.y >= g.y && pt.y <= g.y + g.h
+          );
+        case "circle": {
+          var dx = pt.x - g.cx, dy = pt.y - g.cy;
+          return dx * dx + dy * dy <= g.r * g.r;
+        }
+        case "polygon":
+        case "freehand": {
+          // Ray-casting: count edge crossings to the right of `pt`.
+          var pts = g.points || [];
+          if (pts.length < 3) return false;
+          var inside = false;
+          for (var i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+            var xi = pts[i][0], yi = pts[i][1];
+            var xj = pts[j][0], yj = pts[j][1];
+            var intersect =
+              ((yi > pt.y) !== (yj > pt.y)) &&
+              (pt.x < ((xj - xi) * (pt.y - yi)) / (yj - yi || 1e-9) + xi);
+            if (intersect) inside = !inside;
+          }
+          return inside;
+        }
+        default:
+          return false;
       }
     },
 

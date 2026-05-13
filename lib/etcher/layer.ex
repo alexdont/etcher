@@ -97,7 +97,7 @@ defmodule Etcher.Layer do
   )
 
   attr(:tools, :list,
-    default: [:rectangle, :circle, :polygon, :freehand],
+    default: [:rectangle, :circle, :polygon, :freehand, :callout, :text],
     doc: "Subset of drawing tools to show in the toolbar."
   )
 

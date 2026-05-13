@@ -88,6 +88,14 @@
     circle:   '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><circle cx="12" cy="12" r="7.5"/></svg>',
     polygon:  '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3.5 21 9.5 18 20H6L3 9.5 12 3.5Z"/></svg>',
     freehand: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3 17.25c2-2 3-4 5-4s2.5 2 4.5 2 3-2 5-2 2.5 1 3.5 1"/></svg>',
+    // Callout / leader line — small filled dot at the anchor, a thin
+    // diagonal line, and a sample "T" at the text endpoint. Mimics
+    // the blueprint-callout shape so the toolbar icon advertises what
+    // the tool draws.
+    callout:  '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><circle cx="5" cy="19" r="1.6" fill="currentColor" stroke="none"/><line x1="5.7" y1="18.3" x2="14" y2="10" stroke-linecap="round"/><text x="14" y="10" font-size="6.5" font-weight="600" fill="currentColor" stroke="none">Aa</text></svg>',
+    // Text tool — a stylized "T" glyph above an underline-bar so the
+    // toolbar button reads as "drop a text label" regardless of locale.
+    text:     '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M5 5h14M12 5v14M9 19h6"/></svg>',
     close:    '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>'
   };
 
@@ -149,6 +157,66 @@
       // OSD). Setting `pointer-events: visiblePainted` on freehand
       // polylines means the user can hover the thin line itself.
       "  pointer-events: visiblePainted; cursor: pointer;",
+      "}",
+      // Callout: the <g> container picks up `color` (default blue,
+      // overridden by the picker via `style.color`); children resolve
+      // `currentColor` against it. Text gets a subtle white halo so
+      // it stays readable over busy image regions.
+      ".etcher-callout { color: #3b82f6; }",
+      ".etcher-callout text {",
+      "  paint-order: stroke fill;",
+      "  stroke: rgba(255, 255, 255, 0.9);",
+      "  stroke-width: 3;",
+      "  stroke-linejoin: round;",
+      "}",
+      // Text shape — bordered box (visible only when hovered/selected/
+      // editing) wrapping a content <text> that fills the box. Border
+      // inherits the shape's color via currentColor. Default state is
+      // text-only (no border) so the label looks freestanding.
+      ".etcher-text { color: #3b82f6; }",
+      ".etcher-text .etcher-text-rect {",
+      "  fill: transparent; stroke: transparent;",
+      "  pointer-events: all;",
+      "  transition: stroke 120ms ease, fill 120ms ease;",
+      "}",
+      ".etcher-text.is-hovered .etcher-text-rect,",
+      ".etcher-text.is-selected .etcher-text-rect,",
+      ".etcher-text.is-editing .etcher-text-rect,",
+      ".etcher-text.is-draft   .etcher-text-rect {",
+      "  stroke: currentColor;",
+      "  stroke-dasharray: 5 4;",
+      "}",
+      ".etcher-text .etcher-text-content,",
+      ".etcher-text .etcher-text-content tspan {",
+      "  fill: currentColor;",
+      "  stroke: rgba(255, 255, 255, 0.95);",
+      "  stroke-width: 2;",
+      "  stroke-linejoin: round;",
+      "  paint-order: stroke fill;",
+      "  pointer-events: none;",
+      "  user-select: none;",
+      "}",
+      // The foreignObject editor sits above the shape — its inner
+      // <input> handles its own focus/blur, but a fallback z-index keeps
+      // it clear of any overlapping shape.
+      ".etcher-text-editor { z-index: 10; }",
+      // Inline title text for non-callout shapes. Rendered as a sibling
+      // `<text>` of the shape (not a child) so it doesn't inherit the
+      // shape's fill/stroke. Uses currentColor so `_applyShapeColor` can
+      // recolor by setting style.color on the title element. White halo
+      // matches the callout text for readability over busy media.
+      ".etcher-title {",
+      "  font-size: 12px;",
+      "  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;",
+      "  font-weight: 500;",
+      "  fill: currentColor;",
+      "  stroke: rgba(255, 255, 255, 0.9);",
+      "  stroke-width: 3;",
+      "  paint-order: stroke fill;",
+      "  stroke-linejoin: round;",
+      "  pointer-events: none;",
+      "  color: #3b82f6;",
+      "  user-select: none;",
       "}",
       // While a drawing tool is active, shapes step out of the way so a
       // drag started over an existing shape opens a new one instead of
@@ -302,7 +370,9 @@
     rectangle: { icon: ICONS.rectangle, title: "Rectangle" },
     circle:    { icon: ICONS.circle,    title: "Circle" },
     polygon:   { icon: ICONS.polygon,   title: "Polygon (double-click to close)" },
-    freehand:  { icon: ICONS.freehand,  title: "Freehand" }
+    freehand:  { icon: ICONS.freehand,  title: "Freehand" },
+    callout:   { icon: ICONS.callout,   title: "Callout (point at something, write a label)" },
+    text:      { icon: ICONS.text,      title: "Text label (drag a box, then type)" }
   };
 
   // Default color palette — pastel rainbow plus monochrome bookends.
@@ -469,6 +539,26 @@
           shape.el.setAttribute("data-uuid", payload.uuid);
           shape.el.removeAttribute("data-tmp-id");
         }
+
+        // Text shape was discarded mid-creation (user pressed Esc with
+        // no content typed) before the server ack'd. Now that we have
+        // the uuid, ask the server to drop the row.
+        if (shape._discardOnSave) {
+          self.shapes = self.shapes.filter(function(s) { return s !== shape; });
+          self.pushEventTo(self.el, "etcher:deleted", { uuid: payload.uuid });
+          return;
+        }
+
+        // Text shape had its title typed before the server ack'd —
+        // flush the pending title now that we can address the row.
+        if (shape._pendingTitle != null) {
+          var t = shape._pendingTitle;
+          delete shape._pendingTitle;
+          self.pushEventTo(self.el, "etcher:updated", {
+            uuid: payload.uuid,
+            title: t
+          });
+        }
       });
 
       // Server reports an external delete — drop the shape from the overlay.
@@ -498,6 +588,10 @@
         var shape = self.shapes.find(function(s) { return s.uuid === payload.uuid; });
         if (!shape) return;
         shape.metadata = payload.metadata || {};
+        // Re-render the shape so the inline title sibling picks up
+        // any change to `metadata.title` / `metadata.title_offset`.
+        // For callouts this also refreshes the in-group <text>.
+        self._renderShape(shape);
         if (self._tooltipShape === shape && self.tooltipEl &&
             self.tooltipEl.style.display !== "none") {
           self._showTooltipFor(shape);
@@ -893,6 +987,8 @@
       if (shape && shape.uuid) {
         shape.style = Object.assign({}, shape.style || {}, { color: color });
         this._applyShapeColor(shape.el, color);
+        // Keep the inline title sibling in sync with the shape color.
+        if (shape.titleEl) shape.titleEl.style.color = color || "";
         this.pushEventTo(this.el, "etcher:updated", {
           uuid: shape.uuid,
           geometry: shape.geometry,
@@ -903,6 +999,15 @@
 
     _applyShapeColor: function(el, color) {
       if (!el) return;
+      // Callout shapes use a <g> with `currentColor`-bound children
+      // (line stroke + dot fill + text fill). Setting `style.color` on
+      // the group propagates through the SVG `currentColor` keyword so
+      // every child picks it up, and we skip the rgba fill-opacity that
+      // would make the dot + text semi-transparent.
+      if (el.tagName && el.tagName.toLowerCase() === "g") {
+        el.style.color = color || "";
+        return;
+      }
       if (color) {
         el.style.stroke = color;
         el.style.fill = color;
@@ -958,11 +1063,19 @@
 
     // Render one shape (or draft) by projecting its image-px geometry into
     // container-px coordinates and writing the result onto its SVG element.
+    // For non-callout shapes that carry `metadata.title`, also renders a
+    // sibling `<text>` element above the shape's bounding box (or at
+    // `metadata.title_offset` if the user has dragged it).
     _renderShape: function(shape) {
       if (!shape || !shape.el) return;
       var self = this;
       var g = shape.geometry;
       var el = shape.el;
+      // Track the bbox top-center in IMAGE coords for non-callout shapes
+      // — populated below in each switch branch, used after the switch
+      // to place the title sibling. Image coords (not container) so the
+      // user-saved `metadata.title_offset` survives pan/zoom.
+      var bboxTopImage = null;
 
       switch (shape.kind) {
         case "rectangle": {
@@ -972,6 +1085,7 @@
           el.setAttribute("y", Math.min(tl.y, br.y));
           el.setAttribute("width",  Math.abs(br.x - tl.x));
           el.setAttribute("height", Math.abs(br.y - tl.y));
+          bboxTopImage = { x: g.x + g.w / 2, y: g.y };
           break;
         }
         case "circle": {
@@ -980,18 +1094,220 @@
           el.setAttribute("cx", c.x);
           el.setAttribute("cy", c.y);
           el.setAttribute("r", Math.abs(rp.x - c.x));
+          bboxTopImage = { x: g.cx, y: g.cy - g.r };
           break;
         }
         case "polygon":
         case "freehand": {
+          var minIX = Infinity, maxIX = -Infinity, minIY = Infinity;
           var pts = (g.points || []).map(function(p) {
+            if (p[0] < minIX) minIX = p[0];
+            if (p[0] > maxIX) maxIX = p[0];
+            if (p[1] < minIY) minIY = p[1];
             var s = self._imageToContainer({ x: p[0], y: p[1] });
             return s.x + "," + s.y;
           }).join(" ");
           el.setAttribute("points", pts);
+          if (isFinite(minIX) && isFinite(minIY)) {
+            bboxTopImage = { x: (minIX + maxIX) / 2, y: minIY };
+          }
+          break;
+        }
+        case "callout": {
+          // shape.el is a <g> containing <line>, <circle> (anchor dot),
+          // <text>. Each child gets repositioned per the current
+          // anchor / text_at projection.
+          var line = el.querySelector("line");
+          var dot  = el.querySelector("circle");
+          var txt  = el.querySelector("text");
+          var anchor = self._imageToContainer({ x: g.anchor[0],  y: g.anchor[1]  });
+          var tail   = self._imageToContainer({ x: g.text_at[0], y: g.text_at[1] });
+
+          if (line) {
+            line.setAttribute("x1", anchor.x);
+            line.setAttribute("y1", anchor.y);
+            line.setAttribute("x2", tail.x);
+            line.setAttribute("y2", tail.y);
+          }
+          if (dot) {
+            dot.setAttribute("cx", anchor.x);
+            dot.setAttribute("cy", anchor.y);
+          }
+          if (txt) {
+            // Text reads outward from the anchor. If the label is to the
+            // RIGHT of the anchor, text starts at tail and extends right
+            // (text-anchor: start). If it's to the LEFT, text ends at
+            // tail and extends left (text-anchor: end). Mirror the line
+            // direction so labels read naturally.
+            var rightOfAnchor = tail.x >= anchor.x;
+            var gap = 4; // px gap between line end and text
+            txt.setAttribute("x", rightOfAnchor ? tail.x + gap : tail.x - gap);
+            // Baseline slightly above the line endpoint so text sits
+            // above the implicit cap-line, not buried under it.
+            txt.setAttribute("y", tail.y - 2);
+            txt.setAttribute("text-anchor", rightOfAnchor ? "start" : "end");
+
+            // Callouts read from `metadata.title` (the user's inline
+            // label) — never from the comment text. Comments are
+            // expandable details surfaced via the tooltip/thread; the
+            // title is the one-line caption that lives on the shape.
+            var content =
+              (shape.metadata && shape.metadata.title) ||
+              shape.label ||
+              "";
+            if (content.length > 40) content = content.slice(0, 39) + "…";
+            txt.textContent = content;
+          }
+          break;
+        }
+        case "text": {
+          // <g> wrapping a hit-zone <rect> and a content <text>. The
+          // rect sizes to the user's bbox in container px; the text
+          // word-wraps inside it via <tspan> lines computed on the fly
+          // from the title at the current zoom-aware font size.
+          var trect = el.querySelector(".etcher-text-rect");
+          var ttext = el.querySelector(".etcher-text-content");
+          var ttl = self._imageToContainer({ x: g.x,         y: g.y });
+          var tbr = self._imageToContainer({ x: g.x + g.w,   y: g.y + g.h });
+          var tx = Math.min(ttl.x, tbr.x);
+          var ty = Math.min(ttl.y, tbr.y);
+          var tw = Math.abs(tbr.x - ttl.x);
+          var th = Math.abs(tbr.y - ttl.y);
+
+          if (trect) {
+            trect.setAttribute("x", tx);
+            trect.setAttribute("y", ty);
+            trect.setAttribute("width",  tw);
+            trect.setAttribute("height", th);
+          }
+          if (ttext) {
+            var titleText = (shape.metadata && shape.metadata.title) || "";
+            // Font size scales from the bbox height — about 65% gives
+            // a single line comfortable padding. Floor at 10px so a
+            // tiny box stays legible; no ceiling so a big box renders
+            // proportionally large text (matches the user's "draw the
+            // box the size you want the text" expectation).
+            var pad = 4;
+            var fontSize = Math.max(10, th * 0.65);
+            ttext.setAttribute("x", tx + pad);
+            ttext.setAttribute("y", ty + pad);
+            ttext.setAttribute("font-size", fontSize);
+            ttext.setAttribute(
+              "font-family",
+              "ui-sans-serif, system-ui, -apple-system, sans-serif"
+            );
+            ttext.setAttribute("font-weight", "500");
+            self._fillTextWithWrappedTspans(ttext, titleText, tw - pad * 2, fontSize);
+          }
           break;
         }
       }
+
+      // Inline title sibling for non-callout shapes (rect/circle/poly/
+      // freehand). Callout renders its title as a child <text> inside
+      // its <g>; for the other kinds a separate <text> is positioned a
+      // hair above the bounding box. The dedicated `kind: "text"` shape
+      // is the proper way to drop free-floating labels on the image —
+      // the inline title here is just a small context affordance.
+      if (shape.kind !== "callout" && shape.kind !== "text") {
+        self._renderTitleSibling(shape, bboxTopImage);
+      }
+    },
+
+    // Ensure a `<text class="etcher-title">` sibling exists for shapes
+    // that carry a non-blank `metadata.title`. Positioned a small fixed
+    // image-px nudge above the shape's bbox top-center; pan/zoom comes
+    // for free because the anchor is in image space.
+    _renderTitleSibling: function(shape, bboxTopImage) {
+      var title =
+        (shape && shape.metadata && shape.metadata.title) ||
+        null;
+      var trimmed = title && String(title).trim();
+
+      if (!trimmed || !bboxTopImage) {
+        if (shape.titleEl && shape.titleEl.parentNode) {
+          shape.titleEl.parentNode.removeChild(shape.titleEl);
+        }
+        shape.titleEl = null;
+        return;
+      }
+
+      if (!shape.titleEl) {
+        shape.titleEl = svgEl("text", {
+          "text-anchor": "middle",
+          "dominant-baseline": "auto"
+        });
+        shape.titleEl.classList.add("etcher-title");
+        if (shape.uuid) shape.titleEl.setAttribute("data-title-for", shape.uuid);
+        // Inherit any color the shape was painted with so the title
+        // matches. _applyShapeColor handles ongoing changes.
+        if (shape.style && shape.style.color) {
+          shape.titleEl.style.color = shape.style.color;
+        }
+        this.svg.appendChild(shape.titleEl);
+      }
+
+      // Small image-px nudge upward — keeps the title clear of the
+      // shape's stroke without depending on the current zoom level.
+      var anchorImage = { x: bboxTopImage.x, y: bboxTopImage.y };
+      var c = this._imageToContainer(anchorImage);
+      shape.titleEl.setAttribute("x", c.x);
+      shape.titleEl.setAttribute("y", c.y - 6);
+
+      var content = trimmed;
+      if (content.length > 40) content = content.slice(0, 39) + "…";
+      if (shape.titleEl.textContent !== content) {
+        shape.titleEl.textContent = content;
+      }
+    },
+
+    // Fill a <text> node with word-wrapped <tspan> lines that fit a
+    // pixel-width budget. SVG <text> doesn't auto-wrap, so we measure
+    // each candidate line using a hidden <text> sibling and `getComputedTextLength()`.
+    // Empty input clears the node.
+    _fillTextWithWrappedTspans: function(textEl, content, maxWidth, fontSize) {
+      while (textEl.firstChild) textEl.removeChild(textEl.firstChild);
+      if (!content) return;
+
+      var words = String(content).split(/\s+/).filter(Boolean);
+      if (words.length === 0) return;
+
+      var probe = svgEl("text", { visibility: "hidden", "font-size": fontSize });
+      probe.setAttribute("font-family", textEl.getAttribute("font-family") || "");
+      probe.setAttribute("font-weight", textEl.getAttribute("font-weight") || "");
+      this.svg.appendChild(probe);
+
+      function measure(s) {
+        probe.textContent = s;
+        try { return probe.getComputedTextLength(); } catch (_) { return s.length * fontSize * 0.6; }
+      }
+
+      var lines = [];
+      var current = "";
+      for (var i = 0; i < words.length; i++) {
+        var attempt = current ? current + " " + words[i] : words[i];
+        if (measure(attempt) <= maxWidth || !current) {
+          current = attempt;
+        } else {
+          lines.push(current);
+          current = words[i];
+        }
+      }
+      if (current) lines.push(current);
+
+      if (probe.parentNode) probe.parentNode.removeChild(probe);
+
+      var x = textEl.getAttribute("x");
+      // Each line is a <tspan> with dy=1.1em after the first. Fill is
+      // inherited from the parent <text> via the .etcher-text-content
+      // CSS rule, which targets both the text and its tspans so the
+      // visible color cascades reliably across browsers (some skip
+      // tspan inheritance of presentation attributes).
+      lines.forEach(function(line, idx) {
+        var tspan = svgEl("tspan", { x: x, dy: idx === 0 ? "1em" : "1.1em" });
+        tspan.textContent = line;
+        textEl.appendChild(tspan);
+      });
     },
 
     _renderAll: function() {
@@ -1027,6 +1343,8 @@
         case "circle":    this._startCircle(pt, e); break;
         case "polygon":   this._polygonClick(pt); break;
         case "freehand":  this._startFreehand(pt, e); break;
+        case "callout":   this._calloutClick(pt); break;
+        case "text":      this._startText(pt, e); break;
       }
     },
 
@@ -1034,6 +1352,8 @@
       if (!this.draftState) {
         if (this.activeTool === "polygon" && this.draftPolygon) {
           this._polygonHover(this._toImage(e));
+        } else if (this.activeTool === "callout" && this.draftCallout) {
+          this._calloutHover(this._toImage(e));
         }
         return;
       }
@@ -1042,6 +1362,7 @@
         case "rectangle": this._updateRectangle(pt); break;
         case "circle":    this._updateCircle(pt); break;
         case "freehand":  this._appendFreehand(pt); break;
+        case "text":      this._updateText(pt); break;
       }
     },
 
@@ -1052,6 +1373,7 @@
         case "rectangle": this._commitRectangle(pt); break;
         case "circle":    this._commitCircle(pt); break;
         case "freehand":  this._commitFreehand(pt); break;
+        case "text":      this._commitText(pt); break;
       }
     },
 
@@ -1114,6 +1436,18 @@
           }
         }
         self.pushEventTo(self.el, "etcher:selected", { uuid: id });
+      });
+
+      // Double-click on a text shape (in annotation mode, cursor tool)
+      // jumps into inline-edit mode. Matches Figma/Miro muscle memory.
+      el.addEventListener("dblclick", function(e) {
+        if (shape.kind !== "text") return;
+        if (self.annotationMode && self.activeTool != null) return;
+        if (!self.annotationMode) return;
+        e.stopPropagation();
+        e.preventDefault();
+        self._enterEditMode(shape);
+        self._startTextEdit(shape);
       });
 
       // When the shape is the active edit target, its body becomes a
@@ -1512,6 +1846,81 @@
     },
 
     // -------------------------------------------------------------------------
+    // Callout — leader line + text label. Two-click input: anchor first
+    // (the thing being labeled), text endpoint second (where the label
+    // sits). Between clicks, the line rubber-bands to the cursor. The
+    // label text comes from `metadata.title` — the consumer's composer
+    // captures it and writes it back via the `etcher:annotation-updated`
+    // event after Post.
+    // -------------------------------------------------------------------------
+
+    _calloutClick: function(pt) {
+      if (!this.draftCallout) {
+        var g = svgEl("g");
+        g.classList.add("etcher-shape", "etcher-callout", "is-draft");
+
+        // Children bind to `currentColor` so _applyShapeColor can drive
+        // them by setting `style.color` on the group. Each child opts
+        // out of the things that don't suit it (line: no fill; dot/text:
+        // no stroke).
+        var line = svgEl("line", {
+          "stroke-width": "2",
+          stroke: "currentColor",
+          fill: "none"
+        });
+        var dot = svgEl("circle", {
+          r: "3",
+          fill: "currentColor",
+          stroke: "none"
+        });
+        var text = svgEl("text", {
+          "font-size": "12",
+          "font-family": "ui-sans-serif, system-ui, -apple-system, sans-serif",
+          "font-weight": "500",
+          fill: "currentColor",
+          stroke: "none"
+        });
+
+        g.appendChild(line);
+        g.appendChild(dot);
+        g.appendChild(text);
+
+        this._applyShapeColor(g, this.activeColor);
+        this.svg.appendChild(g);
+
+        this.draftCallout = {
+          kind: "callout",
+          geometry: { anchor: [pt.x, pt.y], text_at: [pt.x + 60, pt.y - 30] },
+          // Show a placeholder during draft so the user sees where the
+          // label will land before they fill in the title.
+          metadata: { title: "Add a title…" },
+          el: g
+        };
+        this._renderShape(this.draftCallout);
+        this._syncDraftHandles();
+        return;
+      }
+
+      // Second click — commit at the new text endpoint.
+      var anchor = this.draftCallout.geometry.anchor;
+      var geom = { anchor: anchor, text_at: [pt.x, pt.y] };
+      var el = this.draftCallout.el;
+      el.classList.remove("is-draft");
+      this.draftCallout = null;
+      this._finalizeShape("callout", geom, el);
+    },
+
+    _calloutHover: function(pt) {
+      if (!this.draftCallout) return;
+      this.draftCallout.geometry = {
+        anchor: this.draftCallout.geometry.anchor,
+        text_at: [pt.x, pt.y]
+      };
+      this._renderShape(this.draftCallout);
+      this._positionAllHandles(this.draftCallout);
+    },
+
+    // -------------------------------------------------------------------------
     // Freehand
     // -------------------------------------------------------------------------
 
@@ -1547,10 +1956,254 @@
     },
 
     // -------------------------------------------------------------------------
+    // Text — freestanding text-label shape. Click-drag a bounding box,
+    // release to commit and enter inline edit mode (HTML <input> hosted
+    // in a <foreignObject> over the bbox). The text content is stored
+    // in the annotation's `title` field — the same column an inline
+    // title on other shapes uses, so a text shape is essentially "just
+    // a title with a custom bbox."
+    // -------------------------------------------------------------------------
+
+    _startText: function(pt, e) {
+      var g = svgEl("g");
+      g.classList.add("etcher-shape", "etcher-text", "is-draft");
+      // Hit-zone rect — invisible by default, dashed border while
+      // dragging the draft so the user can see what they're sizing.
+      var rect = svgEl("rect", {
+        fill: "transparent",
+        stroke: "currentColor",
+        "stroke-width": "2"
+      });
+      rect.classList.add("etcher-text-rect");
+      var text = svgEl("text", {
+        "text-anchor": "start",
+        "dominant-baseline": "hanging",
+        fill: "currentColor",
+        stroke: "none"
+      });
+      text.classList.add("etcher-text-content");
+      g.appendChild(rect);
+      g.appendChild(text);
+      this._applyShapeColor(g, this.activeColor);
+      this.svg.appendChild(g);
+
+      var geom = { x: pt.x, y: pt.y, w: 0, h: 0 };
+      this.draftState = { kind: "text", anchor: pt, geometry: geom, el: g };
+      this._renderShape(this.draftState);
+      this._syncDraftHandles();
+      try { e.target.setPointerCapture(e.pointerId); } catch (_) {}
+    },
+
+    _updateText: function(pt) {
+      var a = this.draftState.anchor;
+      this.draftState.geometry = {
+        x: Math.min(a.x, pt.x), y: Math.min(a.y, pt.y),
+        w: Math.abs(pt.x - a.x), h: Math.abs(pt.y - a.y)
+      };
+      this._renderShape(this.draftState);
+      this._positionAllHandles(this.draftState);
+    },
+
+    _commitText: function(pt) {
+      var a = this.draftState.anchor;
+      var geom = {
+        x: Math.min(a.x, pt.x),
+        y: Math.min(a.y, pt.y),
+        w: Math.abs(pt.x - a.x),
+        h: Math.abs(pt.y - a.y)
+      };
+      // Tiny boxes from accidental clicks default to a sensible minimum
+      // size in image px so the user gets a usable text bbox even on a
+      // single click. The minimum is computed from the current zoom so
+      // it looks roughly the same on screen across zoom levels.
+      var minImagePx = this._textDefaultBoxImagePx();
+      if (geom.w < minImagePx) geom.w = minImagePx * 4;
+      if (geom.h < minImagePx) geom.h = minImagePx * 1.2;
+
+      var el = this.draftState.el;
+      el.classList.remove("is-draft");
+      var self = this;
+      this._finalizeShape("text", geom, el, function(shape) {
+        // Drop straight into inline-edit mode so the user can type
+        // immediately. `_startTextEdit` waits for the server-assigned
+        // uuid (via `etcher:annotation-saved`) before flushing the
+        // first `etcher:updated` so we don't try to PATCH an uncommitted
+        // shape.
+        self._startTextEdit(shape);
+      });
+    },
+
+    // Convert ~40 container px (a comfortable single-line text box at
+    // 12px font) into image px at the current zoom. Falls back to a
+    // safe constant if the viewport isn't initialized yet.
+    _textDefaultBoxImagePx: function() {
+      try {
+        var a = this._imageToContainer({ x: 0, y: 0 });
+        var b = this._imageToContainer({ x: 0, y: 1 });
+        var perImagePx = Math.abs(b.y - a.y) || 1;
+        return 16 / perImagePx;
+      } catch (e) {
+        return 16;
+      }
+    },
+
+    // -------------------------------------------------------------------------
+    // Inline text editor — a <foreignObject> overlay with an <input>
+    // positioned exactly over the text shape's bbox. Pressing Enter (or
+    // clicking outside) commits the title via `etcher:updated`; Esc
+    // cancels and, if the shape has no title yet, deletes it (a freshly
+    // drawn text shape with no content is just noise).
+    // -------------------------------------------------------------------------
+
+    _startTextEdit: function(shape) {
+      if (!shape || shape.kind !== "text") return;
+      this._endTextEdit();
+
+      var self = this;
+      var g = shape.geometry;
+      var tl = this._imageToContainer({ x: g.x, y: g.y });
+      var br = this._imageToContainer({ x: g.x + g.w, y: g.y + g.h });
+      var w = Math.max(20, Math.abs(br.x - tl.x));
+      var h = Math.max(16, Math.abs(br.y - tl.y));
+
+      var fo = svgEl("foreignObject", {
+        x: Math.min(tl.x, br.x),
+        y: Math.min(tl.y, br.y),
+        width: w,
+        height: h
+      });
+      fo.classList.add("etcher-text-editor");
+      var input = document.createElement("input");
+      input.type = "text";
+      input.maxLength = 200;
+      input.placeholder = "Type your label…";
+      input.value = (shape.metadata && shape.metadata.title) || "";
+      input.style.width = "100%";
+      input.style.height = "100%";
+      input.style.boxSizing = "border-box";
+      input.style.border = "2px dashed currentColor";
+      input.style.background = "rgba(255, 255, 255, 0.9)";
+      input.style.color = "inherit";
+      input.style.padding = "2px 4px";
+      input.style.font = "500 14px ui-sans-serif, system-ui, -apple-system, sans-serif";
+      input.style.outline = "none";
+
+      fo.appendChild(input);
+      this.svg.appendChild(fo);
+      this._textEditor = { fo: fo, input: input, shape: shape };
+      // Hide the visible <text> while editing — the input shows the
+      // current content live, and overlapping them blurs the readout.
+      var existing = shape.el.querySelector(".etcher-text-content");
+      if (existing) existing.setAttribute("visibility", "hidden");
+
+      input.addEventListener("keydown", function(e) {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          self._commitTextEdit();
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          self._cancelTextEdit();
+        }
+      });
+      // Blur path (click outside the input but inside the overlay,
+      // viewport edge, etc.) commits as well — matches the muscle
+      // memory from inline text editors elsewhere.
+      input.addEventListener("blur", function() {
+        // Defer so synchronous Enter/Esc handling above wins.
+        setTimeout(function() {
+          if (self._textEditor && self._textEditor.input === input) {
+            self._commitTextEdit();
+          }
+        }, 0);
+      });
+      // Focus on next frame so the foreignObject is attached before
+      // we yank the cursor in.
+      setTimeout(function() { try { input.focus(); input.select(); } catch (_) {} }, 0);
+    },
+
+    _commitTextEdit: function() {
+      var ed = this._textEditor;
+      if (!ed) return;
+      var shape = ed.shape;
+      var newTitle = ed.input.value.trim();
+      var prevTitle = (shape.metadata && shape.metadata.title) || "";
+
+      // Mirror the new title locally so the <text> renders with it
+      // immediately, before the server round-trip.
+      shape.metadata = Object.assign({}, shape.metadata || {}, { title: newTitle });
+      this._endTextEdit();
+      this._renderShape(shape);
+
+      if (newTitle === "" && !prevTitle && !shape.uuid) {
+        // Brand-new text shape with no content typed — clean up. The
+        // server may not have responded yet, so the create event will
+        // be paired with a delete on tmp_id arrival.
+        this._discardEmptyTextShape(shape);
+        return;
+      }
+
+      if (newTitle === prevTitle) return;
+
+      if (shape.uuid) {
+        this.pushEventTo(this.el, "etcher:updated", {
+          uuid: shape.uuid,
+          title: newTitle
+        });
+      } else {
+        // Server hasn't ack'd yet — stash the pending title; the
+        // annotation-saved handler picks it up and flushes.
+        shape._pendingTitle = newTitle;
+      }
+    },
+
+    _cancelTextEdit: function() {
+      var ed = this._textEditor;
+      if (!ed) return;
+      var shape = ed.shape;
+      this._endTextEdit();
+
+      var hasContent = shape.metadata && shape.metadata.title;
+      if (!hasContent) {
+        this._discardEmptyTextShape(shape);
+        return;
+      }
+      this._renderShape(shape);
+    },
+
+    _endTextEdit: function() {
+      var ed = this._textEditor;
+      if (!ed) return;
+      if (ed.fo && ed.fo.parentNode) ed.fo.parentNode.removeChild(ed.fo);
+      var existing = ed.shape && ed.shape.el && ed.shape.el.querySelector(".etcher-text-content");
+      if (existing) existing.removeAttribute("visibility");
+      this._textEditor = null;
+    },
+
+    // Strip a text shape that was abandoned mid-creation (no title ever
+    // typed). If the server already ack'd a uuid, fire a delete; if not,
+    // mark the shape so the upcoming `annotation-saved` handler can
+    // delete on arrival.
+    _discardEmptyTextShape: function(shape) {
+      if (!shape) return;
+      if (shape.uuid) {
+        var uuid = shape.uuid;
+        this._removeShape(uuid);
+        this.pushEventTo(this.el, "etcher:deleted", { uuid: uuid });
+      } else {
+        shape._discardOnSave = true;
+        // Optimistically hide so the user sees it gone; the actual
+        // shape struct is purged when uuid arrives.
+        if (shape.el && shape.el.parentNode) {
+          shape.el.parentNode.removeChild(shape.el);
+        }
+      }
+    },
+
+    // -------------------------------------------------------------------------
     // Shared finalize + cancel
     // -------------------------------------------------------------------------
 
-    _finalizeShape: function(kind, geometry, el) {
+    _finalizeShape: function(kind, geometry, el, afterCreate) {
       var tmpId = genTmpId();
       el.setAttribute("data-tmp-id", tmpId);
       var style = this.activeColor ? { color: this.activeColor } : null;
@@ -1586,6 +2239,13 @@
 
       this.draftState = null;
       this._syncDraftHandles();
+
+      // Per-kind post-create hook (e.g. text → inline edit). Runs on
+      // the just-pushed shape so callers can capture it without
+      // re-finding by uuid.
+      if (typeof afterCreate === "function") {
+        try { afterCreate(shape); } catch (_) {}
+      }
     },
 
     // Returns the shape's bottom-left corner in container px (the
@@ -1612,6 +2272,10 @@
         this.draftPolygon.el.parentNode.removeChild(this.draftPolygon.el);
       }
       this.draftPolygon = null;
+      if (this.draftCallout && this.draftCallout.el && this.draftCallout.el.parentNode) {
+        this.draftCallout.el.parentNode.removeChild(this.draftCallout.el);
+      }
+      this.draftCallout = null;
       this._syncDraftHandles();
     },
 
@@ -1635,10 +2299,66 @@
         case "circle":    el = svgEl("circle");                     break;
         case "polygon":   el = svgEl("polygon");                    break;
         case "freehand":  el = svgEl("polyline", { fill: "none" }); break;
+        case "text": {
+          // <g> wrapping a hit-zone <rect> and a content <text>. The
+          // group bind to `currentColor` so _applyShapeColor can recolor
+          // the rect border and text fill in one stroke.
+          el = svgEl("g");
+          el.classList.add("etcher-text");
+          var trect = svgEl("rect", {
+            fill: "transparent",
+            stroke: "currentColor",
+            "stroke-width": "2"
+          });
+          trect.classList.add("etcher-text-rect");
+          var ttext = svgEl("text", {
+            "text-anchor": "start",
+            "dominant-baseline": "hanging",
+            fill: "currentColor",
+            stroke: "none"
+          });
+          ttext.classList.add("etcher-text-content");
+          el.appendChild(trect);
+          el.appendChild(ttext);
+          break;
+        }
+        case "callout": {
+          // <g> wrapping the line, anchor dot, and text. _renderShape's
+          // callout branch finds each child via querySelector to update
+          // their coordinates. Children bind to `currentColor` so
+          // _applyShapeColor can recolor the whole group via
+          // `style.color` on the group.
+          el = svgEl("g");
+          el.classList.add("etcher-callout");
+          el.appendChild(svgEl("line", {
+            "stroke-width": "2",
+            stroke: "currentColor",
+            fill: "none"
+          }));
+          el.appendChild(svgEl("circle", {
+            r: "3",
+            fill: "currentColor",
+            stroke: "none"
+          }));
+          el.appendChild(svgEl("text", {
+            "font-size": "12",
+            "font-family": "ui-sans-serif, system-ui, -apple-system, sans-serif",
+            "font-weight": "500",
+            fill: "currentColor",
+            stroke: "none"
+          }));
+          break;
+        }
         default: return;
       }
 
-      el.setAttribute("stroke-width", "2");
+      // Non-callout shapes get a uniform stroke-width on the root. The
+      // callout's stroke-width is on the inner line; the group itself
+      // doesn't render anything. The text shape's stroke-width is on
+      // the inner rect (set during construction above).
+      if (ann.kind !== "callout" && ann.kind !== "text") {
+        el.setAttribute("stroke-width", "2");
+      }
       el.classList.add("etcher-shape");
       if (ann.uuid) el.setAttribute("data-uuid", ann.uuid);
       this.svg.appendChild(el);
@@ -1695,7 +2415,7 @@
       var self = this;
       this._outsideClickHandler = function(e) {
         var inside = e.target.closest(
-          ".etcher-shape, .etcher-handle, .etcher-tooltip, .etcher-toolbar"
+          ".etcher-shape, .etcher-handle, .etcher-text-editor, .etcher-tooltip, .etcher-toolbar"
         );
         if (!inside) self._exitEditMode();
       };
@@ -1747,6 +2467,7 @@
           el: this.draftPolygon.el
         };
       }
+      if (this.draftCallout) return this.draftCallout;
       return null;
     },
 
@@ -1791,6 +2512,7 @@
       var g = shape.geometry;
       switch (shape.kind) {
         case "rectangle":
+        case "text":
           return [
             { x: g.x,         y: g.y },          // 0: top-left
             { x: g.x + g.w,   y: g.y },          // 1: top-right
@@ -1801,6 +2523,11 @@
           return [{ x: g.cx + g.r, y: g.cy }];   // 0: east, controls radius
         case "polygon":
           return (g.points || []).map(function(p) { return { x: p[0], y: p[1] }; });
+        case "callout":
+          return [
+            { x: g.anchor[0],  y: g.anchor[1]  },  // 0: anchor (what's pointed at)
+            { x: g.text_at[0], y: g.text_at[1] }   // 1: text endpoint
+          ];
         // Freehand has too many points to edit individually for v1 —
         // delete and redraw.
         default:
@@ -1909,6 +2636,7 @@
     _translateGeometry: function(kind, geom, dx, dy) {
       switch (kind) {
         case "rectangle":
+        case "text":
           return { x: geom.x + dx, y: geom.y + dy, w: geom.w, h: geom.h };
         case "circle":
           return { cx: geom.cx + dx, cy: geom.cy + dy, r: geom.r };
@@ -1919,6 +2647,11 @@
               return [p[0] + dx, p[1] + dy];
             })
           };
+        case "callout":
+          return {
+            anchor:  [geom.anchor[0]  + dx, geom.anchor[1]  + dy],
+            text_at: [geom.text_at[0] + dx, geom.text_at[1] + dy]
+          };
         default:
           return geom;
       }
@@ -1926,7 +2659,8 @@
 
     _applyHandleDrag: function(shape, idx, pt, startGeom) {
       switch (shape.kind) {
-        case "rectangle": {
+        case "rectangle":
+        case "text": {
           var g = startGeom;
           var right = g.x + g.w, bottom = g.y + g.h;
           var nx, ny, nw, nh;
@@ -1958,6 +2692,21 @@
           shape.geometry = { points: pts };
           break;
         }
+        case "callout": {
+          // 0 = anchor (what's pointed at), 1 = text endpoint.
+          if (idx === 0) {
+            shape.geometry = {
+              anchor: [pt.x, pt.y],
+              text_at: startGeom.text_at
+            };
+          } else if (idx === 1) {
+            shape.geometry = {
+              anchor: startGeom.anchor,
+              text_at: [pt.x, pt.y]
+            };
+          }
+          break;
+        }
       }
     },
 
@@ -1967,6 +2716,9 @@
       var shape = this.shapes[idx];
       if (this.editingShape === shape) this._exitEditMode();
       if (shape.el && shape.el.parentNode) shape.el.parentNode.removeChild(shape.el);
+      if (shape.titleEl && shape.titleEl.parentNode) {
+        shape.titleEl.parentNode.removeChild(shape.titleEl);
+      }
       this.shapes.splice(idx, 1);
       // Removed shape's element can no longer fire mouseleave, so close
       // any tooltip that was anchored to it.

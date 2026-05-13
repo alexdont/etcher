@@ -211,6 +211,14 @@
       // <input> handles its own focus/blur, but a fallback z-index keeps
       // it clear of any overlapping shape.
       ".etcher-text-editor { z-index: 10; }",
+      // Eraser mid-sweep: shapes the cursor has touched get
+      // de-saturated + dimmed so the user can see what's about to
+      // disappear when they release.
+      ".etcher-shape.is-erasing,",
+      ".etcher-title-group.is-erasing {",
+      "  opacity: 0.35; filter: grayscale(1);",
+      "  transition: opacity 80ms ease, filter 80ms ease;",
+      "}",
       // Title group: a satellite text bbox attached to a parent shape.
       // Cursor changes to "grab" so users know they can drag it; the
       // leader line stays subtle so the parent shape remains the
@@ -398,7 +406,8 @@
     polygon:   { icon: ICONS.polygon,   title: "Polygon (double-click to close)" },
     freehand:  { icon: ICONS.freehand,  title: "Freehand" },
     callout:   { icon: ICONS.callout,   title: "Callout (point at something, write a label)" },
-    text:      { icon: ICONS.text,      title: "Text label (drag a box, then type)" }
+    text:      { icon: ICONS.text,      title: "Text label (drag a box, then type)" },
+    eraser:    { icon: ICONS.trash,     title: "Eraser (click and drag to wipe shapes)" }
   };
 
   // Default color palette — pastel rainbow plus monochrome bookends.
@@ -585,6 +594,23 @@
             title: t
           });
         }
+
+        // If this shape was just recreated by an undo of a bulk
+        // delete, the corresponding history item is waiting on this
+        // tmpId so a subsequent redo can target the new uuid.
+        function syncLiveUuid(stack) {
+          (stack || []).forEach(function(op) {
+            if (op.type !== "bulk_delete") return;
+            op.items.forEach(function(item) {
+              if (item.pendingTmpId === payload.tmp_id) {
+                item.liveUuid = payload.uuid;
+                item.pendingTmpId = null;
+              }
+            });
+          });
+        }
+        syncLiveUuid(self._undoStack);
+        syncLiveUuid(self._redoStack);
       });
 
       // Server reports an external delete — drop the shape from the overlay.
@@ -2028,6 +2054,7 @@
         case "freehand":  this._startFreehand(pt, e); break;
         case "callout":   this._calloutClick(pt); break;
         case "text":      this._startText(pt, e); break;
+        case "eraser":    this._startErase(pt, e); break;
       }
     },
 
@@ -2037,6 +2064,8 @@
           this._polygonHover(this._toImage(e));
         } else if (this.activeTool === "callout" && this.draftCallout) {
           this._calloutHover(this._toImage(e));
+        } else if (this.activeTool === "eraser" && this._erasingActive) {
+          this._eraserMove(this._toImage(e));
         }
         return;
       }
@@ -2050,6 +2079,13 @@
     },
 
     _onPointerUp: function(e) {
+      // Eraser commits independently of the draftState flow since it
+      // doesn't build a shape — it grays hits during a press-and-drag
+      // and flushes them on release.
+      if (this.activeTool === "eraser" && this._erasingActive) {
+        this._commitErase();
+        return;
+      }
       if (!this.draftState) return;
       var pt = this._toImage(e);
       switch (this.draftState.kind) {
@@ -2359,7 +2395,9 @@
       if (!shape) return;
       // Capture for undo BEFORE we tear the shape down — the snapshot
       // is what `_recreateFromSnapshot` will use to rebuild the row.
-      if (shape.uuid) this._pushUndoDelete(shape);
+      // Single deletes ride the same bulk path as the eraser so they
+      // get matching undo + redo support out of the box.
+      if (shape.uuid) this._pushUndoBulkDelete([shape]);
       var uuid = shape.uuid;
       if (this.editingShape === shape) this._exitEditMode();
       // Optimistic local removal so the UI feels instant. Server still
@@ -2781,6 +2819,111 @@
         // shape.
         self._startTextEdit(shape);
       });
+    },
+
+    // -------------------------------------------------------------------------
+    // Eraser — press-and-drag to gray out shapes the cursor crosses,
+    // release to bulk-delete them. Hit-tests against image-px geometry
+    // (not DOM pointer-events, which are off for shapes while a tool
+    // is active). All shapes erased in one stroke become a single
+    // undo op so ⌘Z brings the whole sweep back at once.
+    // -------------------------------------------------------------------------
+
+    _startErase: function(pt, e) {
+      this._erasingActive = true;
+      this._erasingHits = [];
+      this._erasingHitSet = new Set();
+      try { e.target.setPointerCapture(e.pointerId); } catch (_) {}
+      this._hideTooltip();
+      this._eraserMove(pt);
+    },
+
+    _eraserMove: function(pt) {
+      if (!this._erasingActive) return;
+      var self = this;
+      this.shapes.forEach(function(shape) {
+        if (self._erasingHitSet.has(shape)) return;
+        if (!shape.uuid) return;
+        if (self._eraserHit(shape, pt)) {
+          self._erasingHitSet.add(shape);
+          self._erasingHits.push(shape);
+          if (shape.el) shape.el.classList.add("is-erasing");
+          if (shape.titleGroup) shape.titleGroup.classList.add("is-erasing");
+        }
+      });
+    },
+
+    _commitErase: function() {
+      if (!this._erasingActive) return;
+      this._erasingActive = false;
+      var hits = this._erasingHits || [];
+      this._erasingHits = null;
+      this._erasingHitSet = null;
+      if (hits.length === 0) return;
+
+      // Push a single compound undo op covering every shape in the
+      // stroke so ⌘Z brings them all back together.
+      this._pushUndoBulkDelete(hits);
+
+      var self = this;
+      hits.forEach(function(shape) {
+        var uuid = shape.uuid;
+        if (self.editingShape === shape) self._exitEditMode();
+        if (self.editingTitleShape === shape) self._exitTitleEditMode();
+        var idx = self.shapes.indexOf(shape);
+        if (idx !== -1) {
+          if (shape.el && shape.el.parentNode) shape.el.parentNode.removeChild(shape.el);
+          if (shape.titleGroup && shape.titleGroup.parentNode) {
+            shape.titleGroup.parentNode.removeChild(shape.titleGroup);
+          }
+          self.shapes.splice(idx, 1);
+        }
+        if (uuid) self.pushEventTo(self.el, "etcher:deleted", { uuid: uuid });
+      });
+      self._hideTooltip();
+    },
+
+    // Hit-test in image px against each shape's geometry (or the
+    // shape's title group, if it has one). Permissive — covers the
+    // full visible footprint so users don't have to nick the exact
+    // glyph or vertex to erase.
+    _eraserHit: function(shape, pt) {
+      function inRect(box) {
+        if (!box) return false;
+        return pt.x >= box.x && pt.x <= box.x + box.w &&
+               pt.y >= box.y && pt.y <= box.y + box.h;
+      }
+      // Title group (when present) is its own hit zone.
+      if (shape.titleGroup && shape._renderedTitleImage &&
+          inRect(shape._renderedTitleImage)) {
+        return true;
+      }
+      var g = shape.geometry;
+      switch (shape.kind) {
+        case "rectangle":
+          return inRect(g);
+        case "text":
+          return inRect(shape._renderedBox || g);
+        case "circle": {
+          var dx = pt.x - g.cx, dy = pt.y - g.cy;
+          return dx * dx + dy * dy <= g.r * g.r;
+        }
+        case "polygon":
+        case "freehand":
+          return this._shapeContainsImagePoint(shape, pt);
+        case "callout": {
+          var box = shape._renderedBox || this._calloutTextBoxImage(g);
+          if (inRect(box)) return true;
+          var ax = g.anchor[0], ay = g.anchor[1];
+          var dax = pt.x - ax, day = pt.y - ay;
+          // Small radius around the anchor dot so the user can erase
+          // by clicking the leader endpoint as well as the label.
+          var r = this._textDefaultBoxImagePx() * 0.6;
+          return dax * dax + day * day <= r * r;
+        }
+        default:
+          return false;
+      }
     },
 
     // Convert ~40 container px (a comfortable single-line text box at
@@ -3736,31 +3879,35 @@
       this._refreshUndoButtons();
     },
 
-    // A deletion isn't a before/after diff — we need the full shape
-    // data to rebuild the row on undo. Server assigns a fresh uuid
-    // when the row is recreated, so no redo support: once you undo a
-    // delete, the op leaves the history (re-deleting is a manual
-    // gesture).
-    _pushUndoDelete: function(shape) {
+    // Compound delete op: snapshot every shape removed in one gesture
+    // (a manual delete from the tooltip trash button is treated as a
+    // bulk of size 1; the eraser tool sweeps multiple shapes into one
+    // op). Each item carries its pre-deletion uuid + a `liveUuid`
+    // slot that gets filled when an undo recreates the row — the
+    // server-assigned uuid arrives via `etcher:annotation-saved`, the
+    // saved handler maps tmpId → uuid back onto the item, and a
+    // subsequent redo can target it.
+    _pushUndoBulkDelete: function(shapes) {
       this._undoStack = this._undoStack || [];
       this._redoStack = this._redoStack || [];
       function clone(v) {
         if (v == null) return v;
         try { return JSON.parse(JSON.stringify(v)); } catch (_) { return v; }
       }
-      this._undoStack.push({
-        type: "delete",
-        snapshot: {
-          kind: shape.kind,
-          geometry: clone(shape.geometry),
-          style: clone(shape.style),
-          metadata: clone(shape.metadata),
-          // Pre-deletion uuid travels with the snapshot so the
-          // restore handler can find soft-deleted comments tied to
-          // the old row and re-link them to the recreated row.
-          originalUuid: shape.uuid
-        }
+      var items = shapes.map(function(shape) {
+        return {
+          snapshot: {
+            kind: shape.kind,
+            geometry: clone(shape.geometry),
+            style: clone(shape.style),
+            metadata: clone(shape.metadata),
+            originalUuid: shape.uuid
+          },
+          liveUuid: null,
+          pendingTmpId: null
+        };
       });
+      this._undoStack.push({ type: "bulk_delete", items: items });
       if (this._undoStack.length > this._undoStackLimit) this._undoStack.shift();
       this._redoStack = [];
       this._refreshUndoButtons();
@@ -3771,11 +3918,15 @@
       this._redoStack = this._redoStack || [];
       var op = this._undoStack.pop();
       if (!op) return;
-      if (op.type === "delete") {
-        // Recreate the row. Redo doesn't apply — see `_pushUndoDelete`
-        // comment.
-        this._recreateFromSnapshot(op.snapshot);
-      } else {
+      if (op.type === "bulk_delete") {
+        var self = this;
+        op.items.forEach(function(item) {
+          var tmpId = self._recreateFromSnapshot(item.snapshot);
+          item.pendingTmpId = tmpId;
+          item.liveUuid = null;
+        });
+        this._redoStack.push(op);
+      } else if (op.type === "update") {
         this._redoStack.push(op);
         this._applyHistorySnapshot(op.uuid, op.before);
       }
@@ -3787,8 +3938,31 @@
       this._redoStack = this._redoStack || [];
       var op = this._redoStack.pop();
       if (!op) return;
-      this._undoStack.push(op);
-      this._applyHistorySnapshot(op.uuid, op.after);
+      if (op.type === "bulk_delete") {
+        var self = this;
+        op.items.forEach(function(item) {
+          var uuid = item.liveUuid;
+          if (!uuid) return;
+          var shape = self.shapes.find(function(s) { return s.uuid === uuid; });
+          if (!shape) return;
+          if (self.editingShape === shape) self._exitEditMode();
+          if (self.editingTitleShape === shape) self._exitTitleEditMode();
+          var idx = self.shapes.indexOf(shape);
+          if (idx !== -1) {
+            if (shape.el && shape.el.parentNode) shape.el.parentNode.removeChild(shape.el);
+            if (shape.titleGroup && shape.titleGroup.parentNode) {
+              shape.titleGroup.parentNode.removeChild(shape.titleGroup);
+            }
+            self.shapes.splice(idx, 1);
+          }
+          self.pushEventTo(self.el, "etcher:deleted", { uuid: uuid });
+          item.liveUuid = null;
+        });
+        this._undoStack.push(op);
+      } else if (op.type === "update") {
+        this._undoStack.push(op);
+        this._applyHistorySnapshot(op.uuid, op.after);
+      }
       this._refreshUndoButtons();
     },
 
@@ -3837,6 +4011,7 @@
       // comment threads) onto the new uuid.
       if (snap.originalUuid) payload.restore_from_uuid = snap.originalUuid;
       this.pushEventTo(this.el, "etcher:created", payload);
+      return tmpId;
     },
 
     // Apply a snapshot to a shape: restore local state and push the

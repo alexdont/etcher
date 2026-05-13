@@ -1169,7 +1169,31 @@
               "ui-sans-serif, system-ui, -apple-system, sans-serif"
             );
             coText.setAttribute("font-weight", "500");
-            self._fillTextWithWrappedTspans(coText, calloutText, bw - coPad * 2, coFontSize);
+            var coMeasured = self._fillTextWithWrappedTspans(
+              coText, calloutText, bw - coPad * 2, coFontSize
+            );
+
+            // Shrink-wrap the callout's text bbox the same way text
+            // shapes and titles do — keeps the underline + leader
+            // attached to the visible text edge.
+            var coActualW = Math.max(coMeasured.width + coPad * 2, coFontSize);
+            var coActualH = Math.max(coMeasured.height + coPad * 2, coFontSize * 1.2);
+            if (coRect) {
+              coRect.setAttribute("width",  coActualW);
+              coRect.setAttribute("height", coActualH);
+            }
+            var cosx = bw > 0 ? bw / box.w : 1;
+            var cosy = bh > 0 ? bh / box.h : cosx;
+            shape._renderedBox = {
+              x: box.x,
+              y: box.y,
+              w: cosx > 0 ? coActualW / cosx : box.w,
+              h: cosy > 0 ? coActualH / cosy : box.h
+            };
+            bw = coActualW;
+            bh = coActualH;
+          } else {
+            shape._renderedBox = null;
           }
 
           // Underline spans the full bottom edge of the bbox.
@@ -1692,6 +1716,18 @@
         handleEl.removeEventListener("pointerup", onUp);
         handleEl.removeEventListener("pointercancel", onUp);
         try { handleEl.releasePointerCapture(ev.pointerId); } catch (_) {}
+        // Persist the shrunk-to-text box so storage matches what's
+        // rendered (no leftover "drag envelope" wider than the text).
+        if (shape._renderedTitleImage) {
+          shape.metadata = Object.assign({}, shape.metadata || {}, {
+            title_box: {
+              x: shape._renderedTitleImage.x,
+              y: shape._renderedTitleImage.y,
+              w: shape._renderedTitleImage.w,
+              h: shape._renderedTitleImage.h
+            }
+          });
+        }
         if (shape.uuid) {
           self.pushEventTo(self.el, "etcher:updated", {
             uuid: shape.uuid,
@@ -1759,11 +1795,25 @@
         tg.removeEventListener("pointermove", onMove);
         tg.removeEventListener("pointerup", onUp);
         tg.removeEventListener("pointercancel", onUp);
-        if (dragged && shape.uuid) {
-          self.pushEventTo(self.el, "etcher:updated", {
-            uuid: shape.uuid,
-            metadata: shape.metadata
-          });
+        if (dragged) {
+          // Same shrink-on-release as title-handle drags so the
+          // saved bbox always hugs the text, never the drag envelope.
+          if (shape._renderedTitleImage) {
+            shape.metadata = Object.assign({}, shape.metadata || {}, {
+              title_box: {
+                x: shape._renderedTitleImage.x,
+                y: shape._renderedTitleImage.y,
+                w: shape._renderedTitleImage.w,
+                h: shape._renderedTitleImage.h
+              }
+            });
+          }
+          if (shape.uuid) {
+            self.pushEventTo(self.el, "etcher:updated", {
+              uuid: shape.uuid,
+              metadata: shape.metadata
+            });
+          }
         }
       }
       tg.addEventListener("pointermove", onMove);
@@ -3221,7 +3271,10 @@
         case "polygon":
           return (g.points || []).map(function(p) { return { x: p[0], y: p[1] }; });
         case "callout": {
-          var cbox = this._calloutTextBoxImage(g);
+          // Use the shrunk-to-text rendered bbox when available so the
+          // 4 text-corner handles snap to what's drawn, not the wider
+          // storage envelope.
+          var cbox = shape._renderedBox || this._calloutTextBoxImage(g);
           return [
             { x: g.anchor[0],            y: g.anchor[1]            },  // 0: anchor
             { x: cbox.x,                 y: cbox.y                 },  // 1: text TL
@@ -3250,12 +3303,16 @@
       var self = this;
       // Snapshot the starting geometry so corner drags derive from the
       // *original* opposite corner, not the live one that's moving.
-      // Text shapes snap their handles to the shrunk-to-text bbox
-      // (`_renderedBox`), so the drag math has to start from there too
-      // — otherwise the cursor and the bbox edge would diverge.
+      // Text shapes + callouts snap their handles to the shrunk-to-
+      // text bbox (`_renderedBox`); the drag math has to start from
+      // there too or the cursor and the bbox edge will diverge.
       var startGeom;
       if (shape.kind === "text" && shape._renderedBox) {
         startGeom = JSON.parse(JSON.stringify(shape._renderedBox));
+      } else if (shape.kind === "callout" && shape._renderedBox) {
+        var coStart = JSON.parse(JSON.stringify(shape.geometry));
+        coStart.text_box = JSON.parse(JSON.stringify(shape._renderedBox));
+        startGeom = coStart;
       } else {
         startGeom = JSON.parse(JSON.stringify(shape.geometry));
       }
@@ -3272,15 +3329,27 @@
         handleEl.removeEventListener("pointerup", onUp);
         handleEl.removeEventListener("pointercancel", onUp);
         try { handleEl.releasePointerCapture(ev.pointerId); } catch (_) {}
-        // For text shapes, persist the shrunk-to-text bbox rather
-        // than the larger "drag envelope" the user swept through —
-        // keeps the stored geometry consistent with what's visible.
+        // Persist the shrunk-to-text bbox rather than the larger
+        // "drag envelope" the user swept through — keeps the stored
+        // geometry consistent with what's visible. Applies to text
+        // shapes (whole geometry is the bbox) and callouts (the text
+        // endpoint of the geometry is the bbox).
         if (shape.kind === "text" && shape._renderedBox) {
           shape.geometry = {
             x: shape._renderedBox.x,
             y: shape._renderedBox.y,
             w: shape._renderedBox.w,
             h: shape._renderedBox.h
+          };
+        } else if (shape.kind === "callout" && shape._renderedBox) {
+          shape.geometry = {
+            anchor: shape.geometry.anchor,
+            text_box: {
+              x: shape._renderedBox.x,
+              y: shape._renderedBox.y,
+              w: shape._renderedBox.w,
+              h: shape._renderedBox.h
+            }
           };
         }
         if (shape.uuid) {
@@ -3360,6 +3429,19 @@
         el.removeEventListener("pointercancel", onUp);
         try { el.releasePointerCapture(ev.pointerId); } catch (_) {}
         if (dragged) {
+          // If the shape carries a title, sync the stored title_box
+          // with the shrunk-to-text dimensions so the storage stays
+          // consistent with what's drawn after the translation.
+          if (startTitleBox && shape._renderedTitleImage) {
+            shape.metadata = Object.assign({}, shape.metadata || {}, {
+              title_box: {
+                x: shape._renderedTitleImage.x,
+                y: shape._renderedTitleImage.y,
+                w: shape._renderedTitleImage.w,
+                h: shape._renderedTitleImage.h
+              }
+            });
+          }
           if (shape.uuid) {
             var payload = { uuid: shape.uuid, geometry: shape.geometry };
             if (startTitleBox) payload.metadata = shape.metadata;

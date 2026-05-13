@@ -3754,7 +3754,11 @@
           kind: shape.kind,
           geometry: clone(shape.geometry),
           style: clone(shape.style),
-          metadata: clone(shape.metadata)
+          metadata: clone(shape.metadata),
+          // Pre-deletion uuid travels with the snapshot so the
+          // restore handler can find soft-deleted comments tied to
+          // the old row and re-link them to the recreated row.
+          originalUuid: shape.uuid
         }
       });
       if (this._undoStack.length > this._undoStackLimit) this._undoStack.shift();
@@ -3828,6 +3832,10 @@
       if (snap.metadata && typeof snap.metadata.title === "string") {
         payload.title = snap.metadata.title;
       }
+      // Tells the consumer which old uuid this row is restoring from
+      // so it can rehydrate any related state (e.g. soft-deleted
+      // comment threads) onto the new uuid.
+      if (snap.originalUuid) payload.restore_from_uuid = snap.originalUuid;
       this.pushEventTo(this.el, "etcher:created", payload);
     },
 

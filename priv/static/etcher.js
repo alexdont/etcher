@@ -1474,22 +1474,61 @@
           if (coText) {
             var calloutText = (shape.metadata && shape.metadata.title) || "";
             var coPad = 4;
-            var coFontSize = Math.max(10, bh * 0.65);
+            var coFontFamily = "ui-sans-serif, system-ui, -apple-system, sans-serif";
+            var coFontWeight = "500";
+            var coFontSizeByHeight = Math.max(10, bh * 0.65);
+
+            // Width-fit cap: same fix `_renderTitleSibling` got in
+            // 0.2.3 — without it, callout text that overflows the box
+            // width at the height-derived font-size wraps onto
+            // multiple lines, `coActualH` exceeds `bh`, the snap on
+            // body-drag release writes that taller height back into
+            // `geometry.text_box`, the next render derives an even
+            // larger font, more lines wrap, and the callout grows
+            // exponentially per interaction. Capping the font-size so
+            // the text fits the box width on a single line bounds
+            // `coActualH` to one line of text and breaks the cycle.
+            if (!self._measureCanvas) {
+              self._measureCanvas = document.createElement("canvas");
+            }
+            var coCtx = self._measureCanvas.getContext("2d");
+            coCtx.font = coFontWeight + " " + coFontSizeByHeight + "px " + coFontFamily;
+            var coWidthAtHeightFont;
+            try { coWidthAtHeightFont = coCtx.measureText(calloutText).width; }
+            catch (_) { coWidthAtHeightFont = calloutText.length * coFontSizeByHeight * 0.55; }
+            var coAvailWidth = Math.max(1, bw - coPad * 2);
+            var coFontSize = coFontSizeByHeight;
+            if (coWidthAtHeightFont > coAvailWidth) {
+              coFontSize = Math.max(10, coFontSizeByHeight * coAvailWidth / coWidthAtHeightFont);
+            }
+
             coText.setAttribute("x", bx + coPad);
             coText.setAttribute("y", by + coPad);
             coText.setAttribute("font-size", coFontSize);
-            coText.setAttribute(
-              "font-family",
-              "ui-sans-serif, system-ui, -apple-system, sans-serif"
-            );
-            coText.setAttribute("font-weight", "500");
+            coText.setAttribute("font-family", coFontFamily);
+            coText.setAttribute("font-weight", coFontWeight);
             var coMeasured = self._fillTextWithWrappedTspans(
-              coText, calloutText, bw - coPad * 2, coFontSize
+              coText, calloutText, coAvailWidth, coFontSize
             );
+
+            // Firefox compat: same first-tspan absolute-y override
+            // `_renderTitleSibling` uses — Firefox doesn't honor
+            // `dy="1em"` on the first <tspan>, so without this the
+            // callout text floats at the top of the bbox in Firefox.
+            var coFirstTspan = coText.querySelector("tspan");
+            if (coFirstTspan) {
+              coFirstTspan.setAttribute("y", by + coPad + coFontSize);
+              coFirstTspan.removeAttribute("dy");
+            }
 
             // Shrink-wrap the callout's text bbox the same way text
             // shapes and titles do — keeps the underline + leader
-            // attached to the visible text edge.
+            // attached to the visible text edge. `_renderedBox` is
+            // the shrunk visual; geometry.text_box stays at the
+            // user-set size. Handle drag math (in _startHandleDrag
+            // / _applyHandleDrag) uses delta from startPt against
+            // the FULL geometry, so dragging a handle never bakes
+            // the visual shrink back into the storage box.
             var coActualW = Math.max(coMeasured.width + coPad * 2, coFontSize);
             var coActualH = Math.max(coMeasured.height + coPad * 2, coFontSize * 1.2);
             if (coRect) {
@@ -1723,6 +1762,20 @@
         var measured = this._fillTextWithWrappedTspans(
           textEl, trimmed, availWidth, fontSize
         );
+
+        // Firefox compat: the wrap helper places the first tspan with
+        // `dy="1em"` to push it one em below the text element's y.
+        // Safari/WebKit honor that, Firefox ignores `dy` on the FIRST
+        // tspan and lands the line at y (top of the rect) instead.
+        // Override with an absolute y on the first tspan so both
+        // browsers render the title at the same vertical position
+        // (matching Safari's existing behavior — y + 1em = y + fontSize
+        // since 1em equals the current font-size).
+        var firstTspan = textEl.querySelector("tspan");
+        if (firstTspan) {
+          firstTspan.setAttribute("y", ty + pad + fontSize);
+          firstTspan.removeAttribute("dy");
+        }
 
         // Shrink-wrap the rect to the rendered text dimensions so
         // handles + the underline sit right at the text edge instead
@@ -2044,9 +2097,24 @@
         shape._renderedTitleImage ||
         this._shapeTitleBoxImage(shape, this._lastBboxTopImageFor(shape))
       ));
+      var dragged = false;
 
       function onMove(ev) {
         var pt = self._toImage(ev);
+        if (!dragged) {
+          // 3px screen-space dead zone — distinguishes "drag to
+          // resize" from "I'm just clicking on a handle". Without
+          // this, a bare click on a handle would fall through to
+          // onUp and fire `etcher:updated`, round-tripping through
+          // the LiveView and writing back possibly-normalized
+          // title_box values that visibly drift the title's size
+          // each click. Same gating the body-drag and title-drag
+          // handlers already use.
+          var aC = self._imageToContainer(startBox);
+          var bC = self._imageToContainer(pt);
+          if ((bC.x - aC.x) * (bC.x - aC.x) + (bC.y - aC.y) * (bC.y - aC.y) < 9) return;
+          dragged = true;
+        }
         var right = startBox.x + startBox.w;
         var bottom = startBox.y + startBox.h;
         var nx, ny, nw, nh;
@@ -2071,11 +2139,13 @@
         handleEl.removeEventListener("pointerup", onUp);
         handleEl.removeEventListener("pointercancel", onUp);
         try { handleEl.releasePointerCapture(ev.pointerId); } catch (_) {}
-        // Snap stored title_box to the shrunk-to-text bbox so the
-        // persisted dimensions match what's on screen — the rect, the
-        // handles, and the storage all agree. Safe with the width-fit
-        // font cap in `_renderTitleSibling`, which prevents the
-        // multi-line-wrap growth that this commit used to amplify.
+        if (!dragged) return;
+        // Snap stored title_box to the rendered bbox so the
+        // persisted dimensions match what's on screen. Now a no-op
+        // since `_renderTitleSibling` keeps the rect at user-set
+        // dims and `_renderedTitleImage` mirrors title_box, but
+        // kept as a safety net in case future render changes
+        // reintroduce a divergence.
         if (shape._renderedTitleImage) {
           shape.metadata = Object.assign({}, shape.metadata || {}, {
             title_box: {
@@ -4450,20 +4520,42 @@
       // Text shapes + callouts snap their handles to the shrunk-to-
       // text bbox (`_renderedBox`); the drag math has to start from
       // there too or the cursor and the bbox edge will diverge.
+      // Callouts use FULL geometry (not _renderedBox) for drag math
+      // so the corner-resize delta accumulates against the user-set
+      // text_box rather than the shrunk visual. Without this, every
+      // drag bakes the shrink-fit offset back into geometry and the
+      // callout visibly shrinks on each interaction. _applyHandleDrag
+      // gets startPt for callout text-corner drags and uses the
+      // pointer DELTA against startGeom; visual continues to
+      // shrink-fit independently. Text shapes still snap geometry to
+      // the rendered box on release (existing 0.2.x behavior).
       var startGeom;
       if (shape.kind === "text" && shape._renderedBox) {
         startGeom = JSON.parse(JSON.stringify(shape._renderedBox));
-      } else if (shape.kind === "callout" && shape._renderedBox) {
-        var coStart = JSON.parse(JSON.stringify(shape.geometry));
-        coStart.text_box = JSON.parse(JSON.stringify(shape._renderedBox));
-        startGeom = coStart;
       } else {
         startGeom = JSON.parse(JSON.stringify(shape.geometry));
       }
+      var startPt = self._toImage(e);
+      var dragged = false;
 
       function onMove(ev) {
         var pt = self._toImage(ev);
-        self._applyHandleDrag(shape, idx, pt, startGeom);
+        if (!dragged) {
+          // 3px screen-space dead zone — distinguishes "drag to
+          // resize" from "I'm just clicking on a handle". Without
+          // this, a bare click on a text-shape or callout handle
+          // falls through to onUp and snaps geometry to the shrunk
+          // `_renderedBox`, then round-trips through the LiveView.
+          // Each click trims a little off the box, so the callout /
+          // text shape visibly shrinks every time the user touches
+          // a handle. Same gating the body-drag and title-drag
+          // handlers already use.
+          var aC = self._imageToContainer(startPt);
+          var bC = self._imageToContainer(pt);
+          if ((bC.x - aC.x) * (bC.x - aC.x) + (bC.y - aC.y) * (bC.y - aC.y) < 9) return;
+          dragged = true;
+        }
+        self._applyHandleDrag(shape, idx, pt, startGeom, startPt);
         self._renderShape(shape);
         self._positionAllHandles(shape);
       }
@@ -4473,27 +4565,23 @@
         handleEl.removeEventListener("pointerup", onUp);
         handleEl.removeEventListener("pointercancel", onUp);
         try { handleEl.releasePointerCapture(ev.pointerId); } catch (_) {}
-        // Persist the shrunk-to-text bbox rather than the larger
-        // "drag envelope" the user swept through — keeps the stored
-        // geometry consistent with what's visible. Applies to text
-        // shapes (whole geometry is the bbox) and callouts (the text
-        // endpoint of the geometry is the bbox).
+        if (!dragged) {
+          self._showTooltipFor(shape);
+          return;
+        }
+        // Text shapes still persist the shrunk-to-text bbox so the
+        // stored geometry matches what's drawn — they don't have
+        // the callout's drag-math complexity (no anchor, geometry
+        // IS the box). Callouts intentionally skip this snap: the
+        // delta-based drag math in _applyHandleDrag already keeps
+        // the user-set text_box intact, and snapping to _renderedBox
+        // would re-introduce the shrink cascade across drags.
         if (shape.kind === "text" && shape._renderedBox) {
           shape.geometry = {
             x: shape._renderedBox.x,
             y: shape._renderedBox.y,
             w: shape._renderedBox.w,
             h: shape._renderedBox.h
-          };
-        } else if (shape.kind === "callout" && shape._renderedBox) {
-          shape.geometry = {
-            anchor: shape.geometry.anchor,
-            text_box: {
-              x: shape._renderedBox.x,
-              y: shape._renderedBox.y,
-              w: shape._renderedBox.w,
-              h: shape._renderedBox.h
-            }
           };
         }
         if (shape.uuid) {
@@ -4631,7 +4719,7 @@
       }
     },
 
-    _applyHandleDrag: function(shape, idx, pt, startGeom) {
+    _applyHandleDrag: function(shape, idx, pt, startGeom, startPt) {
       switch (shape.kind) {
         case "rectangle":
         case "text": {
@@ -4670,6 +4758,18 @@
           // idx 0 = anchor (what's pointed at); idx 1-4 = text-bbox
           // corners (TL, TR, BR, BL), mirroring rectangle's resize
           // handlers but writing back into `geometry.text_box`.
+          //
+          // Callout corner drags use DELTA math (pt - startPt against
+          // startGeom.text_box) instead of absolute pt against the
+          // visual box. The visual rect shrink-wraps to the text
+          // (smaller than `geometry.text_box`), so the user is
+          // grabbing a handle at the SHRUNK corner. Absolute-pt math
+          // would compute new geometry as (visual + delta), shrinking
+          // geometry every drag. Delta math against the full
+          // geometry preserves the user's drag intent: new geometry
+          // = old geometry + delta. Anchor (idx 0) still uses
+          // absolute pt — the anchor is rendered at its actual
+          // position, no visual/storage offset.
           var startBox = this._calloutTextBoxImage(startGeom);
           if (idx === 0) {
             shape.geometry = {
@@ -4677,14 +4777,14 @@
               text_box: { x: startBox.x, y: startBox.y, w: startBox.w, h: startBox.h }
             };
           } else {
-            var right = startBox.x + startBox.w;
-            var bottom = startBox.y + startBox.h;
+            var dxC = startPt ? pt.x - startPt.x : 0;
+            var dyC = startPt ? pt.y - startPt.y : 0;
             var nx, ny, nw, nh;
             switch (idx) {
-              case 1: nx = pt.x;     ny = pt.y;     nw = right - pt.x;     nh = bottom - pt.y;    break;
-              case 2: nx = startBox.x; ny = pt.y;   nw = pt.x - startBox.x; nh = bottom - pt.y;    break;
-              case 3: nx = startBox.x; ny = startBox.y; nw = pt.x - startBox.x; nh = pt.y - startBox.y; break;
-              case 4: nx = pt.x;     ny = startBox.y; nw = right - pt.x;   nh = pt.y - startBox.y; break;
+              case 1: nx = startBox.x + dxC; ny = startBox.y + dyC; nw = startBox.w - dxC; nh = startBox.h - dyC; break;
+              case 2: nx = startBox.x;       ny = startBox.y + dyC; nw = startBox.w + dxC; nh = startBox.h - dyC; break;
+              case 3: nx = startBox.x;       ny = startBox.y;       nw = startBox.w + dxC; nh = startBox.h + dyC; break;
+              case 4: nx = startBox.x + dxC; ny = startBox.y;       nw = startBox.w - dxC; nh = startBox.h + dyC; break;
               default: return;
             }
             if (nw < 0) { nx += nw; nw = -nw; }

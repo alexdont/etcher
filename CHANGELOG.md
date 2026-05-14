@@ -4,6 +4,53 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.4] — 2026-05-15
+
+Cross-browser fixes + a callout stability sweep — mostly fallout from
+the 0.2.3 title fix not being symmetric across the rendering paths.
+
+### Fixed
+
+- **Title / callout / text-shape labels render at the same vertical
+  position in Firefox as in Safari.** The shared
+  `_fillTextWithWrappedTspans` placed the first `<tspan>` with
+  `dy="1em"` to push the line one em below the text element's `y`.
+  Safari/WebKit honors that, Firefox does not reliably honor `dy` on
+  the FIRST tspan and lands the line at `y` (top of the rect) — the
+  title text floated above the rect's bottom edge where the leader
+  attaches. Both `_renderTitleSibling` and the callout render path
+  now override the first tspan with an absolute `y = text_y +
+  fontSize` after the wrap helper runs (matching Safari's existing
+  hanging-baseline position).
+- **Callouts no longer grow exponentially when text overflows.** The
+  width-fit font cap that 0.2.3 added to `_renderTitleSibling` was
+  missing from the callout render path, so a long callout label
+  triggered the same multi-line wrap → grow → wider font → more wraps
+  feedback loop the title fix originally addressed. Same cap applied
+  to callouts.
+- **Click on a title or callout/text-shape handle no longer triggers
+  a phantom resize.** `_startTitleHandleDrag` and `_startHandleDrag`
+  unconditionally fired `etcher:updated` and snapped geometry to the
+  rendered (shrunk) box on `pointerup`, even when the user just
+  clicked without dragging. Both now use a 3-px screen-space dead
+  zone (matching the body-drag and title-drag handlers) so a bare
+  click is a no-op.
+- **Callout corner drags no longer shrink the box on every
+  interaction.** Drag math used `_renderedBox` (shrink-fit visual)
+  as the start reference, so each drag computed a new geometry of
+  `(visual + delta)` instead of `(geometry + delta)`. With shrink-fit
+  on, that baked the shrink offset back into storage every drag —
+  the callout visibly shrunk a bit each time, then converged. Drag
+  math now uses pointer DELTA (`pt - startPt`) against the full
+  `geometry.text_box`, so dragging a handle by Δpx grows or shrinks
+  geometry by exactly Δpx; the visual continues to shrink-fit
+  independently. Anchor drag (idx 0) still uses absolute pt — no
+  visual/storage offset there.
+- The `_startHandleDrag` `onUp` snap-to-`_renderedBox` is skipped for
+  callouts (delta math already keeps geometry consistent with the
+  visible drag). Text shapes still snap on release — same 0.2.x
+  behavior, no regression.
+
 ## [0.2.3] — 2026-05-14
 
 Single bug fix — stops the runaway growth of shape titles on drag /

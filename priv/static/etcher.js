@@ -1683,30 +1683,59 @@
       }
       if (textEl) {
         var pad = 4;
-        var fontSize = Math.max(10, th * 0.65);
+        var fontFamily = "ui-sans-serif, system-ui, -apple-system, sans-serif";
+        var fontWeight = "500";
+        var fontSizeByHeight = Math.max(10, th * 0.65);
+
+        // Width-fit cap: scale the font down so the title fits the box
+        // width on a single line. Critical for stability — without it,
+        // an overflowing title wraps onto multiple lines, `actualH`
+        // exceeds `th`, that taller height gets persisted back into
+        // `title_box` on release, the next render derives an even
+        // larger font, more lines wrap, and the title grows
+        // exponentially per interaction. With the cap, font-size is
+        // bounded by both axes and the system has a fixed point.
+        if (!this._measureCanvas) {
+          this._measureCanvas = document.createElement("canvas");
+        }
+        var ctx = this._measureCanvas.getContext("2d");
+        ctx.font = fontWeight + " " + fontSizeByHeight + "px " + fontFamily;
+        var widthAtHeightFont;
+        try { widthAtHeightFont = ctx.measureText(trimmed).width; }
+        catch (_) { widthAtHeightFont = trimmed.length * fontSizeByHeight * 0.55; }
+        var availWidth = Math.max(1, tw - pad * 2);
+        var fontSize = fontSizeByHeight;
+        if (widthAtHeightFont > availWidth) {
+          // Floor of 10 keeps the title legible in pathologically
+          // narrow boxes — at that point we let the rect grow past
+          // `tw` to fit the text rather than render unreadable glyphs.
+          fontSize = Math.max(10, fontSizeByHeight * availWidth / widthAtHeightFont);
+        }
+
         textEl.setAttribute("x", tx + pad);
         textEl.setAttribute("y", ty + pad);
         textEl.setAttribute("font-size", fontSize);
-        textEl.setAttribute(
-          "font-family",
-          "ui-sans-serif, system-ui, -apple-system, sans-serif"
+        textEl.setAttribute("font-family", fontFamily);
+        textEl.setAttribute("font-weight", fontWeight);
+        // At the width-fit font-size the title fits in one line, so
+        // the wrap helper produces a single tspan — no multi-line
+        // growth path.
+        var measured = this._fillTextWithWrappedTspans(
+          textEl, trimmed, availWidth, fontSize
         );
-        textEl.setAttribute("font-weight", "500");
-        var measured =
-          this._fillTextWithWrappedTspans(textEl, trimmed, tw - pad * 2, fontSize);
 
-        // Shrink-wrap the rect to the rendered text dimensions so the
-        // bbox hugs the text exactly — corner handles + the underline
-        // sit right at the text edge instead of leaving empty space.
+        // Shrink-wrap the rect to the rendered text dimensions so
+        // handles + the underline sit right at the text edge instead
+        // of leaving empty space inside the bbox.
         var actualW = Math.max(measured.width + pad * 2, fontSize);
         var actualH = Math.max(measured.height + pad * 2, fontSize * 1.2);
         if (rectEl) {
           rectEl.setAttribute("width",  actualW);
           rectEl.setAttribute("height", actualH);
         }
-        // Convert container-px shrink back to image px so the cache
-        // matches the units used by handles + drag math. Falls back
-        // to the requested bbox dimensions if the scale degenerates.
+        // Convert the container-px shrink back to image px so handles
+        // + drag math operate on the visible rect. Falls back to the
+        // input bbox if the scale degenerates.
         var sx = tw > 0 ? tw / titleBox.w : 1;
         var sy = th > 0 ? th / titleBox.h : sx;
         shape._renderedTitleImage = {
@@ -2042,8 +2071,11 @@
         handleEl.removeEventListener("pointerup", onUp);
         handleEl.removeEventListener("pointercancel", onUp);
         try { handleEl.releasePointerCapture(ev.pointerId); } catch (_) {}
-        // Persist the shrunk-to-text box so storage matches what's
-        // rendered (no leftover "drag envelope" wider than the text).
+        // Snap stored title_box to the shrunk-to-text bbox so the
+        // persisted dimensions match what's on screen — the rect, the
+        // handles, and the storage all agree. Safe with the width-fit
+        // font cap in `_renderTitleSibling`, which prevents the
+        // multi-line-wrap growth that this commit used to amplify.
         if (shape._renderedTitleImage) {
           shape.metadata = Object.assign({}, shape.metadata || {}, {
             title_box: {
@@ -2125,8 +2157,10 @@
         tg.removeEventListener("pointerup", onUp);
         tg.removeEventListener("pointercancel", onUp);
         if (dragged) {
-          // Same shrink-on-release as title-handle drags so the
-          // saved bbox always hugs the text, never the drag envelope.
+          // Snap to the shrunk-to-text bbox on release — same
+          // rationale as the handle-drag path: keep storage aligned
+          // with what's drawn. Safe because the width-fit font cap
+          // prevents the multi-line growth this used to amplify.
           if (shape._renderedTitleImage) {
             shape.metadata = Object.assign({}, shape.metadata || {}, {
               title_box: {
@@ -4542,9 +4576,9 @@
         el.removeEventListener("pointercancel", onUp);
         try { el.releasePointerCapture(ev.pointerId); } catch (_) {}
         if (dragged) {
-          // If the shape carries a title, sync the stored title_box
-          // with the shrunk-to-text dimensions so the storage stays
-          // consistent with what's drawn after the translation.
+          // Sync stored title_box to the shrunk-to-text bbox after
+          // the body translation, matching the handle/drag paths and
+          // keeping storage aligned with what's drawn.
           if (startTitleBox && shape._renderedTitleImage) {
             shape.metadata = Object.assign({}, shape.metadata || {}, {
               title_box: {

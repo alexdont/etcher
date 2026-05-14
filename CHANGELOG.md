@@ -4,6 +4,29 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.3] — 2026-05-14
+
+Single bug fix — stops the runaway growth of shape titles on drag /
+click. No API change, no behavior change for code that doesn't hit
+the bug.
+
+### Fixed
+
+- **Shape title text no longer balloons on every interaction.** When
+  a title's content overflowed the default box width at the
+  height-derived font-size, `_fillTextWithWrappedTspans` wrapped it
+  onto multiple lines. `actualH = measured.height + pad·2` then
+  exceeded the input `th`, that taller height got persisted back
+  into `metadata.title_box` on release, the next render derived an
+  even larger font, more lines wrapped, and the title grew
+  exponentially per interaction (`title_box.h` going
+  22 → 54 → 273 → … in three drags). `_renderTitleSibling` now
+  caps the font-size so the title fits the box width on a single
+  line (floor of 10 px), bounding `actualH` to one line of text.
+  The shrink-to-text rendering + handle-drag commit are unchanged;
+  with the cap in place the system has a fixed point instead of a
+  feedback loop.
+
 ## [0.2.2] — 2026-05-14
 
 Follow-up patch to 0.2.1: restore body-grab on the editing shape,

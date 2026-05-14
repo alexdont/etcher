@@ -1,7 +1,7 @@
 defmodule Etcher.MixProject do
   use Mix.Project
 
-  @version "0.2.2"
+  @version "0.2.3"
   @description "Annotation overlay for Fresco-based image viewers in Phoenix. Draw shapes, fire LiveView events, persist via a default Ecto schema or your own storage adapter."
   @source_url "https://github.com/alexdont/etcher"
 

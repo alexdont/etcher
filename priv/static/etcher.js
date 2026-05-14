@@ -1507,19 +1507,20 @@
             coText.setAttribute("font-size", coFontSize);
             coText.setAttribute("font-family", coFontFamily);
             coText.setAttribute("font-weight", coFontWeight);
+            // Cross-browser baseline fix: override the factory-default
+            // `dominant-baseline: hanging` with `alphabetic` (the
+            // default for SVG text). Safari's `hanging` interpretation
+            // renders text ABOVE the hanging baseline, Firefox's
+            // renders text BELOW per spec — so a callout that fits in
+            // Safari shows its text below the rect in Firefox. Both
+            // browsers honor `alphabetic` identically, and the wrap
+            // helper's `dy="1em"` on the first tspan still positions
+            // the line one em below the text element's y (the
+            // alphabetic baseline lands at by + coPad + coFontSize).
+            coText.setAttribute("dominant-baseline", "alphabetic");
             var coMeasured = self._fillTextWithWrappedTspans(
               coText, calloutText, coAvailWidth, coFontSize
             );
-
-            // Firefox compat: same first-tspan absolute-y override
-            // `_renderTitleSibling` uses — Firefox doesn't honor
-            // `dy="1em"` on the first <tspan>, so without this the
-            // callout text floats at the top of the bbox in Firefox.
-            var coFirstTspan = coText.querySelector("tspan");
-            if (coFirstTspan) {
-              coFirstTspan.setAttribute("y", by + coPad + coFontSize);
-              coFirstTspan.removeAttribute("dy");
-            }
 
             // Shrink-wrap the callout's text bbox the same way text
             // shapes and titles do — keeps the underline + leader
@@ -1611,6 +1612,11 @@
               "ui-sans-serif, system-ui, -apple-system, sans-serif"
             );
             ttext.setAttribute("font-weight", "500");
+            // Cross-browser baseline fix — see callout render block.
+            // `hanging` is interpreted differently by Safari and Firefox
+            // for Latin text; switching to `alphabetic` (the SVG
+            // default) keeps text positioned identically across browsers.
+            ttext.setAttribute("dominant-baseline", "alphabetic");
             var measured =
               self._fillTextWithWrappedTspans(ttext, titleText, tw - pad * 2, fontSize);
 
@@ -1756,26 +1762,21 @@
         textEl.setAttribute("font-size", fontSize);
         textEl.setAttribute("font-family", fontFamily);
         textEl.setAttribute("font-weight", fontWeight);
+        // Cross-browser baseline fix — see callout render block.
+        // `hanging` is interpreted differently by Safari and Firefox
+        // for Latin text (Safari renders text above the hanging
+        // baseline, Firefox renders below per spec). Switching to
+        // `alphabetic` (the SVG default) keeps the title text in the
+        // same position in both browsers, with the wrap helper's
+        // `dy="1em"` on the first tspan dropping the alphabetic
+        // baseline one em below `textEl.y`.
+        textEl.setAttribute("dominant-baseline", "alphabetic");
         // At the width-fit font-size the title fits in one line, so
         // the wrap helper produces a single tspan — no multi-line
         // growth path.
         var measured = this._fillTextWithWrappedTspans(
           textEl, trimmed, availWidth, fontSize
         );
-
-        // Firefox compat: the wrap helper places the first tspan with
-        // `dy="1em"` to push it one em below the text element's y.
-        // Safari/WebKit honor that, Firefox ignores `dy` on the FIRST
-        // tspan and lands the line at y (top of the rect) instead.
-        // Override with an absolute y on the first tspan so both
-        // browsers render the title at the same vertical position
-        // (matching Safari's existing behavior — y + 1em = y + fontSize
-        // since 1em equals the current font-size).
-        var firstTspan = textEl.querySelector("tspan");
-        if (firstTspan) {
-          firstTspan.setAttribute("y", ty + pad + fontSize);
-          firstTspan.removeAttribute("dy");
-        }
 
         // Shrink-wrap the rect to the rendered text dimensions so
         // handles + the underline sit right at the text edge instead

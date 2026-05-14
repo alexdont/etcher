@@ -12,16 +12,19 @@ the 0.2.3 title fix not being symmetric across the rendering paths.
 ### Fixed
 
 - **Title / callout / text-shape labels render at the same vertical
-  position in Firefox as in Safari.** The shared
-  `_fillTextWithWrappedTspans` placed the first `<tspan>` with
-  `dy="1em"` to push the line one em below the text element's `y`.
-  Safari/WebKit honors that, Firefox does not reliably honor `dy` on
-  the FIRST tspan and lands the line at `y` (top of the rect) — the
-  title text floated above the rect's bottom edge where the leader
-  attaches. Both `_renderTitleSibling` and the callout render path
-  now override the first tspan with an absolute `y = text_y +
-  fontSize` after the wrap helper runs (matching Safari's existing
-  hanging-baseline position).
+  position in Firefox as in Safari.** The text elements were created
+  with `dominant-baseline: hanging`, which Safari and Firefox
+  interpret differently for Latin text — Safari renders glyphs ABOVE
+  the hanging baseline while Firefox renders them BELOW per spec.
+  Combined with the wrap helper's `dy="1em"` on the first tspan,
+  callout text rendered correctly in Safari but floated below the
+  rect in Firefox. All three render paths (`_renderTitleSibling`,
+  the `case "text"` branch, and the callout branch in `_renderShape`)
+  now override `dominant-baseline` to `alphabetic` on the text
+  element each render. Both browsers honor alphabetic identically:
+  the alphabetic baseline lands at `text.y + 1em`, putting the text
+  cleanly inside the rect with the underline / leader attaching at
+  the rect's bottom edge.
 - **Callouts no longer grow exponentially when text overflows.** The
   width-fit font cap that 0.2.3 added to `_renderTitleSibling` was
   missing from the callout render path, so a long callout label

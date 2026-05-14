@@ -4,6 +4,45 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.2] — 2026-05-14
+
+Follow-up patch to 0.2.1: restore body-grab on the editing shape,
+keep the tooltip from blocking the satellite title label, and make
+edit-mode survive a click on a sibling shape now that shapes are
+`pointer-events: none`.
+
+### Fixed
+
+- **Body-grab restored on the editing shape.** With 0.2.1 flipping
+  every shape to `pointer-events: none`, the click-drag-the-body-
+  to-move-the-shape gesture stopped firing because the shape's
+  own pointerdown listener no longer saw any events. The
+  currently-edit-mode shape now re-enables `pointer-events:
+  visiblePainted` via a `.etcher-shape.is-editing` rule — only
+  THAT shape catches its own pointerdown; the rest of the shapes
+  stay invisible to events so pan/zoom still passes through them.
+- **Tooltip no longer covers the title satellite.** When the cursor
+  was over a shape's movable title label, the hover tooltip
+  rendered above the parent shape — directly on top of the title
+  the user was trying to grab. The doc-level hover hit-test now
+  detects when the cursor is inside a title's bbox and suppresses
+  the tooltip for that hit; hover styling on the parent shape
+  stays applied so it's still clear which annotation is targeted.
+- **Edit-mode and tooltip-pin survive a click on a sibling shape.**
+  Both outside-click handlers (the edit-mode tear-down and the
+  tooltip-pin tear-down) used `e.target.closest(".etcher-shape")`
+  to detect "is this click on a shape?" — but since 0.2.1 shapes
+  are `pointer-events: none`, the click's DOM target is OSD's
+  canvas, not the shape. The handlers now fall back to an
+  image-px hit-test via `_shapeAt(pt)` so clicking a different
+  shape switches edit mode or the pin instead of tearing down to
+  empty.
+
+### Internal
+
+- `_setHoveredShape/2` (was /1) gains an `onTitle` flag.
+- New helper `_pointOnTitleOf/2` for the title-bbox hit-test.
+
 ## [0.2.1] — 2026-05-14
 
 Patch release: pan / zoom now work over shapes.
@@ -162,6 +201,7 @@ Initial release.
   tools; pencil-button toggle integrated with Fresco's nav column via
   `handle.appendNavButton/3` (Fresco 0.2+).
 
+[0.2.2]: https://github.com/alexdont/etcher/releases/tag/v0.2.2
 [0.2.1]: https://github.com/alexdont/etcher/releases/tag/v0.2.1
 [0.2.0]: https://github.com/alexdont/etcher/releases/tag/v0.2.0
 [0.1.0]: https://github.com/alexdont/etcher/releases/tag/v0.1.0

@@ -193,6 +193,15 @@
       // hit-test the cursor against `self.shapes` in image-px space.
       "  pointer-events: none;",
       "}",
+      // EXCEPT: the shape currently in edit mode catches pointer
+      // events on its painted body so a click-drag from inside the
+      // shape moves it (`_startShapeMove`). The user is actively
+      // editing this one — they'd rather drag than pan past it; the
+      // non-editing siblings stay pointer-events: none so pan/zoom
+      // works everywhere else.
+      ".etcher-shape.is-editing {",
+      "  pointer-events: visiblePainted;",
+      "}",
       // Callout: the <g> container picks up `color` (default blue,
       // overridden by the picker via `style.color`); children resolve
       // `currentColor` against it. Text gets a subtle white halo so
@@ -2446,13 +2455,21 @@
 
       self._docMouseMove = function(e) {
         if (!overContainer(e)) {
-          if (self._hoveredShape) self._setHoveredShape(null);
+          if (self._hoveredShape) self._setHoveredShape(null, false);
           return;
         }
         var pt;
         try { pt = self._toImage(e); } catch (_) { return; }
         var hit = self._shapeAt(pt);
-        if (hit !== self._hoveredShape) self._setHoveredShape(hit);
+        // If the cursor is on a shape's title satellite (the
+        // movable label group), the user is most likely about to
+        // grab/drag/edit the title — suppress the tooltip so it
+        // doesn't cover the very thing they're trying to grab.
+        // Hover styling on the parent stays applied either way.
+        var onTitle = !!hit && self._pointOnTitleOf(hit, pt);
+        if (hit !== self._hoveredShape || onTitle !== self._hoveredOnTitle) {
+          self._setHoveredShape(hit, onTitle);
+        }
       };
 
       // Tap-vs-drag tracker for shape clicks. Records pointerdown
@@ -2535,7 +2552,7 @@
       this._docMouseMove = this._docPointerDown = null;
       this._docPointerMove = this._docPointerUp = this._docDblClick = null;
       this._pendingTap = null;
-      this._setHoveredShape(null);
+      this._setHoveredShape(null, false);
     },
 
     // Diff the currently-hovered shape against the new one. Fires
@@ -2543,21 +2560,53 @@
     // schedules tooltip hide on the previous shape; adds
     // `.is-hovered` + shows tooltip on the new one. Pinned tooltips
     // are left alone.
-    _setHoveredShape: function(next) {
+    //
+    // `onTitle` (bool) means the cursor is specifically over the
+    // shape's title satellite. Hover styling on the parent shape
+    // still applies, but the tooltip is suppressed so it doesn't
+    // sit on top of the very label the user is trying to grab.
+    _setHoveredShape: function(next, onTitle) {
+      onTitle = !!onTitle;
       var prev = this._hoveredShape;
-      if (prev === next) return;
-      if (prev && prev.el) {
+      var prevOnTitle = this._hoveredOnTitle === true;
+
+      // Hide the tooltip when:
+      // 1. We're moving off a shape entirely.
+      // 2. We just moved ONTO the title (suppress per the rule above).
+      var hideTooltip =
+        (!next && prev) || (next && onTitle && !prevOnTitle);
+      // Show the tooltip when:
+      // 1. We just moved onto a NEW shape's body.
+      // 2. We moved off the title back onto the body of the same shape.
+      var showTooltip =
+        next && !onTitle &&
+        (next !== prev || (next === prev && prevOnTitle));
+
+      if (prev !== next && prev && prev.el) {
         prev.el.classList.remove("is-hovered");
-        if (!this.tooltipPinned) this._scheduleHideTooltip();
       }
-      if (next && next.el) {
+      if (prev !== next && next && next.el) {
         next.el.classList.add("is-hovered");
-        if (!this.tooltipPinned) this._showTooltipFor(next);
       }
+      if (hideTooltip && !this.tooltipPinned) this._scheduleHideTooltip();
+      if (showTooltip && !this.tooltipPinned) this._showTooltipFor(next);
+
       this._hoveredShape = next;
+      this._hoveredOnTitle = onTitle;
       if (this.overlayWrapper) {
         this.overlayWrapper.classList.toggle("is-shape-hovered", !!next);
       }
+    },
+
+    // True iff `pt` (image-px) lies inside `shape`'s title satellite
+    // (only present for rect/circle/polygon/freehand with a non-blank
+    // `metadata.title`). Used to suppress the tooltip while the user
+    // is interacting with the movable title label.
+    _pointOnTitleOf: function(shape, pt) {
+      var box = shape && shape.titleGroup && shape._renderedTitleImage;
+      if (!box) return false;
+      return pt.x >= box.x && pt.x <= box.x + box.w &&
+             pt.y >= box.y && pt.y <= box.y + box.h;
     },
 
     _showTooltipFor: function(shape) {

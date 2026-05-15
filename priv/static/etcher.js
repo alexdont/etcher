@@ -120,6 +120,10 @@
     // toolbar sizes (the previous version had pinched serifs that
     // muddied the silhouette).
     text:     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 6 L19 6 M12 6 L12 18"/></svg>',
+    // Dimension — horizontal shaft with V-arrows on both ends. Mirrors
+    // the architectural dimension-line annotation the tool draws (line
+    // + 2 arrows + black label sliding along the shaft).
+    dimension:'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12 L19 12 M5 12 L8 9 M5 12 L8 15 M19 12 L16 9 M19 12 L16 15"/></svg>',
     close:    '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>'
   };
 
@@ -490,6 +494,7 @@
     freehand:  { icon: ICONS.freehand,  title: "Freehand" },
     callout:   { icon: ICONS.callout,   title: "Callout (point at something, write a label)" },
     text:      { icon: ICONS.text,      title: "Text label (drag a box, then type)" },
+    dimension: { icon: ICONS.dimension, title: "Dimension (line with arrows + slidable label)" },
     eraser:    { icon: ICONS.trash,     title: "Eraser (click and drag to wipe shapes)" }
   };
 
@@ -1639,6 +1644,101 @@
           }
           break;
         }
+        case "dimension": {
+          // <g> with: <line> shaft, two <polyline> V-arrows at the
+          // endpoints, and a <text> label that floats at a 0–1 offset
+          // along the line (default midpoint). Arrow color follows
+          // the shape's currentColor; label is always black with a
+          // white halo for cross-color readability.
+          var shaftEl = el.querySelector(".etcher-dim-shaft");
+          var arrowEls = el.querySelectorAll(".etcher-dim-arrow");
+          var labelEl = el.querySelector(".etcher-dim-label");
+
+          var aImg = { x: g.a[0], y: g.a[1] };
+          var bImg = { x: g.b[0], y: g.b[1] };
+          var aC = self._imageToContainer(aImg);
+          var bC = self._imageToContainer(bImg);
+
+          if (shaftEl) {
+            shaftEl.setAttribute("x1", aC.x);
+            shaftEl.setAttribute("y1", aC.y);
+            shaftEl.setAttribute("x2", bC.x);
+            shaftEl.setAttribute("y2", bC.y);
+          }
+
+          // V-arrowheads at each endpoint, opening backward toward
+          // the other end. Skip when the line is degenerate (length
+          // 0) — draft state during the very first pointermove tick.
+          var ddx = bC.x - aC.x;
+          var ddy = bC.y - aC.y;
+          var dlen = Math.sqrt(ddx * ddx + ddy * ddy);
+          if (dlen > 0.001) {
+            var ux = ddx / dlen, uy = ddy / dlen;
+            var arrowLen = 10;
+            var arrowHalfWidth = 5;
+            // Arrow at A: tip at A, wings extending toward B
+            // (`+ u * arrowLen`) ± perpendicular.
+            var aWxA = aC.x + ux * arrowLen + -uy * arrowHalfWidth;
+            var aWyA = aC.y + uy * arrowLen + ux * arrowHalfWidth;
+            var aWxB = aC.x + ux * arrowLen - -uy * arrowHalfWidth;
+            var aWyB = aC.y + uy * arrowLen - ux * arrowHalfWidth;
+            if (arrowEls[0]) {
+              arrowEls[0].setAttribute(
+                "points",
+                aWxA + "," + aWyA + " " + aC.x + "," + aC.y + " " + aWxB + "," + aWyB
+              );
+            }
+            // Arrow at B: tip at B, wings extending toward A
+            // (`- u * arrowLen`) ± perpendicular.
+            var bWxA = bC.x - ux * arrowLen + -uy * arrowHalfWidth;
+            var bWyA = bC.y - uy * arrowLen + ux * arrowHalfWidth;
+            var bWxB = bC.x - ux * arrowLen - -uy * arrowHalfWidth;
+            var bWyB = bC.y - uy * arrowLen - ux * arrowHalfWidth;
+            if (arrowEls[1]) {
+              arrowEls[1].setAttribute(
+                "points",
+                bWxA + "," + bWyA + " " + bC.x + "," + bC.y + " " + bWxB + "," + bWyB
+              );
+            }
+          } else {
+            if (arrowEls[0]) arrowEls[0].setAttribute("points", "");
+            if (arrowEls[1]) arrowEls[1].setAttribute("points", "");
+          }
+
+          // Label at lerp(A, B, title_offset). Always horizontal
+          // (text-anchor middle, alphabetic baseline) so the label
+          // stays readable at any line angle. The white halo created
+          // by stroke + paint-order visually breaks the shaft line
+          // behind the text.
+          if (labelEl) {
+            var labelText = (shape.metadata && shape.metadata.title) || "";
+            var tOff = 0.5;
+            if (shape.metadata && typeof shape.metadata.title_offset === "number") {
+              tOff = Math.max(0, Math.min(1, shape.metadata.title_offset));
+            }
+            var labelX = aC.x + (bC.x - aC.x) * tOff;
+            var labelYCenter = aC.y + (bC.y - aC.y) * tOff;
+            var dimFontSize = 14;
+            labelEl.setAttribute("x", labelX);
+            // y here positions the alphabetic baseline; offset by
+            // ~0.35em so the visible text glyphs are vertically
+            // centered on the shaft line.
+            labelEl.setAttribute("y", labelYCenter + dimFontSize * 0.35);
+            labelEl.setAttribute("font-size", dimFontSize);
+            labelEl.setAttribute(
+              "font-family",
+              "ui-sans-serif, system-ui, -apple-system, sans-serif"
+            );
+            labelEl.setAttribute("font-weight", "500");
+            labelEl.textContent = labelText;
+          }
+
+          bboxTopImage = {
+            x: (aImg.x + bImg.x) / 2,
+            y: Math.min(aImg.y, bImg.y)
+          };
+          break;
+        }
       }
 
       // Inline title sibling for non-callout shapes (rect/circle/poly/
@@ -1647,7 +1747,7 @@
       // hair above the bounding box. The dedicated `kind: "text"` shape
       // is the proper way to drop free-floating labels on the image —
       // the inline title here is just a small context affordance.
-      if (shape.kind !== "callout" && shape.kind !== "text") {
+      if (shape.kind !== "callout" && shape.kind !== "text" && shape.kind !== "dimension") {
         // Cache so title-drag handlers can resolve the default
         // anchor without recomputing the parent's bbox.
         shape.bboxTopImage = bboxTopImage;
@@ -2368,6 +2468,7 @@
         case "freehand":  this._startFreehand(pt, e); break;
         case "callout":   this._calloutClick(pt); break;
         case "text":      this._startText(pt, e); break;
+        case "dimension": this._startDimension(pt, e); break;
         case "eraser":    this._startErase(pt, e); break;
       }
     },
@@ -2402,6 +2503,7 @@
         case "circle":    this._updateCircle(pt); break;
         case "freehand":  this._appendFreehand(pt); break;
         case "text":      this._updateText(pt); break;
+        case "dimension": this._updateDimension(pt); break;
       }
     },
 
@@ -2420,6 +2522,7 @@
         case "circle":    this._commitCircle(pt); break;
         case "freehand":  this._commitFreehand(pt); break;
         case "text":      this._commitText(pt); break;
+        case "dimension": this._commitDimension(pt); break;
       }
     },
 
@@ -2487,7 +2590,9 @@
       // memory and lets users tweak the callout's label without
       // re-opening the composer.
       el.addEventListener("dblclick", function(e) {
-        if (shape.kind !== "text" && shape.kind !== "callout") return;
+        if (shape.kind !== "text" && shape.kind !== "callout" && shape.kind !== "dimension") {
+          return;
+        }
         if (self.annotationMode && self.activeTool != null) return;
         if (!self.annotationMode) return;
         e.stopPropagation();
@@ -2505,6 +2610,80 @@
         if (e.button !== 0) return;
         e.stopPropagation();
         self._startShapeMove(shape, e);
+      });
+
+      // Dimension label is independently draggable along the shaft
+      // (writes `metadata.title_offset`). Wires its own pointerdown
+      // so the slide gesture starts on label click rather than
+      // entering shape-move mode.
+      if (shape.kind === "dimension") {
+        this._attachDimensionLabelDrag(shape);
+      }
+    },
+
+    // Drag the dimension label along the shaft. Projects the pointer
+    // onto the line and persists the projection scalar (clamped to
+    // [0, 1]) as `metadata.title_offset`. Call once per shape — the
+    // label element is reused across re-renders so the listener
+    // doesn't need to re-bind.
+    _attachDimensionLabelDrag: function(shape) {
+      var self = this;
+      var labelEl = shape.el && shape.el.querySelector(".etcher-dim-label");
+      if (!labelEl || labelEl._etcherWired) return;
+      labelEl._etcherWired = true;
+      labelEl.style.cursor = "grab";
+
+      labelEl.addEventListener("pointerdown", function(e) {
+        if (e.button !== 0) return;
+        if (self.annotationMode && self.activeTool != null) return;
+        if (!self.annotationMode) return;
+        e.preventDefault();
+        e.stopPropagation();
+
+        try { labelEl.setPointerCapture(e.pointerId); } catch (_) {}
+        labelEl.style.cursor = "grabbing";
+        var historyBefore = self._snapshotShape(shape);
+        var startPt = self._toImage(e);
+        var dragged = false;
+
+        function onMove(ev) {
+          var pt = self._toImage(ev);
+          if (!dragged) {
+            var aC = self._imageToContainer(startPt);
+            var bC = self._imageToContainer(pt);
+            if ((bC.x - aC.x) * (bC.x - aC.x) + (bC.y - aC.y) * (bC.y - aC.y) < 9) return;
+            dragged = true;
+          }
+          var gg = shape.geometry;
+          var dxL = gg.b[0] - gg.a[0];
+          var dyL = gg.b[1] - gg.a[1];
+          var lenSqL = dxL * dxL + dyL * dyL;
+          if (lenSqL <= 0.0001) return;
+          var tProj = ((pt.x - gg.a[0]) * dxL + (pt.y - gg.a[1]) * dyL) / lenSqL;
+          tProj = Math.max(0, Math.min(1, tProj));
+          shape.metadata = Object.assign({}, shape.metadata || {}, { title_offset: tProj });
+          self._renderShape(shape);
+        }
+
+        function onUp(ev) {
+          labelEl.removeEventListener("pointermove", onMove);
+          labelEl.removeEventListener("pointerup", onUp);
+          labelEl.removeEventListener("pointercancel", onUp);
+          try { labelEl.releasePointerCapture(ev.pointerId); } catch (_) {}
+          labelEl.style.cursor = "grab";
+          if (!dragged) return;
+          if (shape.uuid) {
+            self.pushEventTo(self.el, "etcher:updated", {
+              uuid: shape.uuid,
+              metadata: shape.metadata
+            });
+            self._pushUndo(shape.uuid, historyBefore, self._snapshotShape(shape));
+          }
+        }
+
+        labelEl.addEventListener("pointermove", onMove);
+        labelEl.addEventListener("pointerup", onUp);
+        labelEl.addEventListener("pointercancel", onUp);
       });
     },
 
@@ -2629,7 +2808,9 @@
         try { pt = self._toImage(e); } catch (_) { return; }
         var hit = self._shapeAt(pt);
         if (!hit) return;
-        if (hit.kind !== "text" && hit.kind !== "callout") return;
+        if (hit.kind !== "text" && hit.kind !== "callout" && hit.kind !== "dimension") {
+          return;
+        }
         self._enterEditMode(hit);
         self._startTextEdit(hit);
       };
@@ -3237,6 +3418,152 @@
     },
 
     // -------------------------------------------------------------------------
+    // Dimension — line with arrows at both ends + a slidable black label.
+    // Drawn click-drag (rectangle pattern). `geometry = { a: [x,y], b: [x,y] }`
+    // for the two endpoints; `metadata.title` carries the label text and
+    // `metadata.title_offset` (0–1) is the label's position along the line
+    // (default 0.5 = midpoint). The label fill is always black with a
+    // white halo regardless of the shape's stroke color, so the user can
+    // pick any arrow color and the label stays readable.
+    // -------------------------------------------------------------------------
+
+    _startDimension: function(pt, e) {
+      // Click-rubberband mode: a previous pointerdown released without
+      // a drag, so the draft is sitting in two-click mode waiting for
+      // the second click. This pointerdown IS that second click —
+      // commit with the current point and clear the draft.
+      if (this.draftState && this.draftState.kind === "dimension" &&
+          this.draftState.pendingClickEnd) {
+        this._commitDimensionAt(pt);
+        return;
+      }
+
+      var g = svgEl("g");
+      g.classList.add("etcher-shape", "etcher-dimension", "is-draft");
+
+      var shaft = svgEl("line", {
+        "stroke-width": "2",
+        stroke: "currentColor",
+        fill: "none"
+      });
+      shaft.classList.add("etcher-dim-shaft");
+
+      var arrowA = svgEl("polyline", {
+        "stroke-width": "2",
+        stroke: "currentColor",
+        fill: "none",
+        "stroke-linejoin": "round",
+        "stroke-linecap": "round"
+      });
+      arrowA.classList.add("etcher-dim-arrow");
+
+      var arrowB = svgEl("polyline", {
+        "stroke-width": "2",
+        stroke: "currentColor",
+        fill: "none",
+        "stroke-linejoin": "round",
+        "stroke-linecap": "round"
+      });
+      arrowB.classList.add("etcher-dim-arrow");
+
+      // Black label with white halo — independent of the dimension's
+      // stroke color so it stays readable on any arrow color.
+      // `pointer-events: all` makes the label's bounding box hittable
+      // (instead of just the painted glyphs) so the slide-along-line
+      // gesture is forgiving even on short labels like "548".
+      var label = svgEl("text", {
+        "text-anchor": "middle",
+        "dominant-baseline": "alphabetic",
+        fill: "#000",
+        stroke: "rgba(255, 255, 255, 0.95)",
+        "stroke-width": "3",
+        "stroke-linejoin": "round",
+        "paint-order": "stroke fill",
+        "pointer-events": "all"
+      });
+      // `etcher-text-content` lets _endTextEdit's lookup hide the
+      // label while the inline editor is open, same as text + callout.
+      label.classList.add("etcher-dim-label", "etcher-text-content");
+
+      g.appendChild(shaft);
+      g.appendChild(arrowA);
+      g.appendChild(arrowB);
+      g.appendChild(label);
+
+      this._applyShapeColor(g, this.activeColor);
+      this.svg.appendChild(g);
+
+      this.draftState = {
+        kind: "dimension",
+        anchor: pt,
+        geometry: { a: [pt.x, pt.y], b: [pt.x, pt.y] },
+        el: g,
+        dragged: false,
+        pendingClickEnd: false
+      };
+      this._renderShape(this.draftState);
+      this._syncDraftHandles();
+      try { e.target.setPointerCapture(e.pointerId); } catch (_) {}
+    },
+
+    _updateDimension: function(pt) {
+      var a = this.draftState.anchor;
+      this.draftState.geometry = {
+        a: [a.x, a.y],
+        b: [pt.x, pt.y]
+      };
+      // Track drag for the click-vs-drag mode-switch on pointerup.
+      // Once dragged is set, the next pointerup commits; otherwise
+      // pointerup transitions to two-click rubberband mode and waits
+      // for the next pointerdown to commit. 3-px screen-space dead
+      // zone matches the body-drag and title-drag detectors.
+      if (!this.draftState.dragged && !this.draftState.pendingClickEnd) {
+        var aC = this._imageToContainer({ x: a.x, y: a.y });
+        var bC = this._imageToContainer({ x: pt.x, y: pt.y });
+        var sdx = bC.x - aC.x, sdy = bC.y - aC.y;
+        if (sdx * sdx + sdy * sdy >= 9) {
+          this.draftState.dragged = true;
+        }
+      }
+      this._renderShape(this.draftState);
+      this._positionAllHandles(this.draftState);
+    },
+
+    _commitDimension: function(pt) {
+      if (this.draftState.dragged) {
+        // Drag mode — pointerup commits at the release point.
+        this._commitDimensionAt(pt);
+      } else {
+        // Click mode — first pointerup with no drag arms two-click
+        // rubberband. The next pointermove keeps updating endpoint B
+        // (preview), and the next pointerdown commits via the gate
+        // at the top of _startDimension.
+        this.draftState.pendingClickEnd = true;
+      }
+    },
+
+    _commitDimensionAt: function(pt) {
+      var a = this.draftState.anchor;
+      var dx = pt.x - a.x;
+      var dy = pt.y - a.y;
+      // Minimum 4-image-px length so a stationary click doesn't commit
+      // a degenerate zero-length dimension.
+      if (dx * dx + dy * dy < 16) {
+        this._cancelDraft();
+        return;
+      }
+      var geom = { a: [a.x, a.y], b: [pt.x, pt.y] };
+      var el = this.draftState.el;
+      el.classList.remove("is-draft");
+      var self = this;
+      this._finalizeShape("dimension", geom, el, function(shape) {
+        // Drop straight into inline-edit mode so the user can type
+        // the label immediately, matching the callout flow.
+        self._startTextEdit(shape);
+      });
+    },
+
+    // -------------------------------------------------------------------------
     // Freehand
     // -------------------------------------------------------------------------
 
@@ -3517,6 +3844,23 @@
           var r = this._textDefaultBoxImagePx() * 0.6;
           return dax * dax + day * day <= r * r;
         }
+        case "dimension": {
+          // Hit if the point is within ~tolerance image px of the
+          // line segment from a to b. Tolerance scales with viewport
+          // so the hit target stays comfortable at any zoom.
+          var dax2 = g.b[0] - g.a[0];
+          var day2 = g.b[1] - g.a[1];
+          var lenSq = dax2 * dax2 + day2 * day2;
+          if (lenSq <= 0.0001) return false;
+          var t = ((pt.x - g.a[0]) * dax2 + (pt.y - g.a[1]) * day2) / lenSq;
+          t = Math.max(0, Math.min(1, t));
+          var nearestX = g.a[0] + t * dax2;
+          var nearestY = g.a[1] + t * day2;
+          var ddx2 = pt.x - nearestX;
+          var ddy2 = pt.y - nearestY;
+          var tol = this._textDefaultBoxImagePx() * 0.6;
+          return ddx2 * ddx2 + ddy2 * ddy2 <= tol * tol;
+        }
         default:
           return false;
       }
@@ -3587,13 +3931,17 @@
 
     _startTextEdit: function(shape) {
       if (!shape) return;
-      // text + callout edit their own bbox; rect/circle/poly/freehand
-      // edit a title that lives in `metadata.title_box` on the parent.
+      // text + callout + dimension edit their own bbox; rect/circle/
+      // poly/freehand edit a title that lives in `metadata.title_box`
+      // on the parent.
+      var alwaysEditable =
+        shape.kind === "text" ||
+        shape.kind === "callout" ||
+        shape.kind === "dimension";
       var hasTitle =
-        shape.kind !== "text" &&
-        shape.kind !== "callout" &&
+        !alwaysEditable &&
         shape.metadata && shape.metadata.title != null;
-      if (shape.kind !== "text" && shape.kind !== "callout" && !hasTitle) return;
+      if (!alwaysEditable && !hasTitle) return;
       this._endTextEdit();
 
       var self = this;
@@ -3602,6 +3950,21 @@
         g = shape.geometry;
       } else if (shape.kind === "callout") {
         g = this._calloutTextBoxImage(shape.geometry);
+      } else if (shape.kind === "dimension") {
+        // Small box centered on the label's lerp position along the
+        // shaft so the inline editor pops up exactly where the text
+        // will land. Sized off `_textDefaultBoxImagePx` so it scales
+        // with the current zoom.
+        var dimA = shape.geometry.a;
+        var dimB = shape.geometry.b;
+        var dimT = (shape.metadata && typeof shape.metadata.title_offset === "number")
+          ? shape.metadata.title_offset : 0.5;
+        var lblX = dimA[0] + (dimB[0] - dimA[0]) * dimT;
+        var lblY = dimA[1] + (dimB[1] - dimA[1]) * dimT;
+        var basePx = this._textDefaultBoxImagePx();
+        var dlw = basePx * 6;
+        var dlh = basePx * 1.4;
+        g = { x: lblX - dlw / 2, y: lblY - dlh / 2, w: dlw, h: dlh };
       } else {
         g = this._shapeTitleBoxImage(shape, this._lastBboxTopImageFor(shape));
       }
@@ -3628,7 +3991,11 @@
       input.style.boxSizing = "border-box";
       input.style.border = "2px dashed currentColor";
       input.style.background = "rgba(255, 255, 255, 0.9)";
-      input.style.color = "inherit";
+      // Hard-pin black so the typed text is readable on the white-ish
+      // input background regardless of the shape's stroke color (light
+      // pastels like yellow / pink were nearly invisible when the input
+      // inherited the shape's color).
+      input.style.color = "#000";
       input.style.padding = "2px 4px";
       input.style.font = "500 14px ui-sans-serif, system-ui, -apple-system, sans-serif";
       input.style.outline = "none";
@@ -3735,11 +4102,13 @@
     },
 
     // Which DOM element hosts the visible <text class="etcher-text-content">?
-    // text + callout: the shape's own `<g>`.
+    // text + callout + dimension: the shape's own `<g>`.
     // rect/circle/poly/freehand with a title: the title group.
     _textEditHost: function(shape) {
       if (!shape) return null;
-      if (shape.kind === "text" || shape.kind === "callout") return shape.el;
+      if (shape.kind === "text" || shape.kind === "callout" || shape.kind === "dimension") {
+        return shape.el;
+      }
       return shape.titleGroup || null;
     },
 
@@ -3931,14 +4300,62 @@
           }));
           break;
         }
+        case "dimension": {
+          // Same composition as `_startDimension` so persisted
+          // dimensions re-hydrate identically. Shaft + 2 V-arrows in
+          // currentColor; label is hard-pinned black with white halo
+          // and `pointer-events: all` so the slide-along-line gesture
+          // (wired in `_attachDimensionLabelDrag`) has a forgiving
+          // hit area on the bbox of even short labels.
+          el = svgEl("g");
+          el.classList.add("etcher-dimension");
+          var dimShaft = svgEl("line", {
+            "stroke-width": "2",
+            stroke: "currentColor",
+            fill: "none"
+          });
+          dimShaft.classList.add("etcher-dim-shaft");
+          el.appendChild(dimShaft);
+          var dimArrowA = svgEl("polyline", {
+            "stroke-width": "2",
+            stroke: "currentColor",
+            fill: "none",
+            "stroke-linejoin": "round",
+            "stroke-linecap": "round"
+          });
+          dimArrowA.classList.add("etcher-dim-arrow");
+          el.appendChild(dimArrowA);
+          var dimArrowB = svgEl("polyline", {
+            "stroke-width": "2",
+            stroke: "currentColor",
+            fill: "none",
+            "stroke-linejoin": "round",
+            "stroke-linecap": "round"
+          });
+          dimArrowB.classList.add("etcher-dim-arrow");
+          el.appendChild(dimArrowB);
+          var dimLabel = svgEl("text", {
+            "text-anchor": "middle",
+            "dominant-baseline": "alphabetic",
+            fill: "#000",
+            stroke: "rgba(255, 255, 255, 0.95)",
+            "stroke-width": "3",
+            "stroke-linejoin": "round",
+            "paint-order": "stroke fill",
+            "pointer-events": "all"
+          });
+          dimLabel.classList.add("etcher-dim-label", "etcher-text-content");
+          el.appendChild(dimLabel);
+          break;
+        }
         default: return;
       }
 
-      // Non-callout shapes get a uniform stroke-width on the root. The
-      // callout's stroke-width is on the inner line; the group itself
-      // doesn't render anything. The text shape's stroke-width is on
-      // the inner rect (set during construction above).
-      if (ann.kind !== "callout" && ann.kind !== "text") {
+      // Non-group shapes get a uniform stroke-width on the root.
+      // Callout / text / dimension are <g> wrappers — their visible
+      // strokes live on the inner children, so leaving the group
+      // unstroked avoids painting a bogus border on the wrapper.
+      if (ann.kind !== "callout" && ann.kind !== "text" && ann.kind !== "dimension") {
         el.setAttribute("stroke-width", "2");
       }
       el.classList.add("etcher-shape");
@@ -4494,6 +4911,11 @@
             { x: cbox.x,                 y: cbox.y + cbox.h        }   // 4: text BL
           ];
         }
+        case "dimension":
+          return [
+            { x: g.a[0], y: g.a[1] },  // 0: endpoint A
+            { x: g.b[0], y: g.b[1] }   // 1: endpoint B
+          ];
         // Freehand has too many points to edit individually for v1 —
         // delete and redraw.
         default:
@@ -4715,6 +5137,11 @@
             text_box: { x: cbox.x + dx, y: cbox.y + dy, w: cbox.w, h: cbox.h }
           };
         }
+        case "dimension":
+          return {
+            a: [geom.a[0] + dx, geom.a[1] + dy],
+            b: [geom.b[0] + dx, geom.b[1] + dy]
+          };
         default:
           return geom;
       }
@@ -4753,6 +5180,19 @@
           var pts = (startGeom.points || []).map(function(p) { return [p[0], p[1]]; });
           if (pts[idx]) pts[idx] = [pt.x, pt.y];
           shape.geometry = { points: pts };
+          break;
+        }
+        case "dimension": {
+          // idx 0 = endpoint A, 1 = endpoint B. Each handle moves
+          // its own endpoint to the pointer; the other end stays
+          // anchored. No shrink-fit envelope, so absolute pt is
+          // safe (no need for the delta math callouts use).
+          var dimGeom = startGeom;
+          if (idx === 0) {
+            shape.geometry = { a: [pt.x, pt.y], b: [dimGeom.b[0], dimGeom.b[1]] };
+          } else if (idx === 1) {
+            shape.geometry = { a: [dimGeom.a[0], dimGeom.a[1]], b: [pt.x, pt.y] };
+          }
           break;
         }
         case "callout": {

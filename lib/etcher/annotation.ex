@@ -13,12 +13,17 @@ defmodule Etcher.Annotation do
       annotation is on (e.g. `"file"`, `"document"`, `"product"`)
     * `:target_uuid` — UUID of the resource
     * `:creator_uuid` — UUID of the user who drew it (nullable)
-    * `:kind` — `"rectangle"` | `"circle"` | `"polygon"` | `"freehand"`
+    * `:kind` — `"rectangle"` | `"circle"` | `"polygon"` | `"freehand"` |
+      `"callout"` | `"text"` | `"dimension"`
     * `:geometry` — JSONB; shape-specific coordinates in image pixels
         * rectangle: `%{"x" => x, "y" => y, "w" => w, "h" => h}`
         * circle: `%{"cx" => cx, "cy" => cy, "r" => r}`
         * polygon: `%{"points" => [[x1, y1], [x2, y2], ...]}`
         * freehand: `%{"points" => [[x1, y1], [x2, y2], ...]}`
+        * callout: `%{"anchor" => [x, y], "text_box" => %{"x" => x, "y" => y, "w" => w, "h" => h}}`
+        * text: `%{"x" => x, "y" => y, "w" => w, "h" => h}`
+        * dimension: `%{"a" => [x, y], "b" => [x, y]}` (endpoints; label
+          text + offset live in `metadata.title` / `metadata.title_offset`)
     * `:style` — JSONB; optional stroke color / line width
     * `:metadata` — JSONB; consumer-defined extension point (link to
       external systems, tags, etc.)
@@ -31,7 +36,7 @@ defmodule Etcher.Annotation do
   @primary_key {:uuid, Ecto.UUID, autogenerate: true}
   @foreign_key_type Ecto.UUID
 
-  @kinds ~w(rectangle circle polygon freehand)
+  @kinds ~w(rectangle circle polygon freehand callout text dimension)
 
   schema "etcher_annotations" do
     field(:target_type, :string)

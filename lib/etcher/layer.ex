@@ -24,7 +24,7 @@ defmodule Etcher.Layer do
         target_type="file"
         target_uuid={@file.uuid}
         initial_annotations={@annotations}
-        tools={[:rectangle, :circle, :polygon, :freehand]}
+        tools={[:rectangle, :circle, :polygon, :freehand, :callout, :text, :dimension]}
       />
 
   ## Events the consumer's LiveView handles
@@ -62,9 +62,9 @@ defmodule Etcher.Layer do
   ## Tools
 
   Configure which drawing tools appear in the bottom toolbar. Defaults
-  to all four:
+  to all seven:
 
-      tools={[:rectangle, :circle, :polygon, :freehand]}
+      tools={[:rectangle, :circle, :polygon, :freehand, :callout, :text, :dimension]}
 
   Subsetting hides specific tools (e.g. only `:rectangle, :freehand`).
   """
@@ -97,7 +97,7 @@ defmodule Etcher.Layer do
   )
 
   attr(:tools, :list,
-    default: [:rectangle, :circle, :polygon, :freehand, :callout, :text, :eraser],
+    default: [:rectangle, :circle, :polygon, :freehand, :callout, :text, :dimension, :eraser],
     doc: "Subset of drawing tools to show in the toolbar."
   )
 

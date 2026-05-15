@@ -4,6 +4,40 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.5] — 2026-05-15
+
+New annotation kind — `dimension` — for measurement-style labeling.
+A horizontal-or-angled shaft with V-arrows on both ends and a
+black, slidable label. Arrow color follows the active swatch; label
+stays black with a white halo so it's legible on any color.
+
+### Added
+
+- **Dimension tool** (`kind: "dimension"`). Two endpoints
+  (`geometry: {a: [x,y], b: [x,y]}`); label text + position along
+  the shaft live in `metadata.title` and `metadata.title_offset`
+  (0–1, default 0.5 = midpoint). Drawn either by click-drag (commit
+  on release) or by two-click rubberband (first click locks endpoint
+  A, the line follows the cursor, second click commits endpoint B).
+  After commit, drops straight into inline-edit mode for the label.
+- **Slidable label** — in cursor mode, click and drag the label to
+  slide it along the shaft. Persists as `metadata.title_offset`.
+- Endpoint corner handles + body-drag translate, double-click to
+  re-edit the label, eraser supports the new kind.
+- `Etcher.Annotation`'s `@kinds` widened to include `"callout"`,
+  `"text"`, and `"dimension"` (the schema docs were also out of date
+  for callout/text — fixed in passing).
+
+### Changed
+
+- The bundled `Etcher.Annotation` schema now accepts the same kinds
+  the JS toolbar exposes. Consumers using the bundled storage need
+  no migration if their CHECK constraint was already widened for
+  callout/text — add `'dimension'` to the same allow-list.
+- Inline text editor input pinned to black so the typed text stays
+  readable on the white-ish input background regardless of the
+  shape's stroke color (light pastels were nearly invisible).
+
 ## [0.2.4] — 2026-05-15
 
 Cross-browser fixes + a callout stability sweep — mostly fallout from

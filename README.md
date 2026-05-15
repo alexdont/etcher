@@ -6,7 +6,7 @@
 
 **Etcher** is the annotation layer for [Fresco](https://hex.pm/packages/fresco)-based image viewers in Phoenix.
 
-Users draw shapes (rectangle, circle, polygon, freehand) on top of any Fresco viewer; your LiveView receives geometry events; you decide what to persist. A bundled Ecto schema + migration generator covers the common case; consumers with richer needs implement a behaviour and plug in their own storage.
+Users draw shapes (rectangle, circle, polygon, freehand, callout, text, dimension) on top of any Fresco viewer; your LiveView receives geometry events; you decide what to persist. A bundled Ecto schema + migration generator covers the common case; consumers with richer needs implement a behaviour and plug in their own storage.
 
 An *etcher* is the tool that incises marks into a surface — Etcher does the same digitally.
 
@@ -120,7 +120,7 @@ Open the page, click the pencil in Fresco's nav column → the bottom toolbar ap
   target_type="file"
   target_uuid={@file.uuid}
   initial_annotations={@annotations}
-  tools={[:rectangle, :circle, :polygon, :freehand]}
+  tools={[:rectangle, :circle, :polygon, :freehand, :callout, :text, :dimension]}
 />
 ```
 
@@ -130,7 +130,7 @@ Open the page, click the pencil in Fresco's nav column → the bottom toolbar ap
 | `target_type` | yes | What the annotation is on — `"file"`, `"document"`, `"product"`, etc. Echoed back in every event. |
 | `target_uuid` | yes | UUID of the resource being annotated. |
 | `initial_annotations` | no | Pre-existing annotations to render on mount. Each needs at least `:uuid`, `:kind`, `:geometry`. |
-| `tools` | no | Subset of drawing tools to expose. Defaults to all four. |
+| `tools` | no | Subset of drawing tools to expose. Defaults to all seven. |
 | `id` | no | DOM id of the layer host element. Defaults to `"etcher-layer-<fresco_id>"`. |
 
 ## Events
@@ -150,7 +150,7 @@ The `etcher:created` payload includes:
 %{
   "target_type" => "file",
   "target_uuid" => "...",
-  "kind" => "rectangle" | "circle" | "polygon" | "freehand",
+  "kind" => "rectangle" | "circle" | "polygon" | "freehand" | "callout" | "text" | "dimension",
   "geometry" => %{ ... },              # shape-specific, image-pixel coords
   "tmp_id" => "tmp-abc123-..."          # client-side temp id
 }
@@ -170,6 +170,9 @@ Geometry shapes:
 | `circle`    | `%{"cx" => cx, "cy" => cy, "r" => r}` |
 | `polygon`   | `%{"points" => [[x1, y1], [x2, y2], ...]}` |
 | `freehand`  | `%{"points" => [[x1, y1], [x2, y2], ...]}` |
+| `callout`   | `%{"anchor" => [x, y], "text_box" => %{"x" => x, "y" => y, "w" => w, "h" => h}}` |
+| `text`      | `%{"x" => x, "y" => y, "w" => w, "h" => h}` |
+| `dimension` | `%{"a" => [x, y], "b" => [x, y]}` (label text + position live in `metadata.title` / `metadata.title_offset`) |
 
 All coordinates are in image pixels — Fresco's pan/zoom rescales them automatically.
 

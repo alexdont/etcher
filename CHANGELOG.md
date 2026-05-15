@@ -4,6 +4,30 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.6] — 2026-05-15
+
+Single fix to the dimension-creation flow so consumer apps that open
+their own composer popup on `etcher:created` (e.g. PhoenixKit's
+MediaBrowser) can attach a comment to a freshly-drawn dimension
+without fighting an auto-opened inline editor.
+
+### Fixed
+
+- **Dimension creation no longer auto-opens the inline label editor.**
+  0.2.5 fired `_startTextEdit` in the `_finalizeShape` afterCreate
+  for dimensions (mirroring the callout flow), which stacked a
+  foreignObject input over the label position. Consumers that pop a
+  separate composer popup on `etcher:created` (for setting an
+  annotation title + comment in one flow) lost the composer behind
+  the inline editor — users would dismiss the composer they hadn't
+  noticed and lose the comment, sometimes the whole shape (the
+  PhoenixKit composer treats cancel as "discard the annotation").
+  Dimensions now spawn empty; the consumer's UI sets the label via
+  whatever path it normally uses for non-text shapes (typically the
+  `etcher:created` → composer-popup → `etcher:updated` chain). Re-
+  editing the label after creation still works via double-click on
+  the dimension — that path was wired in 0.2.5 and is unchanged.
+
 ## [0.2.5] — 2026-05-15
 
 New annotation kind — `dimension` — for measurement-style labeling.

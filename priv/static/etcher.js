@@ -3555,12 +3555,17 @@
       var geom = { a: [a.x, a.y], b: [pt.x, pt.y] };
       var el = this.draftState.el;
       el.classList.remove("is-draft");
-      var self = this;
-      this._finalizeShape("dimension", geom, el, function(shape) {
-        // Drop straight into inline-edit mode so the user can type
-        // the label immediately, matching the callout flow.
-        self._startTextEdit(shape);
-      });
+      // No afterCreate — the consumer's annotation-creation UI
+      // (e.g. PhoenixKit's composer popup, opened by its
+      // `etcher:created` handler) takes the label via its title
+      // field and creates a linked comment in one flow. Auto-firing
+      // _startTextEdit here would stack an inline editor over that
+      // composer at the label position, hiding the composer and
+      // breaking the comment-link chain (cancel-on-composer-close
+      // ends up dropping the comment, and sometimes the shape too).
+      // Re-editing the label later still works via double-click on
+      // the dimension (wired in `_attachShapeInteractions`).
+      this._finalizeShape("dimension", geom, el);
     },
 
     // -------------------------------------------------------------------------

@@ -4,12 +4,52 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.7] — 2026-05-15
+
+Documentation + comment cleanup release. No runtime behavior changes
+— every existing call site behaves exactly as in 0.2.6. The goal is
+to make Etcher visibly **decoupled from any specific consumer** so
+that a third-party Phoenix dev reading the source or docs sees a
+clean, drop-in library rather than an obvious satellite.
+
+### Changed
+
+- `Etcher.Storage` moduledoc: replaced the "PhoenixKit, for example"
+  paragraph with a generic "consumer that pairs every annotation
+  with a comment thread" example. The behaviour itself is unchanged
+  — only the explanatory prose.
+- `lib/etcher.ex` moduledoc: corrected the install snippet
+  (`{:fresco, "~> 0.1"}, {:etcher, "~> 0.2"}` — the old version pins
+  pointed at non-existent fresco 0.2 / outdated etcher 0.1) and
+  expanded the shape list to include `callout, text, dimension`
+  rather than only the original four.
+- `Etcher.Layer` moduledoc: tools example and "Tools" section now
+  include `:eraser`, matching the actual default. Added one line
+  explaining how to opt out.
+- `priv/static/etcher.js`: four inline comments that named PhoenixKit
+  / PhoenixKitComments now describe the generic contract instead
+  (any element with `data-annotation-uuid` for cross-component
+  highlight; "consumer's annotation-creation UI" / "host apps" for
+  extension-point comments). The contracts themselves were already
+  generic — only the prose changed.
+- `README.md`: corrected the Installation version pins, expanded the
+  bottom-toolbar ASCII diagram to show all eight buttons, replaced
+  "the four drawing tools" with "seven drawing tools (rectangle,
+  circle, polygon, freehand, callout, text, dimension) plus an
+  eraser," documented the `EtcherLayer` hook name for explicit
+  hook-map wiring, and rewrote the Out-of-scope section to drop a
+  stale "v0.1 is draw-and-commit" claim (editing has been supported
+  for several releases) and the "four built-ins" reference.
+- `CHANGELOG.md`: reworded the 0.2.6 entry to drop the two PhoenixKit
+  name-drops; the same fix applies to any consumer that opens its
+  own composer popup on `etcher:created`.
+
 ## [0.2.6] — 2026-05-15
 
 Single fix to the dimension-creation flow so consumer apps that open
-their own composer popup on `etcher:created` (e.g. PhoenixKit's
-MediaBrowser) can attach a comment to a freshly-drawn dimension
-without fighting an auto-opened inline editor.
+their own composer popup on `etcher:created` can attach a comment to
+a freshly-drawn dimension without fighting an auto-opened inline
+editor.
 
 ### Fixed
 
@@ -20,8 +60,8 @@ without fighting an auto-opened inline editor.
   separate composer popup on `etcher:created` (for setting an
   annotation title + comment in one flow) lost the composer behind
   the inline editor — users would dismiss the composer they hadn't
-  noticed and lose the comment, sometimes the whole shape (the
-  PhoenixKit composer treats cancel as "discard the annotation").
+  noticed and lose the comment, sometimes the whole shape (such
+  composers typically treat cancel as "discard the annotation").
   Dimensions now spawn empty; the consumer's UI sets the label via
   whatever path it normally uses for non-text shapes (typically the
   `etcher:created` → composer-popup → `etcher:updated` chain). Re-

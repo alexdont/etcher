@@ -13,10 +13,13 @@ defmodule Etcher.Storage do
   ## Why a behaviour
 
   Etcher is generic; downstream apps often have richer needs than the
-  default schema can express. PhoenixKit, for example, links each
-  annotation to a `phoenix_kit_comments` discussion thread, so its
-  adapter opens a transaction that creates both rows. Other consumers
-  might fan out to multi-tenant tables, log to an audit trail, etc.
+  default schema can express. A consumer that pairs every annotation
+  with a comment thread, for example, would wrap creation in a
+  transaction that inserts the annotation row and the comment row
+  together — something the default adapter has no opinion about. Other
+  shapes: fanning out to multi-tenant tables, logging to an audit
+  trail, swapping in a different Repo per request scope, persisting to
+  a non-Ecto store entirely.
 
   Etcher itself doesn't depend on any specific Repo — the bundled
   `Etcher.Storage.Default` reads `config :etcher, repo: …` at runtime.

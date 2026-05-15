@@ -24,7 +24,7 @@ defmodule Etcher.Layer do
         target_type="file"
         target_uuid={@file.uuid}
         initial_annotations={@annotations}
-        tools={[:rectangle, :circle, :polygon, :freehand, :callout, :text, :dimension]}
+        tools={[:rectangle, :circle, :polygon, :freehand, :callout, :text, :dimension, :eraser]}
       />
 
   ## Events the consumer's LiveView handles
@@ -61,12 +61,13 @@ defmodule Etcher.Layer do
 
   ## Tools
 
-  Configure which drawing tools appear in the bottom toolbar. Defaults
-  to all seven:
+  Configure which drawing tools appear in the bottom toolbar. The
+  default exposes all seven drawing kinds plus the eraser utility:
 
-      tools={[:rectangle, :circle, :polygon, :freehand, :callout, :text, :dimension]}
+      tools={[:rectangle, :circle, :polygon, :freehand, :callout, :text, :dimension, :eraser]}
 
   Subsetting hides specific tools (e.g. only `:rectangle, :freehand`).
+  Drop `:eraser` if you don't want users deleting from the toolbar.
   """
 
   use Phoenix.Component

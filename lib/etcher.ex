@@ -5,9 +5,9 @@ defmodule Etcher do
 
   An *etcher* is the tool that incises marks into a surface — Etcher the
   library does the same digitally: users draw shapes (rectangle, circle,
-  polygon, freehand) on top of any Fresco viewer; the LiveView fires
-  events with the resulting geometry; the consumer decides what to
-  persist.
+  polygon, freehand, callout, text, dimension) on top of any Fresco
+  viewer; the LiveView fires events with the resulting geometry; the
+  consumer decides what to persist.
 
   ## Two pieces
 
@@ -26,8 +26,8 @@ defmodule Etcher do
 
       def deps do
         [
-          {:fresco, "~> 0.2"},
-          {:etcher, "~> 0.1"}
+          {:fresco, "~> 0.1"},
+          {:etcher, "~> 0.2"}
         ]
       end
 

@@ -26,7 +26,7 @@ An *etcher* is the tool that incises marks into a surface — Etcher does the sa
 │         │   │  │        │                           │
 │         └───┘  └────────┘                           │
 │                                                     │
-│         [⌖] [▭] [○] [⬡] [〰] [×]   ← bottom toolbar  │
+│   [⌖] [▭] [○] [⬡] [〰] [💬] [T] [⟷] [⌫]   ← toolbar    │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -37,8 +37,8 @@ Add `:fresco` (the viewer) and `:etcher` to your `mix.exs`:
 ```elixir
 def deps do
   [
-    {:fresco, "~> 0.2"},
-    {:etcher, "~> 0.1"}
+    {:fresco, "~> 0.1"},
+    {:etcher, "~> 0.2"}
   ]
 end
 ```
@@ -53,6 +53,8 @@ let liveSocket = new LiveSocket("/live", Socket, {
   hooks: { ...window.FrescoHooks, ...window.EtcherHooks, ...colocatedHooks }
 })
 ```
+
+The hook name is `EtcherLayer` — if you maintain an explicit hooks map instead of spreading `window.EtcherHooks`, register it as `{ EtcherLayer: window.EtcherHooks.EtcherLayer }` (alongside Fresco's `FrescoViewer`).
 
 If you want the bundled `etcher_annotations` table, run:
 
@@ -110,7 +112,7 @@ defmodule MyAppWeb.PhotoLive do
 end
 ```
 
-Open the page, click the pencil in Fresco's nav column → the bottom toolbar appears with the four drawing tools. Pick rectangle, drag on the image, release — `handle_event("etcher:created", …)` fires with the geometry in image pixel coordinates.
+Open the page, click the pencil in Fresco's nav column → the bottom toolbar appears with the seven drawing tools (rectangle, circle, polygon, freehand, callout, text, dimension) plus an eraser. Pick rectangle, drag on the image, release — `handle_event("etcher:created", …)` fires with the geometry in image pixel coordinates.
 
 ## The component
 
@@ -120,7 +122,7 @@ Open the page, click the pencil in Fresco's nav column → the bottom toolbar ap
   target_type="file"
   target_uuid={@file.uuid}
   initial_annotations={@annotations}
-  tools={[:rectangle, :circle, :polygon, :freehand, :callout, :text, :dimension]}
+  tools={[:rectangle, :circle, :polygon, :freehand, :callout, :text, :dimension, :eraser]}
 />
 ```
 
@@ -130,7 +132,7 @@ Open the page, click the pencil in Fresco's nav column → the bottom toolbar ap
 | `target_type` | yes | What the annotation is on — `"file"`, `"document"`, `"product"`, etc. Echoed back in every event. |
 | `target_uuid` | yes | UUID of the resource being annotated. |
 | `initial_annotations` | no | Pre-existing annotations to render on mount. Each needs at least `:uuid`, `:kind`, `:geometry`. |
-| `tools` | no | Subset of drawing tools to expose. Defaults to all seven. |
+| `tools` | no | Subset of drawing tools to expose. Defaults to all seven drawable kinds plus `:eraser`. |
 | `id` | no | DOM id of the layer host element. Defaults to `"etcher-layer-<fresco_id>"`. |
 
 ## Events
@@ -377,9 +379,8 @@ Etcher uses Fresco 0.2's `handle.appendNavButton/3` extension point to add the p
 
 ## Out of scope (for now)
 
-- Editing existing shapes after commit (drag handles, vertex move). v0.1 is draw-and-commit; to change a shape, delete and redraw.
+- Custom tools beyond the seven built-in kinds. The geometry kind is just a string, so the schema doesn't care, but the toolbar + drawing-loop wiring isn't pluggable yet — adding a kind today means a fork.
 - Touch + pinch gesture coexistence with Fresco's pan/zoom — annotation mode currently disables Fresco's drag-to-pan; refinement comes later.
-- Custom tools beyond the four built-ins. The geometry kind is a string, so adding a new kind is straightforward; the toolbar wiring isn't pluggable yet.
 - Annotation export / import in W3C Web Annotation Data Model JSON-LD.
 
 ## License

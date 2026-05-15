@@ -32,8 +32,8 @@
   // Public extension surface — `window.Etcher`
   //
   // Consumer-facing API surface, all optional. None of these need to be
-  // set for a basic install to work — they're hooks for layered consumers
-  // (PhoenixKit, future apps) to customize Etcher without forking.
+  // set for a basic install to work — they're hooks for host apps and
+  // future libraries to customize Etcher without forking.
   //
   //   window.Etcher.tooltipSlots = { header, body, footer }
   //     Override tooltip content per-slot. See "Customizing the tooltip"
@@ -465,10 +465,13 @@
       ".etcher-tooltip-meta {",
       "  margin-top: 2px; opacity: 0.7; font-size: 11px;",
       "}",
-      // Cross-component highlight: when an annotation is pinned, the
-      // comments that reference it (via `data-annotation-uuid` from
-      // PhoenixKitComments) glow orange so the user can see the
-      // discussion thread in the sidebar at the same time.
+      // Cross-component highlight: when an annotation is pinned, any
+      // element in the document carrying `data-annotation-uuid="<uuid>"`
+      // (typically a comment row in the consumer's discussion thread)
+      // glows orange so the user can see the linked context at the
+      // same time. The selector is generic — a consumer just needs to
+      // stamp `data-annotation-uuid` on the element it wants
+      // highlighted; no Etcher-side wiring required.
       ".etcher-comment-highlight {",
       "  outline: 2px solid #f59e0b; outline-offset: 2px;",
       "  border-radius: 0.5rem;",
@@ -3049,10 +3052,10 @@
       });
     },
 
-    // PhoenixKitComments stamps each rendered comment with
-    // `data-annotation-uuid` when the comment has one. We find those in
-    // the document (the comments thread lives in the sidebar, outside
-    // our viewer container) and highlight them. Scroll the first match
+    // Look up every element in the document that carries
+    // `data-annotation-uuid="<uuid>"` (typically a comment row stamped
+    // by the consumer's discussion thread, but the contract is purely
+    // the data attribute) and highlight them. Scroll the first match
     // into view so the user doesn't have to hunt for the thread.
     _highlightCommentsFor: function(annotationUuid) {
       this._clearCommentHighlights();
@@ -3555,16 +3558,15 @@
       var geom = { a: [a.x, a.y], b: [pt.x, pt.y] };
       var el = this.draftState.el;
       el.classList.remove("is-draft");
-      // No afterCreate — the consumer's annotation-creation UI
-      // (e.g. PhoenixKit's composer popup, opened by its
-      // `etcher:created` handler) takes the label via its title
-      // field and creates a linked comment in one flow. Auto-firing
-      // _startTextEdit here would stack an inline editor over that
-      // composer at the label position, hiding the composer and
-      // breaking the comment-link chain (cancel-on-composer-close
-      // ends up dropping the comment, and sometimes the shape too).
-      // Re-editing the label later still works via double-click on
-      // the dimension (wired in `_attachShapeInteractions`).
+      // No afterCreate — consumers that open their own composer popup
+      // on `etcher:created` (taking the label via a title field and
+      // creating a linked comment in one flow) need a clean slate
+      // here. Auto-firing _startTextEdit would stack an inline editor
+      // over that composer at the label position, hiding the composer
+      // and breaking the comment-link chain (a cancel-on-composer-close
+      // policy ends up dropping the comment, and sometimes the shape
+      // too). Re-editing the label later still works via double-click
+      // on the dimension (wired in `_attachShapeInteractions`).
       this._finalizeShape("dimension", geom, el);
     },
 

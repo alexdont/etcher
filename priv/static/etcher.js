@@ -997,10 +997,36 @@
       // events catch one-off cases (resize, source swap) that don't go
       // through the animation loop.
       function render() { self._renderAll(); }
+
+      // Fresco's CSS-transform fast-pan mode (opt-in via `:pan_optimized`
+      // on the host viewer, available from fresco 0.3.0+). While in
+      // flight, Fresco suppresses OSD's per-frame canvas redraw and
+      // CSS-translates the canvas instead. We translate the overlay
+      // wrapper by the same delta so SVG annotations / tooltips /
+      // foreignObject editors glide in lockstep with the canvas content.
+      // On pan-end, Fresco restores OSD's drawer; the next `animation`
+      // event re-renders the overlay from OSD's now-committed viewport.
+      // Inert against older Fresco that never emits the event.
+      function onFastPan(e) {
+        if (!self.overlayWrapper) return;
+        if (e.phase === "start") {
+          self.overlayWrapper.style.willChange = "transform";
+        }
+        if (e.phase === "start" || e.phase === "delta") {
+          self.overlayWrapper.style.transform =
+            "translate3d(" + e.x + "px, " + e.y + "px, 0)";
+        }
+        if (e.phase === "end") {
+          self.overlayWrapper.style.transform = "";
+          self.overlayWrapper.style.willChange = "";
+        }
+      }
+
       self._unsubViewport = [
         handle.on("animation", render),
         handle.on("resize",    render),
-        handle.on("open",      render)
+        handle.on("open",      render),
+        handle.on("fast-pan",  onFastPan)
       ];
     },
 

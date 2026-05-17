@@ -4,6 +4,39 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.8] — 2026-05-17
+
+Coordinate with Fresco's new CSS-transform pan fast path so
+annotations stay anchored to the canvas during the pan window. No
+behavior change for consumers on Fresco `< 0.3.0` or for viewers
+not opted into `:pan_optimized` — the new subscription is inert
+when the event never fires.
+
+### Added
+
+- Subscribe to Fresco's `fast-pan` event (introduced in fresco
+  `0.3.0` for the `:pan_optimized` viewer mode). When Fresco emits
+  `fast-pan {phase, x, y}` during a fast-path pan, the EtcherLayer
+  hook applies the same `translate3d(x, y, 0)` CSS transform to
+  its SVG overlay wrapper so annotations, tooltips, and
+  foreignObject editors glide in lockstep with the canvas. CSS
+  transform propagates to descendants automatically; hit-testing
+  follows the visual transform so clicks during fast-pan still
+  register on the correct annotation. On `phase: "end"`, the
+  transform is cleared — Fresco has restored OSD's drawer and the
+  next `animation` tick re-renders the overlay from the committed
+  viewport.
+
+### Notes
+
+- Backwards compatible. Older Fresco (`< 0.3.0`) never emits the
+  `fast-pan` event, so the new subscription is dead code with no
+  overhead. Etcher 0.2.8 works identically against any Fresco
+  version it was previously compatible with.
+- The subscription is added to the existing `_unsubViewport`
+  array, so `destroyed()` cleans it up like the other viewport
+  bridges.
+
 ## [0.2.7] — 2026-05-15
 
 Documentation + comment cleanup release. No runtime behavior changes

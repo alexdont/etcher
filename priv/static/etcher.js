@@ -870,6 +870,19 @@
         var t = e.target;
         if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" ||
                   (t.isContentEditable === true))) return;
+
+        // Backspace / Delete deletes the currently-selected shape
+        // (the one in edit mode). Goes through the same _deleteShape
+        // path as the eraser tool so undo + server sync work
+        // identically. No meta key required — the !INPUT/!TEXTAREA
+        // gate above is enough to keep it from firing while the user
+        // is typing in a form.
+        if ((e.key === "Backspace" || e.key === "Delete") && self.editingShape) {
+          e.preventDefault();
+          self._deleteShape(self.editingShape);
+          return;
+        }
+
         var meta = e.metaKey || e.ctrlKey;
         if (!meta) return;
         if (e.key === "z" || e.key === "Z") {
@@ -2569,13 +2582,17 @@
         self._startTextEdit(shape);
       });
 
-      // When the shape is the active edit target, its body becomes a
-      // grab-handle for translating the whole annotation. The early
-      // return covers every other state (not editing, drawing tool
-      // active, etc.) so the listener is cheap to leave always-on.
+      // In annotation cursor mode, the shape body is a grab-handle —
+      // a pointerdown anywhere on the shape starts a drag-to-move
+      // gesture without requiring a prior tap to enter edit mode. The
+      // dead-zone inside `_startShapeMove` keeps stationary clicks
+      // from emitting a no-op edit; on pointerup-without-drag, the
+      // onUp falls back to `_onShapeTap` so single-click still
+      // selects (enters edit mode + shows handles).
       el.addEventListener("pointerdown", function(e) {
-        if (self.editingShape !== shape) return;
         if (e.button !== 0) return;
+        if (!self.annotationMode) return;
+        if (self.activeTool != null) return;
         e.stopPropagation();
         self._startShapeMove(shape, e);
       });
@@ -5060,6 +5077,13 @@
           // Cursor is still over the shape (we just released it there),
           // so the user expects the tooltip to come back.
           self._showTooltipFor(shape);
+        } else {
+          // No drag — treat as a tap. The per-shape pointerdown
+          // listener stopPropagation'd the gesture, so the
+          // doc-level tap detector never saw it. Route through
+          // `_onShapeTap` here so single-click still selects /
+          // enters edit mode / pins the tooltip.
+          self._onShapeTap(shape);
         }
       }
       el.addEventListener("pointermove", onMove);

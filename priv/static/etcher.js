@@ -2985,15 +2985,45 @@
       var shapeRect = shape.el.getBoundingClientRect();
       var containerRect = this.handle.container.getBoundingClientRect();
       var x = shapeRect.left + shapeRect.width / 2 - containerRect.left;
-      var y = shapeRect.top - containerRect.top - 8;
+      var aboveY = shapeRect.top - containerRect.top - 8;
       tip.style.left = x + "px";
-      tip.style.top = y + "px";
+      tip.style.top = aboveY + "px";
       tip.style.transform = "translate(-50%, -100%)";
       tip.style.display = "block";
 
+      // If the tooltip extends past the container's top edge (shape is
+      // near the top), flip it to sit below the shape instead. Measure
+      // after the display:block above so offsetHeight is accurate; if
+      // the flip is needed, swap the y-translate too so `top` lands at
+      // the shape's bottom edge rather than at its top minus tip
+      // height. 4px breathing room either way.
+      var tipRect = tip.getBoundingClientRect();
+      if (tipRect.top < containerRect.top + 4) {
+        var belowY = shapeRect.bottom - containerRect.top + 8;
+        tip.style.top = belowY + "px";
+        tip.style.transform = "translate(-50%, 0)";
+        tipRect = tip.getBoundingClientRect();
+      }
+
+      // Horizontal clamp — keep the tooltip's visible bbox inside the
+      // container. `transform: translate(-50%, …)` centers on `left`,
+      // so the safe range for `x` is [halfW+4, containerWidth-halfW-4].
+      var halfW = tipRect.width / 2;
+      var minX = halfW + 4;
+      var maxX = containerRect.width - halfW - 4;
+      if (maxX < minX) {
+        // Tooltip wider than the container — pin to the left edge with
+        // a buffer; the right side will overflow gracefully.
+        x = minX;
+      } else {
+        if (x < minX) x = minX;
+        else if (x > maxX) x = maxX;
+      }
+      tip.style.left = x + "px";
+
       this._dispatch("etcher:tooltip-show", {
         uuid: shape.uuid || null,
-        anchor: { x: x, y: y }
+        anchor: { x: x, y: parseFloat(tip.style.top) || 0 }
       });
     },
 

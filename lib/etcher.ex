@@ -1,24 +1,33 @@
 defmodule Etcher do
   @moduledoc """
-  Etcher is the annotation layer for [Fresco](https://hex.pm/packages/fresco)-based
-  image viewers in Phoenix.
+  Etcher is the annotation overlay for [Fresco](https://hex.pm/packages/fresco)
+  canvases in Phoenix.
 
   An *etcher* is the tool that incises marks into a surface — Etcher the
   library does the same digitally: users draw shapes (rectangle, circle,
-  polygon, freehand, callout, text, dimension) on top of any Fresco
-  viewer; the LiveView fires events with the resulting geometry; the
-  consumer decides what to persist.
+  polygon, freehand, callout, text, dimension) on top of a `<Fresco.canvas>`;
+  the LiveView fires events with the resulting annotations; the consumer
+  stores them inside the canvas's `extensions.etcher` blob and saves
+  the whole canvas to a `.fresco` file.
 
-  ## Two pieces
+  ## Architecture
+
+  Etcher has two pieces:
 
     * **Client side**: an `<Etcher.layer>` component that attaches to a
-      named Fresco viewer, adds a pencil button to its nav, opens a
+      named `<Fresco.canvas>`, adds a pencil button to its nav, opens a
       bottom toolbar with drawing tools when active. Built from scratch
       — no Annotorious dependency.
-    * **Server side**: a pluggable storage adapter (`Etcher.Storage`
-      behaviour) with a sensible default (`Etcher.Storage.Default`)
-      backed by a bundled `etcher_annotations` table. Consumers with
-      custom needs implement their own adapter.
+    * **Server side**: passive. Etcher pushes a single
+      `etcher:annotations-changed` event with the full annotations array
+      whenever the user edits. The consumer's LiveView pipes that into
+      `Fresco.Canvas.put_extension/3` and re-assigns the canvas; saving
+      the file is a separate `Fresco.Canvas.write!/2` call when the
+      consumer is ready.
+
+  No Ecto schema, no migration, no adapter pattern. The `.fresco` file
+  IS the storage; Etcher annotations live inside its `extensions.etcher`
+  map alongside the image layout.
 
   ## Quick start
 
@@ -26,19 +35,10 @@ defmodule Etcher do
 
       def deps do
         [
-          {:fresco, "~> 0.1"},
-          {:etcher, "~> 0.2"}
+          {:fresco, "~> 0.5"},
+          {:etcher, "~> 0.3"}
         ]
       end
-
-  Generate the default schema:
-
-      mix etcher.gen.migration
-      mix ecto.migrate
-
-  Configure (in `config/config.exs`):
-
-      config :etcher, repo: MyApp.Repo
 
   Wire the JS hook (in `assets/js/app.js`):
 
@@ -49,56 +49,56 @@ defmodule Etcher do
         hooks: { ...window.FrescoHooks, ...window.EtcherHooks, ...colocatedHooks }
       })
 
-  Drop in a LiveView:
+  Drop in a LiveView. Build the canvas in `mount/3`, render `<Fresco.canvas>`
+  alongside `<Etcher.layer>`, handle the `etcher:annotations-changed` event:
 
-      <Fresco.viewer id="demo" src={~p"/uploads/photo.jpg"} class="w-full h-[80vh]" />
-      <Etcher.layer fresco_id="demo" target_type="file" target_uuid={@file.uuid} />
+      @impl true
+      def mount(_params, _session, socket) do
+        canvas =
+          Fresco.Canvas.new(width: 4000, height: 3000)
+          |> Fresco.Canvas.add_image(%{src: "/uploads/a.jpg", x: 0, y: 0, width: 2000})
 
-  Then handle the `etcher:created` event in your LiveView:
-
-      def handle_event("etcher:created", attrs, socket) do
-        case Etcher.create_annotation(attrs) do
-          {:ok, annotation} ->
-            {:noreply, push_event(socket, "etcher:annotation-saved", annotation)}
-          {:error, changeset} ->
-            {:noreply, put_flash(socket, :error, "Failed to save annotation")}
-        end
+        {:ok, assign(socket, canvas: canvas)}
       end
 
-  ## Custom storage
-
-  Skip the bundled schema and implement your own adapter:
-
-      defmodule MyApp.AnnotationStorage do
-        @behaviour Etcher.Storage
-
-        def create(attrs), do: # your insert logic
-        def list_for(target_type, target_uuid), do: # your query
-        def update(uuid, attrs), do: # your update
-        def delete(uuid), do: # your delete
+      @impl true
+      def render(assigns) do
+        ~H\"\"\"
+        <Fresco.canvas id="board" canvas={@canvas} class="w-full h-screen" />
+        <Etcher.layer fresco_id="board" />
+        <button phx-click="save">Save canvas</button>
+        \"\"\"
       end
 
-  Then from your event handler:
+      @impl true
+      def handle_event("etcher:annotations-changed", %{"annotations" => annotations}, socket) do
+        new_canvas =
+          Fresco.Canvas.put_extension(socket.assigns.canvas, "etcher", %{
+            "version" => "1",
+            "annotations" => annotations
+          })
 
-      MyApp.AnnotationStorage.create(attrs)
+        {:noreply, assign(socket, canvas: new_canvas)}
+      end
 
-  Etcher's component doesn't run any persistence itself — it fires
-  events and lets the consumer decide what happens. The bundled
-  `Etcher.create_annotation/1` etc. are just shortcuts for consumers
-  who want the default backend.
+      def handle_event("save", _params, socket) do
+        :ok = Fresco.Canvas.write!("/tmp/scene.fresco", socket.assigns.canvas)
+        {:noreply, socket}
+      end
 
-  See `Etcher.Layer` for the component reference, `Etcher.Storage` for
-  the behaviour, and `Etcher.Annotation` for the bundled schema.
+  Re-mounting later with `Fresco.Canvas.read!/1` re-hydrates the canvas
+  + annotations in one shot — `<Etcher.layer>` reads its initial state
+  from `handle.getExtension("etcher")` at mount time.
+
+  ## Storage flexibility
+
+  The `.fresco` file isn't the only target. `Fresco.Canvas.to_json!/1`
+  yields a JSON string you can stash anywhere: a Postgres `:jsonb` column,
+  an S3 object, a Redis key, a file. Etcher annotations travel with the
+  canvas wherever it goes.
+
+  See `Etcher.Layer` for the component reference.
   """
 
   defdelegate layer(assigns), to: Etcher.Layer
-
-  defdelegate create_annotation(attrs), to: Etcher.Storage.Default, as: :create
-
-  defdelegate list_annotations_for(target_type, target_uuid),
-    to: Etcher.Storage.Default,
-    as: :list_for
-
-  defdelegate update_annotation(uuid, attrs), to: Etcher.Storage.Default, as: :update
-  defdelegate delete_annotation(uuid), to: Etcher.Storage.Default, as: :delete
 end

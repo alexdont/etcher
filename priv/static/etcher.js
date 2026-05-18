@@ -548,8 +548,32 @@
     return el;
   }
 
-  function genTmpId() {
-    return "tmp-" + Math.random().toString(36).slice(2, 10) + "-" + Date.now().toString(36);
+  // UUIDv7 generator — 48 bits of unix-ms timestamp + 74 bits of random
+  // (with 4 bits version + 2 bits variant in their reserved positions).
+  // Replaces 0.2.x's tmp-id round-trip: every shape gets its permanent
+  // uuid at draw time, so the server never has to assign one. UUIDv7
+  // sorts lexicographically by creation time, which is also nice for
+  // debugging.
+  function genUuidV7() {
+    var nowMs = Date.now();
+    var hexTs = nowMs.toString(16).padStart(12, "0");           // 48 bits = 12 hex chars
+    var rand = new Uint8Array(10);
+    (window.crypto || window.msCrypto).getRandomValues(rand);
+    // Version = 7 in the top nibble of byte 6 (after the timestamp).
+    rand[0] = (rand[0] & 0x0f) | 0x70;
+    // Variant = 10 in the top two bits of byte 8.
+    rand[2] = (rand[2] & 0x3f) | 0x80;
+    var hexRand = "";
+    for (var i = 0; i < rand.length; i++) {
+      hexRand += rand[i].toString(16).padStart(2, "0");
+    }
+    return (
+      hexTs.slice(0, 8) + "-" +
+      hexTs.slice(8, 12) + "-" +
+      hexRand.slice(0, 4) + "-" +
+      hexRand.slice(4, 8) + "-" +
+      hexRand.slice(8, 20)
+    );
   }
 
   function escapeHtml(value) {
@@ -617,18 +641,12 @@
 
       var self = this;
       self.frescoId = self.el.dataset.frescoId;
-      self.targetType = self.el.dataset.targetType;
-      self.targetUuid = self.el.dataset.targetUuid;
 
       try {
         self.tools = JSON.parse(self.el.dataset.tools || "[]");
       } catch (_) { self.tools = ["rectangle", "circle", "polygon", "freehand"]; }
 
-      try {
-        self.initialAnnotations = JSON.parse(self.el.dataset.initialAnnotations || "[]");
-      } catch (_) { self.initialAnnotations = []; }
-
-      self.shapes = [];           // { uuid|tmpId, kind, geometry, el }
+      self.shapes = [];           // { uuid, kind, geometry, style?, metadata?, el }
       self.activeTool = null;     // null = cursor mode
       self.annotationMode = false;
       // Default color comes from `window.Etcher.defaultColor` (else the
@@ -637,116 +655,20 @@
       // consumers can override the starting color.
       self.activeColor = resolveDefaultColor();
       self.draftState = null;     // per-tool drawing state
-      self.gestureBackup = null;  // OSD gesture flags to restore on exit
 
       if (!self.frescoId) {
         console.warn("[Etcher] Missing data-fresco-id on layer host", self.el);
         return;
       }
 
-      if (!window.Fresco || !window.Fresco.onViewerReady) {
+      if (!window.Fresco || !window.Fresco.onReady) {
         console.warn("[Etcher] Fresco not loaded — load fresco.js before etcher.js");
         return;
       }
 
-      window.Fresco.onViewerReady(self.frescoId, function(handle) {
+      window.Fresco.onReady(self.frescoId, function(handle) {
         self.handle = handle;
-        self._whenImageReady(function() { self._init(); });
-      });
-
-      // Server confirms a persisted uuid for a temp-id shape — adopt it.
-      self.handleEvent("etcher:annotation-saved", function(payload) {
-        if (!payload || !payload.tmp_id) return;
-        var shape = self.shapes.find(function(s) { return s.tmpId === payload.tmp_id; });
-        if (!shape) return;
-        shape.uuid = payload.uuid;
-        delete shape.tmpId;
-        if (shape.el) {
-          shape.el.setAttribute("data-uuid", payload.uuid);
-          shape.el.removeAttribute("data-tmp-id");
-        }
-
-        // Text shape was discarded mid-creation (user pressed Esc with
-        // no content typed) before the server ack'd. Now that we have
-        // the uuid, ask the server to drop the row.
-        if (shape._discardOnSave) {
-          self.shapes = self.shapes.filter(function(s) { return s !== shape; });
-          self.pushEventTo(self.el, "etcher:deleted", { uuid: payload.uuid });
-          return;
-        }
-
-        // Text shape had its title typed before the server ack'd —
-        // flush the pending title now that we can address the row.
-        if (shape._pendingTitle != null) {
-          var t = shape._pendingTitle;
-          delete shape._pendingTitle;
-          self.pushEventTo(self.el, "etcher:updated", {
-            uuid: payload.uuid,
-            title: t
-          });
-        }
-
-        // If this shape was just recreated by an undo of a bulk
-        // delete, the corresponding history item is waiting on this
-        // tmpId so a subsequent redo can target the new uuid.
-        function syncLiveUuid(stack) {
-          (stack || []).forEach(function(op) {
-            if (op.type !== "bulk_delete") return;
-            op.items.forEach(function(item) {
-              if (item.pendingTmpId === payload.tmp_id) {
-                item.liveUuid = payload.uuid;
-                item.pendingTmpId = null;
-              }
-            });
-          });
-        }
-        syncLiveUuid(self._undoStack);
-        syncLiveUuid(self._redoStack);
-      });
-
-      // Server reports an external delete — drop the shape from the overlay.
-      self.handleEvent("etcher:annotation-removed", function(payload) {
-        if (!payload || !payload.uuid) return;
-        self._removeShape(payload.uuid);
-      });
-
-      // Server pushed a NEW annotation that wasn't drawn locally — e.g.
-      // another user added one in a collaboration session. Payload mirrors
-      // the shape of `initial_annotations` entries: `{uuid, kind,
-      // geometry, style?, metadata?}`. No-ops if the shape already
-      // exists locally (idempotent).
-      self.handleEvent("etcher:annotation-added", function(payload) {
-        if (!payload || !payload.uuid || !payload.kind || !payload.geometry) return;
-        var existing = self.shapes.find(function(s) { return s.uuid === payload.uuid; });
-        if (existing) return;
-        self._renderAnnotation(payload);
-      });
-
-      // Server pushed new tooltip metadata for an existing shape — e.g.
-      // after a comment was posted/edited that the tooltip should now
-      // surface. Merge the new metadata into the in-memory shape and
-      // re-render the tooltip if it's currently showing this shape.
-      self.handleEvent("etcher:annotation-updated", function(payload) {
-        if (!payload || !payload.uuid) return;
-        var shape = self.shapes.find(function(s) { return s.uuid === payload.uuid; });
-        if (!shape) return;
-        shape.metadata = payload.metadata || {};
-        // Re-render the shape so the inline title sibling picks up
-        // any change to `metadata.title` / `metadata.title_offset`.
-        // For callouts this also refreshes the in-group <text>.
-        self._renderShape(shape);
-        if (self._tooltipShape === shape && self.tooltipEl &&
-            self.tooltipEl.style.display !== "none") {
-          self._showTooltipFor(shape);
-        }
-      });
-
-      // Server signals "drop out of the active drawing tool" — fired
-      // after a successful Post so the user doesn't accidentally start
-      // drawing another shape. Annotation mode itself stays on; we
-      // just switch to the cursor tool (toolKey = null).
-      self.handleEvent("etcher:exit-drawing", function() {
-        if (self.annotationMode) self._selectTool(null);
+        self._whenCanvasReady(function() { self._init(); });
       });
 
       // Register this layer in the public `window.Etcher.layerFor`
@@ -863,22 +785,31 @@
     // Initialization
     // -------------------------------------------------------------------------
 
-    _whenImageReady: function(cb) {
-      var self = this;
-      var viewer = self.handle.viewer;
-      var item = viewer.world.getItemAt(0);
-      if (item) { cb(); return; }
-      var unsub = self.handle.on("open", function() { unsub(); cb(); });
+    _whenCanvasReady: function(cb) {
+      // Fresco 0.5's <Fresco.canvas> exposes canvas dimensions at mount
+      // — no async wait needed (unlike OSD's tile-load gate). The
+      // helper stays for API symmetry; future per-image swap support
+      // could wire it back through `handle.on("open", ...)`.
+      cb();
     },
 
     _init: function() {
       var self = this;
       var handle = self.handle;
-      var item = handle.viewer.world.getItemAt(0);
-      if (!item) return;
 
-      var size = item.getContentSize();
-      self.imageSize = { x: size.x, y: size.y };
+      // Fresco 0.5 canvas-pixel extent — replaces OSD's
+      // `world.getItemAt(0).getContentSize()`. `imageSize` stays as the
+      // variable name throughout the file; the math is identical, only
+      // the source of the dimensions changed.
+      var size = handle.getCanvasSize ? handle.getCanvasSize() : { width: 0, height: 0 };
+      if (!size.width || !size.height) {
+        console.warn(
+          "[Etcher] Fresco handle has no canvas size — is the target a <Fresco.canvas>? " +
+          "Etcher 0.3.x requires <Fresco.canvas> (not <Fresco.viewer>)."
+        );
+        return;
+      }
+      self.imageSize = { x: size.width, y: size.height };
 
       self._buildOverlay();
       self._buildToolbar();
@@ -985,7 +916,17 @@
       // Drawing input — only listens when we're in annotation mode with a
       // tool other than cursor. `pointer-events: auto` is toggled on the
       // wrapper to gate this.
-      wrapper.addEventListener("pointerdown", function(e) { self._onPointerDown(e); });
+      //
+      // `data-fresco-no-capture` tells Fresco 0.5's pointerdown handler
+      // to bail when an event originates inside the overlay. Combined
+      // with `e.stopPropagation()` in our handler, drawing never
+      // triggers Fresco's pan/zoom even though the wrapper sits inside
+      // the Fresco host's event tree.
+      wrapper.setAttribute("data-fresco-no-capture", "");
+      wrapper.addEventListener("pointerdown", function(e) {
+        e.stopPropagation();
+        self._onPointerDown(e);
+      });
       wrapper.addEventListener("pointermove", function(e) { self._onPointerMove(e); });
       wrapper.addEventListener("pointerup",   function(e) { self._onPointerUp(e); });
       wrapper.addEventListener("pointerleave", function() { self._onPointerLeave(); });
@@ -998,35 +939,16 @@
       // through the animation loop.
       function render() { self._renderAll(); }
 
-      // Fresco's CSS-transform fast-pan mode (opt-in via `:pan_optimized`
-      // on the host viewer, available from fresco 0.3.0+). While in
-      // flight, Fresco suppresses OSD's per-frame canvas redraw and
-      // CSS-translates the canvas instead. We translate the overlay
-      // wrapper by the same delta so SVG annotations / tooltips /
-      // foreignObject editors glide in lockstep with the canvas content.
-      // On pan-end, Fresco restores OSD's drawer; the next `animation`
-      // event re-renders the overlay from OSD's now-committed viewport.
-      // Inert against older Fresco that never emits the event.
-      function onFastPan(e) {
-        if (!self.overlayWrapper) return;
-        if (e.phase === "start") {
-          self.overlayWrapper.style.willChange = "transform";
-        }
-        if (e.phase === "start" || e.phase === "delta") {
-          self.overlayWrapper.style.transform =
-            "translate3d(" + e.x + "px, " + e.y + "px, 0)";
-        }
-        if (e.phase === "end") {
-          self.overlayWrapper.style.transform = "";
-          self.overlayWrapper.style.willChange = "";
-        }
-      }
-
+      // Fresco 0.5 emits `animation` on every transform-write frame
+      // (and `resize`/`open` on lifecycle moments). That's all the
+      // overlay needs — no separate fast-pan path. The previous
+      // `pan_optimized` machinery was an OSD-era workaround for the
+      // canvas-redraw-per-frame cost that the new CSS-transform engine
+      // doesn't have.
       self._unsubViewport = [
         handle.on("animation", render),
         handle.on("resize",    render),
-        handle.on("open",      render),
-        handle.on("fast-pan",  onFastPan)
+        handle.on("open",      render)
       ];
     },
 
@@ -1044,6 +966,12 @@
 
       var bar = document.createElement("div");
       bar.className = "etcher-toolbar";
+
+      // `data-fresco-no-capture` tells Fresco 0.5's pointerdown handler
+      // to bail when the user clicks a toolbar button — otherwise the
+      // host's `e.preventDefault()` cancels the button's click event
+      // and the gesture handler captures the pointer.
+      bar.setAttribute("data-fresco-no-capture", "");
 
       // Cursor (deselect any active drawing tool).
       bar.appendChild(self._makeToolButton("cursor", ICONS.cursor, "Cursor"));
@@ -1208,6 +1136,27 @@
     // Mode + tool selection
     // -------------------------------------------------------------------------
 
+    // Push the current annotations array to the consumer's LiveView.
+    // Replaces 0.2.x's per-op `etcher:created` / `etcher:updated` /
+    // `etcher:deleted` events with a single bulk event — the consumer
+    // pipes the payload through `Fresco.Canvas.put_extension(canvas,
+    // "etcher", %{"version" => "1", "annotations" => annotations})`.
+    //
+    // Every commit / edit / delete in the JS hook ends with
+    // `self._emitChanged()` after mutating `self.shapes` in place.
+    _emitChanged: function() {
+      if (!this.pushEventTo) return;
+      var payload = (this.shapes || []).map(function(s) {
+        var entry = { uuid: s.uuid, kind: s.kind, geometry: s.geometry };
+        if (s.style != null) entry.style = s.style;
+        if (s.metadata != null) entry.metadata = s.metadata;
+        return entry;
+      });
+      this.pushEventTo(this.el, "etcher:annotations-changed", {
+        annotations: payload
+      });
+    },
+
     // Dispatch a bubbling CustomEvent on the layer host so consumer JS
     // can react without forking etcher.js. Documented in the README.
     _dispatch: function(name, detail) {
@@ -1226,42 +1175,15 @@
       self.annotationMode = on;
       if (self.toolbar) self.toolbar.classList.toggle("is-active", on);
 
-      var viewer = self.handle && self.handle.viewer;
-      var mouse = viewer && viewer.gestureSettingsMouse;
-      var touch = viewer && viewer.gestureSettingsTouch;
-
-      function snap(gs) {
-        return gs && {
-          dragToPan: gs.dragToPan,
-          clickToZoom: gs.clickToZoom,
-          dblClickToZoom: gs.dblClickToZoom,
-          pinchToZoom: gs.pinchToZoom
-        };
-      }
-      function freeze(gs) {
-        if (!gs) return;
-        gs.dragToPan = false;
-        gs.clickToZoom = false;
-        gs.dblClickToZoom = false;
-        gs.pinchToZoom = false;
-      }
-      function restore(gs, snapshot) {
-        if (!gs || !snapshot) return;
-        gs.dragToPan = snapshot.dragToPan;
-        gs.clickToZoom = snapshot.clickToZoom;
-        gs.dblClickToZoom = snapshot.dblClickToZoom;
-        gs.pinchToZoom = snapshot.pinchToZoom;
-      }
-
-      if (on) {
-        self.gestureBackup = { mouse: snap(mouse), touch: snap(touch) };
-        freeze(mouse);
-        freeze(touch);
-      } else if (self.gestureBackup) {
-        restore(mouse, self.gestureBackup.mouse);
-        restore(touch, self.gestureBackup.touch);
-        self.gestureBackup = null;
-      }
+      // In Fresco 0.5 pan/zoom isn't a set of toggleable gesture flags
+      // on an OSD viewer — it's the engine's own pointer/wheel handlers
+      // on the host. We block them while drawing by:
+      //   (1) routing pointer events through the overlay wrapper (which
+      //       has `pointer-events: auto` only when annotation mode is on),
+      //   (2) calling `e.stopPropagation()` inside the overlay's own
+      //       pointerdown handler so it never bubbles to Fresco's host
+      //       and triggers `setPointerCapture` → pan.
+      // No gesture-flag freeze/restore dance is needed.
 
       if (!on) {
         self._selectTool(null);
@@ -1340,11 +1262,7 @@
         this._applyShapeColor(shape.el, color);
         // Keep the inline title sibling in sync with the shape color.
         if (shape.titleGroup) shape.titleGroup.style.color = color || "";
-        this.pushEventTo(this.el, "etcher:updated", {
-          uuid: shape.uuid,
-          geometry: shape.geometry,
-          style: shape.style
-        });
+        this._emitChanged();
         this._pushUndo(shape.uuid, historyBefore, this._snapshotShape(shape));
       }
 
@@ -1379,45 +1297,35 @@
     },
 
     // -------------------------------------------------------------------------
-    // Coord helpers — image px ↔ container px (the SVG's coordinate space)
+    // Coord helpers — canvas px ↔ container px (the SVG's coordinate space)
     //
-    // Two reasons we don't use `handle.screenToImage` / `handle.imageToScreen`:
+    // Fresco 0.5's `handle.screenToImage` / `handle.imageToScreen` are
+    // stable round-trips: the CSS-transform engine doesn't have OSD's
+    // tile-source axis-shift (no tile pyramid) or modal-traversal drift
+    // (uses standard getBoundingClientRect throughout). So Etcher
+    // delegates straight to the handle here — none of the workaround
+    // math from 0.2.x is needed.
     //
-    //   1. They route through OSD's `imageToViewportCoordinates`, which
-    //      depends on the *current* tile source's content size. When Tessera
-    //      swaps sources at higher zoom levels (medium → large → DZI), every
-    //      previously-drawn annotation shifts because the "image pixel" axis
-    //      just resized under us. Solution: snapshot `imageSize` once at
-    //      init and do the conversion ourselves in viewport space (which is
-    //      source-independent — the image's viewport rect is always
-    //      `(0, 0, 1, aspect)`).
-    //
-    //   2. They route through `windowToViewportCoordinates` /
-    //      `viewportToWindowCoordinates`, which use OSD's `getElementPosition`
-    //      (offsetParent traversal). Inside a `position: fixed` modal with
-    //      flex centering (daisyUI's pattern) those traversals can give values
-    //      that don't agree with `getBoundingClientRect`, so the round-trip
-    //      drifts and the drift compounds with zoom. Solution: stay in OSD's
-    //      element-pixel space the whole time. The Etcher overlay is
-    //      `inset: 0` of the viewer element, so element-pixel coords *are*
-    //      the SVG coords.
+    // Geometry stays in canvas-pixel coords (Fresco.Canvas's coordinate
+    // system) so annotations compose uniformly across multi-image
+    // canvases and travel verbatim through `.fresco` files.
     // -------------------------------------------------------------------------
 
     _toImage: function(e) {
-      var Point = window.OpenSeadragon.Point;
-      var r = this.handle.container.getBoundingClientRect();
-      var pixel = new Point(e.clientX - r.left, e.clientY - r.top);
-      var vp = this.handle.viewer.viewport.pointFromPixel(pixel, true);
-      // viewport unit = imageSize.x pixels on both axes (OSD normalizes by
-      // image width, so y uses the same scale factor).
-      return { x: vp.x * this.imageSize.x, y: vp.y * this.imageSize.x };
+      // Fresco's screenToImage takes page (client) coords directly and
+      // returns canvas-pixel coords. The function name keeps "Image" for
+      // back-compat with the rest of Etcher's internals, but the coord
+      // system is the <Fresco.canvas> canvas-pixel space.
+      return this.handle.screenToImage({ x: e.clientX, y: e.clientY });
     },
 
     _imageToContainer: function(pt) {
-      var Point = window.OpenSeadragon.Point;
-      var vp = new Point(pt.x / this.imageSize.x, pt.y / this.imageSize.x);
-      var pixel = this.handle.viewer.viewport.pixelFromPoint(vp, true);
-      return { x: pixel.x, y: pixel.y };
+      // Fresco's imageToScreen returns page coords; subtract the
+      // container origin to land in container-pixel space (the SVG
+      // overlay's coordinate system).
+      var page = this.handle.imageToScreen(pt);
+      var r = this.handle.container.getBoundingClientRect();
+      return { x: page.x - r.left, y: page.y - r.top };
     },
 
     // Render one shape (or draft) by projecting its image-px geometry into
@@ -2287,10 +2195,7 @@
           });
         }
         if (shape.uuid) {
-          self.pushEventTo(self.el, "etcher:updated", {
-            uuid: shape.uuid,
-            metadata: shape.metadata
-          });
+          self._emitChanged();
           self._pushUndo(shape.uuid, historyBefore, self._snapshotShape(shape));
         }
       }
@@ -2372,10 +2277,7 @@
             });
           }
           if (shape.uuid) {
-            self.pushEventTo(self.el, "etcher:updated", {
-              uuid: shape.uuid,
-              metadata: shape.metadata
-            });
+            self._emitChanged();
             self._pushUndo(shape.uuid, historyBefore, self._snapshotShape(shape));
           }
         }
@@ -2702,10 +2604,7 @@
           labelEl.style.cursor = "grab";
           if (!dragged) return;
           if (shape.uuid) {
-            self.pushEventTo(self.el, "etcher:updated", {
-              uuid: shape.uuid,
-              metadata: shape.metadata
-            });
+            self._emitChanged();
             self._pushUndo(shape.uuid, historyBefore, self._snapshotShape(shape));
           }
         }
@@ -2722,7 +2621,7 @@
     // shape per current mode.
     _onShapeTap: function(shape) {
       if (!shape) return;
-      var id = shape.uuid || shape.tmpId;
+      var id = shape.uuid;
       if (this.annotationMode) {
         // Edit handles only appear in annotation mode + cursor tool.
         this._enterEditMode(shape);
@@ -2737,7 +2636,10 @@
           this._pinTooltipFor(shape);
         }
       }
-      this.pushEventTo(this.el, "etcher:selected", { uuid: id });
+      // Selection is local UI state in 0.3.x — no server event. (0.2.x's
+      // `etcher:selected` event is dropped; consumers who tracked the
+      // selected uuid for sidebar UI should drive that off a JS
+      // CustomEvent or a future explicit hook if they need it back.)
     },
 
     // -------------------------------------------------------------------------
@@ -3149,9 +3051,7 @@
         this.shapes.splice(idx, 1);
       }
       this._hideTooltip();
-      if (uuid) {
-        this.pushEventTo(this.el, "etcher:deleted", { uuid: uuid });
-      }
+      this._emitChanged();
     },
 
     // -------------------------------------------------------------------------
@@ -3806,9 +3706,9 @@
           }
           self.shapes.splice(idx, 1);
         }
-        if (uuid) self.pushEventTo(self.el, "etcher:deleted", { uuid: uuid });
       });
       self._hideTooltip();
+      self._emitChanged();
     },
 
     // Hit-test in image px against each shape's geometry (or the
@@ -4087,27 +3987,18 @@
       this._endTextEdit();
       this._renderShape(shape);
 
-      if (newTitle === "" && !prevTitle && !shape.uuid) {
-        // Brand-new text shape with no content typed — clean up. The
-        // server may not have responded yet, so the create event will
-        // be paired with a delete on tmp_id arrival.
+      if (newTitle === "" && !prevTitle) {
+        // Brand-new text shape with no content typed — clean up. UUIDs
+        // are local in 0.3.x so the delete is immediate, no tmp_id
+        // round-trip / pending-title bookkeeping needed.
         this._discardEmptyTextShape(shape);
         return;
       }
 
       if (newTitle === prevTitle) return;
 
-      if (shape.uuid) {
-        this.pushEventTo(this.el, "etcher:updated", {
-          uuid: shape.uuid,
-          title: newTitle
-        });
-        this._pushUndo(shape.uuid, historyBefore, this._snapshotShape(shape));
-      } else {
-        // Server hasn't ack'd yet — stash the pending title; the
-        // annotation-saved handler picks it up and flushes.
-        shape._pendingTitle = newTitle;
-      }
+      this._emitChanged();
+      this._pushUndo(shape.uuid, historyBefore, this._snapshotShape(shape));
     },
 
     _cancelTextEdit: function() {
@@ -4146,23 +4037,11 @@
     },
 
     // Strip a text shape that was abandoned mid-creation (no title ever
-    // typed). If the server already ack'd a uuid, fire a delete; if not,
-    // mark the shape so the upcoming `annotation-saved` handler can
-    // delete on arrival.
+    // typed). Every shape has a local uuid from the moment it was
+    // drawn, so deletion is immediate — no tmp_id round-trip needed.
     _discardEmptyTextShape: function(shape) {
       if (!shape) return;
-      if (shape.uuid) {
-        var uuid = shape.uuid;
-        this._removeShape(uuid);
-        this.pushEventTo(this.el, "etcher:deleted", { uuid: uuid });
-      } else {
-        shape._discardOnSave = true;
-        // Optimistically hide so the user sees it gone; the actual
-        // shape struct is purged when uuid arrives.
-        if (shape.el && shape.el.parentNode) {
-          shape.el.parentNode.removeChild(shape.el);
-        }
-      }
+      this._removeShape(shape.uuid);
     },
 
     // -------------------------------------------------------------------------
@@ -4170,11 +4049,11 @@
     // -------------------------------------------------------------------------
 
     _finalizeShape: function(kind, geometry, el, afterCreate) {
-      var tmpId = genTmpId();
-      el.setAttribute("data-tmp-id", tmpId);
+      var uuid = genUuidV7();
+      el.setAttribute("data-uuid", uuid);
       var style = this.activeColor ? { color: this.activeColor } : null;
       var shape = {
-        tmpId: tmpId,
+        uuid: uuid,
         kind: kind,
         geometry: geometry,
         style: style,
@@ -4184,24 +4063,7 @@
       this._renderShape(shape);
       this._attachShapeInteractions(shape);
 
-      // Anchor for the consumer's "spawn a composer / popover next to
-      // the new shape" UI: shape's bottom-left in container px, with
-      // an 8px gap below. Lets the host LV position a floating widget
-      // anchored to where the user just drew.
-      var anchor = this._shapeAnchorBottomLeft(shape);
-
-      var payload = {
-        target_type: this.targetType,
-        target_uuid: this.targetUuid,
-        kind: kind,
-        geometry: geometry,
-        tmp_id: tmpId,
-        anchor_x: anchor.x,
-        anchor_y: anchor.y
-      };
-      if (style) payload.style = style;
-
-      this.pushEventTo(this.el, "etcher:created", payload);
+      this._emitChanged();
 
       this.draftState = null;
       this._syncDraftHandles();
@@ -4212,6 +4074,13 @@
       if (typeof afterCreate === "function") {
         try { afterCreate(shape); } catch (_) {}
       }
+
+      // Drop back to cursor mode after every successful create so the
+      // next click selects rather than starting another shape. `null`
+      // is the cursor; passing it does NOT exit any inline edit mode
+      // the afterCreate hook may have entered (text / callout), since
+      // `_selectTool` only calls `_exitEditMode` when toolKey != null.
+      this._selectTool(null);
     },
 
     // Returns the shape's bottom-left corner in container px (the
@@ -4251,7 +4120,14 @@
 
     _renderInitial: function() {
       var self = this;
-      (self.initialAnnotations || []).forEach(function(ann) {
+      // Hydrate from <Fresco.canvas>'s `extensions.etcher` blob — set by
+      // the consumer via Fresco.Canvas.put_extension/3. Replaces 0.2.x's
+      // server-rendered `data-initial-annotations` attribute.
+      var ext = (self.handle && typeof self.handle.getExtension === "function")
+        ? self.handle.getExtension("etcher")
+        : null;
+      var annotations = (ext && Array.isArray(ext.annotations)) ? ext.annotations : [];
+      annotations.forEach(function(ann) {
         self._renderAnnotation(ann);
       });
     },
@@ -4675,9 +4551,7 @@
         handleEl.removeEventListener("pointercancel", onUp);
         try { handleEl.releasePointerCapture(ev.pointerId); } catch (_) {}
         if (shape.uuid) {
-          var payload = { uuid: shape.uuid, geometry: shape.geometry };
-          if (startTitleBox) payload.metadata = shape.metadata;
-          self.pushEventTo(self.el, "etcher:updated", payload);
+          self._emitChanged();
           self._pushUndo(shape.uuid, historyBefore, self._snapshotShape(shape));
         }
         self._showTooltipFor(shape);
@@ -4807,10 +4681,7 @@
         handleEl.removeEventListener("pointercancel", onUp);
         try { handleEl.releasePointerCapture(ev.pointerId); } catch (_) {}
         if (shape.uuid) {
-          self.pushEventTo(self.el, "etcher:updated", {
-            uuid: shape.uuid,
-            geometry: shape.geometry
-          });
+          self._emitChanged();
           self._pushUndo(shape.uuid, historyBefore, self._snapshotShape(shape));
         }
         // Refresh the full handle set so the new vertex picks up a
@@ -5041,10 +4912,7 @@
           };
         }
         if (shape.uuid) {
-          self.pushEventTo(self.el, "etcher:updated", {
-            uuid: shape.uuid,
-            geometry: shape.geometry
-          });
+          self._emitChanged();
           self._pushUndo(shape.uuid, historyBefore, self._snapshotShape(shape));
         }
         self._showTooltipFor(shape);
@@ -5134,9 +5002,7 @@
             });
           }
           if (shape.uuid) {
-            var payload = { uuid: shape.uuid, geometry: shape.geometry };
-            if (startTitleBox) payload.metadata = shape.metadata;
-            self.pushEventTo(self.el, "etcher:updated", payload);
+            self._emitChanged();
             self._pushUndo(shape.uuid, historyBefore, self._snapshotShape(shape));
           }
           // Cursor is still over the shape (we just released it there),
@@ -5333,10 +5199,10 @@
     // (a manual delete from the tooltip trash button is treated as a
     // bulk of size 1; the eraser tool sweeps multiple shapes into one
     // op). Each item carries its pre-deletion uuid + a `liveUuid`
-    // slot that gets filled when an undo recreates the row — the
-    // server-assigned uuid arrives via `etcher:annotation-saved`, the
-    // saved handler maps tmpId → uuid back onto the item, and a
-    // subsequent redo can target it.
+    // In 0.3.x every shape has its uuid from the moment it's drawn
+    // (client-side UUIDv7), so undo/redo of a bulk-delete can track
+    // shapes by their permanent uuid — no more `tmpId` / `liveUuid` /
+    // `pendingTmpId` dance waiting for the server to assign ids.
     _pushUndoBulkDelete: function(shapes) {
       this._undoStack = this._undoStack || [];
       this._redoStack = this._redoStack || [];
@@ -5353,8 +5219,9 @@
             metadata: clone(shape.metadata),
             originalUuid: shape.uuid
           },
-          liveUuid: null,
-          pendingTmpId: null
+          // Set when this item gets recreated by undo; cleared on redo.
+          // Lets a second redo find the live shape to delete again.
+          liveUuid: null
         };
       });
       this._undoStack.push({ type: "bulk_delete", items: items });
@@ -5371,9 +5238,8 @@
       if (op.type === "bulk_delete") {
         var self = this;
         op.items.forEach(function(item) {
-          var tmpId = self._recreateFromSnapshot(item.snapshot);
-          item.pendingTmpId = tmpId;
-          item.liveUuid = null;
+          var uuid = self._recreateFromSnapshot(item.snapshot);
+          item.liveUuid = uuid;
         });
         this._redoStack.push(op);
       } else if (op.type === "update") {
@@ -5405,9 +5271,9 @@
             }
             self.shapes.splice(idx, 1);
           }
-          self.pushEventTo(self.el, "etcher:deleted", { uuid: uuid });
           item.liveUuid = null;
         });
+        self._emitChanged();
         this._undoStack.push(op);
       } else if (op.type === "update") {
         this._undoStack.push(op);
@@ -5416,58 +5282,32 @@
       this._refreshUndoButtons();
     },
 
-    // Rebuild a freshly-deleted shape from its pre-deletion snapshot
-    // and ask the server to create a new row. Mirrors `_finalizeShape`
-    // but works from arbitrary data instead of an in-flight draft.
-    // The `restore: true` flag tells consumers (e.g. MediaBrowser) to
-    // skip the post-create composer popup so an undo doesn't ambush
-    // the user with a comment composer.
+    // Rebuild a freshly-deleted shape from its pre-deletion snapshot.
+    // Returns the new uuid (so the undo's bulk_delete item can track it
+    // for a subsequent redo). The original uuid is preserved in
+    // `snap.originalUuid` — if a consumer wants to keep external state
+    // tied to the same id across undo/redo, they can fish it out of the
+    // emitted annotations list.
     _recreateFromSnapshot: function(snap) {
-      if (!snap || !snap.kind || !snap.geometry) return;
-      // Use the same builder the initial-render path uses so the SVG
-      // structure and interaction wiring match a normal load.
+      if (!snap || !snap.kind || !snap.geometry) return null;
       var ann = {
+        // Restore under the same uuid so re-deletes look like a no-op
+        // from the consumer's perspective and tooltips don't get
+        // re-keyed across an undo.
+        uuid: snap.originalUuid || genUuidV7(),
         kind: snap.kind,
         geometry: snap.geometry,
         style: snap.style,
         metadata: snap.metadata
       };
       this._renderAnnotation(ann);
-      var shape = this.shapes[this.shapes.length - 1];
-      if (!shape) return;
-
-      var tmpId = genTmpId();
-      shape.tmpId = tmpId;
-      if (shape.el) shape.el.setAttribute("data-tmp-id", tmpId);
-
-      var anchor = this._shapeAnchorBottomLeft(shape);
-      var payload = {
-        target_type: this.targetType,
-        target_uuid: this.targetUuid,
-        kind: snap.kind,
-        geometry: snap.geometry,
-        tmp_id: tmpId,
-        anchor_x: anchor.x,
-        anchor_y: anchor.y,
-        restore: true
-      };
-      if (snap.style) payload.style = snap.style;
-      if (snap.metadata) payload.metadata = snap.metadata;
-      if (snap.metadata && typeof snap.metadata.title === "string") {
-        payload.title = snap.metadata.title;
-      }
-      // Tells the consumer which old uuid this row is restoring from
-      // so it can rehydrate any related state (e.g. soft-deleted
-      // comment threads) onto the new uuid.
-      if (snap.originalUuid) payload.restore_from_uuid = snap.originalUuid;
-      this.pushEventTo(this.el, "etcher:created", payload);
-      return tmpId;
+      this._emitChanged();
+      return ann.uuid;
     },
 
     // Apply a snapshot to a shape: restore local state and push the
-    // matching `etcher:updated` so the server's row reflects the
-    // reverted/redone value. Tolerates a missing local shape — happens
-    // if the row was deleted by another session.
+    // updated annotations array. Tolerates a missing local shape —
+    // happens if the row was deleted by another session.
     _applyHistorySnapshot: function(uuid, snap) {
       var shape = this.shapes.find(function(s) { return s.uuid === uuid; });
       if (!shape) return;
@@ -5479,16 +5319,7 @@
       if (this.editingShape === shape) this._positionAllHandles(shape);
       if (this.editingTitleShape === shape) this._positionAllTitleHandles(shape);
 
-      var payload = {
-        uuid: uuid,
-        geometry: shape.geometry,
-        style: shape.style,
-        metadata: shape.metadata
-      };
-      if (shape.metadata && typeof shape.metadata.title === "string") {
-        payload.title = shape.metadata.title;
-      }
-      this.pushEventTo(this.el, "etcher:updated", payload);
+      this._emitChanged();
     },
 
     _refreshUndoButtons: function() {

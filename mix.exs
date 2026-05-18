@@ -1,8 +1,8 @@
 defmodule Etcher.MixProject do
   use Mix.Project
 
-  @version "0.2.8"
-  @description "Annotation overlay for Fresco-based image viewers in Phoenix. Draw shapes, fire LiveView events, persist via a default Ecto schema or your own storage adapter."
+  @version "0.3.0"
+  @description "Annotation overlay for Fresco canvases in Phoenix. Draw shapes; annotations live inside <Fresco.canvas>'s extensions map and travel with the .fresco file."
   @source_url "https://github.com/alexdont/etcher"
 
   def project do
@@ -24,11 +24,12 @@ defmodule Etcher.MixProject do
 
   defp deps do
     [
-      {:fresco, "~> 0.1"},
+      # Path dep for local dev against unreleased Fresco 0.5.1. Switch to
+      # `{:fresco, "~> 0.5"}` before publishing.
+      {:fresco, path: "../fresco"},
       {:phoenix_live_view, "~> 1.1"},
       {:phoenix_html, "~> 4.0"},
       {:jason, "~> 1.4"},
-      {:ecto, "~> 3.10"},
       {:ex_doc, "~> 0.39", only: :dev, runtime: false}
     ]
   end

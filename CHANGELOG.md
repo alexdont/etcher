@@ -4,6 +4,109 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] — <today's date>
+
+**Major rewrite.** Etcher now plugs into `<Fresco.canvas>`'s
+`extensions.etcher` blob instead of a separate Ecto table. Annotations
+live in the `.fresco` file alongside the image layout, so a single
+`Fresco.Canvas.write!/2` saves the entire scene — no more scattered
+DB rows.
+
+### Requires Fresco ~> 0.5
+
+Etcher 0.2 was OpenSeadragon-coupled (through Fresco 0.3.x). Fresco 0.5
+dropped OSD entirely; Etcher's coord transforms (`pointFromPixel`,
+`pixelFromPoint`, `world.getItemAt`) port to Fresco 0.5's stable
+`handle.screenToImage` / `handle.imageToScreen` / `handle.getCanvasSize`.
+The "tile-source axis shift" and "modal-traversal drift" problems that
+motivated Etcher's custom OSD-viewport math are gone in Fresco 0.5, so
+the bridge math is now four lines instead of a forty-line workaround
+with footnotes.
+
+### Removed
+
+- **`Etcher.Annotation` Ecto schema.** Annotations are plain maps inside
+  `extensions.etcher`, not DB rows.
+- **`Etcher.Storage` behaviour** + `Etcher.Storage.Default` adapter. No
+  adapter pattern — one storage path: `Fresco.Canvas.put_extension/3`
+  and `Fresco.Canvas.write!/2`.
+- **`mix etcher.gen.migration`** task + the `etcher_annotations` table.
+- **`:target_type`, `:target_uuid`, `:initial_annotations` attrs** on
+  `<Etcher.layer>`. The canvas IS the target; hydration comes from
+  `handle.getExtension("etcher")` at mount.
+- **`Etcher.create_annotation` / `list_annotations_for` /
+  `update_annotation` / `delete_annotation`** defdelegates on the
+  `Etcher` module.
+- **`etcher:created` / `etcher:updated` / `etcher:deleted` /
+  `etcher:selected`** events and the matching `etcher:annotation-saved`
+  / `:annotation-removed` / `:annotation-added` /
+  `:annotation-updated` / `:exit-drawing` push-events. Replaced by a
+  single bulk `etcher:annotations-changed` event.
+- **tmp_id ⇄ real-uuid round-trip.** UUIDv7 is generated client-side
+  via `crypto.getRandomValues` at draw time; the server never assigns
+  ids. The `_pendingTitle` / `_discardOnSave` / `syncLiveUuid`
+  deferred-action plumbing all goes away.
+- **`OpenSeadragon.Point` references** and the `handle.on("fast-pan")`
+  listener. Fresco 0.5's CSS-transform engine doesn't need either.
+
+### Added
+
+- **Hydration from `handle.getExtension("etcher")`** on mount. Initial
+  annotations come from the canvas's `extensions` map — the consumer
+  loads a `.fresco` file via `Fresco.Canvas.read!/1` and stashes it in
+  assigns; Etcher reads it through Fresco's handle.
+- **Single bulk event** `etcher:annotations-changed`, payload
+  `%{"annotations" => [%{uuid, kind, geometry, style, metadata}, …]}`.
+  Consumer's LiveView pipes through `Fresco.Canvas.put_extension(canvas,
+  "etcher", %{"version" => "1", "annotations" => annotations})`.
+
+### Unchanged (drawing UX)
+
+All seven drawing tools (rectangle, circle, polygon, freehand, callout,
+text, dimension) plus the eraser behave identically to 0.2.x.
+Hit-testing, undo/redo (⌘Z / ⌘⇧Z / Ctrl+Y), inline text editor, color
+swatches, tooltips, the bottom toolbar, the pencil + visibility nav
+buttons — all preserved. The ~5000 lines of shape drawing code are
+unchanged; only the ~200-line Fresco bridge was rewritten.
+
+### Migration from 0.2.x
+
+Consumers on Etcher 0.2 with persisted annotations in
+`etcher_annotations` need to migrate. Export the rows you care about:
+
+```sql
+SELECT uuid, kind, geometry, style, metadata
+FROM etcher_annotations
+WHERE target_type = ? AND target_uuid = ?
+ORDER BY position;
+```
+
+Marshal them into the new `extensions.etcher.annotations` array shape
+and stash into the canvas struct:
+
+```elixir
+canvas =
+  Fresco.Canvas.new(width: 4000, height: 3000)
+  |> Fresco.Canvas.add_image(%{src: image_url, x: 0, y: 0, width: 4000})
+  |> Fresco.Canvas.put_extension("etcher", %{
+    "version" => "1",
+    "annotations" => exported_rows
+  })
+
+Fresco.Canvas.write!("/path/to/scene.fresco", canvas)
+```
+
+Drop the `etcher_annotations` table once migrated. `<Etcher.layer>`
+loses its `:target_type` / `:target_uuid` / `:initial_annotations`
+attrs in the template — pass just `fresco_id="..."` and optionally
+`tools={...}`. The handle_event clauses for `etcher:created`,
+`etcher:updated`, `etcher:deleted` collapse into a single
+`etcher:annotations-changed` clause.
+
+`<Fresco.viewer>` users need to switch to `<Fresco.canvas>` (use a
+canvas with a single image for the same effect) — Etcher 0.3 only
+attaches to canvases.
+
 ## [0.2.8] — 2026-05-17
 
 Coordinate with Fresco's new CSS-transform pan fast path so

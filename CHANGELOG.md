@@ -4,7 +4,7 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [0.3.0] — <today's date>
+## [0.3.0] — 2026-05-19
 
 **Major rewrite.** Etcher now plugs into `<Fresco.canvas>`'s
 `extensions.etcher` blob instead of a separate Ecto table. Annotations
@@ -59,15 +59,68 @@ with footnotes.
   `%{"annotations" => [%{uuid, kind, geometry, style, metadata}, …]}`.
   Consumer's LiveView pipes through `Fresco.Canvas.put_extension(canvas,
   "etcher", %{"version" => "1", "annotations" => annotations})`.
+- **`etcher:shape-drawn` event**, payload `%{"uuid", "kind"}`. Fires
+  once per `_finalizeShape` call — i.e. on actual user-draw intent.
+  Distinct from `annotations-changed` (which fires on every mutation
+  including undo/redo of deletes, drags, color picks). Use this when
+  a consumer wants to open a composer / inspector keyed on "the user
+  just drew a new shape" without false positives.
+- **`patchShape(uuid, {metadata, style})` API** on the layer handle.
+  Merges the supplied fields into the in-memory shape and re-renders
+  so DOM that derives from metadata (dimension labels, callout text,
+  title siblings) reflects the patch. Designed for consumers hosting
+  the canvas with `phx-update="ignore"` — `handle.getExtension("etcher")`
+  freezes at mount, so a full layer remount used to be the only way
+  to push server-side state updates.
+- **`deleteShape(uuid)` API** on the layer handle. Removes the shape
+  from local state + DOM, pushes the deletion onto Etcher's undo
+  stack (Cmd+Z restores), and fires `annotations-changed` so the
+  consumer's persistence layer catches up automatically.
+- **Line annotation tool** — eighth drawing kind. Two-endpoint stroke,
+  no arrows, no inline label. Geometry (`{a: [x,y], b: [x,y]}`) and
+  edit-handle mechanics shared with `dimension`. Title rides the
+  standard sibling-above-shape path (the same movable label group
+  rectangle / circle / polygon use).
+- **Direct shape drag in annotation cursor mode** — pointerdown on
+  any shape's body now immediately starts the move gesture. Stationary
+  clicks still select via the no-drag fallback. Doc-level pointer
+  routing was extended so shapes with `.etcher-shape { pointer-events:
+  none }` wrappers (rectangle, circle, polygon, line, dimension,
+  freehand) participate; callout and text were already covered via
+  their inner `pointer-events: all` rects.
+- **Select-on-grab** — shape enters edit mode the moment the user
+  starts a move gesture, not on release. Handles appear immediately
+  so drag feels like "select and move" instead of "move then select."
+- **Backspace / Delete keyboard shortcut** removes the
+  currently-selected shape. Routes through the same `_deleteShape`
+  path as the eraser tool, so undo + sync behavior is identical.
+
+### Changed
+
+- **Callout commit flow.** Second-click no longer auto-opens Etcher's
+  inline text editor and no longer seeds `metadata.title` with an
+  `"Add a title…"` placeholder. Consumers wiring their own composer
+  (taking the title via a UI field + creating a linked comment in
+  one flow) now get a clean draft to work with — the composer is the
+  single edit surface for the title. Re-editing the title later via
+  double-click is unchanged.
+- **Tooltip placement** flips below the shape when sitting above
+  would clip the container's top edge, and clamps horizontally so
+  the tooltip stays inside the container near the left/right edges.
+  Previously a shape near the top of the viewport had its tooltip
+  rendered partially off-screen above the container.
 
 ### Unchanged (drawing UX)
 
-All seven drawing tools (rectangle, circle, polygon, freehand, callout,
-text, dimension) plus the eraser behave identically to 0.2.x.
-Hit-testing, undo/redo (⌘Z / ⌘⇧Z / Ctrl+Y), inline text editor, color
-swatches, tooltips, the bottom toolbar, the pencil + visibility nav
-buttons — all preserved. The ~5000 lines of shape drawing code are
-unchanged; only the ~200-line Fresco bridge was rewritten.
+The eight drawing tools (rectangle, circle, polygon, freehand,
+callout, text, dimension, line) plus the eraser keep their existing
+draw + edit mechanics. Hit-testing, undo/redo (⌘Z / ⌘⇧Z / Ctrl+Y),
+inline text editor for text shapes, color swatches, tooltips, the
+bottom toolbar, the pencil + visibility nav buttons — all preserved.
+The new drag-without-tap + select-on-grab + keyboard-delete layers
+above these without changing the per-shape draw paths. The ~5000
+lines of shape drawing code are substantially unchanged; only the
+~200-line Fresco bridge was rewritten.
 
 ### Migration from 0.2.x
 

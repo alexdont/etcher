@@ -24,7 +24,7 @@ defmodule Etcher.MixProject do
 
   defp deps do
     [
-      # Path dep for local dev against unreleased Fresco 0.5.1. Switch to
+      # Path dep for local dev against unreleased Fresco 0.5.0. Switch to
       # `{:fresco, "~> 0.5"}` before publishing.
       {:fresco, path: "../fresco"},
       {:phoenix_live_view, "~> 1.1"},

@@ -124,6 +124,11 @@
     // the architectural dimension-line annotation the tool draws (line
     // + 2 arrows + black label sliding along the shaft).
     dimension:'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12 L19 12 M5 12 L8 9 M5 12 L8 15 M19 12 L16 9 M19 12 L16 15"/></svg>',
+    // Line — bare diagonal stroke. The line annotation is the
+    // arrow-and-label-free sibling of dimension: same two-endpoint
+    // geometry, title rendered via the standard sibling-above-shape
+    // path (not inline on the line).
+    line:     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 19 L19 5"/></svg>',
     close:    '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>'
   };
 
@@ -498,6 +503,7 @@
     callout:   { icon: ICONS.callout,   title: "Callout (point at something, write a label)" },
     text:      { icon: ICONS.text,      title: "Text label (drag a box, then type)" },
     dimension: { icon: ICONS.dimension, title: "Dimension (line with arrows + slidable label)" },
+    line:      { icon: ICONS.line,      title: "Line" },
     eraser:    { icon: ICONS.trash,     title: "Eraser (click and drag to wipe shapes)" }
   };
 
@@ -1726,14 +1732,33 @@
           };
           break;
         }
+        case "line": {
+          // Bare stroked line A→B — no arrows, no inline label. Title
+          // (if any) is rendered above by the standard sibling path
+          // (see `_renderTitleSibling` below).
+          var lineShaft = el.querySelector(".etcher-line-shaft");
+          var lAImg = { x: g.a[0], y: g.a[1] };
+          var lBImg = { x: g.b[0], y: g.b[1] };
+          var lAC = self._imageToContainer(lAImg);
+          var lBC = self._imageToContainer(lBImg);
+          if (lineShaft) {
+            lineShaft.setAttribute("x1", lAC.x);
+            lineShaft.setAttribute("y1", lAC.y);
+            lineShaft.setAttribute("x2", lBC.x);
+            lineShaft.setAttribute("y2", lBC.y);
+          }
+          bboxTopImage = {
+            x: (lAImg.x + lBImg.x) / 2,
+            y: Math.min(lAImg.y, lBImg.y)
+          };
+          break;
+        }
       }
 
       // Inline title sibling for non-callout shapes (rect/circle/poly/
-      // freehand). Callout renders its title as a child <text> inside
-      // its <g>; for the other kinds a separate <text> is positioned a
-      // hair above the bounding box. The dedicated `kind: "text"` shape
-      // is the proper way to drop free-floating labels on the image —
-      // the inline title here is just a small context affordance.
+      // freehand/line). Callout renders its title as a child <text>
+      // inside its <g>; dimension paints the title inline along the
+      // shaft. Text is its own free-floating-label shape kind.
       if (shape.kind !== "callout" && shape.kind !== "text" && shape.kind !== "dimension") {
         // Cache so title-drag handlers can resolve the default
         // anchor without recomputing the parent's bbox.
@@ -2450,6 +2475,7 @@
         case "callout":   this._calloutClick(pt); break;
         case "text":      this._startText(pt, e); break;
         case "dimension": this._startDimension(pt, e); break;
+        case "line":      this._startLine(pt, e); break;
         case "eraser":    this._startErase(pt, e); break;
       }
     },
@@ -2485,6 +2511,7 @@
         case "freehand":  this._appendFreehand(pt); break;
         case "text":      this._updateText(pt); break;
         case "dimension": this._updateDimension(pt); break;
+        case "line":      this._updateDimension(pt); break;
       }
     },
 
@@ -2504,6 +2531,7 @@
         case "freehand":  this._commitFreehand(pt); break;
         case "text":      this._commitText(pt); break;
         case "dimension": this._commitDimension(pt); break;
+        case "line":      this._commitDimension(pt); break;
       }
     },
 
@@ -3531,24 +3559,66 @@
       var dx = pt.x - a.x;
       var dy = pt.y - a.y;
       // Minimum 4-image-px length so a stationary click doesn't commit
-      // a degenerate zero-length dimension.
+      // a degenerate zero-length shape.
       if (dx * dx + dy * dy < 16) {
         this._cancelDraft();
         return;
       }
       var geom = { a: [a.x, a.y], b: [pt.x, pt.y] };
       var el = this.draftState.el;
+      var kind = this.draftState.kind;
       el.classList.remove("is-draft");
       // No afterCreate — consumers that open their own composer popup
-      // on `etcher:created` (taking the label via a title field and
-      // creating a linked comment in one flow) need a clean slate
-      // here. Auto-firing _startTextEdit would stack an inline editor
-      // over that composer at the label position, hiding the composer
-      // and breaking the comment-link chain (a cancel-on-composer-close
-      // policy ends up dropping the comment, and sometimes the shape
-      // too). Re-editing the label later still works via double-click
-      // on the dimension (wired in `_attachShapeInteractions`).
-      this._finalizeShape("dimension", geom, el);
+      // on `etcher:shape-drawn` (taking the title via a composer field
+      // and creating a linked comment in one flow) need a clean slate
+      // here. Re-editing the title later still works via double-click
+      // (dimension) or composer reopen (line) per shape kind.
+      this._finalizeShape(kind, geom, el);
+    },
+
+    // -------------------------------------------------------------------------
+    // Line — two-endpoint stroke with no arrows and no inline label.
+    // Shares geometry (`{ a: [x,y], b: [x,y] }`) and draft-state
+    // machinery with dimension; title rides the standard sibling-
+    // above-shape path (rendered by `_renderTitleSibling`, same as
+    // rectangle/circle/polygon). Comment is collected by the host's
+    // annotation composer via the `etcher:shape-drawn` event.
+    // -------------------------------------------------------------------------
+
+    _startLine: function(pt, e) {
+      // Two-click rubberband re-entry (mirrors _startDimension).
+      if (this.draftState && this.draftState.kind === "line" &&
+          this.draftState.pendingClickEnd) {
+        this._commitDimensionAt(pt);
+        return;
+      }
+
+      var g = svgEl("g");
+      g.classList.add("etcher-shape", "etcher-line", "is-draft");
+
+      var shaft = svgEl("line", {
+        "stroke-width": "2",
+        stroke: "currentColor",
+        fill: "none"
+      });
+      shaft.classList.add("etcher-line-shaft");
+
+      g.appendChild(shaft);
+
+      this._applyShapeColor(g, this.activeColor);
+      this.svg.appendChild(g);
+
+      this.draftState = {
+        kind: "line",
+        anchor: pt,
+        geometry: { a: [pt.x, pt.y], b: [pt.x, pt.y] },
+        el: g,
+        dragged: false,
+        pendingClickEnd: false
+      };
+      this._renderShape(this.draftState);
+      this._syncDraftHandles();
+      try { e.target.setPointerCapture(e.pointerId); } catch (_) {}
     },
 
     // -------------------------------------------------------------------------
@@ -3832,10 +3902,13 @@
           var r = this._textDefaultBoxImagePx() * 0.6;
           return dax * dax + day * day <= r * r;
         }
+        case "line":
         case "dimension": {
           // Hit if the point is within ~tolerance image px of the
           // line segment from a to b. Tolerance scales with viewport
-          // so the hit target stays comfortable at any zoom.
+          // so the hit target stays comfortable at any zoom. Shared
+          // between dimension + line since both store
+          // `geometry = { a: [x,y], b: [x,y] }`.
           var dax2 = g.b[0] - g.a[0];
           var day2 = g.b[1] - g.a[1];
           var lenSq = dax2 * dax2 + day2 * day2;
@@ -4326,14 +4399,28 @@
           el.appendChild(dimLabel);
           break;
         }
+        case "line": {
+          // <g> wrapping a single stroked <line>. No arrows, no inline
+          // label — title (if any) rides the sibling-above-shape path.
+          el = svgEl("g");
+          el.classList.add("etcher-line");
+          var lnShaft = svgEl("line", {
+            "stroke-width": "2",
+            stroke: "currentColor",
+            fill: "none"
+          });
+          lnShaft.classList.add("etcher-line-shaft");
+          el.appendChild(lnShaft);
+          break;
+        }
         default: return;
       }
 
       // Non-group shapes get a uniform stroke-width on the root.
-      // Callout / text / dimension are <g> wrappers — their visible
-      // strokes live on the inner children, so leaving the group
-      // unstroked avoids painting a bogus border on the wrapper.
-      if (ann.kind !== "callout" && ann.kind !== "text" && ann.kind !== "dimension") {
+      // Callout / text / dimension / line are <g> wrappers — their
+      // visible strokes live on the inner children, so leaving the
+      // group unstroked avoids painting a bogus border on the wrapper.
+      if (ann.kind !== "callout" && ann.kind !== "text" && ann.kind !== "dimension" && ann.kind !== "line") {
         el.setAttribute("stroke-width", "2");
       }
       el.classList.add("etcher-shape");
@@ -4885,6 +4972,7 @@
           ];
         }
         case "dimension":
+        case "line":
           return [
             { x: g.a[0], y: g.a[1] },  // 0: endpoint A
             { x: g.b[0], y: g.b[1] }   // 1: endpoint B
@@ -5113,6 +5201,7 @@
           };
         }
         case "dimension":
+        case "line":
           return {
             a: [geom.a[0] + dx, geom.a[1] + dy],
             b: [geom.b[0] + dx, geom.b[1] + dy]
@@ -5157,11 +5246,13 @@
           shape.geometry = { points: pts };
           break;
         }
-        case "dimension": {
+        case "dimension":
+        case "line": {
           // idx 0 = endpoint A, 1 = endpoint B. Each handle moves
           // its own endpoint to the pointer; the other end stays
           // anchored. No shrink-fit envelope, so absolute pt is
-          // safe (no need for the delta math callouts use).
+          // safe (no need for the delta math callouts use). Shared
+          // between dimension + line — same two-endpoint geometry.
           var dimGeom = startGeom;
           if (idx === 0) {
             shape.geometry = { a: [pt.x, pt.y], b: [dimGeom.b[0], dimGeom.b[1]] };

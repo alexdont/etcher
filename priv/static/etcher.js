@@ -4103,6 +4103,20 @@
 
       this._emitChanged();
 
+      // Dedicated user-draw event. `annotations-changed` fires on every
+      // mutation (including undo/redo, drags, color picks) and is the
+      // right channel for persistence sync. But "open the composer for
+      // this shape" is about user intent, not state diff — undo of a
+      // delete restores a shape via _emitChanged too, and that should
+      // NOT re-open the composer. So consumers wanting to react to "user
+      // just drew a brand-new shape" subscribe to this event instead.
+      if (this.pushEventTo) {
+        this.pushEventTo(this.el, "etcher:shape-drawn", {
+          uuid: shape.uuid,
+          kind: shape.kind
+        });
+      }
+
       this.draftState = null;
       this._syncDraftHandles();
 

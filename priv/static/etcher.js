@@ -751,6 +751,43 @@
           deleteShape: function(uuid) {
             var shape = self.shapes.find(function(s) { return s.uuid === uuid; });
             if (shape) self._deleteShape(shape);
+          },
+
+          // Patch in-place: merge `fields` into the shape's existing
+          // values. Currently honors `metadata` and `style`; other
+          // fields are no-ops (geometry edits need geometry-specific
+          // re-rendering; uuid/kind are immutable identity).
+          //
+          // Purpose: consumers that drive annotation state from the
+          // server (`<Fresco.canvas>` with `phx-update="ignore"`, so
+          // `handle.getExtension("etcher")` returns the initial-mount
+          // value forever) need a way to refresh in-DOM metadata when
+          // server-side state changes (e.g., a user posts a comment
+          // and the tooltip should now show comment_* fields). Without
+          // this API the only options were full layer remount or
+          // mutating private state.
+          patchShape: function(uuid, fields) {
+            var shape = self.shapes.find(function(s) { return s.uuid === uuid; });
+            if (!shape || !fields) return;
+            if (fields.metadata && typeof fields.metadata === "object") {
+              shape.metadata = Object.assign({}, shape.metadata || {}, fields.metadata);
+            }
+            if (fields.style && typeof fields.style === "object") {
+              shape.style = Object.assign({}, shape.style || {}, fields.style);
+              if (shape.style.color && shape.el) {
+                self._applyShapeColor(shape.el, shape.style.color);
+              }
+            }
+            // Re-render the shape so DOM that derives from metadata
+            // (dimension labels, callout text, title siblings with
+            // their leader lines) reflects the patched values. Without
+            // this, server-pushed titles arrive in shape.metadata.title
+            // but the on-shape text never redraws. _renderShape is
+            // idempotent; for tooltip-only patches (comment_* fields
+            // that only affect hover state) this is a no-op visually.
+            if (shape.el) {
+              self._renderShape(shape);
+            }
           }
         }
       };
@@ -3307,7 +3344,7 @@
         this.draftCallout = {
           kind: "callout",
           geometry: { anchor: [pt.x, pt.y], text_box: defaultBox },
-          metadata: { title: "Add a title…" },
+          metadata: {},
           el: g
         };
         this._renderShape(this.draftCallout);
@@ -3315,7 +3352,13 @@
         return;
       }
 
-      // Second click — commit at the new text-bbox top-left.
+      // Second click — commit at the new text-bbox top-left. The title
+      // is collected by the host's annotation composer (opened in
+      // response to the `annotations-changed` event) and arrives back
+      // here via `patchShape` once posted. No inline-edit auto-open —
+      // the composer is the single edit surface for callouts; opening
+      // both stacks UI on top of each other and confuses the user
+      // about where to type.
       var anchor = this.draftCallout.geometry.anchor;
       var box = this.draftCallout.geometry.text_box;
       var geom = {
@@ -3325,12 +3368,7 @@
       var el = this.draftCallout.el;
       el.classList.remove("is-draft");
       this.draftCallout = null;
-      var self = this;
-      this._finalizeShape("callout", geom, el, function(shape) {
-        // Drop straight into inline-edit mode so the user can type
-        // the label immediately, matching the text shape's flow.
-        self._startTextEdit(shape);
-      });
+      this._finalizeShape("callout", geom, el);
     },
 
     _calloutHover: function(pt) {

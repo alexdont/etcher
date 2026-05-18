@@ -6,13 +6,13 @@
 
 **Etcher** is the annotation layer for [Fresco](https://hex.pm/packages/fresco)-based image viewers in Phoenix.
 
-Users draw shapes (rectangle, circle, polygon, freehand, callout, text, dimension) on top of any Fresco viewer; your LiveView receives geometry events; you decide what to persist. A bundled Ecto schema + migration generator covers the common case; consumers with richer needs implement a behaviour and plug in their own storage.
+Users draw shapes (rectangle, circle, polygon, freehand, callout, text, dimension, line) on top of any `<Fresco.canvas>`; the annotations live inside the canvas's `extensions.etcher` blob and travel with the `.fresco` file. Your LiveView receives bulk update events and writes the canvas back to disk (or DB, or wherever). No Ecto schema, no migrations, no adapters — Etcher is a thin renderer + event source over Fresco's existing extension contract.
 
 An *etcher* is the tool that incises marks into a surface — Etcher does the same digitally.
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  <Fresco.viewer id="photo" src="/uploads/img.jpg"/> │
+│  <Fresco.canvas id="photo" canvas={@canvas} />      │
 │   ┌──┐                                              │
 │   │+ │  ← fresco's nav column                       │
 │   │- │                                              │
@@ -26,7 +26,7 @@ An *etcher* is the tool that incises marks into a surface — Etcher does the sa
 │         │   │  │        │                           │
 │         └───┘  └────────┘                           │
 │                                                     │
-│   [⌖] [▭] [○] [⬡] [〰] [💬] [T] [⟷] [⌫]   ← toolbar    │
+│   [⌖] [▭] [○] [⬡] [〰] [💬] [T] [⟷] [╱] [⌫]  ← toolbar │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -37,8 +37,8 @@ Add `:fresco` (the viewer) and `:etcher` to your `mix.exs`:
 ```elixir
 def deps do
   [
-    {:fresco, "~> 0.1"},
-    {:etcher, "~> 0.2"}
+    {:fresco, "~> 0.5"},
+    {:etcher, "~> 0.3"}
   ]
 end
 ```
@@ -54,22 +54,9 @@ let liveSocket = new LiveSocket("/live", Socket, {
 })
 ```
 
-The hook name is `EtcherLayer` — if you maintain an explicit hooks map instead of spreading `window.EtcherHooks`, register it as `{ EtcherLayer: window.EtcherHooks.EtcherLayer }` (alongside Fresco's `FrescoViewer`).
+The hook name is `EtcherLayer` — if you maintain an explicit hooks map instead of spreading `window.EtcherHooks`, register it as `{ EtcherLayer: window.EtcherHooks.EtcherLayer }` (alongside Fresco's `FrescoCanvas`).
 
-If you want the bundled `etcher_annotations` table, run:
-
-```bash
-mix etcher.gen.migration
-mix ecto.migrate
-```
-
-And point Etcher at your Repo in `config/config.exs`:
-
-```elixir
-config :etcher, repo: MyApp.Repo
-```
-
-(You can skip both steps if you're implementing custom storage — see below.)
+That's it. No `mix etcher.gen.migration` step, no `config :etcher, repo: ...` — Etcher 0.3 doesn't own any tables. Annotations live in a `%Fresco.Canvas{}` struct under `extensions.etcher`, which you persist however you like (a `.fresco` file on disk, a JSONB column, a blob store, …).
 
 ## Quick start
 
@@ -77,94 +64,111 @@ config :etcher, repo: MyApp.Repo
 defmodule MyAppWeb.PhotoLive do
   use MyAppWeb, :live_view
 
+  def mount(_params, _session, socket) do
+    canvas =
+      "/uploads/photo.fresco"
+      |> Fresco.Canvas.read!()
+      # Or build it inline:
+      # Fresco.Canvas.new(width: 4000, height: 3000)
+      # |> Fresco.Canvas.add_image(%{src: "/uploads/photo.jpg", x: 0, y: 0, width: 4000})
+      # |> Fresco.Canvas.put_extension("etcher", %{"version" => "1", "annotations" => []})
+
+    {:ok, assign(socket, :canvas, canvas)}
+  end
+
   def render(assigns) do
     ~H"""
-    <Fresco.viewer id="photo" src={~p"/uploads/photo.jpg"} class="w-full h-[80vh]" />
+    <Fresco.canvas id="photo" canvas={@canvas} class="w-full h-[80vh]" />
 
-    <Etcher.layer
-      fresco_id="photo"
-      target_type="file"
-      target_uuid={@file.uuid}
-      initial_annotations={@annotations}
-    />
+    <Etcher.layer fresco_id="photo" />
     """
   end
 
-  def handle_event("etcher:created", attrs, socket) do
-    case Etcher.create_annotation(Map.put(attrs, "creator_uuid", socket.assigns.current_user.uuid)) do
-      {:ok, annotation} ->
-        # Reflect the persisted uuid back to the client so subsequent
-        # updates/deletes can reference the saved row.
-        {:noreply,
-         push_event(socket, "etcher:annotation-saved", %{
-           tmp_id: attrs["tmp_id"],
-           uuid: annotation.uuid
-         })}
+  # Bulk event — every annotation create / update / delete / drag / color
+  # change ends with this single event carrying Etcher's full current list.
+  # The Etcher 0.2.x per-op events (etcher:created / :updated / :deleted /
+  # :selected) are gone — diff against your last-known state if you need
+  # per-row semantics.
+  def handle_event("etcher:annotations-changed", %{"annotations" => annotations}, socket) do
+    canvas =
+      Fresco.Canvas.put_extension(socket.assigns.canvas, "etcher", %{
+        "version" => "1",
+        "annotations" => annotations
+      })
 
-      {:error, _changeset} ->
-        {:noreply, put_flash(socket, :error, "Could not save annotation")}
-    end
+    # Persist however you like — file, DB column, S3, ...
+    Fresco.Canvas.write!("/uploads/photo.fresco", canvas)
+
+    {:noreply, assign(socket, :canvas, canvas)}
   end
 
-  def handle_event("etcher:selected", %{"uuid" => uuid}, socket) do
-    {:noreply, assign(socket, :selected_annotation_uuid, uuid)}
+  # Optional: fires once when the user finishes drawing a new shape. Use
+  # it to open a composer / inspector / metadata-entry popup. Unlike
+  # `annotations-changed`, this does NOT fire on undo/redo, drags, or
+  # color picks — only on actual user-draw intent.
+  def handle_event("etcher:shape-drawn", %{"uuid" => uuid, "kind" => _kind}, socket) do
+    {:noreply, assign(socket, :composing_uuid, uuid)}
   end
 end
 ```
 
-Open the page, click the pencil in Fresco's nav column → the bottom toolbar appears with the seven drawing tools (rectangle, circle, polygon, freehand, callout, text, dimension) plus an eraser. Pick rectangle, drag on the image, release — `handle_event("etcher:created", …)` fires with the geometry in image pixel coordinates.
+Open the page, click the pencil in Fresco's nav column → the bottom toolbar appears with the eight drawing tools (rectangle, circle, polygon, freehand, callout, text, dimension, line) plus an eraser. Pick rectangle, drag on the image, release — `handle_event("etcher:annotations-changed", …)` fires with the geometry in canvas-pixel coordinates.
 
 ## The component
 
 ```heex
 <Etcher.layer
   fresco_id="photo"
-  target_type="file"
-  target_uuid={@file.uuid}
-  initial_annotations={@annotations}
-  tools={[:rectangle, :circle, :polygon, :freehand, :callout, :text, :dimension, :eraser]}
+  tools={[:rectangle, :circle, :polygon, :freehand, :callout, :text, :dimension, :line, :eraser]}
 />
 ```
 
 | Attr | Required | Notes |
 |------|----------|-------|
-| `fresco_id` | yes | DOM id of the `<Fresco.viewer>` this layer attaches to. |
-| `target_type` | yes | What the annotation is on — `"file"`, `"document"`, `"product"`, etc. Echoed back in every event. |
-| `target_uuid` | yes | UUID of the resource being annotated. |
-| `initial_annotations` | no | Pre-existing annotations to render on mount. Each needs at least `:uuid`, `:kind`, `:geometry`. |
-| `tools` | no | Subset of drawing tools to expose. Defaults to all seven drawable kinds plus `:eraser`. |
+| `fresco_id` | yes | DOM id of the `<Fresco.canvas>` this layer attaches to. |
+| `tools` | no | Subset of drawing tools to expose. Defaults to all eight drawable kinds plus `:eraser`. |
 | `id` | no | DOM id of the layer host element. Defaults to `"etcher-layer-<fresco_id>"`. |
+
+Hydration is implicit: on mount, Etcher reads `handle.getExtension("etcher")` from the Fresco canvas it attaches to and renders whatever annotations are already inside `extensions.etcher.annotations`. There's no `:initial_annotations` attr — the canvas IS the source of truth.
 
 ## Events
 
-The component emits four LiveView events. The consumer's LiveView handles whichever ones it cares about.
+### Client → server LiveView events
+
+The component emits two events.
+
+#### `etcher:annotations-changed` — fires on every mutation
 
 ```elixir
-def handle_event("etcher:created", attrs, socket), do: ...
-def handle_event("etcher:updated", %{"uuid" => uuid, "geometry" => geom}, socket), do: ...
-def handle_event("etcher:deleted", %{"uuid" => uuid}, socket), do: ...
-def handle_event("etcher:selected", %{"uuid" => uuid}, socket), do: ...
+def handle_event("etcher:annotations-changed", %{"annotations" => annotations}, socket), do: ...
 ```
 
-The `etcher:created` payload includes:
+Payload: `%{"annotations" => [annotation_map, ...]}` — the full current list, replayed on every change. Each map looks like:
 
 ```elixir
 %{
-  "target_type" => "file",
-  "target_uuid" => "...",
-  "kind" => "rectangle" | "circle" | "polygon" | "freehand" | "callout" | "text" | "dimension",
-  "geometry" => %{ ... },              # shape-specific, image-pixel coords
-  "tmp_id" => "tmp-abc123-..."          # client-side temp id
+  "uuid"     => "019e3c53-7734-76bf-b983-a2e158ef6e17",  # UUIDv7, client-assigned
+  "kind"     => "rectangle" | "circle" | "polygon" | "freehand"
+              | "callout" | "text" | "dimension" | "line",
+  "geometry" => %{ ... },        # shape-specific, canvas-pixel coords (see below)
+  "style"    => %{ "color" => "#fca5a5" },  # optional
+  "metadata" => %{ ... }          # optional, consumer-controlled
 }
 ```
 
-After persisting, push back the saved uuid so the client can adopt it:
+UUIDs are generated client-side via `crypto.getRandomValues` (UUIDv7) at draw time, so the server never has to assign one — no tmp-id round-trip.
+
+The canonical handler pipes the array straight through `Fresco.Canvas.put_extension/3` and persists the resulting canvas. Diff against `viewer_annotations` (or your own snapshot) if you need per-row create/update/delete semantics — see [the PhoenixKit MediaBrowser](https://hexdocs.pm/phoenix_kit) for a worked example with linked-comment cleanup.
+
+#### `etcher:shape-drawn` — fires only on real user draws
 
 ```elixir
-push_event(socket, "etcher:annotation-saved", %{tmp_id: tmp_id, uuid: annotation.uuid})
+def handle_event("etcher:shape-drawn", %{"uuid" => uuid, "kind" => kind}, socket), do: ...
 ```
 
-Geometry shapes:
+Payload: `%{"uuid", "kind"}`. Use this to drive UI keyed on actual user-draw intent (open a composer, focus a metadata form, fire an analytics event). It does **not** fire on undo/redo of a delete (which also adds a shape back into the canvas), drags, color picks, or programmatic shape additions via `layer.patchShape/2`. `etcher:annotations-changed` handles persistence; `etcher:shape-drawn` handles intent.
+
+### Geometry shapes
 
 | kind | geometry |
 |------|----------|
@@ -174,51 +178,47 @@ Geometry shapes:
 | `freehand`  | `%{"points" => [[x1, y1], [x2, y2], ...]}` |
 | `callout`   | `%{"anchor" => [x, y], "text_box" => %{"x" => x, "y" => y, "w" => w, "h" => h}}` |
 | `text`      | `%{"x" => x, "y" => y, "w" => w, "h" => h}` |
-| `dimension` | `%{"a" => [x, y], "b" => [x, y]}` (label text + position live in `metadata.title` / `metadata.title_offset`) |
+| `dimension` | `%{"a" => [x, y], "b" => [x, y]}` (label lives in `metadata.title` / `metadata.title_offset`) |
+| `line`      | `%{"a" => [x, y], "b" => [x, y]}` (title lives in `metadata.title`, rendered as a sibling label) |
 
-All coordinates are in image pixels — Fresco's pan/zoom rescales them automatically.
+All coordinates are in canvas pixels — Fresco's pan/zoom rescales them automatically.
 
-## Custom storage
+## Persistence
 
-`Etcher.Storage` is a behaviour. The default implementation is fine for most consumers, but you can swap in your own — useful when annotations need to be linked to other tables (comments, notifications, audit trails) inside the same transaction.
+Etcher's component doesn't run any persistence itself — it emits `etcher:annotations-changed` and trusts the consumer. The canvas-extension model means every persistence shape works the same way:
 
 ```elixir
-defmodule MyApp.AnnotationStorage do
-  @behaviour Etcher.Storage
+def handle_event("etcher:annotations-changed", %{"annotations" => annotations}, socket) do
+  canvas =
+    Fresco.Canvas.put_extension(socket.assigns.canvas, "etcher", %{
+      "version" => "1",
+      "annotations" => annotations
+    })
 
-  alias MyApp.Repo
-  alias MyApp.{Annotation, Comment}
+  # Pick whichever storage path fits your app:
+  Fresco.Canvas.write!(my_path(socket), canvas)         # local file
+  # MyRepo.update!(my_changeset(socket, canvas))         # JSONB column
+  # MyBlobStore.put(my_key(socket), Fresco.Canvas.to_json!(canvas))  # S3 / similar
 
-  def create(attrs) do
-    Repo.transaction(fn ->
-      {:ok, comment} = %Comment{}
-                       |> Comment.changeset(%{kind: "annotation", author_uuid: attrs.creator_uuid})
-                       |> Repo.insert()
-
-      {:ok, annotation} = %Annotation{}
-                          |> Annotation.changeset(Map.put(attrs, :comment_uuid, comment.uuid))
-                          |> Repo.insert()
-
-      annotation
-    end)
-  end
-
-  def list_for(target_type, target_uuid), do: ...
-  def update(uuid, attrs), do: ...
-  def delete(uuid), do: ...
+  {:noreply, assign(socket, :canvas, canvas)}
 end
 ```
 
-Then in your LiveView:
+Linking annotations to other rows (comments, audit trails, notifications) belongs in your handler too. Diff `annotations` against `socket.assigns.canvas.extensions["etcher"]["annotations"]` to know what changed; route the deltas wherever they need to go.
+
+### Server → client live updates
+
+For consumers that mutate annotation metadata server-side (e.g. a comment arrives in the sidebar and you want the tooltip to reflect a new `comment_count`), Fresco's `phx-update="ignore"` freezes `data-extensions` at mount. Use the layer API to patch the in-DOM shape directly:
 
 ```elixir
-def handle_event("etcher:created", attrs, socket) do
-  {:ok, annotation} = MyApp.AnnotationStorage.create(attrs)
-  # ...
-end
+push_event(socket, "etcher:patch-shape", %{
+  fresco_id: "photo",
+  uuid: annotation_uuid,
+  metadata: updated_metadata
+})
 ```
 
-Etcher's component doesn't run any persistence itself — it fires events and trusts the consumer. The bundled `Etcher.create_annotation/1` is just a shortcut for `Etcher.Storage.Default.create/1`.
+On the client, your JS bridges this to `layer.patchShape(uuid, {metadata})` — see [the `phoenix_kit.js` reference bridge](https://github.com/alexdont/phoenix_kit/blob/main/priv/static/assets/phoenix_kit.js) for a 12-line listener. Same pattern works for `style` updates or for `etcher:delete-shape` → `layer.deleteShape(uuid)`.
 
 ## Customizing the tooltip
 
@@ -240,7 +240,7 @@ window.Etcher.tooltipSlots = {
 
 ### Default slot keys
 
-If you don't register custom slots but want a meaningful tooltip, populate these on each annotation's `metadata` (server-side, in `initial_annotations`):
+If you don't register custom slots but want a meaningful tooltip, populate these on each annotation's `metadata`:
 
 | Slot   | Read from              | Fallback                          |
 |--------|------------------------|-----------------------------------|
@@ -250,24 +250,16 @@ If you don't register custom slots but want a meaningful tooltip, populate these
 
 ### Styling primitives
 
-Etcher's stylesheet ships a handful of opt-in classes consumers can use inside their slot HTML for a layout consistent with the default look:
+The tooltip exposes a few CSS classes you can target from your own stylesheet:
 
-- `.etcher-tooltip-body` — flex row, thumbnail on the left, text column on the right (`gap: 8px`, `max-width: 260px`)
-- `.etcher-tooltip-thumb` — 40×40 rounded box for an `<img>` or icon span
-- `.etcher-tooltip-thumb-icon` — modifier that centers an SVG icon inside the thumb box (paperclip-style fallback)
-- `.etcher-tooltip-text` — flex column container for the right-hand text
-- `.etcher-tooltip-quote` — italic, two-line clamp for a quoted text preview
-
-These are entirely optional. A slot that just returns `<p>plain text</p>` lays out fine without any of them.
+- `.etcher-tooltip` — the floating wrapper
+- `.etcher-tooltip-header` / `.etcher-tooltip-meta` — title + meta rows
+- `.etcher-tooltip-body` / `.etcher-tooltip-thumb` / `.etcher-tooltip-text` / `.etcher-tooltip-quote` — body slot building blocks
+- `.etcher-tooltip-delete` — the trash button
 
 ### Lifecycle events
 
-Slot APIs cover content. For interaction wiring the existing LiveView events still fire:
-
-- `etcher:selected {uuid}` on click (also pins the tooltip)
-- `etcher:deleted {uuid}` when the user hits the trash button
-
-`etcher:tooltip-show` / `-hide` / `-pin` events would be a natural follow-up if a consumer needs them; not in v0.1.
+Etcher dispatches bubbling `CustomEvent`s for the tooltip's lifecycle — see "Lifecycle DOM events" below. If you need tooltip `show` / `hide` / `pin` events tied into analytics or shared state, listen on the layer host.
 
 ## Hooks reference
 
@@ -333,6 +325,14 @@ layer.selectShape("uuid-…");  // pins the tooltip
 layer.enterEditMode("uuid-…");
 layer.exitEditMode();
 layer.deleteShape("uuid-…");
+
+// Live patch — merge metadata / style into an existing shape and
+// re-render. Use this when server-side state (comment count, author,
+// etc.) changes and `phx-update="ignore"` is blocking a remount.
+layer.patchShape("uuid-…", {
+  metadata: { comment_count: 3, comment_author: "Alice" },
+  style:    { color: "#fca5a5" }
+});
 ```
 
 ### Lifecycle DOM events
@@ -357,29 +357,17 @@ document.addEventListener("etcher:tooltip-show", (e) => {
 | `etcher:visibility-changed` | `{ visible: bool }`            | Annotations hidden / shown |
 | `etcher:history-changed`    | `{ canUndo: bool, canRedo: bool }` | Undo/redo stack updated — useful for keeping a custom toolbar in sync |
 
-### Server → client LiveView events
-
-In addition to the create / update / delete / selected client→server events documented above, the server can push state into a running viewer via `Phoenix.LiveView.push_event/3`:
-
-| Event | Payload | Behavior |
-|-------|---------|----------|
-| `etcher:annotation-saved`   | `{ tmp_id, uuid }`                | Client adopts the persisted uuid for a temp shape |
-| `etcher:annotation-added`   | `{ uuid, kind, geometry, style?, metadata? }` | Renders a new shape locally (collaboration / external create) |
-| `etcher:annotation-updated` | `{ uuid, metadata }`              | Merges fresh tooltip metadata into an existing shape |
-| `etcher:annotation-removed` | `{ uuid }`                        | Removes a shape from the overlay |
-| `etcher:exit-drawing`       | `{}`                              | Switches to cursor mode (annotation mode stays on) |
-
 ### `window.Etcher.escapeHtml(value)` — escape helper
 
 Stable helper exposed for use inside consumer slot functions. HTML-escapes `&`, `<`, `>`, `"`, `'`.
 
 ## How it fits with Fresco
 
-Etcher uses Fresco 0.2's `handle.appendNavButton/3` extension point to add the pencil button — no other extension surface required. Drawing input is delivered as plain `pointerdown` / `pointermove` / `pointerup` events on an SVG overlay anchored to Fresco's image coordinate space, so shapes stay locked to image pixels through pan and zoom.
+Etcher 0.3 uses Fresco 0.5's `handle.appendNavButton/3` (for the pencil button) and `handle.getExtension/1` (to hydrate annotations from `extensions.etcher` on mount). Drawing input is delivered as plain `pointerdown` / `pointermove` / `pointerup` events on an SVG overlay anchored to Fresco's canvas-pixel coordinate space, so shapes stay locked to the image through pan and zoom. No OpenSeadragon, no canvas redraw — Fresco 0.5 dropped both.
 
 ## Out of scope (for now)
 
-- Custom tools beyond the seven built-in kinds. The geometry kind is just a string, so the schema doesn't care, but the toolbar + drawing-loop wiring isn't pluggable yet — adding a kind today means a fork.
+- Custom tools beyond the eight built-in kinds. The geometry kind is just a string, so the canvas extension blob doesn't care, but the toolbar + drawing-loop wiring isn't pluggable yet — adding a kind today means a fork.
 - Touch + pinch gesture coexistence with Fresco's pan/zoom — annotation mode currently disables Fresco's drag-to-pan; refinement comes later.
 - Annotation export / import in W3C Web Annotation Data Model JSON-LD.
 

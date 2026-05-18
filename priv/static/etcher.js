@@ -2785,6 +2785,23 @@
         if (inside) return;
         var hit = self._hoveredShape;
         if (!hit) return;
+
+        // In annotation cursor mode, immediately enter shape-move so the
+        // user can drag without first tapping to enter edit mode. Only
+        // callouts and text shapes naturally bubble pointerdown to the
+        // per-shape listener (their inner rect is pointer-events:all);
+        // every other kind has `.etcher-shape { pointer-events: none }`
+        // and only reaches us here at the doc level. _startShapeMove's
+        // onUp falls back to _onShapeTap when no drag happens, so
+        // click-to-select keeps working uniformly.
+        if (self.annotationMode && self.activeTool == null) {
+          self._startShapeMove(hit, e);
+          return;
+        }
+
+        // Browse mode (or a draw tool is active): track for click-to-pin
+        // only. _pendingTap survives until _docPointerUp; if the pointer
+        // didn't move past the dead-zone, _onShapeTap fires.
         self._pendingTap = {
           shape: hit,
           startX: e.clientX,
@@ -5090,6 +5107,15 @@
       var startGeom = JSON.parse(JSON.stringify(shape.geometry));
       // Full pre-move snapshot for the undo stack.
       var historyBefore = self._snapshotShape(shape);
+
+      // Select on grab — `_onShapeTap` enters edit mode (annotation
+      // cursor mode) or pins the tooltip (browse mode), idempotent if
+      // we're already in edit mode for this shape. This used to fire
+      // only from onUp's no-drag fallback, which meant dragging never
+      // visually selected the shape until release. Calling here makes
+      // the handles appear the instant the user grabs, so drag feels
+      // like "select and move" rather than "move then select."
+      self._onShapeTap(shape);
       // If the shape carries a title bbox, snapshot it too so we can
       // translate the title alongside the shape on body-grab.
       var startTitleBox =
@@ -5165,14 +5191,10 @@
           // Cursor is still over the shape (we just released it there),
           // so the user expects the tooltip to come back.
           self._showTooltipFor(shape);
-        } else {
-          // No drag — treat as a tap. The per-shape pointerdown
-          // listener stopPropagation'd the gesture, so the
-          // doc-level tap detector never saw it. Route through
-          // `_onShapeTap` here so single-click still selects /
-          // enters edit mode / pins the tooltip.
-          self._onShapeTap(shape);
         }
+        // No-drag case is a no-op here — `_onShapeTap` already fired
+        // at the top of _startShapeMove, so the shape is already
+        // selected / pinned by the time we hit pointerup.
       }
       el.addEventListener("pointermove", onMove);
       el.addEventListener("pointerup", onUp);

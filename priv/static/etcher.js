@@ -1174,6 +1174,10 @@
             container.removeEventListener("pointercancel", this._stripPointerUp);
           }
           if (this._stripDblClick) container.removeEventListener("dblclick", this._stripDblClick);
+          if (this._stripTouchStart) {
+            container.removeEventListener("touchstart", this._stripTouchStart,
+              { passive: false });
+          }
           container.classList.remove("etcher-strip-drawing");
           container.style.cursor = "";
         }
@@ -1597,11 +1601,41 @@
         self._onDoubleClick(e);
       };
 
+      // iOS Safari: cursor-mode finger drags on a shape get claimed by
+      // the strip's native scroller before `pointerdown`'s
+      // `preventDefault` runs. By that point `setPointerCapture` is a
+      // no-op for scroll cancellation. The OS bakes the
+      // scroll-vs-app decision into `touchstart`, so a same-frame
+      // `preventDefault` there is the only API that defers
+      // classification long enough for app hit-testing.
+      //
+      // Only act when the finger lands on an existing shape — every
+      // other tap should keep scrolling so the reader can still
+      // navigate the chapter without exiting annotation mode. Skipped
+      // when a drawing tool is active (0.4.4's `.etcher-strip-drawing`
+      // already sets `touch-action: none` for that case).
+      //
+      // `{ passive: false }` is required: modern browsers silently
+      // ignore `preventDefault` on passive listeners.
+      self._stripTouchStart = function(e) {
+        if (!self.annotationMode || self.activeTool) return;
+        if (!e.touches || e.touches.length !== 1) return;
+        var t = e.touches[0];
+        var pt;
+        try {
+          pt = self.handle.screenToImage({ x: t.clientX, y: t.clientY });
+        } catch (_) { return; }
+        if (!pt || typeof pt.imageIdx !== "number") return;
+        if (self._shapeAt(pt)) e.preventDefault();
+      };
+
       container.addEventListener("pointerdown", self._stripPointerDown);
       container.addEventListener("pointermove", self._stripPointerMove);
       container.addEventListener("pointerup", self._stripPointerUp);
       container.addEventListener("pointercancel", self._stripPointerUp);
       container.addEventListener("dblclick", self._stripDblClick);
+      container.addEventListener("touchstart", self._stripTouchStart,
+        { passive: false });
     },
 
     // Switch the "current overlay" so the existing draw / render /

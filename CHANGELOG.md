@@ -4,6 +4,26 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.5] — 2026-05-21
+
+### Fixed
+
+- **Cursor-mode finger-drag on a shape in `<Fresco.scroll_strip>`
+  now moves the shape instead of scrolling the page.** Strip
+  `_wireStripPointerInput` adds a `touchstart` listener that
+  hit-tests the touch point and calls `preventDefault()` only when
+  the finger lands on an existing shape — defers iOS's
+  scroll-vs-app classification long enough for `pointerdown` +
+  `setPointerCapture` to claim the gesture for the move handler.
+  Every other tap (empty area, between pages, etc.) still scrolls,
+  so the reader can navigate the chapter without exiting
+  annotation mode.
+
+  Sibling to 0.4.4's `touch-action: none` fix, but scoped to
+  cursor mode where blanket-disabling `touch-action` would break
+  reader navigation. `{ passive: false }` on the listener so
+  `preventDefault` actually overrides the scroll classification.
+
 ## [0.4.4] — 2026-05-21
 
 ### Fixed

@@ -56,8 +56,11 @@ defmodule Etcher.Layer do
 
   ## The event your LiveView must handle (strip)
 
-  Strip-mode annotations carry `image_idx` (which page they're on); the
-  consumer stores them inside the `:extensions` map the same way.
+  Strip-mode annotations carry `image_idx` (which page they're on).
+  Strip viewers don't have a `%Fresco.Canvas{}` struct or a
+  `put_extension/3` helper — the consumer just maintains the
+  `:extensions` map (a plain `%{}`) in socket assigns and threads it
+  through the component:
 
       def handle_event("etcher:annotations-changed", %{"annotations" => annotations}, socket) do
         extensions =
@@ -67,6 +70,18 @@ defmodule Etcher.Layer do
           })
 
         {:noreply, assign(socket, reader_extensions: extensions)}
+      end
+
+  When a LiveView hosts multiple Etcher layers, the
+  `"etcher:annotations-changed"` payload includes a `"fresco_id"` key
+  so consumers can pattern-match on the source:
+
+      def handle_event(
+            "etcher:annotations-changed",
+            %{"fresco_id" => "reader", "annotations" => annotations},
+            socket
+          ) do
+        # ...
       end
 
   UUIDs are generated client-side (UUIDv7) in both modes, so there's no

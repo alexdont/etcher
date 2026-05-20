@@ -149,6 +149,12 @@
       "  background: rgba(0, 0, 0, 0.7); border-radius: 10px;",
       "  pointer-events: auto;",
       "}",
+      // Strip mode: the scroll container IS the scrolling element, so
+      // anchor the toolbar to the viewport instead of the container.
+      // Otherwise it scrolls out of view with the content.
+      ".etcher-toolbar[data-strip] {",
+      "  position: fixed; bottom: 16px;",
+      "}",
       ".etcher-toolbar.is-active { display: flex; }",
       ".etcher-toolbar button {",
       "  width: 36px; height: 36px;",
@@ -1006,6 +1012,11 @@
       self._wireUndoKeyboard();
       self._wireStripPointerInput();
       self._wireStripResize();
+      // Shared shape-interaction listeners: hover → tooltip,
+      // tap → _onShapeTap (→ pin in browse, edit-mode in cursor).
+      // The handlers route through `_toImage` + `_shapeAt`, both of
+      // which already understand strip's `{imageIdx, x, y}` shape.
+      self._wireGlobalShapeListeners();
       self._renderInitial();
     },
 
@@ -1031,21 +1042,19 @@
           "data-etcher-strip-overlay": "",
           "data-image-idx": String(page.idx)
         });
-        svg.setAttribute(
-          "viewBox",
-          "0 0 " + (page.naturalWidth || 1) + " " + (page.naturalHeight || 1)
-        );
-        svg.setAttribute("preserveAspectRatio", "none");
-        svg.style.position = "absolute";
-        svg.style.top = page.top + "px";
-        svg.style.left = "0";
-        svg.style.width = "100%";
-        svg.style.height = page.height + "px";
+        self._applyStripOverlayLayout(svg, page);
         // Critical: never consume pointer events. Native scroll on the
         // container must keep working when the user touches inside an
         // overlay region; draw-mode capture lives on the container.
         svg.style.pointerEvents = "none";
         svg.style.overflow = "visible";
+        // No `preserveAspectRatio` attribute — the SVG default
+        // (`xMidYMid meet`) letterboxes on momentary mismatches
+        // between the overlay element box and the viewBox (during
+        // image-load, aspect-ratio correction, container-padding
+        // changes). The previous `"none"` value would stretch shapes
+        // during those windows, which the user sees as a flash of
+        // distorted geometry.
 
         // Insert as sibling immediately after the image so DOM order
         // matches z-order and the overlay scrolls with its image
@@ -1056,6 +1065,29 @@
 
         self.pageOverlays[page.idx] = { svg: svg, page: page };
       });
+    },
+
+    // Apply geometry + viewBox to a single overlay. Shared by
+    // `_buildStripOverlays` (initial mount) and `_onResize` (window
+    // resize, image-loaded, consumer-dispatched layout-changed). All
+    // four positioning values come from `getImages()` so any
+    // consumer-side CSS that shifts each `<img>` (centered narrow
+    // pages, horizontal padding, aspect-ratio correction) flows
+    // through transparently. The viewBox refresh handles the case
+    // where the consumer fixes natural dimensions after the image
+    // bitmap loads — without refreshing, shapes would render against
+    // a stale natural ratio and visibly stretch.
+    _applyStripOverlayLayout: function(svg, page) {
+      svg.setAttribute(
+        "viewBox",
+        "0 0 " + (page.naturalWidth || 1) + " " + (page.naturalHeight || 1)
+      );
+      svg.style.position = "absolute";
+      svg.style.top = page.top + "px";
+      svg.style.left = ((page.left != null) ? page.left : 0) + "px";
+      svg.style.width = ((page.width != null) ? page.width : "100%") +
+        (typeof page.width === "number" ? "px" : "");
+      svg.style.height = page.height + "px";
     },
 
     // Tooltip element lives in the scroll container too (not in a per-
@@ -1091,6 +1123,12 @@
     // match the new display size.
     _wireStripResize: function() {
       var self = this;
+      // Universal re-sync path: refreshes every overlay's viewBox +
+      // position + size from the live `getImages()` snapshot. Consumers
+      // who mutate page layout outside of `image-loaded` (toggling a
+      // padding slider, swapping an aspect-ratio correction class)
+      // can trigger this manually by dispatching a `resize` event on
+      // the window — same hook the browser uses.
       self._onResize = function() {
         if (!self.pageOverlays) return;
         var pages = self.handle.getImages();
@@ -1098,8 +1136,7 @@
           var entry = self.pageOverlays[page.idx];
           if (!entry || !entry.svg) return;
           entry.page = page;
-          entry.svg.style.top = page.top + "px";
-          entry.svg.style.height = page.height + "px";
+          self._applyStripOverlayLayout(entry.svg, page);
         });
         self.pages = pages;
         // Tooltip might be showing — reposition to its anchor shape.
@@ -1177,6 +1214,14 @@
         // gesturing inside the canvas and a competing scroll feels wrong.
         try { container.setPointerCapture(e.pointerId); } catch (_) {}
         e.preventDefault();
+        // Stop the pointerdown from bubbling to the doc-level shape
+        // listeners. Without this, `_docPointerDown` would set a
+        // `_pendingTap` on the shape under the cursor and a stationary
+        // click (polygon vertex, callout anchor) would fire
+        // `_onShapeTap` on release — pinning a tooltip mid-draw. The
+        // canvas wrapper does the same `stopPropagation()` for the
+        // identical reason; we mirror it here on the container.
+        e.stopPropagation();
         self._onPointerDown(e);
       };
 
@@ -1411,6 +1456,16 @@
 
       var bar = document.createElement("div");
       bar.className = "etcher-toolbar";
+
+      // Strip mode: the scroll container IS the scrolling element, so an
+      // absolutely-positioned toolbar anchored to it would scroll away
+      // with the content. Tag the toolbar so the stylesheet can switch
+      // it to `position: fixed`. Canvas mode keeps the existing
+      // absolute positioning (the canvas container is itself fixed in
+      // the viewport).
+      if (self.handleKind === "strip") {
+        bar.setAttribute("data-strip", "");
+      }
 
       // `data-fresco-no-capture` tells Fresco 0.5's pointerdown handler
       // to bail when the user clicks a toolbar button — otherwise the

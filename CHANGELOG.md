@@ -4,6 +4,70 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.1] — 2026-05-20
+
+Closes strip-mode parity gaps flagged by the consumer reader on top of
+0.4.0. Most issues collapsed to two missing wires; a couple needed
+small fresco-side help (`getImages()` now reports horizontal layout +
+prefers live natural dims — see Fresco 0.5.4).
+
+### Requires Fresco ~> 0.5.4
+
+The overlay-positioning fix below relies on Fresco 0.5.4's enriched
+`getImages()` (added `left` / `width`, switched `naturalWidth` /
+`naturalHeight` to prefer loaded bitmap dims over consumer-passed
+`sources` hints). Older Fresco gracefully falls back to the 0.4.0
+behavior (overlay pinned to container width).
+
+### Fixed
+
+- **Shape hover + tap now work on strip.** `_initStripRenderer` was
+  missing the `_wireGlobalShapeListeners()` call canvas mode has. The
+  doc-level listeners already understand strip's `{imageIdx, x, y}`
+  coords (since `_shapeAt` filters by `pt.imageIdx`), so wiring them
+  in unlocks: tooltip on hover, `.is-hovered` styling, `_onShapeTap`
+  in browse mode (pin tooltip → fires `etcher:tooltip-pin`), and
+  `_enterEditMode` on shape click in annotation cursor mode (no
+  drawing tool active). No consumer-side hover/tap workarounds
+  needed.
+- **Toolbar stays in view while scrolling.** Strip-mode toolbar gets
+  a `data-strip` attribute and a `position: fixed` CSS rule so it
+  anchors to the viewport instead of the scroll container (which IS
+  the scrolling element in strip mode and was carrying the toolbar
+  off-screen).
+- **Overlays size to each image, not to the container.**
+  `_buildStripOverlays` and `_onResize` now read `left` / `width`
+  from `getImages()` per image, so consumer-side horizontal padding
+  or centered narrow pages render correctly. Previously every
+  overlay was hardcoded to `left: 0; width: 100%`, stretching shapes
+  to fill the container width.
+- **viewBox refreshes on resize / image-load.** `_onResize` (which
+  also fires on Fresco's `image-loaded` event) now refreshes each
+  overlay's `viewBox` from the current `naturalWidth` /
+  `naturalHeight`. Combined with Fresco 0.5.4 preferring loaded
+  bitmap dims, consumers who patch `sources[i]` after the bitmap
+  arrives no longer end up with stale-ratio viewBoxes that distort
+  geometry.
+- **No more momentary stretch on layout mismatches.** The overlay
+  SVG's `preserveAspectRatio` is now the default (`xMidYMid meet`),
+  which letterboxes if there's a brief mismatch between the
+  element's box and the viewBox (during load / aspect-ratio
+  correction / padding changes). Previously `"none"` would stretch
+  shapes during those windows as a user-visible flash of distorted
+  geometry. Trade-off: shapes don't perfectly fill the element
+  during the mismatch — but a momentary letterbox is strictly
+  better UX than a momentary stretch.
+
+### Added
+
+- **`_applyStripOverlayLayout(svg, page)`** internal helper: shared
+  by mount + resize paths so viewBox / position / size always
+  refresh together. Universal re-sync entrypoint is still
+  `window.dispatchEvent(new Event("resize"))` — same hook the
+  browser uses on its own. Consumers who mutate `<img>` layout via
+  CSS (toggling a padding slider, swapping an aspect-ratio class)
+  should dispatch a resize event to nudge etcher to re-query.
+
 ## [0.4.0] — 2026-05-20
 
 **`<Fresco.scroll_strip>` support.** Etcher now renders on strip-format

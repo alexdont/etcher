@@ -107,12 +107,18 @@
   //
   // Consumers shipping a non-conventional input-owning overlay can
   // append a selector via `Etcher.registerInputOwnerSelector(...)`.
-  // Max number of custom colors remembered in `localStorage` and
-  // shown as a quick-access row above the hue ring picker. FIFO
-  // (most-recent first) with move-to-front on re-pick. Preset
-  // swatches never enter this list — they're already one tap away.
+  // Max number of recently-used colors remembered in `localStorage`.
+  // The list is also the source of the toolbar's inline swatches —
+  // recents fill the row first, presets backfill any unused slots
+  // so a new user still sees a starter palette before they've
+  // picked anything. MRU order (most-recent at index 0) with
+  // move-to-front on re-pick.
   var RECENT_COLORS_KEY = "etcher.recentColors";
   var RECENT_COLORS_MAX = 5;
+  // Hard cap on how many swatches render inline in the toolbar.
+  // Matches RECENT_COLORS_MAX so a user with a full recents list
+  // sees their entire palette without overflow.
+  var TOOLBAR_SWATCH_LIMIT = 5;
 
   var DEFAULT_INPUT_OWNER_SELECTORS = [
     ".etcher-handle",
@@ -316,6 +322,14 @@
       "  display: flex; flex-direction: column;",
       "  align-items: center; gap: 8px;",
       "  padding: 4px 2px 2px;",
+      "}",
+      // Preset swatches inside the picker — horizontal row tucked
+      // above the hue ring as bootstrap colors. Same swatch styling
+      // as the recents row.
+      ".etcher-presets {",
+      "  display: flex; gap: 6px; flex-wrap: wrap;",
+      "  align-items: center; justify-content: center;",
+      "  padding: 0 2px;",
       "}",
       ".etcher-picker-ring-wrap {",
       "  position: relative; line-height: 0;",
@@ -1824,36 +1838,26 @@
 
       self._refreshUndoButtons();
 
-      // Color swatches. Affects: (a) the active draft if drawing,
-      // (b) the editing shape if one is being edited, (c) the default
-      // color future shapes start with. CSS handles the "no selection"
-      // state — without an inline style the shape inherits the default
-      // blue from `.etcher-shape`.
-      self.swatchEls = resolveColorSwatches().map(function(s) {
-        var b = document.createElement("button");
-        b.type = "button";
-        b.className = "etcher-swatch";
-        b.dataset.color = s.color;
-        b.title = s.title;
-        b.setAttribute("aria-label", "Color: " + s.title);
-        b.style.background = s.color;
-        // Mark the swatch matching the initial `activeColor` as the
-        // selected starting state — gives the picker a non-empty look
-        // when annotation mode opens for the first time.
-        if (s.color === self.activeColor) b.classList.add("is-selected");
-        b.addEventListener("click", function(e) {
-          e.preventDefault();
-          self._selectColor(s.color);
-        });
-        bar.appendChild(b);
-        return b;
-      });
-
       // Compact-mode overflow trigger for colors. Sits right after
-      // the swatches so the layout reads `[active_swatch] [⋯]`
-      // when only one swatch is visible. Tap to open the colors popup.
+      // the swatches so the layout reads `[active_swatch] [⋯]` when
+      // only one is visible; swatches are inserted before it by
+      // `_refreshToolbarSwatches`.
       self.colorsMoreBtn = self._makeMoreButton("colors", "More colors");
       bar.appendChild(self.colorsMoreBtn);
+
+      // Inline toolbar swatches reflect the user's effective palette:
+      // recents first (MRU), then preset colors backfilling any
+      // unused slots. New users see the static presets until they
+      // pick anything; established users see their actual usage.
+      //
+      // The refresh reads `self.toolbar` to find its insertion
+      // anchor, so point that reference at `bar` before calling —
+      // even though `bar` isn't appended to the container yet,
+      // insertions on a detached element work the same and `bar`
+      // ends up in the DOM at the bottom of this method.
+      self.toolbar = bar;
+      self._recentColors = self._loadRecentColors();
+      self._refreshToolbarSwatches();
 
       var divider3 = document.createElement("div");
       divider3.className = "etcher-divider";
@@ -1873,7 +1877,8 @@
       bar.appendChild(closeBtn);
 
       container.appendChild(bar);
-      self.toolbar = bar;
+      // `self.toolbar = bar` was set earlier so the inline swatch
+      // refresh had its insertion anchor; no need to re-assign.
 
       // Popups are siblings of the toolbar inside the same container so
       // they share its absolute-positioning origin. Built lazily on
@@ -2120,9 +2125,19 @@
       popup.dataset.kind = "colors";
       popup.setAttribute("data-fresco-no-capture", "");
 
-      // -- 1. Preset swatches ------------------------------------------------
+      // Custom picker: preset swatches + hue ring + lightness slider.
+      // No separate \"Recent\" row inside the popup — the toolbar's
+      // inline swatches are now the recents display, so duplicating
+      // them in the popup would just be redundant chrome. The static
+      // preset row stays inside the picker as a quick way back to
+      // default colors even after the user's palette has drifted.
+      var picker = document.createElement("div");
+      picker.className = "etcher-picker";
+
       var presetColors = resolveColorSwatches().map(function(s) { return s.color; });
       self._presetColors = presetColors;
+      var presetRow = document.createElement("div");
+      presetRow.className = "etcher-presets";
       self.colorsPopupBtns = resolveColorSwatches().map(function(s) {
         var b = document.createElement("button");
         b.type = "button";
@@ -2135,30 +2150,13 @@
         b.addEventListener("click", function(e) {
           e.preventDefault();
           self._selectColor(s.color);
+          self._pushRecentColor(s.color);
           self._closePopup();
         });
-        popup.appendChild(b);
+        presetRow.appendChild(b);
         return b;
       });
-
-      // -- 2. Recents row ----------------------------------------------------
-      // Loaded from localStorage on mount. The row is `display:none`
-      // while empty so the popup doesn't reserve a hairline of space
-      // for nothing.
-      self._recentColors = self._loadRecentColors();
-      self.recentsRow = document.createElement("div");
-      self.recentsRow.className = "etcher-recents";
-      var recentsLabel = document.createElement("span");
-      recentsLabel.className = "etcher-recents-label";
-      recentsLabel.textContent = "Recent";
-      self.recentsRow.appendChild(recentsLabel);
-      self._recentsLabel = recentsLabel;
-      popup.appendChild(self.recentsRow);
-      self._renderRecentColors();
-
-      // -- 3. Custom picker --------------------------------------------------
-      var picker = document.createElement("div");
-      picker.className = "etcher-picker";
+      picker.appendChild(presetRow);
 
       // Hue ring — a torus-shaped canvas painted once. Clicking /
       // dragging on it sets `_pickerHue`. Default size keeps the
@@ -2429,49 +2427,99 @@
     _pushRecentColor: function(color) {
       if (typeof color !== "string" || !/^#[0-9a-f]{6}$/i.test(color)) return;
       color = color.toLowerCase();
-      // Don't pollute recents with preset colors — they're already
-      // one tap away in the popup's first row.
-      if (this._presetColors && this._presetColors.indexOf(color) !== -1) return;
       var list = this._recentColors || [];
-      // Dedupe + move-to-front so re-picking an existing recent
-      // bumps it to the head of the FIFO.
+      // Dedupe + move-to-front so re-picking an existing color
+      // bumps it to the head of the MRU list. Both presets and
+      // custom picks land here — the toolbar's inline swatches
+      // ARE the recents display now, so any selection that the
+      // user makes should propagate to that surface.
       var idx = list.indexOf(color);
       if (idx !== -1) list.splice(idx, 1);
       list.unshift(color);
       if (list.length > RECENT_COLORS_MAX) list.length = RECENT_COLORS_MAX;
       this._recentColors = list;
       this._saveRecentColors();
-      this._renderRecentColors();
+      this._refreshToolbarSwatches();
     },
 
-    _renderRecentColors: function() {
-      var row = this.recentsRow;
-      if (!row) return;
-      // Strip every existing swatch (keep the leading label).
-      var swatches = row.querySelectorAll(".etcher-swatch");
-      swatches.forEach(function(el) { el.parentNode.removeChild(el); });
-      var list = this._recentColors || [];
-      row.classList.toggle("is-empty", list.length === 0);
-      if (this._recentsLabel) {
-        this._recentsLabel.style.display = list.length === 0 ? "none" : "";
+    // Compute the effective inline-toolbar palette: recents in MRU
+    // order, then presets backfilling any unused slots (deduped).
+    // Initial state (no recents yet) returns the full preset list so
+    // a new user still sees a starter palette.
+    _buildToolbarSwatchList: function() {
+      var out = [];
+      var seen = Object.create(null);
+      var recents = this._recentColors || [];
+      for (var i = 0; i < recents.length && out.length < TOOLBAR_SWATCH_LIMIT; i++) {
+        var c = (recents[i] || "").toLowerCase();
+        if (!c || seen[c]) continue;
+        out.push(c);
+        seen[c] = true;
       }
+      var presets = (this._presetColors && this._presetColors.length)
+        ? this._presetColors
+        : resolveColorSwatches().map(function(s) { return s.color; });
+      for (var j = 0; j < presets.length && out.length < TOOLBAR_SWATCH_LIMIT; j++) {
+        var p = (presets[j] || "").toLowerCase();
+        if (!p || seen[p]) continue;
+        out.push(p);
+        seen[p] = true;
+      }
+      return out;
+    },
+
+    // Rebuild the toolbar's inline swatch row from `_recentColors`
+    // (with preset backfill). Called on initial mount and after
+    // every `_pushRecentColor` so the row stays in sync with the
+    // user's MRU palette.
+    //
+    // Existing swatch buttons (direct children of the toolbar) are
+    // removed and rebuilt rather than diffed — the row is at most
+    // TOOLBAR_SWATCH_LIMIT items and rebuilds are user-driven
+    // (color picks), not per-frame.
+    _refreshToolbarSwatches: function() {
       var self = this;
-      list.forEach(function(color) {
+      if (!self.toolbar || !self.colorsMoreBtn) return;
+      // Cache presets the first time we hit this path so the
+      // backfill in `_buildToolbarSwatchList` has data even when
+      // `_buildColorsPopup` hasn't run yet.
+      if (!self._presetColors) {
+        self._presetColors = resolveColorSwatches().map(function(s) { return s.color; });
+      }
+      // Strip old swatches that are direct children of the toolbar.
+      // (Popup swatches live inside `.etcher-popup` and are unaffected
+      // by this scoped query.)
+      Array.prototype.slice.call(
+        self.toolbar.children
+      ).forEach(function(child) {
+        if (child.classList && child.classList.contains("etcher-swatch")) {
+          self.toolbar.removeChild(child);
+        }
+      });
+
+      var list = self._buildToolbarSwatchList();
+      self.swatchEls = list.map(function(color) {
         var b = document.createElement("button");
         b.type = "button";
         b.className = "etcher-swatch";
         b.dataset.color = color;
         b.title = color;
-        b.setAttribute("aria-label", "Recent color " + color);
+        b.setAttribute("aria-label", "Color: " + color);
         b.style.background = color;
         if (color === self.activeColor) b.classList.add("is-selected");
         b.addEventListener("click", function(e) {
           e.preventDefault();
           self._selectColor(color);
-          self._closePopup();
+          self._pushRecentColor(color);
         });
-        row.appendChild(b);
+        self.toolbar.insertBefore(b, self.colorsMoreBtn);
+        return b;
       });
+
+      // Layout may have changed (different number of swatches or
+      // different active item position) — re-run the overflow
+      // pinning so the active swatch stays visible.
+      self._layoutToolbar();
     },
 
     _togglePopup: function(kind) {
@@ -2761,15 +2809,6 @@
       }
       if (this.colorsPopupBtns) {
         this.colorsPopupBtns.forEach(function(el) {
-          el.classList.toggle("is-selected", el.dataset.color === color);
-        });
-      }
-      // Recent-custom-colors row lives in the same popup; sync its
-      // selection ring too so the user sees a single visible
-      // \"selected\" state across all three sources (presets, recents,
-      // picker preview).
-      if (this.recentsRow) {
-        this.recentsRow.querySelectorAll(".etcher-swatch").forEach(function(el) {
           el.classList.toggle("is-selected", el.dataset.color === color);
         });
       }

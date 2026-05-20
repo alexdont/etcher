@@ -759,6 +759,20 @@
             if (shape) self._deleteShape(shape);
           },
 
+          // Bring a shape into the viewport. Strip mode scrolls the
+          // strip so the shape's image is centered (smooth by default);
+          // canvas mode calls `handle.fitBounds` on the shape's image-
+          // px bounding box. Useful for reveal-comment-on-page flows
+          // where the consumer LV navigates by uuid.
+          //
+          // Returns `true` if the shape was found and a reveal action
+          // was issued. Options:
+          //   { behavior: "smooth" | "instant" }  // default "smooth"
+          //   { padding: <natural-px> }           // canvas fitBounds padding
+          revealShape: function(uuid, opts) {
+            return self._revealShape(uuid, opts || {});
+          },
+
           // Patch in-place: merge `fields` into the shape's existing
           // values. Currently honors `metadata` and `style`; other
           // fields are no-ops (geometry edits need geometry-specific
@@ -816,6 +830,44 @@
       if (this.overlayWrapper && this.overlayWrapper.parentNode) {
         this.overlayWrapper.parentNode.removeChild(this.overlayWrapper);
       }
+      // Strip-mode teardown: pointer handlers on `handle.container`,
+      // per-image SVG siblings, the container-level tooltip, and the
+      // resize listeners.
+      if (this.handleKind === "strip") {
+        var container = this.handle && this.handle.container;
+        if (container) {
+          if (this._stripPointerDown) container.removeEventListener("pointerdown", this._stripPointerDown);
+          if (this._stripPointerMove) container.removeEventListener("pointermove", this._stripPointerMove);
+          if (this._stripPointerUp) {
+            container.removeEventListener("pointerup", this._stripPointerUp);
+            container.removeEventListener("pointercancel", this._stripPointerUp);
+          }
+          if (this._stripDblClick) container.removeEventListener("dblclick", this._stripDblClick);
+          container.classList.remove("etcher-strip-drawing");
+          container.style.cursor = "";
+        }
+        if (this.pageOverlays) {
+          this.pageOverlays.forEach(function(entry) {
+            if (entry && entry.svg && entry.svg.parentNode) {
+              entry.svg.parentNode.removeChild(entry.svg);
+            }
+          });
+          this.pageOverlays = null;
+        }
+        if (this.tooltipEl && this.tooltipEl.parentNode) {
+          this.tooltipEl.parentNode.removeChild(this.tooltipEl);
+          this.tooltipEl = null;
+        }
+        if (this._onResize) {
+          window.removeEventListener("resize", this._onResize);
+          window.removeEventListener("orientationchange", this._onResize);
+          this._onResize = null;
+        }
+        if (this._unsubImageLoaded) {
+          try { this._unsubImageLoaded(); } catch (_) {}
+          this._unsubImageLoaded = null;
+        }
+      }
       if (this._unsubViewport) {
         this._unsubViewport.forEach(function(fn) { try { fn(); } catch (_) {} });
         this._unsubViewport = null;
@@ -840,15 +892,51 @@
       var self = this;
       var handle = self.handle;
 
+      // Handle-type dispatch (added in 0.4 with Fresco 0.5.3).
+      //
+      // Fresco's `<Fresco.canvas>` and `<Fresco.scroll_strip>` both publish
+      // their handle through the same `window.Fresco.onReady` registry,
+      // but expose different surfaces:
+      //
+      //   - canvas handle has `getCanvasSize()` + image positions in a
+      //     single canvas-pixel coordinate space (`imageToScreen({x, y})`).
+      //   - strip handle has `scrollTo({imageIdx, y})` + per-image
+      //     coordinates (`imageToScreen({imageIdx, x, y})`).
+      //
+      // The renderers are quite different (strip = per-image SVG
+      // siblings of the imgs, scrolled by native browser scroll; canvas
+      // = one stage-anchored SVG that scales/translates with the
+      // transform engine), so each gets its own init path. Both end
+      // up calling `_buildNavButton` / `_buildVisibilityButton` so the
+      // pencil + eye buttons attach via `appendNavButton` (which works
+      // identically on both handles).
+      self.handleKind = ("scrollTo" in handle && typeof handle.scrollTo === "function")
+        ? "strip"
+        : (typeof handle.getCanvasSize === "function" ? "canvas" : null);
+
+      if (self.handleKind === "strip") {
+        self._initStripRenderer(handle);
+      } else if (self.handleKind === "canvas") {
+        self._initCanvasRenderer(handle);
+      } else {
+        console.warn(
+          "[Etcher] Unknown Fresco handle shape — needs <Fresco.canvas> or " +
+          "<Fresco.scroll_strip>."
+        );
+      }
+    },
+
+    _initCanvasRenderer: function(handle) {
+      var self = this;
+
       // Fresco 0.5 canvas-pixel extent — replaces OSD's
       // `world.getItemAt(0).getContentSize()`. `imageSize` stays as the
       // variable name throughout the file; the math is identical, only
       // the source of the dimensions changed.
-      var size = handle.getCanvasSize ? handle.getCanvasSize() : { width: 0, height: 0 };
+      var size = handle.getCanvasSize();
       if (!size.width || !size.height) {
         console.warn(
-          "[Etcher] Fresco handle has no canvas size — is the target a <Fresco.canvas>? " +
-          "Etcher 0.3.x requires <Fresco.canvas> (not <Fresco.viewer>)."
+          "[Etcher] Canvas handle reports zero size; check <Fresco.canvas> :canvas dimensions."
         );
         return;
       }
@@ -863,6 +951,307 @@
       self._wireUndoKeyboard();
       self._wireGlobalShapeListeners();
       self._renderInitial();
+    },
+
+    // ─────────────────────────────────────────────────────────────────
+    // Strip renderer (0.4+, requires Fresco ~> 0.5.3).
+    //
+    // <Fresco.scroll_strip> renders N <img> elements as direct children of
+    // a scrollable container, sized by aspect-ratio CSS so memory windowing
+    // can evict src without collapsing the layout. Etcher attaches one SVG
+    // overlay per image as a sibling of that image; the overlay shares the
+    // scroll container so native browser scroll moves it in lockstep with
+    // its image. Overlays default to `pointer-events: none` so native
+    // scroll keeps working — drawing-mode pointer events are captured on
+    // `handle.container` instead (added on enter-draw-mode, removed on
+    // exit) so the rest of the strip stays scrollable.
+    //
+    // Each overlay SVG has `viewBox="0 0 naturalWidth naturalHeight"`, so
+    // shape attributes can be written directly in image-pixel coordinates
+    // without per-frame scaling. The viewBox + percentage sizing combo
+    // also means overlays automatically rescale on container width change
+    // (orientation flip, window resize) — only `top`/`height` need
+    // repositioning, which the resize listener handles.
+    //
+    // Strip annotations carry an extra `image_idx` field identifying which
+    // image they live on; canvas annotations don't. The `etcher:annotations-
+    // changed` payload stays a single array — consumers' handle_event
+    // doesn't need to branch on mode.
+    // ─────────────────────────────────────────────────────────────────
+
+    _initStripRenderer: function(handle) {
+      var self = this;
+
+      // Cache page layout once at mount; re-query on resize. getImages
+      // forces a sync layout flush so we don't want to call it per scroll
+      // tick — but it's stable across memory-windowing evict/restore
+      // because aspect-ratio CSS holds each image's slot.
+      self.pages = handle.getImages();
+      if (!self.pages || self.pages.length === 0) {
+        console.warn(
+          "[Etcher] Strip handle returned no images; check <Fresco.scroll_strip> :sources."
+        );
+        return;
+      }
+
+      // pageOverlays[image_idx] = { svg, page, titleLayer? }
+      // The SVG is the drawable surface; shapes attach as children.
+      self.pageOverlays = [];
+
+      self._buildStripOverlays();
+      self._buildStripTooltip();
+      self._buildToolbar();
+      self._buildVisibilityButton();
+      self._buildNavButton();
+      self._wireUndoKeyboard();
+      self._wireStripPointerInput();
+      self._wireStripResize();
+      self._renderInitial();
+    },
+
+    // Build one SVG overlay per image. The overlay is inserted into the
+    // scroll container as a sibling immediately after its image, so
+    // native browser scroll moves them together — no per-frame
+    // repositioning needed during scroll. viewBox is image-natural so
+    // shape coords are 1:1 with the geometry stored in extensions.
+    _buildStripOverlays: function() {
+      var self = this;
+      var container = self.handle.container;
+
+      // Make sure the container can position absolute children.
+      // Scroll containers usually have `overflow: auto` but no explicit
+      // position; we need `position: relative` so our absolute overlays
+      // anchor to the container (not the page).
+      if (getComputedStyle(container).position === "static") {
+        container.style.position = "relative";
+      }
+
+      self.pages.forEach(function(page) {
+        var svg = svgEl("svg", {
+          "data-etcher-strip-overlay": "",
+          "data-image-idx": String(page.idx)
+        });
+        svg.setAttribute(
+          "viewBox",
+          "0 0 " + (page.naturalWidth || 1) + " " + (page.naturalHeight || 1)
+        );
+        svg.setAttribute("preserveAspectRatio", "none");
+        svg.style.position = "absolute";
+        svg.style.top = page.top + "px";
+        svg.style.left = "0";
+        svg.style.width = "100%";
+        svg.style.height = page.height + "px";
+        // Critical: never consume pointer events. Native scroll on the
+        // container must keep working when the user touches inside an
+        // overlay region; draw-mode capture lives on the container.
+        svg.style.pointerEvents = "none";
+        svg.style.overflow = "visible";
+
+        // Insert as sibling immediately after the image so DOM order
+        // matches z-order and the overlay scrolls with its image
+        // naturally.
+        if (page.element && page.element.parentNode) {
+          page.element.parentNode.insertBefore(svg, page.element.nextSibling);
+        }
+
+        self.pageOverlays[page.idx] = { svg: svg, page: page };
+      });
+    },
+
+    // Tooltip element lives in the scroll container too (not in a per-
+    // image overlay) so it can be positioned freely with respect to
+    // any shape. Visibility toggles via opacity; pointer-events: auto
+    // when shown so the delete button is clickable.
+    _buildStripTooltip: function() {
+      var self = this;
+      var container = self.handle.container;
+      var tip = document.createElement("div");
+      tip.className = "etcher-tooltip";
+      tip.style.position = "absolute";
+      tip.style.zIndex = "12";
+      // Same hover-bridge timers as canvas mode so the user can move
+      // from a shape to the tooltip without it auto-hiding mid-traverse.
+      tip.addEventListener("mouseenter", function() { self._cancelHideTooltip(); });
+      tip.addEventListener("mouseleave", function() { self._scheduleHideTooltip(); });
+      tip.addEventListener("click", function(e) {
+        e.stopPropagation();
+        var btn = e.target.closest("[data-etcher-action]");
+        if (!btn) return;
+        if (btn.dataset.etcherAction === "delete") {
+          self._deleteShape(self._tooltipShape);
+        }
+      });
+      container.appendChild(tip);
+      self.tooltipEl = tip;
+    },
+
+    // Re-query page positions and resize each overlay. Called on window
+    // resize / orientation change. The viewBox stays the same (image
+    // natural dimensions don't change); only `top`/`height` shift to
+    // match the new display size.
+    _wireStripResize: function() {
+      var self = this;
+      self._onResize = function() {
+        if (!self.pageOverlays) return;
+        var pages = self.handle.getImages();
+        pages.forEach(function(page) {
+          var entry = self.pageOverlays[page.idx];
+          if (!entry || !entry.svg) return;
+          entry.page = page;
+          entry.svg.style.top = page.top + "px";
+          entry.svg.style.height = page.height + "px";
+        });
+        self.pages = pages;
+        // Tooltip might be showing — reposition to its anchor shape.
+        if (self._tooltipShape && self.tooltipEl &&
+            self.tooltipEl.style.display !== "none") {
+          self._showTooltipFor(self._tooltipShape);
+        }
+      };
+      window.addEventListener("resize", self._onResize);
+      window.addEventListener("orientationchange", self._onResize);
+
+      // Fresco's strip emits `image-loaded` when each <img> finishes
+      // loading (and after memory-windowing restores an evicted src).
+      // In normal operation the aspect-ratio CSS already holds the slot
+      // so offsetTop / offsetHeight don't shift on load — but if a
+      // consumer ever ships an image whose actual intrinsic ratio
+      // diverges from the width/height attrs, the slot resizes when
+      // the bitmap arrives. Re-syncing on image-loaded covers that
+      // edge case cheaply; it's a single getImages() call per load.
+      if (typeof self.handle.on === "function") {
+        self._unsubImageLoaded = self.handle.on("image-loaded", function() {
+          if (self._onResize) self._onResize();
+        });
+      }
+    },
+
+    // Capture drawing gestures on the scroll container. Overlays are
+    // pointer-events: none so native scroll keeps working in every other
+    // state. When `activeTool` is set we hit-test, snapshot the starting
+    // image (so cross-image drag clamps to that image's screen rect),
+    // activate the matching per-image overlay so the existing
+    // `self.svg.appendChild(...)` paths land in the right SVG, and forward
+    // to the shared `_onPointerDown / Move / Up` handlers.
+    _wireStripPointerInput: function() {
+      var self = this;
+      var container = self.handle.container;
+
+      self._stripPointerDown = function(e) {
+        if (!self.annotationMode || !self.activeTool) return;
+        if (e.button !== 0) return;
+        var pt;
+        try { pt = self.handle.screenToImage({ x: e.clientX, y: e.clientY }); }
+        catch (_) { return; }
+        if (!pt || typeof pt.imageIdx !== "number") return;
+
+        // Multi-click flows (polygon, callout) lock to the page where
+        // the first click landed. Subsequent clicks on other images
+        // are ignored — all vertices must share one image's natural-
+        // pixel space. ESC clears the draft if the user wants to
+        // restart on a different page.
+        if (self.draftPolygon || self.draftCallout) {
+          if (!self._stripActiveDraw) return;
+          if (pt.imageIdx !== self._stripActiveDraw.imageIdx) return;
+        } else {
+          var entry = self.pageOverlays && self.pageOverlays[pt.imageIdx];
+          if (!entry) return;
+
+          // Lock subsequent moves to this image's screen rect so a drag
+          // that wanders into the next image still records into the
+          // page it started on.
+          var elRect = entry.page.element.getBoundingClientRect();
+          self._stripActiveDraw = {
+            imageIdx: pt.imageIdx,
+            rect: {
+              left: elRect.left,
+              right: elRect.right,
+              top: elRect.top,
+              bottom: elRect.bottom
+            }
+          };
+          self._activateOverlayForImage(pt.imageIdx);
+        }
+
+        // Block native scroll while drawing; the user is intentionally
+        // gesturing inside the canvas and a competing scroll feels wrong.
+        try { container.setPointerCapture(e.pointerId); } catch (_) {}
+        e.preventDefault();
+        self._onPointerDown(e);
+      };
+
+      self._stripPointerMove = function(e) {
+        // Tool-active hover previews (eraser, polygon next-vertex)
+        // need to flow through `_onPointerMove` too, but only over the
+        // active image. Without an active draw we don't clamp.
+        if (!self.annotationMode || !self.activeTool) return;
+        var ev = e;
+        var lock = self._stripActiveDraw;
+        if (lock && self.draftState) {
+          var r = lock.rect;
+          var cx = Math.max(r.left, Math.min(r.right - 1, e.clientX));
+          var cy = Math.max(r.top, Math.min(r.bottom - 1, e.clientY));
+          if (cx !== e.clientX || cy !== e.clientY) {
+            ev = {
+              clientX: cx,
+              clientY: cy,
+              pointerId: e.pointerId,
+              pointerType: e.pointerType,
+              button: e.button,
+              buttons: e.buttons,
+              target: e.target,
+              preventDefault: function() { try { e.preventDefault(); } catch (_) {} },
+              stopPropagation: function() { try { e.stopPropagation(); } catch (_) {} }
+            };
+          }
+          e.preventDefault();
+        }
+        self._onPointerMove(ev);
+      };
+
+      self._stripPointerUp = function(e) {
+        if (!self.annotationMode) return;
+        self._onPointerUp(e);
+        // Keep the per-image lock alive during multi-click polygon /
+        // callout flows. Clear once the draft is gone (commit / cancel
+        // both clear draftPolygon / draftCallout / draftState).
+        if (self._stripActiveDraw && !self.draftPolygon &&
+            !self.draftCallout && !self.draftState) {
+          try { container.releasePointerCapture(e.pointerId); } catch (_) {}
+          self._stripActiveDraw = null;
+        }
+      };
+
+      self._stripDblClick = function(e) {
+        if (!self.annotationMode) return;
+        self._onDoubleClick(e);
+      };
+
+      container.addEventListener("pointerdown", self._stripPointerDown);
+      container.addEventListener("pointermove", self._stripPointerMove);
+      container.addEventListener("pointerup", self._stripPointerUp);
+      container.addEventListener("pointercancel", self._stripPointerUp);
+      container.addEventListener("dblclick", self._stripDblClick);
+    },
+
+    // Switch the "current overlay" so the existing draw / render /
+    // handle-creation code paths (which all `appendChild` to `self.svg`)
+    // land in the right per-image SVG. No-op for canvas mode.
+    _activateOverlayForImage: function(imageIdx) {
+      if (this.handleKind !== "strip") return;
+      var entry = this.pageOverlays && this.pageOverlays[imageIdx];
+      if (entry && entry.svg) this.svg = entry.svg;
+    },
+
+    // Activate the overlay that owns `shape.el`. Used by interaction
+    // entry points (edit-mode enter, shape-move start, midpoint refresh)
+    // so handles / title labels render in the same SVG as the shape
+    // they decorate.
+    _activateOverlayForShape: function(shape) {
+      if (this.handleKind !== "strip") return;
+      if (shape && shape.el && shape.el.ownerSVGElement) {
+        this.svg = shape.el.ownerSVGElement;
+      }
     },
 
     // ⌘Z / Ctrl+Z to undo, +Shift to redo. Only handled while
@@ -1202,13 +1591,21 @@
     // `self._emitChanged()` after mutating `self.shapes` in place.
     _emitChanged: function() {
       if (!this.pushEventTo) return;
+      var stripMode = this.handleKind === "strip";
       var payload = (this.shapes || []).map(function(s) {
         var entry = { uuid: s.uuid, kind: s.kind, geometry: s.geometry };
+        // Strip annotations carry the per-image index. Canvas
+        // annotations omit it — they live in a single canvas-pixel
+        // coordinate space.
+        if (stripMode && typeof s.image_idx === "number") {
+          entry.image_idx = s.image_idx;
+        }
         if (s.style != null) entry.style = s.style;
         if (s.metadata != null) entry.metadata = s.metadata;
         return entry;
       });
       this.pushEventTo(this.el, "etcher:annotations-changed", {
+        fresco_id: this.frescoId || null,
         annotations: payload
       });
     },
@@ -1277,12 +1674,22 @@
       // catch their own hover + click independently via CSS, so the
       // wrapper can stay `pointer-events: none` in every other state and
       // let background clicks pass through to OSD's canvas.
+      var drawingNow = toolKey != null;
       if (self.overlayWrapper) {
-        var drawing = toolKey != null;
-        self.overlayWrapper.style.pointerEvents = drawing ? "auto" : "none";
-        self.overlayWrapper.classList.toggle("is-drawing", drawing);
-        if (drawing) self._hideTooltip();
+        self.overlayWrapper.style.pointerEvents = drawingNow ? "auto" : "none";
+        self.overlayWrapper.classList.toggle("is-drawing", drawingNow);
       }
+      // Strip mode has no overlay wrapper (per-image overlays sit on the
+      // scroll container directly). Apply the crosshair cursor + is-
+      // drawing class to the container so the user gets the same visual
+      // affordance, and the scroll container's native gestures still
+      // bubble for non-draw moments. Restore the original cursor on tool
+      // exit; `''` is the spec-correct way to clear an inline style.
+      if (self.handleKind === "strip" && self.handle && self.handle.container) {
+        self.handle.container.classList.toggle("etcher-strip-drawing", drawingNow);
+        self.handle.container.style.cursor = drawingNow ? "crosshair" : "";
+      }
+      if (drawingNow) self._hideTooltip();
 
       self._dispatch("etcher:tool-changed", { tool: toolKey });
     },
@@ -1368,17 +1775,26 @@
     // -------------------------------------------------------------------------
 
     _toImage: function(e) {
-      // Fresco's screenToImage takes page (client) coords directly and
-      // returns canvas-pixel coords. The function name keeps "Image" for
-      // back-compat with the rest of Etcher's internals, but the coord
-      // system is the <Fresco.canvas> canvas-pixel space.
+      // Both handle shapes expose `screenToImage({x, y})` but the
+      // return is different: canvas returns `{x, y}` in canvas-pixel
+      // coords; strip returns `{imageIdx, x, y}` in per-image natural
+      // pixel coords. Strip draw paths consume `imageIdx`; canvas
+      // draw paths ignore it (extra field is harmless).
       return this.handle.screenToImage({ x: e.clientX, y: e.clientY });
     },
 
     _imageToContainer: function(pt) {
-      // Fresco's imageToScreen returns page coords; subtract the
-      // container origin to land in container-pixel space (the SVG
-      // overlay's coordinate system).
+      // Strip mode: each shape's SVG element lives inside a per-image
+      // overlay whose `viewBox` is set to that image's natural pixel
+      // dimensions. So SVG attrs in image-pixel coords render
+      // correctly without any transform — the identity case lets the
+      // existing per-shape render switch in `_renderShape` work
+      // unchanged.
+      if (this.handleKind === "strip") return pt;
+
+      // Canvas mode: convert image-pixel → container-pixel for the
+      // single canvas-spanning overlay SVG. Fresco's imageToScreen
+      // returns page coords; subtract the container origin.
       var page = this.handle.imageToScreen(pt);
       var r = this.handle.container.getBoundingClientRect();
       return { x: page.x - r.left, y: page.y - r.top };
@@ -2784,7 +3200,18 @@
           e.target.closest(".etcher-handle, .etcher-title-group, .etcher-tooltip, .etcher-toolbar, .etcher-text-editor");
         if (inside) return;
         var hit = self._hoveredShape;
-        if (!hit) return;
+        // Touch-native fallback: devices without hover (mobile Safari /
+        // Chrome on Android) never populate `_hoveredShape` because no
+        // mousemove fires before tap. Hit-test directly on pointerdown
+        // so a single finger-tap selects (annotation mode) or pins the
+        // tooltip (browse mode). Cheap — only runs when hover state is
+        // empty.
+        if (!hit) {
+          var ptDirect;
+          try { ptDirect = self._toImage(e); } catch (_) { return; }
+          hit = self._shapeAt(ptDirect);
+          if (!hit) return;
+        }
 
         // In annotation cursor mode, immediately enter shape-move so the
         // user can drag without first tapping to enter edit mode. Only
@@ -3088,6 +3515,112 @@
       this._installTooltipOutsideClickHandler();
       this._highlightCommentsFor(shape.uuid);
       this._dispatch("etcher:tooltip-pin", { uuid: shape.uuid || null });
+    },
+
+    // Compute a shape's bounding box in image-natural pixels. Returns
+    // `null` if geometry is malformed (e.g., an empty polygon). Used
+    // by `_revealShape`; not called per-frame so it's fine to recompute
+    // here rather than caching.
+    _shapeBBoxImagePx: function(shape) {
+      var g = shape && shape.geometry;
+      if (!g) return null;
+      function fromPoints(pts) {
+        if (!pts || pts.length === 0) return null;
+        var minX = pts[0].x, minY = pts[0].y, maxX = minX, maxY = minY;
+        for (var i = 1; i < pts.length; i++) {
+          var p = pts[i];
+          if (p.x < minX) minX = p.x; else if (p.x > maxX) maxX = p.x;
+          if (p.y < minY) minY = p.y; else if (p.y > maxY) maxY = p.y;
+        }
+        return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+      }
+      switch (shape.kind) {
+        case "rectangle":
+        case "text":
+          return { x: g.x, y: g.y, w: g.w, h: g.h };
+        case "circle":
+          return { x: g.cx - g.r, y: g.cy - g.r, w: 2 * g.r, h: 2 * g.r };
+        case "polygon":
+        case "freehand":
+          return fromPoints(g.points);
+        case "line":
+        case "dimension": {
+          var ax = g.a[0], ay = g.a[1], bx = g.b[0], by = g.b[1];
+          return {
+            x: Math.min(ax, bx),
+            y: Math.min(ay, by),
+            w: Math.abs(bx - ax),
+            h: Math.abs(by - ay)
+          };
+        }
+        case "callout": {
+          var box = g.text_box;
+          var anchorX = g.anchor ? g.anchor[0] : 0;
+          var anchorY = g.anchor ? g.anchor[1] : 0;
+          if (!box) return { x: anchorX - 1, y: anchorY - 1, w: 2, h: 2 };
+          var x1 = Math.min(box.x, anchorX);
+          var y1 = Math.min(box.y, anchorY);
+          var x2 = Math.max(box.x + box.w, anchorX);
+          var y2 = Math.max(box.y + box.h, anchorY);
+          return { x: x1, y: y1, w: x2 - x1, h: y2 - y1 };
+        }
+      }
+      return null;
+    },
+
+    // Bring a shape into the viewport. Strip mode scrolls the strip
+    // so the shape's bbox center sits at the viewport's vertical
+    // center (clamped at the top edge). Canvas mode delegates to
+    // `handle.fitBounds`. Returns `false` if the uuid is unknown or
+    // the active Fresco handle can't service the request.
+    _revealShape: function(uuid, opts) {
+      var shape = (this.shapes || []).find(function(s) { return s.uuid === uuid; });
+      if (!shape) return false;
+      var bbox = this._shapeBBoxImagePx(shape);
+      if (!bbox) return false;
+      var behavior = opts.behavior === "instant" ? "instant" : "smooth";
+
+      if (this.handleKind === "strip") {
+        if (typeof shape.image_idx !== "number") return false;
+        var page = (this.pages || [])[shape.image_idx];
+        if (!page) return false;
+        // page.height is rendered px, page.naturalHeight is image px.
+        var scale = page.naturalHeight > 0 ? page.height / page.naturalHeight : 1;
+        var renderedTop = bbox.y * scale;
+        var renderedH = bbox.h * scale;
+        var viewportH = (this.handle.container &&
+          this.handle.container.clientHeight) || 0;
+        var yOffset = Math.max(
+          0,
+          renderedTop + renderedH / 2 - viewportH / 2
+        );
+        try {
+          this.handle.scrollTo({
+            imageIdx: shape.image_idx,
+            y: yOffset,
+            behavior: behavior
+          });
+          return true;
+        } catch (_) { return false; }
+      }
+
+      if (this.handleKind === "canvas") {
+        if (typeof this.handle.fitBounds !== "function") return false;
+        var pad = typeof opts.padding === "number" ? opts.padding : 0;
+        try {
+          this.handle.fitBounds(
+            {
+              x: bbox.x - pad,
+              y: bbox.y - pad,
+              w: bbox.w + pad * 2,
+              h: bbox.h + pad * 2
+            },
+            { animate: behavior !== "instant" }
+          );
+          return true;
+        } catch (_) { return false; }
+      }
+      return false;
     },
 
     _unpinTooltip: function() {
@@ -3901,9 +4434,16 @@
     // shapes without a uuid (drafts, mid-create, recently-deleted).
     _shapeAt: function(pt) {
       if (!this.shapes) return null;
+      // Strip mode: only test shapes that live on the same image as
+      // `pt`. screenToImage on a strip handle returns `{imageIdx, x, y}`,
+      // and shape coords are stored in per-image natural pixels, so
+      // mixing pages would produce false positives.
+      var stripMode = this.handleKind === "strip";
+      var ptImageIdx = stripMode && typeof pt.imageIdx === "number" ? pt.imageIdx : null;
       for (var i = this.shapes.length - 1; i >= 0; i--) {
         var s = this.shapes[i];
         if (!s.uuid) continue;
+        if (stripMode && s.image_idx !== ptImageIdx) continue;
         if (this._shapeContainsPoint(s, pt)) return s;
       }
       return null;
@@ -4234,6 +4774,14 @@
         style: style,
         el: el
       };
+      // Strip mode: tag the shape with the image it was drawn on so the
+      // pushed `etcher:annotations-changed` payload carries `image_idx`,
+      // and so subsequent hit-tests / handle renders / interactions can
+      // route to the correct per-image overlay.
+      if (this.handleKind === "strip" && this._stripActiveDraw) {
+        shape.image_idx = this._stripActiveDraw.imageIdx;
+        el.setAttribute("data-image-idx", String(shape.image_idx));
+      }
       this.shapes.push(shape);
       this._renderShape(shape);
       this._attachShapeInteractions(shape);
@@ -4309,14 +4857,33 @@
 
     _renderInitial: function() {
       var self = this;
-      // Hydrate from <Fresco.canvas>'s `extensions.etcher` blob — set by
-      // the consumer via Fresco.Canvas.put_extension/3. Replaces 0.2.x's
-      // server-rendered `data-initial-annotations` attribute.
+      // Hydrate from `extensions.etcher` set by the consumer via
+      // Fresco.Canvas.put_extension/3 (or the matching scroll_strip
+      // `extensions={}` attr). Replaces 0.2.x's server-rendered
+      // `data-initial-annotations` attribute.
       var ext = (self.handle && typeof self.handle.getExtension === "function")
         ? self.handle.getExtension("etcher")
         : null;
       var annotations = (ext && Array.isArray(ext.annotations)) ? ext.annotations : [];
+      var stripMode = self.handleKind === "strip";
       annotations.forEach(function(ann) {
+        // Strip annotations are stored in per-image natural-pixel space.
+        // Switch the active overlay before each render so `self.svg`
+        // appendChild sites (in `_renderAnnotation` / `_renderShape`)
+        // attach into the matching page. Annotations missing a valid
+        // `image_idx` are skipped with a console hint — they almost
+        // certainly came from a canvas-mode export.
+        if (stripMode) {
+          var idx = typeof ann.image_idx === "number" ? ann.image_idx : -1;
+          if (!self.pageOverlays || !self.pageOverlays[idx]) {
+            console.warn(
+              "[Etcher] Skipping annotation with missing/unknown image_idx:",
+              ann.uuid, "image_idx:", ann.image_idx
+            );
+            return;
+          }
+          self._activateOverlayForImage(idx);
+        }
         self._renderAnnotation(ann);
       });
     },
@@ -4483,6 +5050,12 @@
         style: ann.style || null,
         el: el
       };
+      // Strip mode: keep `image_idx` on the shape so future emits round-
+      // trip cleanly and so `_shapeAt` can filter hit-tests by page.
+      if (this.handleKind === "strip" && typeof ann.image_idx === "number") {
+        shape.image_idx = ann.image_idx;
+        el.setAttribute("data-image-idx", String(shape.image_idx));
+      }
       this.shapes.push(shape);
       this._renderShape(shape);
       // Apply persisted color (if any) — the `style` field carries
@@ -4590,6 +5163,10 @@
       opts = opts || { interactive: true };
       this._removeHandles();
       var self = this;
+      // Strip mode: handles must land in the same per-image overlay as
+      // the shape they decorate. `self.svg` may still be pointing at
+      // a different page from the last interaction.
+      this._activateOverlayForShape(shape);
       var positions = this._handlePositions(shape);
       var handleColor = self._handleColor(shape);
 
@@ -5133,6 +5710,10 @@
     _startShapeMove: function(shape, e) {
       var self = this;
       var el = shape.el;
+      // Strip mode: make sure handle / drag-preview elements created
+      // during the move land in the same per-image overlay as the
+      // shape being dragged.
+      self._activateOverlayForShape(shape);
       var startPt = self._toImage(e);
       var startGeom = JSON.parse(JSON.stringify(shape.geometry));
       // Full pre-move snapshot for the undo stack.

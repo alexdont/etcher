@@ -4,6 +4,87 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] — 2026-05-20
+
+**`<Fresco.scroll_strip>` support.** Etcher now renders on strip-format
+viewers (vertical-scroll manga/manhwa, long-form web comics) with the
+same UX surface canvas mode has — pencil button, toolbar, hover
+tooltips, undo/redo, hydration from `extensions.etcher`. Pure-additive
+on the consumer side: the existing `<Etcher.layer>` mounts unchanged
+and dispatches strip vs canvas internally based on the Fresco handle
+shape.
+
+### Requires Fresco ~> 0.5.3
+
+Strip mode relies on `handle.getExtension("etcher")` and
+`handle.getImages()` (both added in Fresco 0.5.3). Mixing Etcher 0.4
+with an older Fresco prints a console warning and skips hydration but
+otherwise no-ops cleanly.
+
+### Added
+
+- **Strip renderer.** `<Etcher.layer>` inspects the Fresco handle at
+  mount and picks between two renderers: the existing canvas renderer
+  (one SVG overlay spanning the whole canvas) and a new strip renderer
+  (one SVG sibling per image, sized to each image's `offsetTop` /
+  `offsetHeight`, with `viewBox` set to natural pixel dimensions so
+  geometry stored in image-px renders 1:1 without any per-frame coord
+  math). Native browser scroll moves overlays with their images for
+  free.
+- **Per-image annotations.** Strip shapes carry an `image_idx` field
+  (the page they live on), pushed in the `etcher:annotations-changed`
+  payload and round-tripped through `extensions.etcher`. Canvas-mode
+  payloads are unchanged — `image_idx` is strip-only.
+- **`handle.revealShape(uuid, opts)` on the layer API.** Scroll a
+  strip to center a shape's bbox in the viewport (or call
+  `handle.fitBounds` on the shape's bbox in canvas mode). `opts`:
+  `{behavior: "smooth" | "instant", padding: <natural-px>}`. Returns
+  `true` if the shape was found and a reveal action was issued.
+  Useful for "click a comment thread → jump to the page it's on"
+  flows.
+- **Touch-native tap-to-select.** `_docPointerDown` now hit-tests
+  directly on pointerdown when no shape is currently hovered.
+  Previously, devices without hover (mobile Safari / Chrome on
+  Android) never populated `_hoveredShape`, so finger-tapping a shape
+  never pinned its tooltip — fixed for canvas and strip alike.
+- **Per-page click + drag locking.** When the user starts drawing on
+  image #3, a `pointermove` that wanders into image #4 is clamped to
+  image #3's screen rect — the resulting shape stays anchored to the
+  page it was started on. Polygon and callout multi-click flows lock
+  the same way: clicks outside the starting page are ignored.
+- **Strip-mode `crosshair` cursor** on the scroll container while a
+  drawing tool is active, plus an `etcher-strip-drawing` class hook
+  for consumer CSS that wants to restyle native scrollbars or hide
+  page chrome while drawing.
+
+### Changed
+
+- **`_init` dispatch.** The mount-time init split into
+  `_initCanvasRenderer(handle)` and `_initStripRenderer(handle)`.
+  Detection: `"scrollTo" in handle && typeof handle.scrollTo === "function"`
+  → strip; `typeof handle.getCanvasSize === "function"` → canvas;
+  anything else logs a warning and bails. Consumers driving the layer
+  via `window.Etcher.layerFor(...)` see the same `api` either way.
+- **`_shapeAt(pt)`** filters hit-tests by `pt.imageIdx` in strip mode.
+  Without the filter, a shape on image 2 with bbox
+  `{x: 100, y: 200, w: 50, h: 50}` would falsely match a click at
+  the same image-px coordinates on image 5. Canvas mode is
+  unaffected.
+- **`_finalizeShape` / `_renderAnnotation`** stamp `data-image-idx`
+  on the shape's `<g>` / `<rect>` / `<polygon>` element in strip mode
+  for DOM-level debugging + consumer CSS hooks.
+- **`mix.exs`** dep pinned to `{:fresco, "~> 0.5.3"}` (was `~> 0.5`).
+
+### Why now
+
+The consumer reader was migrating their long-form manhwa chapters
+from `<Fresco.canvas>` (paged, one image at a time) to
+`<Fresco.scroll_strip>` (vertical scroll, all pages stitched) but
+couldn't bring Etcher with them — strip's handle missed the surface
+canvas had, and Etcher's geometry model assumed a single canvas-pixel
+coord space. Fresco 0.5.3 closed the handle-side gap; this release
+closes the Etcher-side gap.
+
 ## [0.3.0] — 2026-05-19
 
 **Major rewrite.** Etcher now plugs into `<Fresco.canvas>`'s

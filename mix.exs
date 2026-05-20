@@ -1,8 +1,8 @@
 defmodule Etcher.MixProject do
   use Mix.Project
 
-  @version "0.3.0"
-  @description "Annotation overlay for Fresco canvases in Phoenix. Draw shapes; annotations live inside <Fresco.canvas>'s extensions map and travel with the .fresco file."
+  @version "0.4.0"
+  @description "Annotation overlay for Fresco viewers in Phoenix. Draw shapes on `<Fresco.canvas>` and `<Fresco.scroll_strip>`; annotations live inside the host's extensions map and travel with the .fresco file (canvas) or the strip's serialized state."
   @source_url "https://github.com/alexdont/etcher"
 
   def project do
@@ -24,7 +24,7 @@ defmodule Etcher.MixProject do
 
   defp deps do
     [
-      {:fresco, "~> 0.5"},
+      {:fresco, "~> 0.5.3"},
       {:phoenix_live_view, "~> 1.1"},
       {:phoenix_html, "~> 4.0"},
       {:jason, "~> 1.4"},

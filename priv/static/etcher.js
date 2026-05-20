@@ -537,6 +537,16 @@
       "  cursor: grab;",
       "}",
       ".etcher-shape.is-editing.is-moving { cursor: grabbing; }",
+      // Multi-selection (shift-click) — distinct from `.is-editing` so
+      // a shape that's part of a multi-selection doesn't grow vertex
+      // handles. Solid orange stroke + a soft glow reads as
+      // \"grouped\" without competing with the dashed edit-mode stroke.
+      ".etcher-shape.is-multi-selected {",
+      "  stroke: #f59e0b; stroke-width: 3;",
+      "  fill: rgba(245, 158, 11, 0.16);",
+      "  filter: drop-shadow(0 0 3px rgba(245, 158, 11, 0.7));",
+      "}",
+      ".etcher-shape.is-multi-selected.is-moving { cursor: grabbing; }",
       ".etcher-handle {",
       // Stroke + interactive fills bind to `currentColor` so a handle
       // inherits the shape's painted color (set via `style.color`
@@ -1606,16 +1616,24 @@
         if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" ||
                   (t.isContentEditable === true))) return;
 
-        // Backspace / Delete deletes the currently-selected shape
-        // (the one in edit mode). Goes through the same _deleteShape
-        // path as the eraser tool so undo + server sync work
-        // identically. No meta key required — the !INPUT/!TEXTAREA
-        // gate above is enough to keep it from firing while the user
-        // is typing in a form.
-        if ((e.key === "Backspace" || e.key === "Delete") && self.editingShape) {
-          e.preventDefault();
-          self._deleteShape(self.editingShape);
-          return;
+        // Backspace / Delete deletes the currently-selected shape(s).
+        // Multi-selection wins when present (one batched delete +
+        // single bulk-undo entry); otherwise falls back to the
+        // single edit-mode shape. Goes through the same path as the
+        // eraser so undo + server sync work identically. No meta key
+        // required — the !INPUT/!TEXTAREA gate above keeps it from
+        // firing while the user is typing in a form.
+        if (e.key === "Backspace" || e.key === "Delete") {
+          if (self.selectedShapes && self.selectedShapes.length > 0) {
+            e.preventDefault();
+            self._deleteSelectedShapes();
+            return;
+          }
+          if (self.editingShape) {
+            e.preventDefault();
+            self._deleteShape(self.editingShape);
+            return;
+          }
         }
 
         var meta = e.metaKey || e.ctrlKey;
@@ -2561,6 +2579,34 @@
         return b;
       });
 
+      // Sync `activeColor` to the leftmost swatch when it isn't
+      // represented in the freshly-built row. This covers two cases:
+      //
+      //   1. Initial mount — `resolveDefaultColor()` may pick blue
+      //      (the legacy default) but the toolbar's leftmost slot
+      //      could be a recent or a canvas-frequent color the user
+      //      has been working with. Snapping to that swatch makes
+      //      \"what's highlighted\" match \"what will draw\" on
+      //      first paint.
+      //
+      //   2. Hydration — `_renderInitial` re-runs the refresh after
+      //      shapes load, which may reshuffle the row's leading
+      //      color via the canvas-frequent fallback. Re-sync so
+      //      the next stroke uses the new leftmost.
+      //
+      // Once any color is explicitly picked, `_pushRecentColor`
+      // moves it to the front of recents, so `activeColor` and the
+      // leftmost swatch agree — the `inList` check makes this branch
+      // a no-op in the steady state.
+      if (self.swatchEls && self.swatchEls.length > 0) {
+        var inList = self.swatchEls.some(function(b) {
+          return b.dataset.color === self.activeColor;
+        });
+        if (!inList) {
+          self._selectColor(self.swatchEls[0].dataset.color);
+        }
+      }
+
       // Layout may have changed (different number of swatches or
       // different active item position) — re-run the overflow
       // pinning so the active swatch stays visible.
@@ -2774,6 +2820,7 @@
         self._selectTool(null);
         self._cancelDraft();
         self._exitEditMode();
+        self._clearSelection();
         self._closePopup();
       }
 
@@ -2791,8 +2838,13 @@
       }
       self.activeTool = toolKey;
       // Drawing and editing are mutually exclusive — picking a tool
-      // means we're done admiring the current edit.
-      if (toolKey != null) self._exitEditMode();
+      // means we're done admiring the current edit. Same goes for
+      // multi-selection: entering draw mode clears the group so a
+      // stray Backspace mid-draw doesn't wipe the selected shapes.
+      if (toolKey != null) {
+        self._exitEditMode();
+        self._clearSelection();
+      }
 
       // Sync `.is-selected` across the main toolbar AND the
       // compact-mode tools popup. The popup is an alternate UI; its
@@ -4379,7 +4431,42 @@
           var ptDirect;
           try { ptDirect = self._toImage(e); } catch (_) { return; }
           hit = self._shapeAt(ptDirect);
-          if (!hit) return;
+          if (!hit) {
+            // Empty click in annotation cursor mode (no modifier)
+            // clears any active multi-selection — same affordance
+            // most graphics apps use for \"click outside to deselect\".
+            if (self.annotationMode && self.activeTool == null && !e.shiftKey &&
+                self.selectedShapes && self.selectedShapes.length > 0) {
+              self._clearSelection();
+            }
+            return;
+          }
+        }
+
+        // Multi-select (Shift+click). Toggles the clicked shape in/
+        // out of `selectedShapes` and skips the move/edit flow — the
+        // user is grouping shapes for a batch action, not interacting
+        // with one. Only meaningful in annotation cursor mode; in
+        // browse mode or with a draw tool active, shift+click falls
+        // through to the existing behavior.
+        if (self.annotationMode && self.activeTool == null && e.shiftKey) {
+          self._exitEditMode();
+          self._toggleInSelection(hit);
+          e.preventDefault();
+          return;
+        }
+
+        // Click on a shape that's part of a multi-selection (no
+        // modifier) drags the whole group together. Anything else
+        // exits multi-selection and falls through to single-shape
+        // behavior.
+        if (self.annotationMode && self.activeTool == null &&
+            self.selectedShapes && self.selectedShapes.length > 0) {
+          if (self._isInSelection(hit)) {
+            self._startMultiShapeMove(hit, e);
+            return;
+          }
+          self._clearSelection();
         }
 
         // In annotation cursor mode, immediately enter shape-move so the
@@ -4867,6 +4954,164 @@
         document.removeEventListener("click", this._tooltipOutsideClick, true);
         this._tooltipOutsideClick = null;
       }
+    },
+
+    // ---- Multi-selection (shift-click) -----------------------------------
+    //
+    // A second selection mode independent of `editingShape`. Shift-
+    // clicking a shape toggles it in/out of `selectedShapes`; the
+    // group can then be dragged together or deleted with a single
+    // Backspace / Delete keystroke. Clearing happens on:
+    //   - clicking empty canvas (no modifier)
+    //   - selecting any drawing tool (entering draw mode)
+    //   - exiting annotation mode
+    //   - completing a delete on the group
+
+    _addToSelection: function(shape) {
+      if (!shape || !shape.el) return;
+      this.selectedShapes = this.selectedShapes || [];
+      if (this.selectedShapes.indexOf(shape) !== -1) return;
+      this.selectedShapes.push(shape);
+      shape.el.classList.add("is-multi-selected");
+    },
+
+    _removeFromSelection: function(shape) {
+      var list = this.selectedShapes || [];
+      var idx = list.indexOf(shape);
+      if (idx === -1) return;
+      list.splice(idx, 1);
+      if (shape.el) shape.el.classList.remove("is-multi-selected");
+    },
+
+    _toggleInSelection: function(shape) {
+      var list = this.selectedShapes || [];
+      if (list.indexOf(shape) === -1) this._addToSelection(shape);
+      else this._removeFromSelection(shape);
+    },
+
+    _clearSelection: function() {
+      var list = this.selectedShapes || [];
+      list.forEach(function(s) {
+        if (s && s.el) s.el.classList.remove("is-multi-selected");
+      });
+      this.selectedShapes = [];
+    },
+
+    _isInSelection: function(shape) {
+      return !!(this.selectedShapes &&
+                this.selectedShapes.indexOf(shape) !== -1);
+    },
+
+    // Drag every multi-selected shape together. `anchorShape` is the
+    // one the user grabbed; the gesture's image-space delta is applied
+    // uniformly to every shape's geometry, so relative positions are
+    // preserved. Title boxes (when present) translate alongside.
+    _startMultiShapeMove: function(anchorShape, e) {
+      var self = this;
+      var startPt = self._toImage(e);
+      // Snapshot geometry + title box for every selected shape.
+      var snapshots = self.selectedShapes.map(function(s) {
+        return {
+          shape: s,
+          geometry: JSON.parse(JSON.stringify(s.geometry)),
+          titleBox: (s.metadata && s.metadata.title_box)
+            ? Object.assign({}, s.metadata.title_box)
+            : null,
+          history: self._snapshotShape(s)
+        };
+      });
+
+      var dragged = false;
+      try { anchorShape.el.setPointerCapture(e.pointerId); } catch (_) {}
+      self._hideTooltip();
+
+      function onMove(ev) {
+        var pt = self._toImage(ev);
+        if (!dragged) {
+          var a = self._imageToContainer(startPt);
+          var b = self._imageToContainer(pt);
+          var sdx = b.x - a.x, sdy = b.y - a.y;
+          // Same 3-px dead zone as `_startShapeMove` — a stationary
+          // click on a multi-selected shape shouldn't fire a network
+          // round-trip.
+          if (sdx * sdx + sdy * sdy < 9) return;
+          dragged = true;
+          snapshots.forEach(function(snap) {
+            if (snap.shape.el) snap.shape.el.classList.add("is-moving");
+          });
+        }
+        var dxI = pt.x - startPt.x;
+        var dyI = pt.y - startPt.y;
+        snapshots.forEach(function(snap) {
+          snap.shape.geometry = self._translateGeometry(
+            snap.shape.kind, snap.geometry, dxI, dyI
+          );
+          if (snap.titleBox) {
+            snap.shape.metadata = Object.assign({}, snap.shape.metadata || {}, {
+              title_box: {
+                x: snap.titleBox.x + dxI,
+                y: snap.titleBox.y + dyI,
+                w: snap.titleBox.w,
+                h: snap.titleBox.h
+              }
+            });
+          }
+          self._renderShape(snap.shape);
+        });
+      }
+
+      function onUp(ev) {
+        anchorShape.el.removeEventListener("pointermove", onMove);
+        anchorShape.el.removeEventListener("pointerup", onUp);
+        anchorShape.el.removeEventListener("pointercancel", onUp);
+        try { anchorShape.el.releasePointerCapture(ev.pointerId); } catch (_) {}
+        snapshots.forEach(function(snap) {
+          if (snap.shape.el) snap.shape.el.classList.remove("is-moving");
+        });
+        if (!dragged) return;
+        // One undo entry per shape — keeps the existing per-shape
+        // restore logic; the user will need to ⌘Z N times to walk
+        // the entire group back. (Undoing the whole-group move with
+        // one keystroke would require a new bulk_move undo entry
+        // type; out of scope here.)
+        snapshots.forEach(function(snap) {
+          if (snap.shape.uuid) {
+            self._pushUndo(snap.shape.uuid, snap.history, self._snapshotShape(snap.shape));
+          }
+        });
+        self._emitChanged();
+      }
+
+      anchorShape.el.addEventListener("pointermove", onMove);
+      anchorShape.el.addEventListener("pointerup", onUp);
+      anchorShape.el.addEventListener("pointercancel", onUp);
+    },
+
+    // Batch-delete every multi-selected shape under a single
+    // `bulk_delete` undo entry. One `etcher:annotations-changed` emit
+    // covers the whole group so the consumer LV doesn't see a flurry
+    // of full-array replays.
+    _deleteSelectedShapes: function() {
+      var self = this;
+      var list = (self.selectedShapes || []).slice();
+      if (list.length === 0) return;
+      var withUuids = list.filter(function(s) { return s && s.uuid; });
+      if (withUuids.length) self._pushUndoBulkDelete(withUuids);
+      list.forEach(function(shape) {
+        if (self.editingShape === shape) self._exitEditMode();
+        var idx = self.shapes.indexOf(shape);
+        if (idx === -1) return;
+        if (shape.el && shape.el.parentNode) {
+          shape.el.parentNode.removeChild(shape.el);
+        }
+        if (shape.titleGroup && shape.titleGroup.parentNode) {
+          shape.titleGroup.parentNode.removeChild(shape.titleGroup);
+        }
+        self.shapes.splice(idx, 1);
+      });
+      self.selectedShapes = [];
+      self._hideTooltip();
+      self._emitChanged();
     },
 
     _deleteShape: function(shape) {

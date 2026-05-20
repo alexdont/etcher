@@ -571,6 +571,15 @@
       "  cursor: grabbing; transform: scale(1.8); stroke-width: 3;",
       "  fill: currentColor; fill-opacity: 0.55;",
       "}",
+      // Vertex selected (click without drag). Highlights the vertex so
+      // the user can see which point Backspace / Delete will remove.
+      // Red outline reads as \"about to delete\" without making the
+      // dot disappear on the canvas.
+      ".etcher-handle.is-selected {",
+      "  stroke: #dc2626; stroke-width: 3;",
+      "  fill: #dc2626; fill-opacity: 0.45;",
+      "  transform: scale(1.6);",
+      "}",
       // While drafting a polygon the first vertex doubles as the close
       // button — highlight it when the cursor is near so the user knows
       // a click there finishes the shape. Same look as `:hover` for
@@ -1624,6 +1633,21 @@
         // required — the !INPUT/!TEXTAREA gate above keeps it from
         // firing while the user is typing in a form.
         if (e.key === "Backspace" || e.key === "Delete") {
+          // Vertex selection wins over shape selection — clicking a
+          // polygon vertex first scopes the next delete to just those
+          // points. Falls through if removing the selected count would
+          // drop the polygon below 3 vertices so the user can still
+          // delete the shape via the regular path.
+          if (
+            self.editingShape &&
+            self.selectedVertexIndices &&
+            self.selectedVertexIndices.size > 0
+          ) {
+            if (self._deleteSelectedVertex()) {
+              e.preventDefault();
+              return;
+            }
+          }
           if (self.selectedShapes && self.selectedShapes.length > 0) {
             e.preventDefault();
             self._deleteSelectedShapes();
@@ -6559,6 +6583,7 @@
     _exitEditMode: function() {
       if (!this.editingShape) return;
       this.editingShape.el.classList.remove("is-editing");
+      this._clearVertexSelection();
       this._removeHandles();
       this._unwireMidpointTracker();
       this.editingShape = null;
@@ -6566,6 +6591,79 @@
         document.removeEventListener("click", this._outsideClickHandler, true);
         this._outsideClickHandler = null;
       }
+    },
+
+    // Mark polygon vertices as the Backspace / Delete target. Plain
+    // click resets the selection to just `idx`; shift-click toggles
+    // `idx` in/out of the existing set so the user can pick multiple
+    // points to delete in one keystroke. Stored as a Set of indices
+    // against the live `editingShape` so subsequent re-renders can
+    // re-apply `.is-selected` to the same dots.
+    _selectVertex: function(shape, idx, additive) {
+      if (!shape || shape.kind !== "polygon") return;
+      if (this.editingShape !== shape) return;
+      if (!this.selectedVertexIndices) this.selectedVertexIndices = new Set();
+      if (additive) {
+        if (this.selectedVertexIndices.has(idx)) {
+          this.selectedVertexIndices.delete(idx);
+        } else {
+          this.selectedVertexIndices.add(idx);
+        }
+      } else {
+        this.selectedVertexIndices.clear();
+        this.selectedVertexIndices.add(idx);
+      }
+      this._refreshVertexSelectionClass();
+    },
+
+    _clearVertexSelection: function() {
+      if (!this.selectedVertexIndices || this.selectedVertexIndices.size === 0) {
+        return;
+      }
+      this.selectedVertexIndices.clear();
+      this._refreshVertexSelectionClass();
+    },
+
+    _refreshVertexSelectionClass: function() {
+      var handles = this.handles || [];
+      var sel = this.selectedVertexIndices;
+      for (var i = 0; i < handles.length; i++) {
+        handles[i].classList.toggle(
+          "is-selected",
+          !!(sel && sel.has(i))
+        );
+      }
+    },
+
+    // Splice the currently-selected vertices out of the editing polygon.
+    // Refuses to drop below 3 points (a polygon needs at least 3
+    // vertices to still be a polygon; the regular shape-delete
+    // keystroke covers full-shape removal). Splices from the highest
+    // index down so earlier indices stay valid mid-loop. Single undo
+    // entry for the whole batch.
+    _deleteSelectedVertex: function() {
+      var shape = this.editingShape;
+      var sel = this.selectedVertexIndices;
+      if (!shape || shape.kind !== "polygon" || !sel || sel.size === 0) {
+        return false;
+      }
+      var pts = (shape.geometry && shape.geometry.points) || [];
+      if (pts.length - sel.size < 3) return false;
+      var historyBefore = this._snapshotShape(shape);
+      var idxList = Array.from(sel).sort(function(a, b) { return b - a; });
+      var nextPts = pts.slice();
+      for (var i = 0; i < idxList.length; i++) {
+        nextPts.splice(idxList[i], 1);
+      }
+      shape.geometry = { points: nextPts };
+      this.selectedVertexIndices.clear();
+      this._renderShape(shape);
+      this._renderHandles(shape);
+      if (shape.uuid) {
+        this._emitChanged();
+        this._pushUndo(shape.uuid, historyBefore, this._snapshotShape(shape));
+      }
+      return true;
     },
 
     _wireMidpointTracker: function() {
@@ -6859,6 +6957,10 @@
       this._hideTooltip();
 
       var self = this;
+      // Inserting a new vertex shifts every index >= newIdx by one;
+      // drop any prior vertex selection to avoid the highlight
+      // landing on the wrong dot after the splice.
+      self._clearVertexSelection();
       var historyBefore = self._snapshotShape(shape);
 
       var pts = shape.geometry.points.slice();
@@ -7048,6 +7150,7 @@
       // back on release.
       this._hideTooltip();
 
+      var shiftHeld = !!e.shiftKey;
       var self = this;
       // Full snapshot of the shape's pre-drag state for the undo stack
       // — captured before any mutation so the inverse op can restore
@@ -7104,9 +7207,20 @@
         handleEl.removeEventListener("pointercancel", onUp);
         try { handleEl.releasePointerCapture(ev.pointerId); } catch (_) {}
         if (!dragged) {
+          // Pure click on a vertex — select it so Backspace / Delete
+          // can remove just that point instead of the whole shape.
+          // Polygon-only for now (rectangles can't lose corners,
+          // circle has no vertices, freehand has too many).
+          // Shift-click toggles the vertex in the selection set so the
+          // user can pick multiple points to delete in one keystroke.
+          if (shape.kind === "polygon") {
+            self._selectVertex(shape, idx, shiftHeld);
+          }
           self._showTooltipFor(shape);
           return;
         }
+        // Drag committed — any prior vertex selection is stale.
+        self._clearVertexSelection();
         // Text shapes still persist the shrunk-to-text bbox so the
         // stored geometry matches what's drawn — they don't have
         // the callout's drag-math complexity (no anchor, geometry

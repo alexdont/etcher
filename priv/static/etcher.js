@@ -2442,30 +2442,75 @@
       this._refreshToolbarSwatches();
     },
 
-    // Compute the effective inline-toolbar palette: recents in MRU
-    // order, then presets backfilling any unused slots (deduped).
-    // Initial state (no recents yet) returns the full preset list so
-    // a new user still sees a starter palette.
+    // Compute the effective inline-toolbar palette by walking sources
+    // in priority order until TOOLBAR_SWATCH_LIMIT slots are filled:
+    //
+    //   1. `_recentColors` — the user's explicit MRU history.
+    //   2. Canvas-frequent colors — top N colors on existing shapes.
+    //      Only consulted when recents is empty: the user hasn't
+    //      explicitly picked anything yet, so we infer their palette
+    //      from what's already drawn on the canvas (existing
+    //      annotations from a prior session, hydrated extensions).
+    //   3. Static preset list — final backfill so the row is always
+    //      full even on an empty canvas with empty recents.
+    //
+    // Once the user picks any color, `_recentColors` becomes non-
+    // empty and source (2) stops contributing — explicit history
+    // wins over inferred usage.
     _buildToolbarSwatchList: function() {
       var out = [];
       var seen = Object.create(null);
-      var recents = this._recentColors || [];
-      for (var i = 0; i < recents.length && out.length < TOOLBAR_SWATCH_LIMIT; i++) {
-        var c = (recents[i] || "").toLowerCase();
-        if (!c || seen[c]) continue;
-        out.push(c);
-        seen[c] = true;
+      function take(list) {
+        if (!list) return;
+        for (var i = 0; i < list.length && out.length < TOOLBAR_SWATCH_LIMIT; i++) {
+          var c = (list[i] || "").toLowerCase();
+          if (!c || seen[c]) continue;
+          out.push(c);
+          seen[c] = true;
+        }
       }
+
+      var recents = this._recentColors || [];
+      take(recents);
+
+      // Canvas-frequent colors as the implicit-history fallback,
+      // active only when the user has no saved recents.
+      if (recents.length === 0) {
+        take(this._computeCanvasFrequentColors());
+      }
+
       var presets = (this._presetColors && this._presetColors.length)
         ? this._presetColors
         : resolveColorSwatches().map(function(s) { return s.color; });
-      for (var j = 0; j < presets.length && out.length < TOOLBAR_SWATCH_LIMIT; j++) {
-        var p = (presets[j] || "").toLowerCase();
-        if (!p || seen[p]) continue;
-        out.push(p);
-        seen[p] = true;
-      }
+      take(presets);
+
       return out;
+    },
+
+    // Tally `style.color` across the current shapes list and return
+    // the top TOOLBAR_SWATCH_LIMIT colors by frequency. Used as the
+    // bootstrap palette when the user has no saved recents but the
+    // canvas already has annotations (e.g., a hydrated `.fresco`
+    // file from a prior session).
+    _computeCanvasFrequentColors: function() {
+      var counts = Object.create(null);
+      (this.shapes || []).forEach(function(s) {
+        var c = s && s.style && s.style.color;
+        if (typeof c !== "string") return;
+        c = c.toLowerCase();
+        if (!/^#[0-9a-f]{6}$/.test(c)) return;
+        counts[c] = (counts[c] || 0) + 1;
+      });
+      var entries = Object.keys(counts).map(function(c) {
+        return { color: c, n: counts[c] };
+      });
+      // Most-used first. Ties resolve by insertion order, which is
+      // close enough to draw order — no need for an explicit
+      // secondary key.
+      entries.sort(function(a, b) { return b.n - a.n; });
+      return entries.slice(0, TOOLBAR_SWATCH_LIMIT).map(function(e) {
+        return e.color;
+      });
     },
 
     // Rebuild the toolbar's inline swatch row from `_recentColors`
@@ -6017,6 +6062,13 @@
         }
         self._renderAnnotation(ann);
       });
+
+      // Canvas may have just gained shapes — if recents is empty,
+      // the inline toolbar palette should bootstrap from the
+      // canvas-frequent colors instead of falling straight to the
+      // static presets. Re-running the refresh picks that up.
+      // No-op when recents are already populated.
+      self._refreshToolbarSwatches();
     },
 
     _renderAnnotation: function(ann) {

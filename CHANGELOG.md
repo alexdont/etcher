@@ -4,6 +4,25 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.4] — 2026-05-21
+
+### Fixed
+
+- **Finger-drawing on iOS Safari in `<Fresco.scroll_strip>` mode no
+  longer commits a single oversized shape spanning finger-down to
+  finger-up.** The strip container now picks up
+  `touch-action: none` while annotation mode is on AND a drawing
+  tool is active, so iOS hands every `touchmove` to the app
+  instead of classifying the gesture as scroll at `touchstart` —
+  too early for `pointerdown`'s `preventDefault` to override.
+  Cursor mode (no drawing tool) keeps `touch-action: auto` so the
+  reader can still scroll the chapter to reach existing shapes.
+
+  The `.etcher-strip-drawing` class was already toggled on the
+  strip container in `_selectTool` for the crosshair cursor and a
+  consumer-CSS hook; this release adds the matching
+  `touch-action: none` rule to Etcher's injected stylesheet.
+
 ## [0.4.3] — 2026-05-20
 
 **Mobile-friendly toolbar + custom color picker + multi-select +

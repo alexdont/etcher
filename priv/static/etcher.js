@@ -215,6 +215,17 @@
       ".etcher-toolbar[data-strip] {",
       "  position: fixed; bottom: 16px;",
       "}",
+      // Strip mode + drawing tool active: suppress native scroll on
+      // the strip container so iOS Safari hands every touchmove to
+      // the app instead of claiming the gesture for the scroller.
+      // Without this, finger-drawing on iOS commits a single
+      // oversized shape spanning from finger-down to finger-up
+      // (the OS classifies the gesture as scroll at touchstart,
+      // before `pointerdown` runs, so `preventDefault` arrives too
+      // late). Cursor mode (annotation mode + no drawing tool)
+      // keeps `touch-action: auto` so the reader can still scroll
+      // the chapter to reach existing shapes.
+      ".etcher-strip-drawing { touch-action: none; }",
       ".etcher-toolbar.is-active { display: flex; }",
       ".etcher-toolbar button {",
       "  width: 36px; height: 36px;",

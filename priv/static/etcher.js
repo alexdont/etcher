@@ -107,6 +107,13 @@
   //
   // Consumers shipping a non-conventional input-owning overlay can
   // append a selector via `Etcher.registerInputOwnerSelector(...)`.
+  // Max number of custom colors remembered in `localStorage` and
+  // shown as a quick-access row above the hue ring picker. FIFO
+  // (most-recent first) with move-to-front on re-pick. Preset
+  // swatches never enter this list — they're already one tap away.
+  var RECENT_COLORS_KEY = "etcher.recentColors";
+  var RECENT_COLORS_MAX = 5;
+
   var DEFAULT_INPUT_OWNER_SELECTORS = [
     ".etcher-handle",
     ".etcher-title-group",
@@ -255,9 +262,11 @@
       ".etcher-popup.is-open { display: flex; flex-wrap: wrap; }",
       // Tools popup: 5-col grid so 9 tools + cursor fit in 2 rows.
       ".etcher-popup[data-kind=\"tools\"] { width: 222px; }",
-      // Colors popup: row of swatches + (future) custom-picker slot.
+      // Colors popup: row of preset swatches + recents row + custom
+      // picker. Fixed width so the hue ring lays out predictably and
+      // the popup doesn't jitter when recents toggle visibility.
       ".etcher-popup[data-kind=\"colors\"] {",
-      "  align-items: center;",
+      "  width: 192px; align-items: center;",
       "}",
       ".etcher-popup button[data-tool] {",
       "  width: 36px; height: 36px; border: none; padding: 0;",
@@ -298,6 +307,76 @@
       "  background: transparent;",
       "}",
       ".etcher-popup button[data-history] svg { width: 18px; height: 18px; }",
+      // -- Custom color picker (hue ring + lightness slider) ----------------
+      // The whole picker takes a single full-width row inside the
+      // colors popup. Layout: hue ring on top, lightness slider +
+      // preview swatch below it.
+      ".etcher-picker {",
+      "  flex: 0 0 100%;",
+      "  display: flex; flex-direction: column;",
+      "  align-items: center; gap: 8px;",
+      "  padding: 4px 2px 2px;",
+      "}",
+      ".etcher-picker-ring-wrap {",
+      "  position: relative; line-height: 0;",
+      "}",
+      ".etcher-picker-ring {",
+      "  display: block; cursor: pointer;",
+      "  touch-action: none;",
+      "}",
+      // Small filled dot that tracks the picked hue on the ring.
+      // Position is updated via inline `left`/`top` in JS; transform
+      // centers it on its anchor coords.
+      ".etcher-picker-ring-knob {",
+      "  position: absolute; width: 12px; height: 12px;",
+      "  border: 2px solid #fff; border-radius: 999px;",
+      "  box-shadow: 0 0 0 1px rgba(0,0,0,0.6);",
+      "  transform: translate(-50%, -50%);",
+      "  pointer-events: none;",
+      "}",
+      ".etcher-picker-slider-row {",
+      "  display: flex; align-items: center; gap: 8px;",
+      "  width: 100%;",
+      "}",
+      ".etcher-picker-slider-wrap {",
+      "  position: relative; flex: 1; line-height: 0;",
+      "}",
+      ".etcher-picker-slider {",
+      "  display: block; width: 100%; height: 14px;",
+      "  border-radius: 8px; cursor: pointer;",
+      "  touch-action: none;",
+      "}",
+      ".etcher-picker-slider-knob {",
+      "  position: absolute; top: 50%;",
+      "  width: 10px; height: 18px;",
+      "  border: 2px solid #fff; border-radius: 4px;",
+      "  box-shadow: 0 0 0 1px rgba(0,0,0,0.6);",
+      "  transform: translate(-50%, -50%);",
+      "  pointer-events: none;",
+      "}",
+      // Preview chip — solid swatch showing the currently picked
+      // color. Sized to match the in-toolbar swatches so the
+      // \"this is your color\" affordance is consistent.
+      ".etcher-picker-preview {",
+      "  width: 22px; height: 22px; border-radius: 999px;",
+      "  border: 1px solid rgba(255, 255, 255, 0.4);",
+      "  flex: 0 0 auto;",
+      "}",
+      // -- Recent custom colors row ----------------------------------------
+      // Lives between the preset swatches and the picker. The row
+      // itself collapses (display:none) when there are zero recents.
+      ".etcher-recents {",
+      "  flex: 0 0 100%;",
+      "  display: flex; gap: 6px; flex-wrap: wrap;",
+      "  align-items: center; padding: 0 2px;",
+      "}",
+      ".etcher-recents.is-empty { display: none; }",
+      ".etcher-recents-label {",
+      "  font-size: 10px; letter-spacing: 0.05em;",
+      "  text-transform: uppercase;",
+      "  color: rgba(255, 255, 255, 0.55);",
+      "  margin-right: 2px;",
+      "}",
       // Compact mode: below the `sm` breakpoint, hide everything in
       // the toolbar except the currently-active tool, undo/redo, the
       // currently-active swatch, the close button, and the two
@@ -723,6 +802,68 @@
   // Stable escape helper for consumer slot impls so they don't have to
   // duplicate one.
   window.Etcher.escapeHtml = escapeHtml;
+
+  // ---------------------------------------------------------------------------
+  // Color math — minimal HSL ⇄ hex helpers for the custom-color picker.
+  // Saturation is fixed at 100% throughout (the picker only varies hue +
+  // lightness), but the conversions take the full HSL triple for clarity.
+  // ---------------------------------------------------------------------------
+
+  function hslToRgb(h, s, l) {
+    h = ((h % 360) + 360) % 360;
+    s = Math.max(0, Math.min(100, s)) / 100;
+    l = Math.max(0, Math.min(100, l)) / 100;
+    var c = (1 - Math.abs(2 * l - 1)) * s;
+    var hp = h / 60;
+    var x = c * (1 - Math.abs((hp % 2) - 1));
+    var r1 = 0, g1 = 0, b1 = 0;
+    if (hp < 1)      { r1 = c; g1 = x; b1 = 0; }
+    else if (hp < 2) { r1 = x; g1 = c; b1 = 0; }
+    else if (hp < 3) { r1 = 0; g1 = c; b1 = x; }
+    else if (hp < 4) { r1 = 0; g1 = x; b1 = c; }
+    else if (hp < 5) { r1 = x; g1 = 0; b1 = c; }
+    else             { r1 = c; g1 = 0; b1 = x; }
+    var m = l - c / 2;
+    return [
+      Math.round((r1 + m) * 255),
+      Math.round((g1 + m) * 255),
+      Math.round((b1 + m) * 255)
+    ];
+  }
+
+  function hslToHex(h, s, l) {
+    var rgb = hslToRgb(h, s, l);
+    function pad(n) { var s = n.toString(16); return s.length === 1 ? "0" + s : s; }
+    return "#" + pad(rgb[0]) + pad(rgb[1]) + pad(rgb[2]);
+  }
+
+  // Best-effort hex parse → HSL. Used to position the picker's knobs
+  // when a recent color is re-selected. Returns null on malformed
+  // input — callers fall back to a sensible default (hue 0, l 50).
+  function hexToHsl(hex) {
+    if (typeof hex !== "string") return null;
+    var m = hex.trim().match(/^#?([0-9a-f]{6})$/i);
+    if (!m) return null;
+    var n = parseInt(m[1], 16);
+    var r = ((n >> 16) & 0xff) / 255;
+    var g = ((n >> 8) & 0xff) / 255;
+    var b = (n & 0xff) / 255;
+    var max = Math.max(r, g, b), min = Math.min(r, g, b);
+    var d = max - min;
+    var l = (max + min) / 2;
+    var h = 0, s = 0;
+    if (d !== 0) {
+      s = d / (1 - Math.abs(2 * l - 1));
+      switch (max) {
+        case r: h = ((g - b) / d) % 6; break;
+        case g: h = (b - r) / d + 2; break;
+        default: h = (r - g) / d + 4;
+      }
+      h *= 60;
+      if (h < 0) h += 360;
+    }
+    return { h: h, s: s * 100, l: l * 100 };
+  }
 
   // Neutral defaults read from generic, non-comment-specific metadata
   // keys — a consumer who just populates these gets a working tooltip
@@ -1967,16 +2108,21 @@
       self.toolsPopup = popup;
     },
 
-    // Colors popup: every preset swatch as a row. A slot is reserved
-    // (data-etcher-custom-picker) for the upcoming custom-color
-    // picker; until that ships the slot is empty and the popup just
-    // displays the same swatches as desktop mode.
+    // Colors popup: preset swatches + recent-customs row + a
+    // hue-ring / lightness-slider picker. Selecting anything routes
+    // through `_selectColor`, which (for non-preset colors) also
+    // pushes the pick onto the recents stack so the user can
+    // re-grab it from a single swatch on subsequent sessions.
     _buildColorsPopup: function() {
       var self = this;
       var popup = document.createElement("div");
       popup.className = "etcher-popup";
       popup.dataset.kind = "colors";
       popup.setAttribute("data-fresco-no-capture", "");
+
+      // -- 1. Preset swatches ------------------------------------------------
+      var presetColors = resolveColorSwatches().map(function(s) { return s.color; });
+      self._presetColors = presetColors;
       self.colorsPopupBtns = resolveColorSwatches().map(function(s) {
         var b = document.createElement("button");
         b.type = "button";
@@ -1994,14 +2140,338 @@
         popup.appendChild(b);
         return b;
       });
-      // Reserved slot for the custom-color picker (future feature).
-      // Rendered as an empty span so the popup width is stable when
-      // the picker ships and starts taking up space.
-      var pickerSlot = document.createElement("span");
-      pickerSlot.setAttribute("data-etcher-custom-picker", "");
-      popup.appendChild(pickerSlot);
+
+      // -- 2. Recents row ----------------------------------------------------
+      // Loaded from localStorage on mount. The row is `display:none`
+      // while empty so the popup doesn't reserve a hairline of space
+      // for nothing.
+      self._recentColors = self._loadRecentColors();
+      self.recentsRow = document.createElement("div");
+      self.recentsRow.className = "etcher-recents";
+      var recentsLabel = document.createElement("span");
+      recentsLabel.className = "etcher-recents-label";
+      recentsLabel.textContent = "Recent";
+      self.recentsRow.appendChild(recentsLabel);
+      self._recentsLabel = recentsLabel;
+      popup.appendChild(self.recentsRow);
+      self._renderRecentColors();
+
+      // -- 3. Custom picker --------------------------------------------------
+      var picker = document.createElement("div");
+      picker.className = "etcher-picker";
+
+      // Hue ring — a torus-shaped canvas painted once. Clicking /
+      // dragging on it sets `_pickerHue`. Default size keeps the
+      // popup compact while still leaving a comfortable thumb-tap
+      // target on phones.
+      var ringSize = 132;
+      var ringWrap = document.createElement("div");
+      ringWrap.className = "etcher-picker-ring-wrap";
+      ringWrap.style.width = ringSize + "px";
+      ringWrap.style.height = ringSize + "px";
+
+      var ring = document.createElement("canvas");
+      ring.className = "etcher-picker-ring";
+      ring.width = ringSize;
+      ring.height = ringSize;
+      ringWrap.appendChild(ring);
+
+      var ringKnob = document.createElement("div");
+      ringKnob.className = "etcher-picker-ring-knob";
+      ringWrap.appendChild(ringKnob);
+
+      picker.appendChild(ringWrap);
+
+      // Lightness slider + preview, on a single row below the ring.
+      var sliderRow = document.createElement("div");
+      sliderRow.className = "etcher-picker-slider-row";
+
+      var sliderWrap = document.createElement("div");
+      sliderWrap.className = "etcher-picker-slider-wrap";
+      var slider = document.createElement("canvas");
+      slider.className = "etcher-picker-slider";
+      slider.width = 120;
+      slider.height = 14;
+      sliderWrap.appendChild(slider);
+
+      var sliderKnob = document.createElement("div");
+      sliderKnob.className = "etcher-picker-slider-knob";
+      sliderWrap.appendChild(sliderKnob);
+
+      var preview = document.createElement("div");
+      preview.className = "etcher-picker-preview";
+
+      sliderRow.appendChild(sliderWrap);
+      sliderRow.appendChild(preview);
+      picker.appendChild(sliderRow);
+      popup.appendChild(picker);
+
+      // Cache for the layout + redraw routines.
+      self._pickerRing = ring;
+      self._pickerRingWrap = ringWrap;
+      self._pickerRingKnob = ringKnob;
+      self._pickerRingSize = ringSize;
+      self._pickerRingOuter = ringSize / 2 - 2;
+      self._pickerRingInner = ringSize / 2 - 18;
+      self._pickerSlider = slider;
+      self._pickerSliderKnob = sliderKnob;
+      self._pickerPreview = preview;
+
+      // Seed the picker from the active color when it's a non-preset
+      // hex (so re-opening the popup after a custom pick puts the
+      // knobs where the user left them). Otherwise default to a
+      // neutral starting position.
+      var seed = self.activeColor &&
+                 self._presetColors.indexOf(self.activeColor) === -1
+        ? hexToHsl(self.activeColor)
+        : null;
+      self._pickerHue = seed ? seed.h : 200;
+      self._pickerLightness = seed ? seed.l : 50;
+
+      self._drawHueRing();
+      self._drawLightnessSlider();
+      self._positionPickerKnobs();
+      self._updatePickerPreview();
+      self._wirePickerInput();
+
       self.handle.container.appendChild(popup);
       self.colorsPopup = popup;
+    },
+
+    // Paint the hue ring once. The torus is drawn pixel-by-pixel via
+    // `ImageData` so each ring pixel maps to its angle's hue at full
+    // saturation + 50% lightness. A 1-pixel alpha falloff at both
+    // edges softens the otherwise-aliased ring boundary.
+    _drawHueRing: function() {
+      var canvas = this._pickerRing;
+      if (!canvas) return;
+      var size = this._pickerRingSize;
+      var outer = this._pickerRingOuter;
+      var inner = this._pickerRingInner;
+      var ctx = canvas.getContext("2d");
+      var img = ctx.createImageData(size, size);
+      var data = img.data;
+      var cx = size / 2, cy = size / 2;
+      for (var y = 0; y < size; y++) {
+        for (var x = 0; x < size; x++) {
+          var dx = x - cx, dy = y - cy;
+          var r = Math.sqrt(dx * dx + dy * dy);
+          if (r > outer || r < inner - 1) continue;
+          // 0° at the top so the wheel reads like a clock.
+          var ang = Math.atan2(dy, dx) * 180 / Math.PI + 90;
+          if (ang < 0) ang += 360;
+          var rgb = hslToRgb(ang, 100, 50);
+          var alpha = 255;
+          if (r > outer - 1) alpha = (outer - r) * 255;
+          else if (r < inner) alpha = (r - (inner - 1)) * 255;
+          if (alpha < 0) alpha = 0;
+          if (alpha > 255) alpha = 255;
+          var idx = (y * size + x) * 4;
+          data[idx] = rgb[0];
+          data[idx + 1] = rgb[1];
+          data[idx + 2] = rgb[2];
+          data[idx + 3] = alpha;
+        }
+      }
+      ctx.clearRect(0, 0, size, size);
+      ctx.putImageData(img, 0, 0);
+    },
+
+    // Repaint the lightness slider for the current hue. Cheap (one
+    // canvas gradient fill) so we redraw it every time the user
+    // moves the ring knob, keeping the slider visually anchored to
+    // the actual hue they're tuning.
+    _drawLightnessSlider: function() {
+      var canvas = this._pickerSlider;
+      if (!canvas) return;
+      var w = canvas.width, h = canvas.height;
+      var ctx = canvas.getContext("2d");
+      var grad = ctx.createLinearGradient(0, 0, w, 0);
+      grad.addColorStop(0, "hsl(" + this._pickerHue + ", 100%, 0%)");
+      grad.addColorStop(0.5, "hsl(" + this._pickerHue + ", 100%, 50%)");
+      grad.addColorStop(1, "hsl(" + this._pickerHue + ", 100%, 100%)");
+      // Rounded corners via clip — matches the CSS border-radius so
+      // the gradient doesn't leak past the slider's visible bounds.
+      ctx.clearRect(0, 0, w, h);
+      if (typeof ctx.roundRect === "function") {
+        ctx.beginPath();
+        ctx.roundRect(0, 0, w, h, h / 2);
+        ctx.fillStyle = grad;
+        ctx.fill();
+      } else {
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, w, h);
+      }
+    },
+
+    _positionPickerKnobs: function() {
+      var size = this._pickerRingSize;
+      var cx = size / 2, cy = size / 2;
+      // Midline radius of the ring band — knob hugs the center of
+      // the colored donut.
+      var midR = (this._pickerRingOuter + this._pickerRingInner) / 2;
+      var ang = (this._pickerHue - 90) * Math.PI / 180;
+      var kx = cx + midR * Math.cos(ang);
+      var ky = cy + midR * Math.sin(ang);
+      if (this._pickerRingKnob) {
+        this._pickerRingKnob.style.left = kx + "px";
+        this._pickerRingKnob.style.top = ky + "px";
+      }
+      if (this._pickerSliderKnob) {
+        var w = this._pickerSlider.width;
+        var x = (this._pickerLightness / 100) * w;
+        this._pickerSliderKnob.style.left = x + "px";
+      }
+    },
+
+    _updatePickerPreview: function() {
+      if (!this._pickerPreview) return;
+      this._pickerPreview.style.background =
+        hslToHex(this._pickerHue, 100, this._pickerLightness);
+    },
+
+    // Pointer wiring for both the hue ring and the lightness slider.
+    // Both support press + drag (the user can scrub continuously
+    // without lifting their finger); on every move we recompute and
+    // `_selectColor` immediately so the in-flight draft / edit
+    // updates live. `pointerup` commits the chosen color to recents.
+    _wirePickerInput: function() {
+      var self = this;
+      var ring = self._pickerRing;
+      var slider = self._pickerSlider;
+      if (!ring || !slider) return;
+
+      function ringEvent(e) {
+        var rect = ring.getBoundingClientRect();
+        var x = e.clientX - rect.left - rect.width / 2;
+        var y = e.clientY - rect.top - rect.height / 2;
+        var ang = Math.atan2(y, x) * 180 / Math.PI + 90;
+        if (ang < 0) ang += 360;
+        self._pickerHue = ang;
+        self._drawLightnessSlider();
+        self._positionPickerKnobs();
+        var hex = hslToHex(self._pickerHue, 100, self._pickerLightness);
+        self._updatePickerPreview();
+        self._selectColor(hex);
+      }
+
+      function sliderEvent(e) {
+        var rect = slider.getBoundingClientRect();
+        var t = (e.clientX - rect.left) / rect.width;
+        if (t < 0) t = 0;
+        if (t > 1) t = 1;
+        self._pickerLightness = t * 100;
+        self._positionPickerKnobs();
+        var hex = hslToHex(self._pickerHue, 100, self._pickerLightness);
+        self._updatePickerPreview();
+        self._selectColor(hex);
+      }
+
+      function attachDrag(el, onMove) {
+        el.addEventListener("pointerdown", function(e) {
+          e.preventDefault();
+          e.stopPropagation();
+          try { el.setPointerCapture(e.pointerId); } catch (_) {}
+          onMove(e);
+          function move(ev) { onMove(ev); }
+          function up(ev) {
+            el.removeEventListener("pointermove", move);
+            el.removeEventListener("pointerup", up);
+            el.removeEventListener("pointercancel", up);
+            try { el.releasePointerCapture(ev.pointerId); } catch (_) {}
+            // Commit the final picked color to recents on release.
+            self._pushRecentColor(self.activeColor);
+          }
+          el.addEventListener("pointermove", move);
+          el.addEventListener("pointerup", up);
+          el.addEventListener("pointercancel", up);
+        });
+      }
+
+      attachDrag(ring, ringEvent);
+      attachDrag(slider, sliderEvent);
+    },
+
+    // -------------------------------------------------------------------------
+    // Recent custom colors
+    //
+    // Stored in localStorage under a single global key (not per-
+    // `fresco_id`) so a user's palette follows them across projects.
+    // Capped at `RECENT_COLORS_MAX`; FIFO eviction when a new color
+    // joins. Preset colors are never persisted — the recents row is
+    // dedicated to picks made through the hue ring / slider.
+    // -------------------------------------------------------------------------
+
+    _loadRecentColors: function() {
+      try {
+        var raw = window.localStorage && window.localStorage.getItem(RECENT_COLORS_KEY);
+        if (!raw) return [];
+        var arr = JSON.parse(raw);
+        if (!Array.isArray(arr)) return [];
+        return arr
+          .filter(function(c) { return typeof c === "string" && /^#[0-9a-f]{6}$/i.test(c); })
+          .slice(0, RECENT_COLORS_MAX);
+      } catch (_) {
+        return [];
+      }
+    },
+
+    _saveRecentColors: function() {
+      try {
+        if (!window.localStorage) return;
+        window.localStorage.setItem(
+          RECENT_COLORS_KEY,
+          JSON.stringify(this._recentColors || [])
+        );
+      } catch (_) { /* private mode / quota → silently degrade */ }
+    },
+
+    _pushRecentColor: function(color) {
+      if (typeof color !== "string" || !/^#[0-9a-f]{6}$/i.test(color)) return;
+      color = color.toLowerCase();
+      // Don't pollute recents with preset colors — they're already
+      // one tap away in the popup's first row.
+      if (this._presetColors && this._presetColors.indexOf(color) !== -1) return;
+      var list = this._recentColors || [];
+      // Dedupe + move-to-front so re-picking an existing recent
+      // bumps it to the head of the FIFO.
+      var idx = list.indexOf(color);
+      if (idx !== -1) list.splice(idx, 1);
+      list.unshift(color);
+      if (list.length > RECENT_COLORS_MAX) list.length = RECENT_COLORS_MAX;
+      this._recentColors = list;
+      this._saveRecentColors();
+      this._renderRecentColors();
+    },
+
+    _renderRecentColors: function() {
+      var row = this.recentsRow;
+      if (!row) return;
+      // Strip every existing swatch (keep the leading label).
+      var swatches = row.querySelectorAll(".etcher-swatch");
+      swatches.forEach(function(el) { el.parentNode.removeChild(el); });
+      var list = this._recentColors || [];
+      row.classList.toggle("is-empty", list.length === 0);
+      if (this._recentsLabel) {
+        this._recentsLabel.style.display = list.length === 0 ? "none" : "";
+      }
+      var self = this;
+      list.forEach(function(color) {
+        var b = document.createElement("button");
+        b.type = "button";
+        b.className = "etcher-swatch";
+        b.dataset.color = color;
+        b.title = color;
+        b.setAttribute("aria-label", "Recent color " + color);
+        b.style.background = color;
+        if (color === self.activeColor) b.classList.add("is-selected");
+        b.addEventListener("click", function(e) {
+          e.preventDefault();
+          self._selectColor(color);
+          self._closePopup();
+        });
+        row.appendChild(b);
+      });
     },
 
     _togglePopup: function(kind) {
@@ -2293,6 +2763,21 @@
         this.colorsPopupBtns.forEach(function(el) {
           el.classList.toggle("is-selected", el.dataset.color === color);
         });
+      }
+      // Recent-custom-colors row lives in the same popup; sync its
+      // selection ring too so the user sees a single visible
+      // \"selected\" state across all three sources (presets, recents,
+      // picker preview).
+      if (this.recentsRow) {
+        this.recentsRow.querySelectorAll(".etcher-swatch").forEach(function(el) {
+          el.classList.toggle("is-selected", el.dataset.color === color);
+        });
+      }
+      // Preview chip in the picker reflects the active color so
+      // \"this is what you have selected\" reads consistently whether
+      // the source was a preset, a recent, or the picker itself.
+      if (this._pickerPreview && typeof color === "string") {
+        this._pickerPreview.style.background = color;
       }
 
       // Active swatch changed → re-pin in the overflow layout so the

@@ -113,6 +113,7 @@
     ".etcher-tooltip",
     ".etcher-toolbar",
     ".etcher-text-editor",
+    ".etcher-popup",
     "dialog[open]",
     ".modal-open",
     "[role='dialog']"
@@ -172,7 +173,10 @@
     // geometry, title rendered via the standard sibling-above-shape
     // path (not inline on the line).
     line:     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 19 L19 5"/></svg>',
-    close:    '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>'
+    close:    '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>',
+    // Three horizontal dots — overflow / "more" trigger in the
+    // compact mobile toolbar. Heroicons solid `EllipsisHorizontal`.
+    more:     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 12a2 2 0 1 1-4 0 2 2 0 0 1 4 0Zm8 0a2 2 0 1 1-4 0 2 2 0 0 1 4 0Zm6 2a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"/></svg>'
   };
 
   // ===========================================================================
@@ -231,6 +235,82 @@
       ".etcher-swatch.is-selected {",
       "  box-shadow: 0 0 0 2px #fff, 0 0 0 4px rgba(0, 0, 0, 0.5);",
       "}",
+      // The progressive-overflow `[⋯]` buttons. Hidden by default;
+      // `_layoutToolbar` toggles `.is-active` when at least one
+      // tool or swatch had to be collapsed into the popup. The
+      // popups they trigger are positioned absolutely against the
+      // toolbar's container.
+      ".etcher-more {",
+      "  display: none;",
+      "}",
+      ".etcher-more.is-active {",
+      "  display: inline-flex;",
+      "}",
+      ".etcher-popup {",
+      "  position: absolute; z-index: 12; display: none;",
+      "  background: rgba(0, 0, 0, 0.85); border-radius: 10px;",
+      "  padding: 6px; gap: 6px; pointer-events: auto;",
+      "  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);",
+      "}",
+      ".etcher-popup.is-open { display: flex; flex-wrap: wrap; }",
+      // Tools popup: 5-col grid so 9 tools + cursor fit in 2 rows.
+      ".etcher-popup[data-kind=\"tools\"] { width: 222px; }",
+      // Colors popup: row of swatches + (future) custom-picker slot.
+      ".etcher-popup[data-kind=\"colors\"] {",
+      "  align-items: center;",
+      "}",
+      ".etcher-popup button[data-tool] {",
+      "  width: 36px; height: 36px; border: none; padding: 0;",
+      "  display: inline-flex; align-items: center; justify-content: center;",
+      "  background: transparent; color: #fff; border-radius: 6px;",
+      "  cursor: pointer; transition: background 120ms ease;",
+      "}",
+      ".etcher-popup button[data-tool]:hover {",
+      "  background: rgba(255, 255, 255, 0.12);",
+      "}",
+      ".etcher-popup button[data-tool].is-selected {",
+      "  background: rgba(255, 255, 255, 0.24);",
+      "}",
+      ".etcher-popup button[data-tool] svg { width: 18px; height: 18px; }",
+      ".etcher-popup .etcher-swatch { width: 26px; height: 26px; }",
+      // Full-width hairline divider used inside flex-wrap popups to
+      // force the items after it onto a new row + visually section
+      // them off (e.g., \"history\" buttons below the tools grid).
+      ".etcher-popup-divider {",
+      "  flex: 0 0 100%; height: 1px; margin: 4px 0;",
+      "  background: rgba(255, 255, 255, 0.15);",
+      "}",
+      // History buttons share the tool-button visual but carry a
+      // distinct data attribute so the layout logic can target them.
+      ".etcher-popup button[data-history] {",
+      "  width: 36px; height: 36px; border: none; padding: 0;",
+      "  display: inline-flex; align-items: center; justify-content: center;",
+      "  background: transparent; color: #fff; border-radius: 6px;",
+      "  cursor: pointer; transition: background 120ms ease;",
+      "}",
+      ".etcher-popup button[data-history]:hover {",
+      "  background: rgba(255, 255, 255, 0.12);",
+      "}",
+      ".etcher-popup button[data-history]:disabled {",
+      "  opacity: 0.35; cursor: not-allowed;",
+      "}",
+      ".etcher-popup button[data-history]:disabled:hover {",
+      "  background: transparent;",
+      "}",
+      ".etcher-popup button[data-history] svg { width: 18px; height: 18px; }",
+      // Compact mode: below the `sm` breakpoint, hide everything in
+      // the toolbar except the currently-active tool, undo/redo, the
+      // currently-active swatch, the close button, and the two
+      // overflow triggers. Dividers and the standalone cursor button
+      // collapse — cursor moves into the tools popup as a regular
+      // option.
+      // Progressive overflow: `_layoutToolbar` walks the tool buttons
+      // right-to-left and tags overflowed ones with `.etcher-overflow-
+      // hidden` until the toolbar fits its container. Same path runs
+      // for swatches when the tools group alone can't free enough
+      // space. The active tool / swatch is pinned — it never collapses
+      // into the popup, so the user always knows what's selected.
+      ".etcher-toolbar .etcher-overflow-hidden { display: none !important; }",
       ".etcher-overlay {",
       "  position: absolute; inset: 0; pointer-events: none;",
       "}",
@@ -876,6 +956,23 @@
       if (this.toolbar && this.toolbar.parentNode) {
         this.toolbar.parentNode.removeChild(this.toolbar);
       }
+      this._closePopup();
+      if (this.toolsPopup && this.toolsPopup.parentNode) {
+        this.toolsPopup.parentNode.removeChild(this.toolsPopup);
+        this.toolsPopup = null;
+      }
+      if (this.colorsPopup && this.colorsPopup.parentNode) {
+        this.colorsPopup.parentNode.removeChild(this.colorsPopup);
+        this.colorsPopup = null;
+      }
+      if (this._toolbarResizeObserver) {
+        try { this._toolbarResizeObserver.disconnect(); } catch (_) {}
+        this._toolbarResizeObserver = null;
+      }
+      if (this._toolbarFallbackResize) {
+        window.removeEventListener("resize", this._toolbarFallbackResize);
+        this._toolbarFallbackResize = null;
+      }
       if (this.overlayWrapper && this.overlayWrapper.parentNode) {
         this.overlayWrapper.parentNode.removeChild(this.overlayWrapper);
       }
@@ -1516,12 +1613,21 @@
       // and the gesture handler captures the pointer.
       bar.setAttribute("data-fresco-no-capture", "");
 
-      // Cursor (deselect any active drawing tool).
+      // Cursor (deselect any active drawing tool). Lives in the
+      // tools group and follows the same active/hidden rule in
+      // compact mode (visible only while it's the selected
+      // \"tool\" — i.e., when no drawing tool is active).
       bar.appendChild(self._makeToolButton("cursor", ICONS.cursor, "Cursor"));
 
+      // Intra-group divider between the cursor and the drawing
+      // tools. Kept on wide viewports for visual rhythm; hidden by
+      // `_layoutToolbar` once the tools group starts collapsing —
+      // a divider next to a single visible item reads as a stray
+      // mark, not a group separator.
       var divider = document.createElement("div");
       divider.className = "etcher-divider";
       bar.appendChild(divider);
+      self._cursorToolsDivider = divider;
 
       self.tools.forEach(function(toolKey) {
         var def = TOOL_DEFS[toolKey];
@@ -1529,8 +1635,17 @@
         bar.appendChild(self._makeToolButton(toolKey, def.icon, def.title));
       });
 
+      // Compact-mode overflow trigger for tools. Sits right after the
+      // tool buttons so the layout reads `[active_tool] [⋯]`
+      // when only one tool is visible. Tap to open the tools popup.
+      self.toolsMoreBtn = self._makeMoreButton("tools", "More tools");
+      bar.appendChild(self.toolsMoreBtn);
+
       var divider2 = document.createElement("div");
       divider2.className = "etcher-divider";
+      // Survives in compact mode — separates the tools group from
+      // the undo/redo group.
+      divider2.setAttribute("data-compact-keep", "");
       bar.appendChild(divider2);
 
       // Undo / redo — operates on the local history stack of in-session
@@ -1561,6 +1676,10 @@
       var dividerUndo = document.createElement("div");
       dividerUndo.className = "etcher-divider";
       bar.appendChild(dividerUndo);
+      // Stored so `_layoutToolbar` can collapse it together with the
+      // undo/redo buttons — once those move to the popup, this
+      // divider would otherwise sit adjacent to the previous one.
+      self._undoSwatchesDivider = dividerUndo;
 
       self._refreshUndoButtons();
 
@@ -1589,8 +1708,16 @@
         return b;
       });
 
+      // Compact-mode overflow trigger for colors. Sits right after
+      // the swatches so the layout reads `[active_swatch] [⋯]`
+      // when only one swatch is visible. Tap to open the colors popup.
+      self.colorsMoreBtn = self._makeMoreButton("colors", "More colors");
+      bar.appendChild(self.colorsMoreBtn);
+
       var divider3 = document.createElement("div");
       divider3.className = "etcher-divider";
+      // Survives in compact mode — separates swatches from close.
+      divider3.setAttribute("data-compact-keep", "");
       bar.appendChild(divider3);
 
       var closeBtn = document.createElement("button");
@@ -1606,6 +1733,346 @@
 
       container.appendChild(bar);
       self.toolbar = bar;
+
+      // Popups are siblings of the toolbar inside the same container so
+      // they share its absolute-positioning origin. Built lazily on
+      // first open isn't worth the complexity — they're cheap.
+      self._buildToolsPopup();
+      self._buildColorsPopup();
+
+      // Re-run the overflow layout on every container resize. The
+      // observer fires immediately on attach so the initial layout
+      // happens via this path too — no separate call needed. Skipped
+      // entirely when the toolbar is hidden (annotation mode off);
+      // measurements return 0 in that state.
+      if (typeof ResizeObserver === "function") {
+        self._toolbarResizeObserver = new ResizeObserver(function() {
+          self._layoutToolbar();
+        });
+        self._toolbarResizeObserver.observe(container);
+      } else {
+        // Defensive fallback for older browsers: layout on window
+        // resize only.
+        self._toolbarFallbackResize = function() { self._layoutToolbar(); };
+        window.addEventListener("resize", self._toolbarFallbackResize);
+      }
+    },
+
+    // Progressive-overflow layout. Walks tools and swatches in lockstep
+    // (one tool, one swatch, one tool, one swatch, …), tagging each
+    // with `.etcher-overflow-hidden` until the toolbar's intrinsic
+    // width fits its container. When one group runs out of hideable
+    // items, the other continues alone. Active tool / swatch is pinned
+    // — never collapsed, so the user always sees what's selected.
+    //
+    // Called from:
+    //   - ResizeObserver on the container (fires on initial attach
+    //     too, so initial layout flows through here)
+    //   - `_setAnnotationMode(true)` after the toolbar becomes visible
+    //   - `_selectTool` / `_selectColor` (active item changed → re-pin)
+    _layoutToolbar: function() {
+      var self = this;
+      if (!self.toolbar) return;
+      // Toolbar is `display: none` until annotation mode is on; bail
+      // so scrollWidth/clientWidth measurements aren't taken against
+      // a hidden element (which would return 0 and skew the logic).
+      if (!self.toolbar.classList.contains("is-active")) return;
+
+      var container = self.handle && self.handle.container;
+      if (!container) return;
+
+      // Reset every overflow-hidden tag from the previous pass.
+      var toolBtns = Array.prototype.slice.call(
+        self.toolbar.querySelectorAll("button[data-tool]")
+      );
+      var swatchBtns = Array.prototype.slice.call(
+        self.toolbar.querySelectorAll(".etcher-swatch")
+      );
+      toolBtns.forEach(function(b) { b.classList.remove("etcher-overflow-hidden"); });
+      swatchBtns.forEach(function(b) { b.classList.remove("etcher-overflow-hidden"); });
+      if (self.toolsMoreBtn) self.toolsMoreBtn.classList.remove("is-active");
+      if (self.colorsMoreBtn) self.colorsMoreBtn.classList.remove("is-active");
+      if (self._cursorToolsDivider) {
+        self._cursorToolsDivider.classList.remove("etcher-overflow-hidden");
+      }
+      if (self.undoBtn) self.undoBtn.classList.remove("etcher-overflow-hidden");
+      if (self.redoBtn) self.redoBtn.classList.remove("etcher-overflow-hidden");
+      if (self._undoSwatchesDivider) {
+        self._undoSwatchesDivider.classList.remove("etcher-overflow-hidden");
+      }
+
+      // Available width: container minus a comfort margin so the
+      // toolbar doesn't kiss the viewer edges.
+      var available = container.clientWidth - 24;
+      if (available <= 0) return;
+      if (self.toolbar.scrollWidth <= available) return;  // already fits
+
+      // Build the hideable queues — non-active items in right-to-left
+      // order so the rightmost button collapses first.
+      var activeToolKey = self.activeTool == null ? "cursor" : self.activeTool;
+      var toolsQueue = [];
+      for (var i = toolBtns.length - 1; i >= 0; i--) {
+        if (toolBtns[i].dataset.tool !== activeToolKey) toolsQueue.push(toolBtns[i]);
+      }
+      var swatchQueue = [];
+      for (var j = swatchBtns.length - 1; j >= 0; j--) {
+        if (swatchBtns[j].dataset.color !== self.activeColor) swatchQueue.push(swatchBtns[j]);
+      }
+
+      // Walk the two queues in lockstep so both groups visually shrink
+      // at the same rate. When a group's first item is about to be
+      // hidden, reveal its `[⋯]` trigger so the collapsed items are
+      // reachable. Showing the trigger also adds width to the
+      // toolbar — the loop re-measures after each hide, so any extra
+      // chrome converges naturally.
+      var tIdx = 0, sIdx = 0;
+      var toolsMoreShown = false, colorsMoreShown = false;
+      while (tIdx < toolsQueue.length || sIdx < swatchQueue.length) {
+        if (tIdx < toolsQueue.length) {
+          if (!toolsMoreShown && self.toolsMoreBtn) {
+            self.toolsMoreBtn.classList.add("is-active");
+            toolsMoreShown = true;
+            // First hide in the tools group: collapse the intra-group
+            // divider too so a single visible item doesn't sit next
+            // to a stray separator.
+            if (self._cursorToolsDivider) {
+              self._cursorToolsDivider.classList.add("etcher-overflow-hidden");
+            }
+          }
+          toolsQueue[tIdx++].classList.add("etcher-overflow-hidden");
+          if (self.toolbar.scrollWidth <= available) return;
+        }
+        if (sIdx < swatchQueue.length) {
+          if (!colorsMoreShown && self.colorsMoreBtn) {
+            self.colorsMoreBtn.classList.add("is-active");
+            colorsMoreShown = true;
+          }
+          swatchQueue[sIdx++].classList.add("etcher-overflow-hidden");
+          if (self.toolbar.scrollWidth <= available) return;
+        }
+      }
+
+      // Last resort: tools + swatches are fully collapsed and the
+      // toolbar still doesn't fit. Hide undo / redo together with
+      // their preceding divider; they remain reachable through the
+      // tools popup (which renders them under a hairline at the
+      // bottom). Tools-more must be visible so the popup is
+      // accessible — guard against the edge case where overflow
+      // started mid-history (no tools to hide) by lighting it up
+      // here too.
+      if (self.undoBtn) self.undoBtn.classList.add("etcher-overflow-hidden");
+      if (self.redoBtn) self.redoBtn.classList.add("etcher-overflow-hidden");
+      if (self._undoSwatchesDivider) {
+        self._undoSwatchesDivider.classList.add("etcher-overflow-hidden");
+      }
+      if (self.toolsMoreBtn && !self.toolsMoreBtn.classList.contains("is-active")) {
+        self.toolsMoreBtn.classList.add("is-active");
+        if (self._cursorToolsDivider) {
+          self._cursorToolsDivider.classList.add("etcher-overflow-hidden");
+        }
+      }
+    },
+
+    // Compact-mode `[⋯]` trigger. Calls into a kind-specific opener
+    // (`_openToolsPopup` / `_openColorsPopup`); both pop above the
+    // button anchored to the toolbar.
+    _makeMoreButton: function(kind, title) {
+      var self = this;
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "etcher-more";
+      btn.dataset.more = kind;
+      btn.title = title;
+      btn.setAttribute("aria-label", title);
+      btn.innerHTML = ICONS.more;
+      btn.addEventListener("click", function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        self._togglePopup(kind);
+      });
+      return btn;
+    },
+
+    // Tools popup: every drawing tool + cursor, rendered as a wrapping
+    // grid above the `[⋯]` trigger. Reuses `_selectTool` so the
+    // popup's selection flows through the same path as the main
+    // toolbar (state stays in lockstep — the popup is just an
+    // alternate UI).
+    _buildToolsPopup: function() {
+      var self = this;
+      var popup = document.createElement("div");
+      popup.className = "etcher-popup";
+      popup.dataset.kind = "tools";
+      popup.setAttribute("data-fresco-no-capture", "");
+      // Cursor first so it's the easy reach when exiting draw mode.
+      var entries = [{ key: "cursor", icon: ICONS.cursor, title: "Cursor" }];
+      self.tools.forEach(function(toolKey) {
+        var def = TOOL_DEFS[toolKey];
+        if (!def) return;
+        entries.push({ key: toolKey, icon: def.icon, title: def.title });
+      });
+      self.toolsPopupBtns = entries.map(function(entry) {
+        var b = document.createElement("button");
+        b.type = "button";
+        b.dataset.tool = entry.key;
+        b.title = entry.title;
+        b.setAttribute("aria-label", entry.title);
+        b.innerHTML = entry.icon;
+        b.addEventListener("click", function(e) {
+          e.preventDefault();
+          self._selectTool(entry.key === "cursor" ? null : entry.key);
+          self._closePopup();
+        });
+        popup.appendChild(b);
+        return b;
+      });
+
+      // Hairline + undo / redo. The popup is also the overflow target
+      // for the history group when the toolbar narrows past the point
+      // where even tools and swatches can't free enough space. Always
+      // rendered (cheap) so the popup contents don't shift when the
+      // user resizes the viewer.
+      var historyDivider = document.createElement("div");
+      historyDivider.className = "etcher-popup-divider";
+      popup.appendChild(historyDivider);
+
+      self.popupUndoBtn = document.createElement("button");
+      self.popupUndoBtn.type = "button";
+      self.popupUndoBtn.dataset.history = "undo";
+      self.popupUndoBtn.title = "Undo (⌘Z)";
+      self.popupUndoBtn.setAttribute("aria-label", "Undo");
+      self.popupUndoBtn.innerHTML = ICONS.undo;
+      self.popupUndoBtn.addEventListener("click", function(e) {
+        e.preventDefault();
+        self._undo();
+        // Don't auto-close — users often undo multiple times in a row.
+        self._refreshUndoButtons();
+      });
+      popup.appendChild(self.popupUndoBtn);
+
+      self.popupRedoBtn = document.createElement("button");
+      self.popupRedoBtn.type = "button";
+      self.popupRedoBtn.dataset.history = "redo";
+      self.popupRedoBtn.title = "Redo (⌘⇧Z)";
+      self.popupRedoBtn.setAttribute("aria-label", "Redo");
+      self.popupRedoBtn.innerHTML = ICONS.redo;
+      self.popupRedoBtn.addEventListener("click", function(e) {
+        e.preventDefault();
+        self._redo();
+        self._refreshUndoButtons();
+      });
+      popup.appendChild(self.popupRedoBtn);
+
+      self.handle.container.appendChild(popup);
+      self.toolsPopup = popup;
+    },
+
+    // Colors popup: every preset swatch as a row. A slot is reserved
+    // (data-etcher-custom-picker) for the upcoming custom-color
+    // picker; until that ships the slot is empty and the popup just
+    // displays the same swatches as desktop mode.
+    _buildColorsPopup: function() {
+      var self = this;
+      var popup = document.createElement("div");
+      popup.className = "etcher-popup";
+      popup.dataset.kind = "colors";
+      popup.setAttribute("data-fresco-no-capture", "");
+      self.colorsPopupBtns = resolveColorSwatches().map(function(s) {
+        var b = document.createElement("button");
+        b.type = "button";
+        b.className = "etcher-swatch";
+        b.dataset.color = s.color;
+        b.title = s.title;
+        b.setAttribute("aria-label", "Color: " + s.title);
+        b.style.background = s.color;
+        if (s.color === self.activeColor) b.classList.add("is-selected");
+        b.addEventListener("click", function(e) {
+          e.preventDefault();
+          self._selectColor(s.color);
+          self._closePopup();
+        });
+        popup.appendChild(b);
+        return b;
+      });
+      // Reserved slot for the custom-color picker (future feature).
+      // Rendered as an empty span so the popup width is stable when
+      // the picker ships and starts taking up space.
+      var pickerSlot = document.createElement("span");
+      pickerSlot.setAttribute("data-etcher-custom-picker", "");
+      popup.appendChild(pickerSlot);
+      self.handle.container.appendChild(popup);
+      self.colorsPopup = popup;
+    },
+
+    _togglePopup: function(kind) {
+      var open = this._openPopupKind;
+      this._closePopup();
+      if (open !== kind) this._openPopup(kind);
+    },
+
+    _openPopup: function(kind) {
+      var popup = kind === "tools" ? this.toolsPopup : this.colorsPopup;
+      var trigger = kind === "tools" ? this.toolsMoreBtn : this.colorsMoreBtn;
+      if (!popup || !trigger) return;
+
+      // Position above the trigger. Both popup and trigger live in
+      // the same container so we work in its coordinate space.
+      // Display before measuring so getBoundingClientRect returns
+      // real dims (display:none → zero).
+      popup.classList.add("is-open");
+      var container = this.handle.container;
+      var cRect = container.getBoundingClientRect();
+      var tRect = trigger.getBoundingClientRect();
+      var pRect = popup.getBoundingClientRect();
+      var top = (tRect.top - cRect.top) - pRect.height - 8;
+      // Strip mode's toolbar uses `position: fixed`, so the popup
+      // should too — anchor it directly to the viewport instead of
+      // to the container (which scrolls). `getBoundingClientRect` on
+      // the trigger returns viewport coords either way.
+      if (this.handleKind === "strip") {
+        popup.style.position = "fixed";
+        popup.style.top = (tRect.top - pRect.height - 8) + "px";
+        popup.style.left = "auto";
+        // Center horizontally on the trigger button.
+        var leftViewport = tRect.left + tRect.width / 2 - pRect.width / 2;
+        var maxLeft = window.innerWidth - pRect.width - 8;
+        if (leftViewport < 8) leftViewport = 8;
+        if (leftViewport > maxLeft) leftViewport = maxLeft;
+        popup.style.left = leftViewport + "px";
+      } else {
+        popup.style.position = "absolute";
+        popup.style.top = top + "px";
+        // Center horizontally on the trigger button, clamped to the
+        // container.
+        var leftContainer = (tRect.left - cRect.left) + tRect.width / 2 - pRect.width / 2;
+        var maxLeftContainer = cRect.width - pRect.width - 8;
+        if (leftContainer < 8) leftContainer = 8;
+        if (leftContainer > maxLeftContainer) leftContainer = maxLeftContainer;
+        popup.style.left = leftContainer + "px";
+      }
+
+      this._openPopupKind = kind;
+      // Outside-click closer. Capture phase so we run before
+      // inner stopPropagation handlers (toolbar buttons all
+      // stopPropagation), and exclude the popup + trigger itself
+      // so re-clicks don't immediately reopen.
+      var self = this;
+      this._popupOutsideClick = function(e) {
+        if (popup.contains(e.target)) return;
+        if (trigger.contains(e.target)) return;
+        self._closePopup();
+      };
+      document.addEventListener("pointerdown", this._popupOutsideClick, true);
+    },
+
+    _closePopup: function() {
+      if (this.toolsPopup) this.toolsPopup.classList.remove("is-open");
+      if (this.colorsPopup) this.colorsPopup.classList.remove("is-open");
+      this._openPopupKind = null;
+      if (this._popupOutsideClick) {
+        document.removeEventListener("pointerdown", this._popupOutsideClick, true);
+        this._popupOutsideClick = null;
+      }
     },
 
     _makeToolButton: function(toolKey, icon, title) {
@@ -1725,6 +2192,10 @@
       if (self.annotationMode === on) return;
       self.annotationMode = on;
       if (self.toolbar) self.toolbar.classList.toggle("is-active", on);
+      // Toolbar just became visible (or just hid). When visible, run
+      // the overflow layout immediately — `_layoutToolbar` bails when
+      // the toolbar is hidden, so the `off` path is a no-op.
+      if (on) self._layoutToolbar();
 
       // In Fresco 0.5 pan/zoom isn't a set of toggleable gesture flags
       // on an OSD viewer — it's the engine's own pointer/wheel handlers
@@ -1740,6 +2211,7 @@
         self._selectTool(null);
         self._cancelDraft();
         self._exitEditMode();
+        self._closePopup();
       }
 
       self._dispatch("etcher:mode-changed", { annotationMode: on });
@@ -1759,14 +2231,20 @@
       // means we're done admiring the current edit.
       if (toolKey != null) self._exitEditMode();
 
-      if (self.toolbar) {
-        var btns = self.toolbar.querySelectorAll("button[data-tool]");
-        btns.forEach(function(b) {
+      // Sync `.is-selected` across the main toolbar AND the
+      // compact-mode tools popup. The popup is an alternate UI; its
+      // buttons must reflect the same selected state so re-opening
+      // it shows the current tool highlighted.
+      function syncToolButtons(root) {
+        if (!root) return;
+        root.querySelectorAll("button[data-tool]").forEach(function(b) {
           var match = (toolKey == null && b.dataset.tool === "cursor") ||
                       (toolKey != null && b.dataset.tool === toolKey);
           b.classList.toggle("is-selected", match);
         });
       }
+      syncToolButtons(self.toolbar);
+      syncToolButtons(self.toolsPopup);
 
       // Wrapper catches input only while a drawing tool is active. Shapes
       // catch their own hover + click independently via CSS, so the
@@ -1789,6 +2267,10 @@
       }
       if (drawingNow) self._hideTooltip();
 
+      // Active tool changed → re-pin in the overflow layout so the
+      // newly-active button never sits in the collapsed set.
+      self._layoutToolbar();
+
       self._dispatch("etcher:tool-changed", { tool: toolKey });
     },
 
@@ -1799,11 +2281,23 @@
       this.activeColor = color;
       this._dispatch("etcher:color-changed", { color: color });
 
+      // Sync `.is-selected` across the main toolbar swatches AND
+      // the compact-mode colors popup. Same alternate-UI rationale
+      // as the tool-button sync above.
       if (this.swatchEls) {
         this.swatchEls.forEach(function(el) {
           el.classList.toggle("is-selected", el.dataset.color === color);
         });
       }
+      if (this.colorsPopupBtns) {
+        this.colorsPopupBtns.forEach(function(el) {
+          el.classList.toggle("is-selected", el.dataset.color === color);
+        });
+      }
+
+      // Active swatch changed → re-pin in the overflow layout so the
+      // newly-active swatch is the one that stays visible.
+      this._layoutToolbar();
 
       // Apply to the in-flight draft (if any) so the user sees the new
       // color while still drawing.
@@ -6242,6 +6736,10 @@
       var r = (this._redoStack || []).length;
       if (this.undoBtn) this.undoBtn.disabled = u === 0;
       if (this.redoBtn) this.redoBtn.disabled = r === 0;
+      // Mirror onto the popup's history buttons so the overflow
+      // copies disable in lockstep with the toolbar copies.
+      if (this.popupUndoBtn) this.popupUndoBtn.disabled = u === 0;
+      if (this.popupRedoBtn) this.popupRedoBtn.disabled = r === 0;
       // Fire a state-change event so consumers driving their own UI
       // off the public API can keep external undo/redo buttons in
       // sync without polling.

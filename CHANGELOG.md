@@ -4,6 +4,80 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.3] — 2026-05-20
+
+**Mobile-friendly toolbar + custom color picker + multi-select +
+polygon vertex deletion.** A round of UX features that turn the
+annotation surface from "works on desktop" into "comfortable on a
+phone with a real workflow." Backwards-compatible: no API breakage,
+no consumer changes required.
+
+### Added
+
+- **Progressive-overflow toolbar.** A `ResizeObserver` on the viewer
+  container drives a layout pass that walks tools and swatches in
+  lockstep and collapses the rightmost non-active items into one of
+  two new `[⋯]` overflow popups (`tools`, `colors`) as the
+  container narrows. Tools and swatches shrink in alternation so
+  the row stays visually balanced; once both groups are exhausted,
+  `undo` / `redo` collapse together as the final step (still
+  reachable from the bottom of the tools popup under a hairline).
+  The active tool / swatch is pinned and never collapses.
+- **Custom color picker.** The colors popup now hosts a 132 px hue
+  ring + 120 px lightness slider + preview chip. Press + drag on
+  either canvas commits live via `_selectColor` (in-flight drafts
+  and edits update under the finger); the final color pushes to
+  recents on `pointerup`. Saturation is fixed at 100 %.
+- **Recent custom colors.** Up to 5 picks are persisted to
+  `localStorage` under `etcher.recentColors` (MRU, dedup +
+  move-to-front on re-pick). The toolbar's inline swatch row now
+  reflects this list — new users see the static preset palette,
+  and once they pick anything the row transitions to their actual
+  usage. Presets backfill any unused slots so the toolbar is never
+  empty.
+- **Canvas-frequent bootstrap.** When `_recentColors` is empty but
+  the canvas already has annotations (a hydrated `.fresco` file, a
+  manga chapter with persisted comments), the inline toolbar
+  derives from the top 5 most-used colors on existing shapes —
+  inferred from `style.color` frequencies. Once the user picks any
+  color, recents takes over and the inferred palette stops
+  contributing.
+- **Shift-click multi-select.** In annotation cursor mode,
+  `Shift+click` toggles a shape in/out of `selectedShapes`. The
+  group can be dragged together (image-px delta applied uniformly,
+  title boxes translate too) or deleted with a single
+  `Backspace`/`Delete` under one `bulk_delete` undo entry + one
+  `etcher:annotations-changed` emit. Selection clears on empty-
+  canvas click, drawing-tool select, or annotation-mode exit.
+- **Polygon vertex deletion.** While a polygon is in edit mode,
+  clicking a vertex (no drag) highlights it red; `Backspace`/
+  `Delete` splices the selected vertices out of `geometry.points`
+  and re-renders. `Shift+click` extends the vertex selection.
+  Falls through to whole-shape delete if the removal would leave
+  fewer than 3 vertices.
+- **`Etcher.registerInputOwnerSelector(selector)`** on the global
+  `window.Etcher`. Append a CSS selector to the input-owner escape
+  list for non-conventional overlays that don't match the built-in
+  modal / dialog / tooltip / handle defaults. Idempotent.
+
+### Changed
+
+- **Default active color** now snaps to whatever lands as the
+  leftmost toolbar swatch on first paint, not the legacy preset
+  blue. Once the user picks anything, `_pushRecentColor`'s
+  move-to-front keeps `activeColor` in agreement with the leftmost
+  slot — so "what's highlighted" always matches "what will draw."
+- **`etcher:annotations-changed` payload** carries a `fresco_id`
+  key alongside `annotations` so a LiveView hosting multiple
+  `<Etcher.layer>` instances can pattern-match the source.
+- **Doc-level hit-test handlers** (`_docPointerDown`,
+  `_docDblClick`, `_outsideClickHandler`,
+  `_titleOutsideClickHandler`, `_tooltipOutsideClick`,
+  `_docMouseMove`) route through a shared `isInputOwner(target)`
+  helper instead of inline selector lists. Adding `.etcher-popup`
+  to the input-owner set means the new picker popups don't tear
+  down their own state.
+
 ## [0.4.2] — 2026-05-20
 
 ### Fixed

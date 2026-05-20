@@ -4,6 +4,43 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.2] — 2026-05-20
+
+### Fixed
+
+- **Clicks inside consumer-owned modals no longer fall through to
+  shapes behind them.** Etcher's doc-level hit-test handlers
+  (`_docPointerDown`, `_docDblClick`, `_outsideClickHandler`,
+  `_titleOutsideClickHandler`, `_tooltipOutsideClick`, and the
+  hover-tracker `_docMouseMove`) now skip events whose target is
+  inside a standard modal / dialog. Three selectors are recognized
+  out of the box:
+
+  - `dialog[open]` — native HTML5 `<dialog>` shown via `.showModal()`
+    or `.show()`
+  - `.modal-open` — daisyUI / Bootstrap convention
+  - `[role='dialog']` — ARIA-compliant custom modals
+
+  Previously, tapping a button inside a modal that sat over the
+  viewer would shadow the button's own handler and pin / move /
+  select the shape underneath instead. Consumers shipping a comment
+  composer, settings sheet, share dialog, or confirmation prompt
+  layered over a Fresco viewer can now drop their per-modal
+  `pointerdown` / `stopPropagation` shims.
+
+### Added
+
+- **`Etcher.registerInputOwnerSelector(selector)`** on the global
+  `window.Etcher`. Append a CSS selector to the input-owner escape
+  list for non-conventional overlays that don't match the three
+  defaults. Idempotent — re-registering the same selector is a
+  no-op. Affects every doc-level Etcher handler immediately on the
+  next event.
+
+  ```js
+  window.Etcher.registerInputOwnerSelector(".my-custom-overlay");
+  ```
+
 ## [0.4.1] — 2026-05-20
 
 Closes strip-mode parity gaps flagged by the consumer reader on top of

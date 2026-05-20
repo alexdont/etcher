@@ -89,6 +89,49 @@
     return entry ? entry.api : null;
   };
 
+  // Selectors for DOM nodes that own their own input. When a click /
+  // pointerdown / dblclick lands inside one of these, Etcher's
+  // doc-level hit-test handlers bail — otherwise the gesture would
+  // shadow the owner's handler (a modal's button would never see its
+  // own click, a tooltip's delete button would tear down its own
+  // pin, etc.).
+  //
+  // The first five are Etcher's own internals. The last three cover
+  // the established modal / dialog conventions so consumers don't
+  // have to register their composer / settings / share-sheet
+  // dialogs by hand:
+  //
+  //   dialog[open]       — native <dialog> shown via .showModal() / .show()
+  //   .modal-open        — daisyUI / Bootstrap convention
+  //   [role='dialog']    — ARIA-compliant custom modals
+  //
+  // Consumers shipping a non-conventional input-owning overlay can
+  // append a selector via `Etcher.registerInputOwnerSelector(...)`.
+  var DEFAULT_INPUT_OWNER_SELECTORS = [
+    ".etcher-handle",
+    ".etcher-title-group",
+    ".etcher-tooltip",
+    ".etcher-toolbar",
+    ".etcher-text-editor",
+    "dialog[open]",
+    ".modal-open",
+    "[role='dialog']"
+  ];
+  var inputOwnerSelectors = DEFAULT_INPUT_OWNER_SELECTORS.slice();
+  var inputOwnerSelectorString = inputOwnerSelectors.join(", ");
+
+  window.Etcher.registerInputOwnerSelector = function(selector) {
+    if (typeof selector !== "string" || !selector.trim()) return;
+    if (inputOwnerSelectors.indexOf(selector) !== -1) return;
+    inputOwnerSelectors.push(selector);
+    inputOwnerSelectorString = inputOwnerSelectors.join(", ");
+  };
+
+  function isInputOwner(target) {
+    if (!target || typeof target.closest !== "function") return false;
+    return !!target.closest(inputOwnerSelectorString);
+  }
+
   // ===========================================================================
   // Icons (Heroicons, outline, 24×24, stroke="currentColor")
   // ===========================================================================
@@ -2581,10 +2624,13 @@
 
       var self = this;
       this._titleOutsideClickHandler = function(e) {
-        var inside = e.target.closest(
-          ".etcher-shape, .etcher-handle, .etcher-title-group, .etcher-text-editor, .etcher-tooltip, .etcher-toolbar"
-        );
-        if (inside) return;
+        // Clicks on a shape keep title-edit alive (the user might be
+        // about to switch focus to that shape) — fall through to the
+        // image-px hit-test below. Clicks on Etcher's internals or
+        // any registered input-owner (modals, dialogs, ARIA dialogs)
+        // also keep edit alive: the click belongs to that UI.
+        if (e.target.closest(".etcher-shape")) return;
+        if (isInputOwner(e.target)) return;
         // Shapes are `pointer-events: none`; fall back to image-px
         // hit-test so a click on a sibling shape doesn't tear down
         // title-edit mode before its own handler can react.
@@ -3226,6 +3272,13 @@
           if (self._hoveredShape) self._setHoveredShape(null, false);
           return;
         }
+        // Cursor sitting over a modal / dialog shouldn't light up the
+        // shape behind it — that's a confusing affordance (the shape
+        // looks tappable but it isn't, since the modal owns the click).
+        if (isInputOwner(e.target)) {
+          if (self._hoveredShape) self._setHoveredShape(null, false);
+          return;
+        }
         var pt;
         try { pt = self._toImage(e); } catch (_) { return; }
         var hit = self._shapeAt(pt);
@@ -3249,11 +3302,9 @@
       self._docPointerDown = function(e) {
         if (e.button !== 0) return;
         if (!overContainer(e)) return;
-        // A handle/title/toolbar element under the cursor handles its
-        // own event; don't shadow it with a shape tap.
-        var inside = e.target && e.target.closest &&
-          e.target.closest(".etcher-handle, .etcher-title-group, .etcher-tooltip, .etcher-toolbar, .etcher-text-editor");
-        if (inside) return;
+        // A handle/title/toolbar/modal element under the cursor
+        // handles its own event; don't shadow it with a shape tap.
+        if (isInputOwner(e.target)) return;
         var hit = self._hoveredShape;
         // Touch-native fallback: devices without hover (mobile Safari /
         // Chrome on Android) never populate `_hoveredShape` because no
@@ -3316,6 +3367,10 @@
       self._docDblClick = function(e) {
         if (!self.annotationMode || self.activeTool != null) return;
         if (!overContainer(e)) return;
+        // Skip if the double-click landed inside a modal or other
+        // input-owner — clicking in a comment composer that happens
+        // to sit over a text shape shouldn't open the shape's editor.
+        if (isInputOwner(e.target)) return;
         var pt;
         try { pt = self._toImage(e); } catch (_) { return; }
         var hit = self._shapeAt(pt);
@@ -3725,11 +3780,14 @@
       if (this._tooltipOutsideClick) return;
       var self = this;
       this._tooltipOutsideClick = function(e) {
-        // Clicks on a shape, on the tooltip itself, or on an edit-mode
-        // handle keep the pin alive. Anything else unpins. Shapes are
-        // `pointer-events: none`, so a click on a shape lands on OSD's
-        // canvas at the DOM level — fall back to image-px hit-test.
-        if (e.target.closest(".etcher-shape, .etcher-tooltip, .etcher-handle")) return;
+        // Clicks on a shape, on the tooltip itself, on an edit-mode
+        // handle, or inside any registered input-owner (modals, etc.)
+        // keep the pin alive. Anything else unpins. Shapes are
+        // `pointer-events: none`, so a click on a shape lands on the
+        // canvas/container at the DOM level — fall back to image-px
+        // hit-test.
+        if (e.target.closest(".etcher-shape")) return;
+        if (isInputOwner(e.target)) return;
         try {
           var pt = self._toImage(e);
           if (self._shapeAt(pt)) return;
@@ -5168,10 +5226,12 @@
       // shape without the handler tearing down edit mode in between.
       var self = this;
       this._outsideClickHandler = function(e) {
-        var inside = e.target.closest(
-          ".etcher-shape, .etcher-handle, .etcher-text-editor, .etcher-tooltip, .etcher-toolbar"
-        );
-        if (inside) return;
+        // Click on a shape keeps edit mode alive (the user might be
+        // switching focus to a sibling). Click inside Etcher's own
+        // chrome or any registered input-owner (modals, dialogs)
+        // also keeps edit mode alive — the gesture belongs to that UI.
+        if (e.target.closest(".etcher-shape")) return;
+        if (isInputOwner(e.target)) return;
         try {
           var pt = self._toImage(e);
           if (self._shapeAt(pt)) return;

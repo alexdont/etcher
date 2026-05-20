@@ -4489,27 +4489,40 @@
         // A handle/title/toolbar/modal element under the cursor
         // handles its own event; don't shadow it with a shape tap.
         if (isInputOwner(e.target)) return;
-        var hit = self._hoveredShape;
-        // Touch-native fallback: devices without hover (mobile Safari /
-        // Chrome on Android) never populate `_hoveredShape` because no
-        // mousemove fires before tap. Hit-test directly on pointerdown
-        // so a single finger-tap selects (annotation mode) or pins the
-        // tooltip (browse mode). Cheap — only runs when hover state is
-        // empty.
-        if (!hit) {
-          var ptDirect;
+        // Touch: `_hoveredShape` is unreliable. iOS synthesizes a
+        // mousemove at the touchend point after every gesture, which
+        // fires `_docMouseMove` and leaves the cache pinned to the
+        // last-touched shape regardless of where the next finger
+        // actually lands. Always hit-test fresh on touch — the next
+        // tap on a different shape (or empty space) needs the real
+        // coordinate, not the stale hover cache.
+        //
+        // Mouse / pen: `mousemove` keeps `_hoveredShape` in sync as
+        // the cursor moves, so the cache is accurate. The empty-
+        // cache branch is only reached on devices without hover at
+        // all (rare for non-touch pointers); fall back to a fresh
+        // hit-test there too.
+        var hit;
+        var ptDirect;
+        if (e.pointerType === "touch") {
           try { ptDirect = self._toImage(e); } catch (_) { return; }
           hit = self._shapeAt(ptDirect);
+        } else {
+          hit = self._hoveredShape;
           if (!hit) {
-            // Empty click in annotation cursor mode (no modifier)
-            // clears any active multi-selection — same affordance
-            // most graphics apps use for \"click outside to deselect\".
-            if (self.annotationMode && self.activeTool == null && !e.shiftKey &&
-                self.selectedShapes && self.selectedShapes.length > 0) {
-              self._clearSelection();
-            }
-            return;
+            try { ptDirect = self._toImage(e); } catch (_) { return; }
+            hit = self._shapeAt(ptDirect);
           }
+        }
+        if (!hit) {
+          // Empty click in annotation cursor mode (no modifier)
+          // clears any active multi-selection — same affordance
+          // most graphics apps use for \"click outside to deselect\".
+          if (self.annotationMode && self.activeTool == null && !e.shiftKey &&
+              self.selectedShapes && self.selectedShapes.length > 0) {
+            self._clearSelection();
+          }
+          return;
         }
 
         // Multi-select (Shift+click). Toggles the clicked shape in/

@@ -4,6 +4,21 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.6] — 2026-05-21
+
+### Fixed
+
+- **Touch taps after a finger-move no longer re-grab the previously-
+  moved shape.** `_docPointerDown` now hit-tests fresh on every
+  `pointertype === "touch"` event instead of trusting
+  `_hoveredShape`. iOS synthesizes a `mousemove` at the
+  `touchend` point after every gesture, which fires
+  `_docMouseMove` and leaves the hover cache pinned to the last-
+  touched shape — making the *next* tap re-select that shape
+  regardless of where the finger actually landed. Mouse / pen
+  events still consult the cache (it's accurate there) and fall
+  back to a fresh hit-test only when it's empty.
+
 ## [0.4.5] — 2026-05-21
 
 ### Fixed

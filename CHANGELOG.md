@@ -4,6 +4,56 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.9] — 2026-05-21
+
+Lets consumers hide Etcher's built-in chrome and wire their own UI
+to the same actions. Pure-additive — defaults preserve every
+existing consumer's behavior. Pairs naturally with Fresco 0.5.7's
+matching `:nav_buttons` empty-list semantics on the viewer side,
+though no Fresco upgrade is required.
+
+### Added
+
+- **`:nav_buttons` attr** on `<Etcher.layer>`. Atom list controlling
+  which buttons get appended to Fresco's nav column:
+  `[:pencil, :visibility]`.
+
+    - `nil` (default) — both enabled.
+    - `[]` — both hidden. Consumers wire their own UI to
+      `handle.toggleMode()` / `handle.toggleVisible()` (or
+      `setMode(true|false)` / `setVisible(true|false)`).
+    - A subset list — only those buttons render.
+
+  Mirrors as `data-nav-buttons` on the layer host using the
+  `"none"` sentinel for the empty case, matching Fresco's
+  convention.
+- **`:toolbar` attr** on `<Etcher.layer>` (boolean, default `true`).
+  `false` skips building the bottom toolbar entirely. Annotation
+  mode still works programmatically — consumers wire their own
+  toolbar UI to `handle.selectTool(...)` / `handle.selectColor(...)` /
+  `handle.undo()` / `handle.redo()` / `handle.setMode(false)`.
+
+### Programmatic equivalents for every built-in button
+
+The `window.Etcher.layerFor(id)` handle already exposes the
+matching primitives — this release just clarifies the mapping so
+consumers hiding a built-in button know exactly which method to
+call from their replacement UI:
+
+| Built-in button         | Programmatic equivalent                       |
+|-------------------------|-----------------------------------------------|
+| Pencil (annotation on)  | `handle.setMode(true)` / `toggleMode()`       |
+| Visibility (eye)        | `handle.setVisible(true)` / `toggleVisible()` |
+| Toolbar — cursor        | `handle.exitDrawing()` / `selectTool(null)`   |
+| Toolbar — rectangle…    | `handle.selectTool("rectangle")` (etc.)       |
+| Toolbar — undo / redo   | `handle.undo()` / `handle.redo()`             |
+| Toolbar — color swatch  | `handle.setColor("#hex")`                     |
+| Toolbar — close (×)     | `handle.setMode(false)`                       |
+
+All seven were already on the API surface; this entry just gives
+consumers building their own chrome a single place to find the
+mapping.
+
 ## [0.4.8] — 2026-05-21
 
 ### Fixed

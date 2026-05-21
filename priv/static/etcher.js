@@ -834,6 +834,20 @@
     );
   }
 
+  // Parse a `data-*-buttons`-style allowlist with three states:
+  //   - attribute absent (`undefined`) → null (caller treats as "all on")
+  //   - `"none"` sentinel → empty Set (caller treats as "everything hidden")
+  //   - CSV → Set of trimmed names
+  // Mirrors the Fresco-side convention so consumers see the same
+  // semantics across both libraries.
+  function parseAllowlistAttr(value) {
+    if (value == null) return null;
+    if (value === "none") return new Set();
+    return new Set(
+      value.split(",").map(function(s) { return s.trim(); }).filter(Boolean)
+    );
+  }
+
   function escapeHtml(value) {
     return String(value == null ? "" : value)
       .replace(/&/g, "&amp;")
@@ -965,6 +979,14 @@
       try {
         self.tools = JSON.parse(self.el.dataset.tools || "[]");
       } catch (_) { self.tools = ["rectangle", "circle", "polygon", "freehand"]; }
+
+      // Chrome-allowlist parsing — same `"none"` sentinel convention
+      // as Fresco's `:nav_buttons` / `:gestures`. `null` here means
+      // "no allowlist set; everything enabled"; an empty Set means
+      // "explicit hide-all." `_chromeEnabled(name)` consults the
+      // Set for per-button gates.
+      self._navButtonAllowlist = parseAllowlistAttr(self.el.dataset.navButtons);
+      self.showToolbar = self.el.dataset.toolbar !== "false";
 
       self.shapes = [];           // { uuid, kind, geometry, style?, metadata?, el }
       self.activeTool = null;     // null = cursor mode
@@ -1282,11 +1304,14 @@
       self.imageSize = { x: size.width, y: size.height };
 
       self._buildOverlay();
-      self._buildToolbar();
+      if (self.showToolbar) self._buildToolbar();
       // Visibility toggle goes above the annotation-mode pencil so
-      // it reads "look first, edit second" top-to-bottom.
-      self._buildVisibilityButton();
-      self._buildNavButton();
+      // it reads "look first, edit second" top-to-bottom. Both are
+      // gated by the `:nav_buttons` allowlist so consumers shipping
+      // their own chrome can hide them and wire `handle.toggleMode()`
+      // / `handle.toggleVisible()` to their own buttons.
+      if (self._chromeEnabled("visibility")) self._buildVisibilityButton();
+      if (self._chromeEnabled("pencil")) self._buildNavButton();
       self._wireUndoKeyboard();
       self._wireGlobalShapeListeners();
 
@@ -1369,9 +1394,9 @@
 
       self._buildStripOverlays();
       self._buildStripTooltip();
-      self._buildToolbar();
-      self._buildVisibilityButton();
-      self._buildNavButton();
+      if (self.showToolbar) self._buildToolbar();
+      if (self._chromeEnabled("visibility")) self._buildVisibilityButton();
+      if (self._chromeEnabled("pencil")) self._buildNavButton();
       self._wireUndoKeyboard();
       self._wireStripPointerInput();
       self._wireStripResize();
@@ -2866,6 +2891,15 @@
     //
     // Every commit / edit / delete in the JS hook ends with
     // `self._emitChanged()` after mutating `self.shapes` in place.
+    // True iff a named piece of nav-column chrome (`"pencil"` /
+    // `"visibility"`) is enabled. Mirrors Fresco's `:nav_buttons`
+    // semantics — `null` allowlist means "no allowlist set, all
+    // enabled"; an empty Set means "explicit hide-all."
+    _chromeEnabled: function(name) {
+      return this._navButtonAllowlist == null ||
+             this._navButtonAllowlist.has(name);
+    },
+
     _emitChanged: function() {
       if (!this.pushEventTo) return;
       var stripMode = this.handleKind === "strip";

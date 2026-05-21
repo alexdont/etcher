@@ -88,5 +88,50 @@ defmodule EtcherTest do
 
       assert html =~ ~s(data-extra="yes")
     end
+
+    test "nav_buttons + toolbar default to omitted (all chrome on)" do
+      assigns = %{}
+
+      html =
+        rendered_to_string(~H"""
+        <Etcher.Layer.layer fresco_id="board" />
+        """)
+
+      refute html =~ "data-nav-buttons"
+      refute html =~ "data-toolbar"
+    end
+
+    test "empty :nav_buttons list renders the `none` sentinel (hide all nav chrome)" do
+      assigns = %{}
+
+      html =
+        rendered_to_string(~H"""
+        <Etcher.Layer.layer fresco_id="board" nav_buttons={[]} />
+        """)
+
+      assert html =~ ~s(data-nav-buttons="none")
+    end
+
+    test ":nav_buttons subset renders the CSV allowlist" do
+      assigns = %{}
+
+      html =
+        rendered_to_string(~H"""
+        <Etcher.Layer.layer fresco_id="board" nav_buttons={[:pencil]} />
+        """)
+
+      assert html =~ ~s(data-nav-buttons="pencil")
+    end
+
+    test ":toolbar=false renders data-toolbar=\"false\"" do
+      assigns = %{}
+
+      html =
+        rendered_to_string(~H"""
+        <Etcher.Layer.layer fresco_id="board" toolbar={false} />
+        """)
+
+      assert html =~ ~s(data-toolbar="false")
+    end
   end
 end

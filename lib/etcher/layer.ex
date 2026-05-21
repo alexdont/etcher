@@ -152,6 +152,33 @@ defmodule Etcher.Layer do
     doc: "Subset of drawing tools to show in the toolbar."
   )
 
+  attr(:nav_buttons, :list,
+    default: nil,
+    doc: """
+    Allowlist of Etcher's nav-column buttons (appended to Fresco's
+    nav). Atom list: `[:pencil, :visibility]`.
+
+    - `nil` (default) — both enabled.
+    - `[]` — both hidden. Consumers shipping their own chrome wire
+      `handle.toggleMode()` / `handle.toggleVisible()` (or
+      `setMode(true|false)` / `setVisible(true|false)`) to their own
+      buttons / shortcuts.
+    - A subset list — only those buttons render.
+    """
+  )
+
+  attr(:toolbar, :boolean,
+    default: true,
+    doc: """
+    Whether to render the bottom toolbar (cursor + drawing tools +
+    undo/redo + color picker + close). `false` hides it entirely;
+    annotation mode still works programmatically — consumers wire
+    their own toolbar UI to `handle.selectTool(...)` /
+    `handle.selectColor(...)` / `handle.undo()` / `handle.redo()`
+    / `handle.setMode(false)` (close).
+    """
+  )
+
   attr(:rest, :global)
 
   @doc """
@@ -174,6 +201,7 @@ defmodule Etcher.Layer do
       assigns
       |> assign(:tools_json, tools_json)
       |> assign(:layer_id, layer_id)
+      |> assign(:nav_buttons_csv, nav_buttons_csv(assigns[:nav_buttons]))
 
     ~H"""
     <div
@@ -181,6 +209,8 @@ defmodule Etcher.Layer do
       phx-hook="EtcherLayer"
       data-fresco-id={@fresco_id}
       data-tools={@tools_json}
+      data-nav-buttons={@nav_buttons_csv}
+      data-toolbar={@toolbar == false && "false"}
       class="hidden"
       aria-hidden="true"
       {@rest}
@@ -188,4 +218,14 @@ defmodule Etcher.Layer do
     </div>
     """
   end
+
+  # Allowlist encoding:
+  #   nil  → omit attr (JS treats as "all enabled" — back-compat default)
+  #   []   → "none" sentinel (JS seeds an empty Set → every button hidden)
+  #   list → CSV of atom names (JS splits + intersects)
+  defp nav_buttons_csv(nil), do: nil
+  defp nav_buttons_csv([]), do: "none"
+
+  defp nav_buttons_csv(list) when is_list(list),
+    do: list |> Enum.map(&Atom.to_string/1) |> Enum.join(",")
 end

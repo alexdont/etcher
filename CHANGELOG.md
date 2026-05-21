@@ -4,6 +4,33 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.8] — 2026-05-21
+
+### Fixed
+
+- **Pre-0.4.7 canvas shapes now get their `image_id` backfilled on
+  hydration**, closing the gap where annotations persisted before
+  0.4.7 still ghost-rendered into adjacent viewport bands on
+  multi-image `<Fresco.canvas>` hosts. Older payloads had no
+  `image_id` field, so 0.4.7's `_applyImageVisibility` filter
+  couldn't tell which page they belonged to and left them
+  unconditionally visible.
+
+  `_renderAnnotation` now runs the same centroid hit-test that
+  draw-time uses (`_resolveCanvasImageId`) for any canvas-mode
+  annotation that hydrates without an `image_id`. The full
+  hydration pass batches its work and `_renderInitial` emits one
+  `etcher:annotations-changed` after the loop — so the consumer
+  persists the new ids once, not per shape, and the next mount
+  reads them straight from `ann.image_id` without re-running the
+  lookup. Single-image canvases (where `getImages().length < 2`)
+  and shapes that already carry an `image_id` skip the branch.
+
+  Shapes that sit in empty canvas margin (not over any image)
+  stay untagged — matching draw-time behavior. A freeform note
+  between two pages isn't owned by any page, so it stays visible
+  regardless of which image is hidden.
+
 ## [0.4.7] — 2026-05-21
 
 ### Requires Fresco ~> 0.5.5

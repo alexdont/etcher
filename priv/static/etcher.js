@@ -6500,6 +6500,15 @@
         self._renderAnnotation(ann);
       });
 
+      // If any pre-0.4.7 canvas shapes got their `image_id`
+      // backfilled during the loop above, push one bulk emit so the
+      // consumer persists the new ids. The next mount sees them in
+      // `ann.image_id` and skips this branch entirely.
+      if (self._backfilledImageId) {
+        self._backfilledImageId = false;
+        self._emitChanged();
+      }
+
       // Canvas may have just gained shapes — if recents is empty,
       // the inline toolbar palette should bootstrap from the
       // canvas-frequent colors instead of falling straight to the
@@ -6683,6 +6692,25 @@
       if (this.handleKind === "canvas" && typeof ann.image_id === "string") {
         shape.image_id = ann.image_id;
         el.setAttribute("data-image-id", shape.image_id);
+      }
+      // Backfill `image_id` for pre-0.4.7 shapes on a multi-image
+      // canvas. Without this, annotations persisted before this
+      // version stay untagged after hydration and the visibility
+      // filter can't hide them when their host page is `display:
+      // none` — they ghost into adjacent viewport bands. The
+      // `_resolveCanvasImageId` lookup is gated on
+      // `getImages().length > 1`, so single-image consumers and
+      // shapes that already carry an id skip this branch.
+      // `_backfilledImageId` accumulates the work; `_renderInitial`
+      // emits one `etcher:annotations-changed` after the full pass
+      // so the consumer persists the new ids once, not N times.
+      if (this.handleKind === "canvas" && !shape.image_id) {
+        var resolvedImageId = this._resolveCanvasImageId(shape.kind, shape.geometry);
+        if (resolvedImageId) {
+          shape.image_id = resolvedImageId;
+          el.setAttribute("data-image-id", resolvedImageId);
+          this._backfilledImageId = true;
+        }
       }
       this.shapes.push(shape);
       this._renderShape(shape);

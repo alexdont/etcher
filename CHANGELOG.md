@@ -4,6 +4,51 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.7] — 2026-05-21
+
+### Requires Fresco ~> 0.5.5
+
+The visibility-mirroring fix below relies on Fresco 0.5.5's new
+`image-visibility-change` event + `getHiddenImageIds()` snapshot.
+Older Fresco gracefully degrades (the wiring no-ops; shapes still
+leak into hidden-image bands as before).
+
+### Fixed
+
+- **Shapes on a hidden image no longer leak into adjacent viewport
+  bands on multi-image `<Fresco.canvas>` hosts.** Paged readers,
+  spreads, and lookbooks lay every page out side-by-side on one
+  canvas and call `handle.setImageVisible(id, false)` to hide the
+  non-active pages. Before this release, the page imgs were
+  hidden but their Etcher shapes stayed visible — ghost-rendering
+  inside the surrounding canvas-space the host exposes via
+  page-padding bands.
+
+  Etcher now subscribes to Fresco's `image-visibility-change` and
+  toggles `display: none` on shapes whose `image_id` is in the
+  hidden set (plus their title satellites). Hidden shapes that
+  were being edited drop out of edit mode; hidden shapes with a
+  pinned tooltip unpin — both states would otherwise float with
+  no visible anchor.
+
+### Added
+
+- **`image_id` field on canvas-mode annotations.** When a shape is
+  finalized on a multi-image canvas (`handle.getImages().length > 1`),
+  its centroid is hit-tested against every image rect and the
+  matching id is recorded on `shape.image_id` + emitted in
+  `etcher:annotations-changed`. Shapes that land in empty canvas
+  space (between images, in an unallocated region) get no
+  `image_id` and behave like always — visible regardless of any
+  image's visibility. Single-image canvas consumers are
+  unaffected: the `length > 1` gate skips the lookup entirely, so
+  no `image_id` is emitted.
+
+  Hydrated annotations with `image_id` round-trip cleanly through
+  the LiveView — Etcher reads it from `ann.image_id` in
+  `_renderAnnotation` and tags the new DOM element with
+  `data-image-id` for consumer CSS hooks.
+
 ## [0.4.6] — 2026-05-21
 
 ### Fixed

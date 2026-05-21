@@ -1207,6 +1207,10 @@
         this._unsubViewport.forEach(function(fn) { try { fn(); } catch (_) {} });
         this._unsubViewport = null;
       }
+      if (this._unsubImageVisibility) {
+        try { this._unsubImageVisibility(); } catch (_) {}
+        this._unsubImageVisibility = null;
+      }
       if (this.frescoId) delete layerRegistry[this.frescoId];
       this._setAnnotationMode(false);
     },
@@ -1285,7 +1289,37 @@
       self._buildNavButton();
       self._wireUndoKeyboard();
       self._wireGlobalShapeListeners();
+
+      // Multi-image canvases (paged readers, lookbooks): subscribe
+      // to Fresco's `image-visibility-change` and hide shapes whose
+      // host image is currently `display: none`. Seed from
+      // `handle.getHiddenImageIds()` so an extension mounting after
+      // the host already toggled images off still picks up the
+      // current state — the event is fire-and-forget, not replayed.
+      self._hiddenImageIds = new Set();
+      if (typeof handle.getHiddenImageIds === "function") {
+        try {
+          handle.getHiddenImageIds().forEach(function(id) {
+            self._hiddenImageIds.add(id);
+          });
+        } catch (_) { /* older fresco — no-op, the on-hex package may not have it */ }
+      }
+      if (typeof handle.on === "function") {
+        self._unsubImageVisibility = handle.on(
+          "image-visibility-change",
+          function(payload) {
+            if (!payload || typeof payload.imageId !== "string") return;
+            if (payload.visible) self._hiddenImageIds.delete(payload.imageId);
+            else self._hiddenImageIds.add(payload.imageId);
+            self._applyImageVisibility();
+          }
+        );
+      }
+
       self._renderInitial();
+      // `_applyImageVisibility` runs after `_renderInitial` so the
+      // hydrated shapes are present to be toggled.
+      self._applyImageVisibility();
     },
 
     // ─────────────────────────────────────────────────────────────────
@@ -2837,11 +2871,17 @@
       var stripMode = this.handleKind === "strip";
       var payload = (this.shapes || []).map(function(s) {
         var entry = { uuid: s.uuid, kind: s.kind, geometry: s.geometry };
-        // Strip annotations carry the per-image index. Canvas
-        // annotations omit it — they live in a single canvas-pixel
-        // coordinate space.
+        // Strip annotations carry per-image index (which page of N).
+        // Canvas multi-image annotations carry `image_id` (which
+        // image on the canvas) — same purpose, different field
+        // because the two coordinate models are otherwise distinct
+        // (image-natural px vs canvas-pixel). Single-image canvases
+        // omit `image_id` entirely.
         if (stripMode && typeof s.image_idx === "number") {
           entry.image_idx = s.image_idx;
+        }
+        if (!stripMode && typeof s.image_id === "string") {
+          entry.image_id = s.image_id;
         }
         if (s.style != null) entry.style = s.style;
         if (s.metadata != null) entry.metadata = s.metadata;
@@ -4859,6 +4899,65 @@
       this._dispatch("etcher:tooltip-pin", { uuid: shape.uuid || null });
     },
 
+    // Multi-image canvas: hit-test a shape's centroid against every
+    // image rect on the canvas and return the matching image id, or
+    // `null` when the shape sits in empty canvas space (e.g., a
+    // freeform note between two pages). Used at draw time to tag
+    // each new shape so the `image-visibility-change` listener can
+    // hide its DOM when the host toggles that image off.
+    //
+    // No-op for single-image canvases — the `length > 1` gate keeps
+    // every existing one-image consumer free of `image_id` tagging.
+    _resolveCanvasImageId: function(kind, geometry) {
+      if (this.handleKind !== "canvas") return null;
+      if (!this.handle || typeof this.handle.getImages !== "function") return null;
+      var images = this.handle.getImages();
+      if (!images || images.length < 2) return null;
+      var bbox = this._shapeBBoxImagePx({ kind: kind, geometry: geometry });
+      if (!bbox) return null;
+      var cx = bbox.x + bbox.w / 2;
+      var cy = bbox.y + bbox.h / 2;
+      for (var i = 0; i < images.length; i++) {
+        var img = images[i];
+        if (!img || !img.id) continue;
+        if (cx >= img.x && cx <= img.x + img.width &&
+            cy >= img.y && cy <= img.y + img.height) {
+          return img.id;
+        }
+      }
+      return null;
+    },
+
+    // Apply `_hiddenImageIds` across every shape: any shape whose
+    // `image_id` is in the hidden set gets `display: none` on its
+    // SVG element + title group (the satellite that hosts the
+    // movable label). Currently-edited shapes drop out of edit
+    // mode and any pinned tooltip on a hidden shape unpins — those
+    // states would orphan with no visible anchor otherwise.
+    //
+    // Fast path: when nothing is hidden, just unset display on every
+    // shape (covers the case where the host re-shows everything).
+    _applyImageVisibility: function() {
+      if (this.handleKind !== "canvas") return;
+      var hidden = this._hiddenImageIds || null;
+      var shapes = this.shapes || [];
+      if (!hidden || hidden.size === 0) {
+        shapes.forEach(function(s) {
+          if (s.el) s.el.style.display = "";
+          if (s.titleGroup) s.titleGroup.style.display = "";
+        });
+        return;
+      }
+      var self = this;
+      shapes.forEach(function(s) {
+        var shouldHide = !!(s.image_id && hidden.has(s.image_id));
+        if (s.el) s.el.style.display = shouldHide ? "none" : "";
+        if (s.titleGroup) s.titleGroup.style.display = shouldHide ? "none" : "";
+        if (shouldHide && self.editingShape === s) self._exitEditMode();
+        if (shouldHide && self._tooltipShape === s) self._hideTooltip();
+      });
+    },
+
     // Compute a shape's bounding box in image-natural pixels. Returns
     // `null` if geometry is malformed (e.g., an empty polygon). Used
     // by `_revealShape`; not called per-frame so it's fine to recompute
@@ -6285,6 +6384,17 @@
         shape.image_idx = this._stripActiveDraw.imageIdx;
         el.setAttribute("data-image-idx", String(shape.image_idx));
       }
+      // Multi-image canvas: tag the shape with its host image id so
+      // visibility toggling can hide it when the host display:nones
+      // that image. Single-image canvases skip this (no `image_id`
+      // returned), keeping the on-the-wire payload backwards-compat.
+      if (this.handleKind === "canvas") {
+        var imageId = this._resolveCanvasImageId(kind, geometry);
+        if (imageId) {
+          shape.image_id = imageId;
+          el.setAttribute("data-image-id", imageId);
+        }
+      }
       this.shapes.push(shape);
       this._renderShape(shape);
       this._attachShapeInteractions(shape);
@@ -6565,6 +6675,14 @@
       if (this.handleKind === "strip" && typeof ann.image_idx === "number") {
         shape.image_idx = ann.image_idx;
         el.setAttribute("data-image-idx", String(shape.image_idx));
+      }
+      // Canvas multi-image: hydrate `image_id` so the visibility
+      // toggle path knows which image owns this shape. Falls through
+      // for canvas annotations that don't carry one (single-image
+      // canvases, or shapes that landed in empty canvas space).
+      if (this.handleKind === "canvas" && typeof ann.image_id === "string") {
+        shape.image_id = ann.image_id;
+        el.setAttribute("data-image-id", shape.image_id);
       }
       this.shapes.push(shape);
       this._renderShape(shape);

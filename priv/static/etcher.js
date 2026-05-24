@@ -1092,6 +1092,26 @@
             var s = self.shapes.find(function(x) { return x.uuid === uuid; });
             return s ? self._shapeDescriptor(s) : null;
           },
+
+          // Hit-test a point against the current shapes. Returns the
+          // top-most shape under `pt` as a shape descriptor (same
+          // shape as `getShape`), or `null`. Coordinate space matches
+          // the active Fresco handle:
+          //   • strip:  pt = { imageIdx, x, y }  (per-image source px)
+          //   • canvas: pt = { x, y }            (canvas px)
+          //
+          // Intended for consumers that wire their own tap-zone
+          // handlers (page navigation on left/right thirds, sidebars,
+          // mini-maps) and need to know whether the tap landed on an
+          // annotation. Etcher's internal pointer pipeline still
+          // runs — this is just exposing the same per-kind hit-test
+          // (`_shapeContainsPoint`) consumers would otherwise
+          // re-implement against `getShapes()`.
+          shapeAt: function(pt) {
+            if (!pt) return null;
+            var s = self._shapeAt(pt);
+            return s ? self._shapeDescriptor(s) : null;
+          },
           selectShape: function(uuid) {
             var shape = self.shapes.find(function(s) { return s.uuid === uuid; });
             if (shape) self._pinTooltipFor(shape);

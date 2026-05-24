@@ -4,6 +4,28 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.5.1] — 2026-05-25
+
+### Added
+
+- **`layer.shapeAt(pt)`** — public hit-test API. Returns the top-
+  most shape descriptor (`{uuid, kind, geometry, image_idx?,
+  image_id?, style, metadata}`) under `pt`, or `null`. Strip
+  handles take `pt = {imageIdx, x, y}` in source-pixel space;
+  canvas handles take `pt = {x, y}` in canvas-pixel space.
+  Wraps the existing internal `_shapeAt` so consumers wiring
+  custom tap-zone navigation (left-third = previous page,
+  right-third = next page, sidebars, mini-maps) can defer to
+  Etcher's per-kind hit-test instead of re-implementing one per
+  shape kind (rectangle / circle / polygon / freehand / …).
+  Pairs with `fresco 0.6.3`'s suppress-tap fix — most consumers
+  don't need this if they rely on `data-fresco-suppress-tap`,
+  but custom tap handlers that bypass Fresco's tap-bus do.
+
+### Compatibility
+
+- Pure additive — no existing API changed.
+
 ## [0.5.0] — 2026-05-24
 
 Deep-linking release. Collapses the ~60 lines of consumer JS each

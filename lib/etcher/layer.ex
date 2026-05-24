@@ -167,6 +167,16 @@ defmodule Etcher.Layer do
         .then(function (r) { console.log("revealed on image", r.image_idx); })
         .catch(function (e) { console.warn(e.reason); });
 
+      // Hit-test a point against the current shapes. Returns the
+      // top-most shape descriptor (uuid, kind, geometry, image_idx /
+      // image_id, …) under `pt`, or null. Use when wiring custom
+      // tap-zone navigation so the tap can be ignored when it lands
+      // on an annotation:
+      //   const hit = layer.shapeAt({ imageIdx: 2, x: 540, y: 920 });
+      //   if (hit) return; // let etcher handle it
+      // Strip handles: pt = { imageIdx, x, y } in source-pixel space.
+      // Canvas handles: pt = { x, y } in canvas-pixel space.
+
   See `priv/static/etcher.js` for the full API surface.
   """
 

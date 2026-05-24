@@ -4,6 +4,28 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.12] — 2026-05-24
+
+### Changed
+
+- **`mix.exs` `:fresco` dep constraint relaxed** to
+  `"~> 0.5.9 or ~> 0.6.0"` so Etcher resolves against both the
+  current `fresco` 0.5.x and the strip-extracted `fresco` 0.6.0.
+  No code changes — Etcher's strip-renderer detects handles at
+  runtime via `"scrollTo" in handle` and works identically
+  whether the strip handle was registered by `fresco <= 0.5.9` or
+  by the new `fresco_strip` package.
+
+### Note
+
+Strip mode is moving to the standalone
+[`fresco_strip`](https://hex.pm/packages/fresco_strip) package
+in `fresco 0.6.0`. If you use `<Fresco.scroll_strip>` (now
+`<FrescoStrip.viewer>`), add `{:fresco_strip, "~> 0.1.0"}` to
+your deps alongside `{:fresco, "~> 0.6.0"}`. Both packages
+contribute handles to the same `window.Fresco.viewerRegistry`,
+so Etcher finds them uniformly.
+
 ## [0.4.11] — 2026-05-24
 
 Polishes touch-and-tooltip UX on `<Fresco.scroll_strip>` hosts +

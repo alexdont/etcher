@@ -4,6 +4,119 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.11] — 2026-05-24
+
+Polishes touch-and-tooltip UX on `<Fresco.scroll_strip>` hosts +
+plumbs into Fresco 0.5.9's tap-suppression hooks so consumer tap-
+zone navigation no longer races etcher's shape interactions.
+Backwards-compatible — every fix is either purely additive (new
+API surface) or scoped to the broken state.
+
+### Requires Fresco ~> 0.5.9
+
+The `data-fresco-suppress-tap` shape-attribute and
+`handle.suppressNextTap(...)` call paths only engage when paired
+with Fresco 0.5.9+. The etcher.js side guards the latter with
+`typeof handle.suppressNextTap === "function"` so older Fresco
+silently degrades (no crash, but the iOS tap-race fixes don't
+activate). The dep constraint in `mix.exs` is bumped to make
+the requirement explicit.
+
+### Fixed
+
+- **Strip-mode tooltip lands at the right position when the
+  container is scrolled.** `_showTooltipFor` now adds the
+  container's `scrollLeft` / `scrollTop` when computing the
+  tooltip's `style.top` / `style.left`. The tooltip is
+  `position: absolute` inside the relatively-positioned scroll
+  container, so its coordinates are interpreted in CONTENT space
+  — without the scroll offset, every tooltip past the first
+  viewport-worth of content landed `scrollTop` px above the
+  visible area. Canvas-mode containers don't scroll (they pan
+  via CSS transform) so `scrollTop` stays 0 and the addition
+  is a no-op there — no per-mode branching.
+- **Tooltip hover-bridge race on first show.** After
+  `_showTooltipFor`, a 250 ms grace window suppresses the next
+  `_scheduleHideTooltip` call. Without it, iOS Safari's
+  synthesized mousemove (which lands on the just-shown tooltip,
+  not the originating shape) fires `_setHoveredShape(null)` →
+  `_scheduleHideTooltip` before the tooltip's own `mouseenter`
+  cancellation runs, so the tooltip flashed visible then hid in
+  the same frame.
+- **Touch-drag of vertex / midpoint handles + edit-mode shape
+  body** no longer fights the strip container's native scroll
+  on mobile. New CSS rule applies `touch-action: none` to
+  `.etcher-handle`, `.etcher-handle-midpoint`, and
+  `.etcher-shape.is-editing` / `.is-moving` — defers iOS's
+  scroll-vs-app classification long enough for `setPointerCapture`
+  to claim the gesture. Scoped to interactive states so static
+  shapes don't block native scroll past them.
+
+### Added
+
+- **`handle.tooltip()`** on the public layer API. Returns the
+  currently-shown tooltip's `{shape, pinned}` or `null`. The
+  `shape` field is the same `{uuid, kind, geometry, style?,
+  metadata?}` descriptor `getShape` returns. Lets consumers
+  driving custom chrome react to "user opened the tooltip on
+  shape X" without scraping the DOM. The raw `tooltipEl` is
+  intentionally not exposed.
+- **`handle.repositionTooltip()`** on the public layer API. Re-
+  anchors the currently-shown tooltip to its shape. No-op when
+  no tooltip is up. Useful after a consumer-driven layout
+  change (toggling a side panel, adjusting strip padding) has
+  drifted the tooltip from its anchor.
+- **`data-fresco-suppress-tap`** on every `.etcher-shape`
+  element (set by both `_finalizeShape` and `_renderAnnotation`).
+  Fresco 0.5.9+ probes for this attribute under the tap point
+  via `document.elementsFromPoint` and skips the `tap` emit, so
+  tapping an existing annotation pins the tooltip without
+  bubbling to consumer-side tap-zone navigation. Older Fresco
+  versions ignore the attribute entirely (no behavior change).
+- **`handle.suppressNextTap(250)` call after every shape-commit**
+  (inside `_finalizeShape`). Closes the synthesized-tap-after-
+  drag race that would fire a consumer's tap-zone navigation
+  immediately after the user finished drawing a shape. Guards
+  on `typeof handle.suppressNextTap === "function"` so older
+  Fresco versions silently no-op.
+
+## [0.4.10] — 2026-05-23
+
+### Added
+
+- **`handle.addShape(payload)` / `handle.addShapes(payloads)`** on
+  the public layer API. Splices one or more shapes into a
+  live-mounted layer without remounting — preserves the active
+  tool, color selection, multi-selection, undo stack, and any
+  pinned tooltip. Useful for multi-chapter strip readers that
+  fetch the next chapter's annotations on scroll, or canvas
+  hosts that grow with new images at runtime.
+
+  The payload mirrors the persisted-annotation shape used by
+  `etcher:annotations-changed`:
+
+      {
+        uuid?:      "01HXY...",          // optional; generated if omitted
+        kind:       "rectangle",
+        geometry:   { ... },
+        image_idx?: 17,                  // strip mode (REQUIRED)
+        image_id?:  "page-3",            // canvas multi-image (auto-resolved
+                                          //  from centroid when omitted)
+        style?:     %{ color: "..." },
+        metadata?:  %{ ... }
+      }
+
+  `addShape` returns the shape's uuid (or `null` on validation
+  failure — strip mode requires a valid `image_idx`).
+  `addShapes` returns an array of uuids in input order with any
+  rejected payloads filtered out.
+
+  Multiple sibling `addShape` / `addShapes` calls scheduled in
+  the same microtask batch into one
+  `etcher:annotations-changed` emit, so the consumer's
+  server-sync handler doesn't see a flurry of full-array
+  replays.
+
 ## [0.4.9] — 2026-05-21
 
 Lets consumers hide Etcher's built-in chrome and wire their own UI

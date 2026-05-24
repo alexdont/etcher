@@ -226,6 +226,18 @@
       // keeps `touch-action: auto` so the reader can still scroll
       // the chapter to reach existing shapes.
       ".etcher-strip-drawing { touch-action: none; }",
+      // Vertex / midpoint handles + the actively-edited or actively-
+      // dragging shape body all need `touch-action: none` for the
+      // same reason as the draw-tool fix above: without it, the
+      // iOS scroll classifier claims the gesture at `touchstart`
+      // (before our `pointerdown` + `setPointerCapture` runs) and
+      // the user's drag becomes a page scroll. Scoped to interactive
+      // states only so static shapes don't block native scroll
+      // past them.
+      ".etcher-handle, .etcher-handle-midpoint,",
+      ".etcher-shape.is-editing, .etcher-shape.is-moving {",
+      "  touch-action: none;",
+      "}",
       ".etcher-toolbar.is-active { display: flex; }",
       ".etcher-toolbar button {",
       "  width: 36px; height: 36px;",
@@ -1093,6 +1105,77 @@
           deleteShape: function(uuid) {
             var shape = self.shapes.find(function(s) { return s.uuid === uuid; });
             if (shape) self._deleteShape(shape);
+          },
+
+          // Splice a single shape into the live layer without
+          // remounting. Mirrors the persisted-annotation payload
+          // shape: `{kind, geometry, image_idx?, image_id?, style?,
+          // metadata?, uuid?}`. Returns the shape's uuid (generated
+          // when not supplied) or `null` if validation fails.
+          //
+          // Strip mode REQUIRES `image_idx` — the renderer can't
+          // pick the right per-image overlay without it. Canvas
+          // multi-image hosts auto-resolve `image_id` from the
+          // centroid when omitted (same path hydrated shapes use).
+          //
+          // Use case: multi-chapter strip readers that fetch the
+          // next chapter's annotations on scroll. The previous
+          // workaround — full-layer remount — wiped in-flight UI
+          // state (active tool, multi-selection, undo stack,
+          // pinned tooltip). `addShape` keeps all of that intact.
+          //
+          // Multiple sibling `addShape` / `addShapes` calls in the
+          // same microtask collapse to one
+          // `etcher:annotations-changed` emit so the consumer's
+          // server-sync handler doesn't see a flurry of full-array
+          // replays.
+          addShape: function(payload) {
+            return self._addShape(payload);
+          },
+
+          // Bulk variant of `addShape`. Returns the array of uuids
+          // (in input order, with any rejected payloads filtered
+          // out). Same microtask-batch emit semantics.
+          addShapes: function(payloads) {
+            return self._addShapes(payloads);
+          },
+
+          // Inspect the currently-shown tooltip. Returns `null` when
+          // no tooltip is up, otherwise `{shape, pinned}` — the
+          // shape descriptor (`{uuid, kind, geometry, style?,
+          // metadata?}`, same shape as `getShape`) and whether the
+          // tooltip is in pinned state. Consumers driving custom
+          // chrome that need to react to "user just opened the
+          // tooltip on shape X" can poll this from
+          // `etcher:tooltip-show` / `:tooltip-pin` listeners (or
+          // anywhere else).
+          //
+          // The raw `tooltipEl` reference is intentionally omitted
+          // — direct DOM access would couple consumers to internal
+          // structure that's free to change between releases. Use
+          // `repositionTooltip()` for the most common need (re-
+          // anchor after a layout change).
+          tooltip: function() {
+            if (!self._tooltipShape) return null;
+            return {
+              shape: {
+                uuid: self._tooltipShape.uuid,
+                kind: self._tooltipShape.kind,
+                geometry: self._tooltipShape.geometry,
+                style: self._tooltipShape.style || null,
+                metadata: self._tooltipShape.metadata || null
+              },
+              pinned: !!self.tooltipPinned
+            };
+          },
+
+          // Re-anchor the currently-shown tooltip to its shape (no-
+          // op when no tooltip is up). Useful after a consumer-
+          // driven layout change — toggling a side panel, adjusting
+          // strip padding, etc. — where the tooltip's last
+          // computed position has drifted from its shape.
+          repositionTooltip: function() {
+            if (self._tooltipShape) self._showTooltipFor(self._tooltipShape);
           },
 
           // Bring a shape into the viewport. Strip mode scrolls the
@@ -2898,6 +2981,80 @@
     _chromeEnabled: function(name) {
       return this._navButtonAllowlist == null ||
              this._navButtonAllowlist.has(name);
+    },
+
+    // Microtask-batched `_emitChanged`. Multiple `_addShape` / other
+    // mutations queued in the same tick collapse to one emit + one
+    // network round-trip — useful when a consumer is splicing in a
+    // whole chapter's worth of annotations and would otherwise
+    // generate N full-array replays.
+    _scheduleEmitChanged: function() {
+      if (this._emitChangedScheduled) return;
+      this._emitChangedScheduled = true;
+      var self = this;
+      var run = function() {
+        self._emitChangedScheduled = false;
+        self._emitChanged();
+      };
+      if (typeof queueMicrotask === "function") queueMicrotask(run);
+      else Promise.resolve().then(run);
+    },
+
+    // Splice a single shape into the live layer without remounting.
+    // The payload mirrors the persisted-annotation shape used by
+    // `_renderAnnotation` (kind, geometry, image_idx / image_id,
+    // style, metadata, optional uuid) — same fields the
+    // `etcher:annotations-changed` event emits. Returns the shape's
+    // uuid (generated if not supplied), or `null` if validation
+    // fails. Strip-mode payloads MUST include `image_idx`; without
+    // it the renderer can't pick the right per-image overlay.
+    //
+    // Multiple sibling calls in the same microtask batch into one
+    // `etcher:annotations-changed` emit.
+    _addShape: function(payload) {
+      if (!payload || typeof payload.kind !== "string" || !payload.geometry) {
+        if (typeof console !== "undefined" && console.warn) {
+          console.warn("[Etcher] addShape: payload requires `kind` + `geometry`.", payload);
+        }
+        return null;
+      }
+      var uuid = (typeof payload.uuid === "string" && payload.uuid)
+        ? payload.uuid : genUuidV7();
+      var ann = Object.assign({}, payload, { uuid: uuid });
+
+      // Strip mode: hand off to the right per-image overlay before
+      // rendering so the SVG element lands on the correct page.
+      // Without this `_renderAnnotation` would append to whatever
+      // overlay was last active.
+      if (this.handleKind === "strip") {
+        var idx = ann.image_idx;
+        if (typeof idx !== "number" || !this.pageOverlays || !this.pageOverlays[idx]) {
+          if (typeof console !== "undefined" && console.warn) {
+            console.warn(
+              "[Etcher] addShape: strip mode requires a valid `image_idx`. " +
+              "Got `" + idx + "` against " +
+              (this.pageOverlays ? this.pageOverlays.length : 0) + " pages."
+            );
+          }
+          return null;
+        }
+        this._activateOverlayForImage(idx);
+      }
+
+      this._renderAnnotation(ann);
+      this._scheduleEmitChanged();
+      return uuid;
+    },
+
+    _addShapes: function(payloads) {
+      if (!Array.isArray(payloads)) return [];
+      var self = this;
+      var out = [];
+      for (var i = 0; i < payloads.length; i++) {
+        var uuid = self._addShape(payloads[i]);
+        if (uuid) out.push(uuid);
+      }
+      return out;
     },
 
     _emitChanged: function() {
@@ -4825,10 +4982,21 @@
       // container px. `getBoundingClientRect` reflects the current
       // post-animation position so the tooltip sits where the shape is
       // *now*, not where it started.
+      //
+      // The tooltip is `position: absolute` inside the (relatively-
+      // positioned) container, so `style.top` is interpreted in
+      // CONTENT space — not viewport space. For strip mode, where
+      // the container itself scrolls, we add `scrollTop` /
+      // `scrollLeft` so the tooltip lands at the right CONTENT
+      // coords. Canvas-mode containers pan via CSS transform and
+      // never accumulate scroll, so adding zero is a safe no-op
+      // — no per-mode branching needed.
       var shapeRect = shape.el.getBoundingClientRect();
       var containerRect = this.handle.container.getBoundingClientRect();
-      var x = shapeRect.left + shapeRect.width / 2 - containerRect.left;
-      var aboveY = shapeRect.top - containerRect.top - 8;
+      var sx = this.handle.container.scrollLeft || 0;
+      var sy = this.handle.container.scrollTop  || 0;
+      var x = shapeRect.left + shapeRect.width / 2 - containerRect.left + sx;
+      var aboveY = shapeRect.top - containerRect.top - 8 + sy;
       tip.style.left = x + "px";
       tip.style.top = aboveY + "px";
       tip.style.transform = "translate(-50%, -100%)";
@@ -4842,7 +5010,7 @@
       // height. 4px breathing room either way.
       var tipRect = tip.getBoundingClientRect();
       if (tipRect.top < containerRect.top + 4) {
-        var belowY = shapeRect.bottom - containerRect.top + 8;
+        var belowY = shapeRect.bottom - containerRect.top + 8 + sy;
         tip.style.top = belowY + "px";
         tip.style.transform = "translate(-50%, 0)";
         tipRect = tip.getBoundingClientRect();
@@ -4864,6 +5032,15 @@
       }
       tip.style.left = x + "px";
 
+      // Grace window after show: the next ~250 ms ignores
+      // `_scheduleHideTooltip` calls. Defeats the iOS-synthesized
+      // mousemove-on-just-shown-tooltip race that fires
+      // `_setHoveredShape(null)` → `_scheduleHideTooltip` before
+      // the tooltip's own `mouseenter` (which would cancel the
+      // hide) gets a chance to run. Without this, the first
+      // hover often shows-then-hides in the same frame.
+      this._tooltipShowGraceUntil = Date.now() + 250;
+
       this._dispatch("etcher:tooltip-show", {
         uuid: shape.uuid || null,
         anchor: { x: x, y: parseFloat(tip.style.top) || 0 }
@@ -4874,6 +5051,10 @@
       // Pinned tooltips never auto-close — only an explicit click action
       // (same shape again, another shape, or outside) closes them.
       if (this.tooltipPinned) return;
+      // Grace window from the most recent `_showTooltipFor` — no-op
+      // for hides scheduled within ~250 ms of show (see comment in
+      // `_showTooltipFor` for the iOS race this prevents).
+      if (this._tooltipShowGraceUntil && Date.now() < this._tooltipShowGraceUntil) return;
       var self = this;
       self._cancelHideTooltip();
       // 180ms is long enough for a Fitts'-friendly diagonal move from
@@ -6402,6 +6583,14 @@
     _finalizeShape: function(kind, geometry, el, afterCreate) {
       var uuid = genUuidV7();
       el.setAttribute("data-uuid", uuid);
+      // Suppress Fresco's `tap` event when the user later taps this
+      // shape — Fresco probes for this attribute under the tap point
+      // via `document.elementsFromPoint`. Shape `<g>` / `<rect>` /
+      // etc. elements all carry `pointer-events: none` (so
+      // pan/zoom passes through), which would hide them from any
+      // hit-test that relied on the topmost-element heuristic; the
+      // data attr is the explicit-opt-in path.
+      el.setAttribute("data-fresco-suppress-tap", "");
       var style = this.activeColor ? { color: this.activeColor } : null;
       var shape = {
         uuid: uuid,
@@ -6434,6 +6623,18 @@
       this._attachShapeInteractions(shape);
 
       this._emitChanged();
+
+      // Swallow Fresco's next `tap` (Fresco >= 0.5.9). The OS-
+      // synthesized mousedown/mouseup that follows a drag's
+      // touchend triggers a `tap` emit on Fresco, which races
+      // etcher's mode-flip and can fire a consumer's tap-zone
+      // navigation immediately after the user committed a shape
+      // (a paged reader would page-turn the just-drawn annotation
+      // off-screen). Older Fresco versions don't expose the method
+      // — guard with typeof and no-op there.
+      if (this.handle && typeof this.handle.suppressNextTap === "function") {
+        this.handle.suppressNextTap(250);
+      }
 
       // Dedicated user-draw event. `annotations-changed` fires on every
       // mutation (including undo/redo, drags, color picks) and is the
@@ -6702,6 +6903,10 @@
       }
       el.classList.add("etcher-shape");
       if (ann.uuid) el.setAttribute("data-uuid", ann.uuid);
+      // Mirror `_finalizeShape`'s Fresco-tap-suppress opt-in so
+      // hydrated annotations behave identically to freshly-drawn
+      // ones — see the comment in `_finalizeShape`.
+      el.setAttribute("data-fresco-suppress-tap", "");
       this.svg.appendChild(el);
 
       var shape = {

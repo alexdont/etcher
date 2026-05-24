@@ -122,6 +122,30 @@ defmodule Etcher.Layer do
   Either way `<Etcher.layer>` reads the annotations through Fresco's
   handle at mount time and renders each shape on the matching page.
 
+  ## Coordinate spaces
+
+  Shape geometry is stored in the **same coordinate system the host
+  Fresco component reports for that image**, never as a normalized
+  fraction. Two cases:
+
+    * **Strip mode** (`<Fresco.scroll_strip>` / `<FrescoStrip.viewer>`)
+      — geometry is in **source-pixel space**: a circle's `cx, cy, r`,
+      a polygon's `points[].x/y`, are integers in the image's own
+      natural-pixel grid (e.g. a 720×9200 page uses 0..720 / 0..9200).
+      Independent of the rendered display size, so shapes survive
+      strip width changes without recomputation.
+    * **Canvas mode** (`<Fresco.canvas>`) — geometry is in **canvas-
+      pixel space**: a unified stage spanning all images in the scene,
+      sized in canvas-internal pixels (the dimensions returned by the
+      canvas handle's `getCanvasSize()`). A single coord pair can
+      address any image since they're all laid out on the same stage.
+
+  Consumers that scroll to a shape, render mini-maps, or persist
+  shape positions outside of Etcher should know which space they're
+  in. `layer.getShape(uuid)` returns the shape descriptor with
+  either `image_idx` (strip) or `image_id` (canvas multi-image)
+  attached so routing UI doesn't need to scrape DOM data-attrs.
+
   ## Programmatic API
 
   Each mounted layer registers a handle on `window.Etcher.layerFor(id)`:
@@ -129,8 +153,19 @@ defmodule Etcher.Layer do
       var layer = window.Etcher.layerFor("reader");
       layer.setMode(true);                       // enter annotation mode
       layer.selectTool("rectangle");
-      layer.revealShape("01HXY...");             // scroll to a shape
       layer.deleteShape("01HXY...");
+
+      // Shape descriptors include image_idx (strip) / image_id (canvas):
+      var shape = layer.getShape("01HXY...");
+      // → { uuid, kind, geometry, style, metadata,
+      //     image_idx?: 4,         // strip mode
+      //     image_id?: "page-5" }  // canvas multi-image
+
+      // Reveal a shape — Promise-returning, polls for late-mounted
+      // shapes, optional pulse flash, fires `etcher:shape-revealed`.
+      layer.revealShape("01HXY...", { pulse: true })
+        .then(function (r) { console.log("revealed on image", r.image_idx); })
+        .catch(function (e) { console.warn(e.reason); });
 
   See `priv/static/etcher.js` for the full API surface.
   """

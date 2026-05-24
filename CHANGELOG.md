@@ -4,6 +4,69 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] — 2026-05-24
+
+Deep-linking release. Collapses the ~60 lines of consumer JS each
+"find this annotation in context" flow used to need (poll for the
+shape, scrape DOM data-attrs for the host image, translate coords,
+call the right handle method, optionally flash the shape) down to
+a single `layer.revealShape(uuid, { pulse: true })` Promise.
+
+### Added
+
+- **`layer.getShape(uuid)` / `layer.getShapes()` carry the host-
+  image identifier.** The returned descriptor now includes
+  `image_idx` (strip mode) or `image_id` (canvas multi-image)
+  when applicable — either field is present iff that handle mode
+  is in use; both omitted for single-image canvas. Consumers
+  routing UI to a shape no longer need to scrape
+  `data-image-idx` / `data-image-id` off the SVG. Fully additive
+  to the existing `{ uuid, kind, geometry, style, metadata }`
+  shape.
+- **`layer.revealShape(uuid, opts)` is now Promise-returning** and
+  polls for late-mounted shapes (chapters that hydrate on scroll,
+  async annotation backfills) for up to `opts.timeout` ms
+  (default `10000`). Resolves with
+  `{ uuid, image_idx?, image_id?, scrollTop?, cameraBounds? }`
+  as soon as the underlying scroll / `fitBounds` call has been
+  issued; rejects with `{ reason }` on timeout or handle failure.
+- **`align` option** on `revealShape` for strip mode:
+  `"center" | "top" | "bottom"` (default `"center"`). Lets
+  callers pin the shape to a specific edge of the viewport — e.g.
+  align to top when a fixed bottom comment-modal would otherwise
+  occlude the shape.
+- **`pulse` option** on `revealShape`: a brief halo flash
+  (`.etcher-shape--pulse` keyframe animation, 1.5s default,
+  configurable via `pulseDuration`). Helps users spot the just-
+  navigated-to shape against a busy page.
+- **`etcher:shape-revealed` DOM event** fires on the layer host
+  with the same payload as the resolved Promise. LiveView hooks /
+  consumer event-bus listeners can react to reveals without
+  owning the Promise — useful when the deep-link handler lives
+  somewhere other than where `revealShape` was called.
+
+### Docs
+
+- New **Coordinate spaces** section in `Etcher.Layer` moduledoc
+  explaining the strip-mode source-pixel vs canvas-mode canvas-
+  pixel distinction. Consumers persisting shape positions outside
+  of Etcher (mini-maps, server-side analytics, deep-link routes)
+  need to know which space their geometry is in. The "Programmatic
+  API" section now shows the descriptor shape with `image_idx` /
+  `image_id` and the `revealShape` Promise + pulse pattern.
+
+### Compatibility
+
+- `layer.revealShape` returning a Promise instead of a boolean is
+  the one consumer-visible change. Callers that did
+  `if (handle.revealShape(uuid)) { ... }` will hit the truthy-
+  Promise gotcha — a Promise is always truthy. In practice the
+  only caller in the wild is consumer deep-link code, and the
+  Promise return is the actual asked-for change. Migrate to
+  `revealShape(uuid).then(...)` / `await revealShape(uuid)`.
+- Fully back-compat for `getShape` / `getShapes` — added fields
+  only.
+
 ## [0.4.12] — 2026-05-24
 
 ### Changed

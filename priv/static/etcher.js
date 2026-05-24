@@ -456,6 +456,21 @@
       ".etcher-shape.is-editing {",
       "  pointer-events: visiblePainted;",
       "}",
+      // Reveal-pulse: a brief halo flash triggered by
+      // `handle.revealShape(uuid, { pulse: true })` so users
+      // can spot the just-navigated-to shape against a busy page.
+      // Uses currentColor's outer drop-shadow over the existing
+      // fill / stroke; doesn't disturb the shape's geometry, so
+      // pointer-events behavior is unchanged.
+      ".etcher-shape--pulse {",
+      "  animation: etcher-shape-pulse 1.5s ease-out;",
+      "}",
+      "@keyframes etcher-shape-pulse {",
+      "  0%   { filter: drop-shadow(0 0 0    rgba(59, 130, 246, 0.0)); }",
+      "  20%  { filter: drop-shadow(0 0 14px rgba(59, 130, 246, 0.95)); }",
+      "  60%  { filter: drop-shadow(0 0 10px rgba(59, 130, 246, 0.55)); }",
+      "  100% { filter: drop-shadow(0 0 0    rgba(59, 130, 246, 0.0)); }",
+      "}",
       // Callout: the <g> container picks up `color` (default blue,
       // overridden by the picker via `style.color`); children resolve
       // `currentColor` against it. Text gets a subtle white halo so
@@ -1071,26 +1086,11 @@
 
           // Shape selection + edit ------------------------------------
           getShapes: function() {
-            return self.shapes.map(function(s) {
-              return {
-                uuid: s.uuid,
-                kind: s.kind,
-                geometry: s.geometry,
-                style: s.style || null,
-                metadata: s.metadata || null
-              };
-            });
+            return self.shapes.map(function(s) { return self._shapeDescriptor(s); });
           },
           getShape: function(uuid) {
             var s = self.shapes.find(function(x) { return x.uuid === uuid; });
-            if (!s) return null;
-            return {
-              uuid: s.uuid,
-              kind: s.kind,
-              geometry: s.geometry,
-              style: s.style || null,
-              metadata: s.metadata || null
-            };
+            return s ? self._shapeDescriptor(s) : null;
           },
           selectShape: function(uuid) {
             var shape = self.shapes.find(function(s) { return s.uuid === uuid; });
@@ -1184,10 +1184,29 @@
           // px bounding box. Useful for reveal-comment-on-page flows
           // where the consumer LV navigates by uuid.
           //
-          // Returns `true` if the shape was found and a reveal action
-          // was issued. Options:
-          //   { behavior: "smooth" | "instant" }  // default "smooth"
-          //   { padding: <natural-px> }           // canvas fitBounds padding
+          // Returns a Promise that resolves with
+          //   { uuid, image_idx?, image_id?, scrollTop?, cameraBounds? }
+          // once the reveal action has been issued (the Promise does
+          // NOT wait for scroll to settle — pulse / consumer follow-up
+          // can rely on the resolution). Rejects with
+          //   { reason: "timeout" | "no_geometry" | "no_image_idx" |
+          //             "scroll_failed" | "fitBounds_failed" |
+          //             "unsupported_handleKind" }.
+          //
+          // Polls for late-mounted shapes for `opts.timeout` ms
+          // (default 10000) — chapters that hydrate on scroll, async
+          // annotation backfills. Also fires an `etcher:shape-revealed`
+          // DOM event on the layer host with the same payload, so
+          // LiveView hooks / event-bus consumers can react without
+          // owning the Promise.
+          //
+          // Options:
+          //   { behavior: "smooth" | "instant" }    // default "smooth"
+          //   { align: "center" | "top" | "bottom" } // strip only, default "center"
+          //   { pulse: boolean }                    // flash the shape, default false
+          //   { pulseDuration: <ms> }               // default 1500
+          //   { timeout: <ms> }                     // poll budget, default 10000
+          //   { padding: <natural-px> }             // canvas fitBounds padding
           revealShape: function(uuid, opts) {
             return self._revealShape(uuid, opts || {});
           },
@@ -5177,6 +5196,27 @@
     // `null` if geometry is malformed (e.g., an empty polygon). Used
     // by `_revealShape`; not called per-frame so it's fine to recompute
     // here rather than caching.
+    // Public-facing snapshot of a shape returned by `getShape` /
+    // `getShapes`. Includes the host-image identifier that matches
+    // the active handle mode: `image_idx` for strip-mode shapes,
+    // `image_id` for canvas-mode shapes on multi-image hosts.
+    // Either field is present iff that mode is in use; both omitted
+    // for single-image canvas. Consumer code routing UI to a shape
+    // (deep-links, comment threads, mini-maps) reads these instead
+    // of scraping `data-image-idx` / `data-image-id` off the DOM.
+    _shapeDescriptor: function(s) {
+      var d = {
+        uuid: s.uuid,
+        kind: s.kind,
+        geometry: s.geometry,
+        style: s.style || null,
+        metadata: s.metadata || null
+      };
+      if (typeof s.image_idx === "number") d.image_idx = s.image_idx;
+      if (typeof s.image_id === "string") d.image_id = s.image_id;
+      return d;
+    },
+
     _shapeBBoxImagePx: function(shape) {
       var g = shape && shape.geometry;
       if (!g) return null;
@@ -5225,58 +5265,136 @@
     },
 
     // Bring a shape into the viewport. Strip mode scrolls the strip
-    // so the shape's bbox center sits at the viewport's vertical
-    // center (clamped at the top edge). Canvas mode delegates to
-    // `handle.fitBounds`. Returns `false` if the uuid is unknown or
-    // the active Fresco handle can't service the request.
+    // so the shape's bbox sits at the chosen alignment (default
+    // center, clamped at the top edge); canvas mode delegates to
+    // `handle.fitBounds`. Polls for late-mounted shapes for up to
+    // `opts.timeout` ms (default 10s) — chapters that hydrate on
+    // scroll, async backfill of an annotation set.
+    //
+    // Returns a Promise resolving with
+    //   { uuid, image_idx?, image_id?, scrollTop?, cameraBounds? }
+    // once the reveal call has been issued. Rejects with a
+    // `{ reason }` object on timeout / missing geometry / handle
+    // failure. Also dispatches an `etcher:shape-revealed` bubbling
+    // CustomEvent on the layer host carrying the same payload.
     _revealShape: function(uuid, opts) {
-      var shape = (this.shapes || []).find(function(s) { return s.uuid === uuid; });
-      if (!shape) return false;
-      var bbox = this._shapeBBoxImagePx(shape);
-      if (!bbox) return false;
+      var self = this;
+      opts = opts || {};
       var behavior = opts.behavior === "instant" ? "instant" : "smooth";
+      var align = (opts.align === "top" || opts.align === "bottom") ?
+        opts.align : "center";
+      var pulse = !!opts.pulse;
+      var pulseDuration = typeof opts.pulseDuration === "number" ?
+        opts.pulseDuration : 1500;
+      var timeout = typeof opts.timeout === "number" ? opts.timeout : 10000;
+      var pad = typeof opts.padding === "number" ? opts.padding : 0;
 
-      if (this.handleKind === "strip") {
-        if (typeof shape.image_idx !== "number") return false;
-        var page = (this.pages || [])[shape.image_idx];
-        if (!page) return false;
-        // page.height is rendered px, page.naturalHeight is image px.
-        var scale = page.naturalHeight > 0 ? page.height / page.naturalHeight : 1;
-        var renderedTop = bbox.y * scale;
-        var renderedH = bbox.h * scale;
-        var viewportH = (this.handle.container &&
-          this.handle.container.clientHeight) || 0;
-        var yOffset = Math.max(
-          0,
-          renderedTop + renderedH / 2 - viewportH / 2
-        );
-        try {
-          this.handle.scrollTo({
-            imageIdx: shape.image_idx,
-            y: yOffset,
-            behavior: behavior
-          });
-          return true;
-        } catch (_) { return false; }
-      }
+      return new Promise(function(resolve, reject) {
+        var startedAt = Date.now();
 
-      if (this.handleKind === "canvas") {
-        if (typeof this.handle.fitBounds !== "function") return false;
-        var pad = typeof opts.padding === "number" ? opts.padding : 0;
-        try {
-          this.handle.fitBounds(
-            {
+        function attempt() {
+          var shape = (self.shapes || [])
+            .find(function(s) { return s.uuid === uuid; });
+          if (!shape) {
+            if (Date.now() - startedAt >= timeout) {
+              return reject({ reason: "timeout" });
+            }
+            return setTimeout(attempt, 120);
+          }
+
+          var bbox = self._shapeBBoxImagePx(shape);
+          if (!bbox) return reject({ reason: "no_geometry" });
+
+          var payload = { uuid: shape.uuid };
+          if (typeof shape.image_idx === "number") {
+            payload.image_idx = shape.image_idx;
+          }
+          if (typeof shape.image_id === "string") {
+            payload.image_id = shape.image_id;
+          }
+
+          if (self.handleKind === "strip") {
+            if (typeof shape.image_idx !== "number") {
+              return reject({ reason: "no_image_idx" });
+            }
+            var page = (self.pages || [])[shape.image_idx];
+            if (!page) {
+              if (Date.now() - startedAt >= timeout) {
+                return reject({ reason: "timeout" });
+              }
+              return setTimeout(attempt, 120);
+            }
+            // page.height is rendered px, page.naturalHeight is image px.
+            var scale = page.naturalHeight > 0 ?
+              page.height / page.naturalHeight : 1;
+            var renderedTop = bbox.y * scale;
+            var renderedH = bbox.h * scale;
+            var viewportH = (self.handle.container &&
+              self.handle.container.clientHeight) || 0;
+            var yOffset;
+            if (align === "top") {
+              yOffset = renderedTop;
+            } else if (align === "bottom") {
+              yOffset = renderedTop + renderedH - viewportH;
+            } else {
+              yOffset = renderedTop + renderedH / 2 - viewportH / 2;
+            }
+            yOffset = Math.max(0, yOffset);
+            payload.scrollTop = yOffset;
+            try {
+              self.handle.scrollTo({
+                imageIdx: shape.image_idx,
+                y: yOffset,
+                behavior: behavior
+              });
+            } catch (e) {
+              return reject({ reason: "scroll_failed", error: e });
+            }
+          } else if (self.handleKind === "canvas") {
+            if (typeof self.handle.fitBounds !== "function") {
+              return reject({ reason: "fitBounds_failed" });
+            }
+            var bounds = {
               x: bbox.x - pad,
               y: bbox.y - pad,
               w: bbox.w + pad * 2,
               h: bbox.h + pad * 2
-            },
-            { animate: behavior !== "instant" }
-          );
-          return true;
-        } catch (_) { return false; }
-      }
-      return false;
+            };
+            payload.cameraBounds = bounds;
+            try {
+              self.handle.fitBounds(
+                bounds,
+                { animate: behavior !== "instant" }
+              );
+            } catch (e) {
+              return reject({ reason: "fitBounds_failed", error: e });
+            }
+          } else {
+            return reject({ reason: "unsupported_handleKind" });
+          }
+
+          if (pulse && shape.el) {
+            // Smooth scroll needs a beat to settle before the flash
+            // is visible. Instant scroll starts on the next frame.
+            var delay = behavior === "instant" ? 16 : 350;
+            setTimeout(function() {
+              var el = shape.el;
+              if (!el) return;
+              el.classList.add("etcher-shape--pulse");
+              setTimeout(function() {
+                if (el && el.classList) {
+                  el.classList.remove("etcher-shape--pulse");
+                }
+              }, pulseDuration);
+            }, delay);
+          }
+
+          self._dispatch("etcher:shape-revealed", payload);
+          resolve(payload);
+        }
+
+        attempt();
+      });
     },
 
     _unpinTooltip: function() {

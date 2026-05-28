@@ -4,6 +4,21 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.5.2] — 2026-05-28
+
+### Fixed
+
+- **Shape hover/click inside daisyUI `.modal-open` host.** When Etcher
+  was rendered inside a `<div class="modal modal-open">`, the doc-level
+  `isInputOwner` gate matched the surrounding modal and short-circuited
+  hover, click, double-click, and outside-click for every shape kind
+  that relies on the global doc-fallback (rectangle, circle, polygon,
+  freehand, callout, line shaft). `text` and `dimension` were unaffected
+  because their per-element listeners bypass the gate. The check now
+  ignores input-owner ancestors that **contain** the layer's own overlay
+  — only ancestors layered *over* the Etcher canvas still suppress
+  interaction, restoring the original intent.
+
 ## [0.5.1] — 2026-05-25
 
 ### Added

@@ -141,9 +141,16 @@
     inputOwnerSelectorString = inputOwnerSelectors.join(", ");
   };
 
-  function isInputOwner(target) {
+  function isInputOwner(target, overlayWrapper) {
     if (!target || typeof target.closest !== "function") return false;
-    return !!target.closest(inputOwnerSelectorString);
+    var match = target.closest(inputOwnerSelectorString);
+    if (!match) return false;
+    // A matched input-owner that contains our own overlay isn't a modal
+    // "over us" — Etcher is rendered INSIDE that container (e.g. a daisyUI
+    // `.modal-open` photo viewer). Don't gate: the cursor is genuinely over
+    // our canvas, not over a separate modal layered above it.
+    if (overlayWrapper && match.contains(overlayWrapper)) return false;
+    return true;
   }
 
   // ===========================================================================
@@ -4084,7 +4091,7 @@
         // any registered input-owner (modals, dialogs, ARIA dialogs)
         // also keep edit alive: the click belongs to that UI.
         if (e.target.closest(".etcher-shape")) return;
-        if (isInputOwner(e.target)) return;
+        if (isInputOwner(e.target, self.overlayWrapper)) return;
         // Shapes are `pointer-events: none`; fall back to image-px
         // hit-test so a click on a sibling shape doesn't tear down
         // title-edit mode before its own handler can react.
@@ -4729,7 +4736,7 @@
         // Cursor sitting over a modal / dialog shouldn't light up the
         // shape behind it — that's a confusing affordance (the shape
         // looks tappable but it isn't, since the modal owns the click).
-        if (isInputOwner(e.target)) {
+        if (isInputOwner(e.target, self.overlayWrapper)) {
           if (self._hoveredShape) self._setHoveredShape(null, false);
           return;
         }
@@ -4758,7 +4765,7 @@
         if (!overContainer(e)) return;
         // A handle/title/toolbar/modal element under the cursor
         // handles its own event; don't shadow it with a shape tap.
-        if (isInputOwner(e.target)) return;
+        if (isInputOwner(e.target, self.overlayWrapper)) return;
         // Touch: `_hoveredShape` is unreliable. iOS synthesizes a
         // mousemove at the touchend point after every gesture, which
         // fires `_docMouseMove` and leaves the cache pinned to the
@@ -4872,7 +4879,7 @@
         // Skip if the double-click landed inside a modal or other
         // input-owner — clicking in a comment composer that happens
         // to sit over a text shape shouldn't open the shape's editor.
-        if (isInputOwner(e.target)) return;
+        if (isInputOwner(e.target, self.overlayWrapper)) return;
         var pt;
         try { pt = self._toImage(e); } catch (_) { return; }
         var hit = self._shapeAt(pt);
@@ -5471,7 +5478,7 @@
         // canvas/container at the DOM level — fall back to image-px
         // hit-test.
         if (e.target.closest(".etcher-shape")) return;
-        if (isInputOwner(e.target)) return;
+        if (isInputOwner(e.target, self.overlayWrapper)) return;
         try {
           var pt = self._toImage(e);
           if (self._shapeAt(pt)) return;
@@ -7151,7 +7158,7 @@
         // chrome or any registered input-owner (modals, dialogs)
         // also keeps edit mode alive — the gesture belongs to that UI.
         if (e.target.closest(".etcher-shape")) return;
-        if (isInputOwner(e.target)) return;
+        if (isInputOwner(e.target, self.overlayWrapper)) return;
         try {
           var pt = self._toImage(e);
           if (self._shapeAt(pt)) return;

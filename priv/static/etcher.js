@@ -1205,6 +1205,22 @@
             if (self._tooltipShape) self._showTooltipFor(self._tooltipShape);
           },
 
+          // Strip mode: re-query the strip's `getImages()` and
+          // create overlays for any pages appended to the container
+          // since the initial mount. Existing overlays have their
+          // layout refreshed in place. No-op on canvas hosts.
+          //
+          // Internally just calls the same path the window-`resize`
+          // / `image-loaded` listeners use, so consumers who already
+          // dispatch a synthetic resize don't need this. Use it
+          // when the resize side-channel doesn't fit — e.g. the
+          // consumer hydrates the next chapter's annotations
+          // synchronously after appending its `<img>`s and wants
+          // overlays in place before the first `addShape` call.
+          refreshPages: function() {
+            if (typeof self._onResize === "function") self._onResize();
+          },
+
           // Bring a shape into the viewport. Strip mode scrolls the
           // strip so the shape's image is centered (smooth by default);
           // canvas mode calls `handle.fitBounds` on the shape's image-
@@ -1554,34 +1570,55 @@
         container.style.position = "relative";
       }
 
-      self.pages.forEach(function(page) {
-        var svg = svgEl("svg", {
-          "data-etcher-strip-overlay": "",
-          "data-image-idx": String(page.idx)
-        });
-        self._applyStripOverlayLayout(svg, page);
-        // Critical: never consume pointer events. Native scroll on the
-        // container must keep working when the user touches inside an
-        // overlay region; draw-mode capture lives on the container.
-        svg.style.pointerEvents = "none";
-        svg.style.overflow = "visible";
-        // No `preserveAspectRatio` attribute — the SVG default
-        // (`xMidYMid meet`) letterboxes on momentary mismatches
-        // between the overlay element box and the viewBox (during
-        // image-load, aspect-ratio correction, container-padding
-        // changes). The previous `"none"` value would stretch shapes
-        // during those windows, which the user sees as a flash of
-        // distorted geometry.
+      self.pages.forEach(function(page) { self._buildStripOverlay(page); });
+    },
 
-        // Insert as sibling immediately after the image so DOM order
-        // matches z-order and the overlay scrolls with its image
-        // naturally.
-        if (page.element && page.element.parentNode) {
-          page.element.parentNode.insertBefore(svg, page.element.nextSibling);
-        }
-
-        self.pageOverlays[page.idx] = { svg: svg, page: page };
+    // Build a strip overlay for a single page and stash it in
+    // `pageOverlays[page.idx]`. Idempotent: if an overlay already
+    // exists for `page.idx`, refresh its layout in place (preserving
+    // any shape children) and return the existing entry.
+    //
+    // Shared by mount-time iteration (`_buildStripOverlays`) and the
+    // post-mount resync (`_onResize`), which encounters pages
+    // appended to the strip after the initial build — multi-chapter
+    // infinite-scroll readers fetching the next chapter's `<img>`s
+    // on demand. Without this path, appended pages have no overlay
+    // and `addShape` / draw-tool taps for those pages silently fail.
+    _buildStripOverlay: function(page) {
+      var self = this;
+      var existing = self.pageOverlays && self.pageOverlays[page.idx];
+      if (existing && existing.svg) {
+        existing.page = page;
+        self._applyStripOverlayLayout(existing.svg, page);
+        return existing;
+      }
+      var svg = svgEl("svg", {
+        "data-etcher-strip-overlay": "",
+        "data-image-idx": String(page.idx)
       });
+      self._applyStripOverlayLayout(svg, page);
+      // Critical: never consume pointer events. Native scroll on the
+      // container must keep working when the user touches inside an
+      // overlay region; draw-mode capture lives on the container.
+      svg.style.pointerEvents = "none";
+      svg.style.overflow = "visible";
+      // No `preserveAspectRatio` attribute — the SVG default
+      // (`xMidYMid meet`) letterboxes on momentary mismatches
+      // between the overlay element box and the viewBox (during
+      // image-load, aspect-ratio correction, container-padding
+      // changes). The previous `"none"` value would stretch shapes
+      // during those windows, which the user sees as a flash of
+      // distorted geometry.
+
+      // Insert as sibling immediately after the image so DOM order
+      // matches z-order and the overlay scrolls with its image
+      // naturally.
+      if (page.element && page.element.parentNode) {
+        page.element.parentNode.insertBefore(svg, page.element.nextSibling);
+      }
+      if (!self.pageOverlays) self.pageOverlays = [];
+      self.pageOverlays[page.idx] = { svg: svg, page: page };
+      return self.pageOverlays[page.idx];
     },
 
     // Apply geometry + viewBox to a single overlay. Shared by
@@ -1651,7 +1688,15 @@
         var pages = self.handle.getImages();
         pages.forEach(function(page) {
           var entry = self.pageOverlays[page.idx];
-          if (!entry || !entry.svg) return;
+          if (!entry || !entry.svg) {
+            // Page appended to the strip after initial mount —
+            // multi-chapter infinite-scroll readers fetching the next
+            // chapter's `<img>`s. Build the overlay now so subsequent
+            // `addShape` calls and draw-tool taps for this page can
+            // land on it.
+            self._buildStripOverlay(page);
+            return;
+          }
           entry.page = page;
           self._applyStripOverlayLayout(entry.svg, page);
         });

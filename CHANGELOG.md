@@ -4,6 +4,33 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.5.3] — 2026-05-28
+
+### Fixed
+
+- **Strip mode silently dropped shapes on pages appended after mount.**
+  `_onResize` (the universal re-sync path wired to window `resize`,
+  `orientationchange`, and the strip's `image-loaded` event) refreshed
+  layout for existing overlays but bailed for pages added to the
+  container after the initial `_buildStripOverlays` pass. Multi-
+  chapter infinite-scroll readers that fetch the next chapter's
+  `<img>`s on demand were the canonical break: drawing tools fell
+  through (no overlay to receive the gesture) and `addShape` /
+  `addShapes` for the appended pages rejected with
+  `[Etcher] addShape: strip mode requires a valid image_idx. …`.
+  `_onResize` now builds overlays for newly-discovered pages.
+  Extracted a single `_buildStripOverlay(page)` helper shared by
+  mount-time iteration and the post-mount resync.
+
+### Added
+
+- **`layer.refreshPages()`** — public strip-mode method to force the
+  same re-sync the window-`resize` / `image-loaded` listeners use.
+  Useful for consumers that hydrate the next chapter's annotations
+  immediately after appending its `<img>`s and want overlays in place
+  before the first `addShape` call, rather than leaning on the
+  synthetic-resize side-channel. No-op on canvas hosts.
+
 ## [0.5.2] — 2026-05-28
 
 ### Fixed

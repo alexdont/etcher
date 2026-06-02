@@ -957,6 +957,14 @@
     return { h: h, s: s * 100, l: l * 100 };
   }
 
+  // How long a hover-shown tooltip dwells before it auto-closes. The
+  // timer starts when the tooltip is shown and is independent of where
+  // the cursor goes afterward — move off the shape and it still rides
+  // out the full window. Pinned tooltips ignore this entirely (they
+  // close only on an explicit click). Hovering the tooltip itself
+  // pauses the countdown so the delete button stays reachable.
+  var TOOLTIP_DWELL_MS = 5000;
+
   // Neutral defaults read from generic, non-comment-specific metadata
   // keys — a consumer who just populates these gets a working tooltip
   // without registering any custom slots.
@@ -1202,7 +1210,7 @@
           // strip padding, etc. — where the tooltip's last
           // computed position has drifted from its shape.
           repositionTooltip: function() {
-            if (self._tooltipShape) self._showTooltipFor(self._tooltipShape);
+            if (self._tooltipShape) self._positionTooltip(self._tooltipShape);
           },
 
           // Strip mode: re-query the strip's `getImages()` and
@@ -1655,10 +1663,13 @@
       tip.className = "etcher-tooltip";
       tip.style.position = "absolute";
       tip.style.zIndex = "12";
-      // Same hover-bridge timers as canvas mode so the user can move
-      // from a shape to the tooltip without it auto-hiding mid-traverse.
-      tip.addEventListener("mouseenter", function() { self._cancelHideTooltip(); });
-      tip.addEventListener("mouseleave", function() { self._scheduleHideTooltip(); });
+      // Hovering the tooltip pauses the dwell countdown so the user can
+      // read it / reach the delete button; leaving restarts the full
+      // window. Same behavior as canvas mode.
+      tip.addEventListener("mouseenter", function() { self._cancelTooltipAutoClose(); });
+      tip.addEventListener("mouseleave", function() {
+        if (!self.tooltipPinned) self._startTooltipAutoClose();
+      });
       tip.addEventListener("click", function(e) {
         e.stopPropagation();
         var btn = e.target.closest("[data-etcher-action]");
@@ -1704,7 +1715,7 @@
         // Tooltip might be showing — reposition to its anchor shape.
         if (self._tooltipShape && self.tooltipEl &&
             self.tooltipEl.style.display !== "none") {
-          self._showTooltipFor(self._tooltipShape);
+          self._positionTooltip(self._tooltipShape);
         }
       };
       window.addEventListener("resize", self._onResize);
@@ -2005,8 +2016,10 @@
       wrapper.appendChild(tip);
       self.tooltipEl = tip;
 
-      tip.addEventListener("mouseenter", function() { self._cancelHideTooltip(); });
-      tip.addEventListener("mouseleave", function() { self._scheduleHideTooltip(); });
+      tip.addEventListener("mouseenter", function() { self._cancelTooltipAutoClose(); });
+      tip.addEventListener("mouseleave", function() {
+        if (!self.tooltipPinned) self._startTooltipAutoClose();
+      });
       tip.addEventListener("click", function(e) {
         // Keep clicks from bubbling to OSD's mouse tracker so the
         // delete button never doubles as a click-to-zoom.
@@ -4479,6 +4492,14 @@
       if (this.editingTitleShape) {
         this._positionAllTitleHandles(this.editingTitleShape);
       }
+      // Keep an open tooltip glued to its anchor shape. `_renderAll`
+      // runs on every pan/zoom animation frame (after the shapes above
+      // have moved), so re-anchoring here makes the tooltip track the
+      // shape instead of floating where it first appeared.
+      if (this._tooltipShape && this.tooltipEl &&
+          this.tooltipEl.style.display !== "none") {
+        this._positionTooltip(this._tooltipShape);
+      }
     },
 
     // -------------------------------------------------------------------------
@@ -4594,12 +4615,10 @@
         // a sticky dashed/selected outline after the cursor leaves.
         // The pin is for tooltip lifecycle, not visual hover state.
         el.classList.remove("is-hovered");
-        // Pinned tooltips ignore mouseleave for hide scheduling — the
-        // user explicitly pinned them and they should dwell.
-        if (self.tooltipPinned) return;
-        // Don't snap closed — give the cursor time to travel from shape
-        // to tooltip so the delete button stays reachable.
-        self._scheduleHideTooltip();
+        // Leaving the shape no longer closes the tooltip — the dwell
+        // timer (armed on show) owns closing, so it stays for its full
+        // window whether the cursor lingers, leaves, or moves to the
+        // tooltip itself.
       });
       el.addEventListener("click", function(e) {
         // Direct DOM clicks on shapes are mostly historical now —
@@ -4977,11 +4996,12 @@
       var prev = this._hoveredShape;
       var prevOnTitle = this._hoveredOnTitle === true;
 
-      // Hide the tooltip when:
-      // 1. We're moving off a shape entirely.
-      // 2. We just moved ONTO the title (suppress per the rule above).
-      var hideTooltip =
-        (!next && prev) || (next && onTitle && !prevOnTitle);
+      // Hide the tooltip when we just moved ONTO the title (suppress
+      // per the rule above so the tooltip doesn't cover the label).
+      // Moving off a shape entirely no longer hides — the dwell timer
+      // owns closing now, so the tooltip stays for its full window
+      // regardless of where the cursor wanders.
+      var hideTooltip = next && onTitle && !prevOnTitle;
       // Show the tooltip when:
       // 1. We just moved onto a NEW shape's body.
       // 2. We moved off the title back onto the body of the same shape.
@@ -5069,6 +5089,41 @@
         });
       }
 
+      // Anchor it to the shape. Split out so the render loop can re-run
+      // just the positioning math on every pan/zoom frame (the tooltip
+      // tracks the shape) without rebuilding content or restarting the
+      // dwell timer.
+      this._positionTooltip(shape);
+
+      // Grace window after show: the next ~250 ms ignores
+      // `_scheduleHideTooltip` calls. Defeats the iOS-synthesized
+      // mousemove-on-just-shown-tooltip race that fires
+      // `_setHoveredShape(null)` → `_scheduleHideTooltip` before
+      // the tooltip's own `mouseenter` (which would cancel the
+      // hide) gets a chance to run. Without this, the first
+      // hover often shows-then-hides in the same frame.
+      this._tooltipShowGraceUntil = Date.now() + 250;
+
+      // Auto-close after the dwell window. Pinning cancels this (see
+      // `_pinTooltipFor`); so does hovering the tooltip itself.
+      this._startTooltipAutoClose();
+
+      this._dispatch("etcher:tooltip-show", {
+        uuid: shape.uuid || null,
+        anchor: { x: parseFloat(tip.style.left) || 0, y: parseFloat(tip.style.top) || 0 }
+      });
+    },
+
+    // Place the (already-populated, already-visible) tooltip element
+    // above its anchor shape, flipping below + clamping horizontally to
+    // stay inside the container. Pure positioning — no content rebuild,
+    // no timer changes — so it's cheap enough to call every animation
+    // frame from `_renderAll`, which is what keeps the tooltip glued to
+    // the shape during pan/zoom instead of floating in stale space.
+    _positionTooltip: function(shape) {
+      var tip = this.tooltipEl;
+      if (!tip || !shape || !shape.el) return;
+
       // Anchor the tooltip just above the shape's bounding rect, in
       // container px. `getBoundingClientRect` reflects the current
       // post-animation position so the tooltip sits where the shape is
@@ -5122,20 +5177,6 @@
         else if (x > maxX) x = maxX;
       }
       tip.style.left = x + "px";
-
-      // Grace window after show: the next ~250 ms ignores
-      // `_scheduleHideTooltip` calls. Defeats the iOS-synthesized
-      // mousemove-on-just-shown-tooltip race that fires
-      // `_setHoveredShape(null)` → `_scheduleHideTooltip` before
-      // the tooltip's own `mouseenter` (which would cancel the
-      // hide) gets a chance to run. Without this, the first
-      // hover often shows-then-hides in the same frame.
-      this._tooltipShowGraceUntil = Date.now() + 250;
-
-      this._dispatch("etcher:tooltip-show", {
-        uuid: shape.uuid || null,
-        anchor: { x: x, y: parseFloat(tip.style.top) || 0 }
-      });
     },
 
     _scheduleHideTooltip: function() {
@@ -5164,10 +5205,33 @@
       }
     },
 
+    // Fixed-dwell auto-close for hover-shown tooltips. Starts on show
+    // and fires `TOOLTIP_DWELL_MS` later regardless of cursor position
+    // — this is what makes a tooltip "stay for 5 seconds, then close"
+    // rather than vanishing the moment the cursor leaves the shape.
+    // Restarting (each new show, or leaving the tooltip) resets the
+    // window from scratch.
+    _startTooltipAutoClose: function() {
+      this._cancelTooltipAutoClose();
+      var self = this;
+      this._tooltipAutoCloseTimer = setTimeout(function() {
+        self._tooltipAutoCloseTimer = null;
+        self._hideTooltip();
+      }, TOOLTIP_DWELL_MS);
+    },
+
+    _cancelTooltipAutoClose: function() {
+      if (this._tooltipAutoCloseTimer) {
+        clearTimeout(this._tooltipAutoCloseTimer);
+        this._tooltipAutoCloseTimer = null;
+      }
+    },
+
     _hideTooltip: function() {
       var wasVisible = this.tooltipEl && this.tooltipEl.style.display !== "none";
       var hidShape = this._tooltipShape;
       this._cancelHideTooltip();
+      this._cancelTooltipAutoClose();
       // _hideTooltip is the universal teardown; make sure pin state is
       // also reset so the next click-to-pin starts clean.
       this.tooltipPinned = false;
@@ -5196,6 +5260,9 @@
       }
       this._showTooltipFor(shape);
       this.tooltipPinned = true;
+      // `_showTooltipFor` armed the dwell auto-close; a pinned tooltip
+      // must dwell until an explicit click, so disarm it.
+      this._cancelTooltipAutoClose();
       // Mark the pinned shape visually so its dashed outline persists
       // when the cursor leaves it — without this the shape would
       // appear deselected even though its tooltip is dwelling.

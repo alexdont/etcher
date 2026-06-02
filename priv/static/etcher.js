@@ -3923,28 +3923,59 @@
           textEl, trimmed, availWidth, fontSize
         );
 
-        // Shrink-wrap the rect to the rendered text dimensions so
-        // handles + the underline sit right at the text edge instead
-        // of leaving empty space inside the bbox.
-        var actualW = Math.max(measured.width + pad * 2, fontSize);
-        var actualH = Math.max(measured.height + pad * 2, fontSize * 1.2);
-        if (rectEl) {
-          rectEl.setAttribute("width",  actualW);
-          rectEl.setAttribute("height", actualH);
+        // How we size the rect splits on whether the user has manually
+        // sized the title. A freshly-created title carries no
+        // `metadata.title_box`, so we shrink-wrap the rect to the text
+        // for a tidy label that hugs its content. The moment the user
+        // grabs a handle, `metadata.title_box` is written and from then
+        // on we honor those exact dimensions every render: resizing
+        // sticks instead of collapsing back to the text, and the
+        // release-snap in the drag handlers becomes a faithful no-op.
+        //
+        // (The old code shrink-wrapped unconditionally, then snapped
+        // `title_box` to the shrunk box on release. Because the font is
+        // `th * 0.65` but the wrapped height lands at `fontSize * 1.2`
+        // ≈ `0.78 * th`, every resize persisted a box ~22% shorter and
+        // collapsed to the text width — so each grab visibly "scaled
+        // the title down again." Honoring the box fixes that.)
+        var hasExplicitBox = !!(shape.metadata && shape.metadata.title_box);
+        if (hasExplicitBox) {
+          // Honor the dragged box. The rect is already at tx/ty/tw/th
+          // from above; just vertically center the text line in it and
+          // mirror the box into `_renderedTitleImage` so handle
+          // positions + drag math operate on the real (visible) rect.
+          var centeredY = ty + Math.max(pad, (th - measured.height) / 2);
+          textEl.setAttribute("y", centeredY);
+          shape._renderedTitleImage = {
+            x: titleBox.x,
+            y: titleBox.y,
+            w: titleBox.w,
+            h: titleBox.h
+          };
+        } else {
+          // Shrink-wrap the rect to the rendered text dimensions so
+          // handles + the underline sit right at the text edge instead
+          // of leaving empty space inside the default bbox.
+          var actualW = Math.max(measured.width + pad * 2, fontSize);
+          var actualH = Math.max(measured.height + pad * 2, fontSize * 1.2);
+          if (rectEl) {
+            rectEl.setAttribute("width",  actualW);
+            rectEl.setAttribute("height", actualH);
+          }
+          // Convert the container-px shrink back to image px so handles
+          // + drag math operate on the visible rect. Falls back to the
+          // input bbox if the scale degenerates.
+          var sx = tw > 0 ? tw / titleBox.w : 1;
+          var sy = th > 0 ? th / titleBox.h : sx;
+          shape._renderedTitleImage = {
+            x: titleBox.x,
+            y: titleBox.y,
+            w: sx > 0 ? actualW / sx : titleBox.w,
+            h: sy > 0 ? actualH / sy : titleBox.h
+          };
+          tw = actualW;
+          th = actualH;
         }
-        // Convert the container-px shrink back to image px so handles
-        // + drag math operate on the visible rect. Falls back to the
-        // input bbox if the scale degenerates.
-        var sx = tw > 0 ? tw / titleBox.w : 1;
-        var sy = th > 0 ? th / titleBox.h : sx;
-        shape._renderedTitleImage = {
-          x: titleBox.x,
-          y: titleBox.y,
-          w: sx > 0 ? actualW / sx : titleBox.w,
-          h: sy > 0 ? actualH / sy : titleBox.h
-        };
-        tw = actualW;
-        th = actualH;
       } else {
         shape._renderedTitleImage = null;
       }

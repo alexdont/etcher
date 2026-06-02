@@ -87,6 +87,42 @@ defmodule Etcher.Layer do
   UUIDs are generated client-side (UUIDv7) in both modes, so there's no
   tmp_id ⇄ real-uuid round-trip — the server never has to assign ids.
 
+  ## Color slots and the `etcher:colors-changed` hook
+
+  The toolbar shows 5 fixed, editable color slots. Clicking a slot selects
+  it; opening the hue picker and choosing a color overwrites the selected
+  slot in place. Each committed edit reports the full palette through two
+  channels (mirroring `etcher:annotations-changed` + the JS lifecycle
+  events) — Etcher itself persists nothing:
+
+    * a LiveView event your `handle_event/3` can store, and
+    * a bubbling DOM `CustomEvent` for pure-JS consumers.
+
+  Seed the slots with the `:colors` attr (per-user palette) or via
+  `extensions["etcher"]["colors"]`; the save/load is generic so the same
+  hook can target a `.fresco`/extension blob here or a per-user store
+  (e.g. phoenix_kit `custom_fields`) in a host app.
+
+      def handle_event(
+            "etcher:colors-changed",
+            %{"fresco_id" => "board", "colors" => colors},
+            socket
+          ) do
+        # `colors` is a list of "#rrggbb" strings. Persist however you
+        # like — alongside annotations in the canvas extension, or in the
+        # current user's metadata. Round-trip it back through `:colors`
+        # (or the extension) on the next mount.
+        etcher = Map.put(socket.assigns.canvas.extensions["etcher"] || %{}, "colors", colors)
+        {:noreply,
+         assign(socket,
+           canvas: Fresco.Canvas.put_extension(socket.assigns.canvas, "etcher", etcher)
+         )}
+      end
+
+  Programmatic control mirrors the colors: `layer.getColors()`,
+  `layer.setColors([...])`, `layer.setSlotColor(i, "#rrggbb")` on the
+  `window.Etcher.layerFor(id)` handle.
+
   ## Tools
 
   Configure which drawing tools appear in the bottom toolbar. The default
@@ -197,6 +233,22 @@ defmodule Etcher.Layer do
     doc: "Subset of drawing tools to show in the toolbar."
   )
 
+  attr(:colors, :list,
+    default: nil,
+    doc: """
+    Optional seed for the toolbar's fixed, editable color slots — a list
+    of `"#rrggbb"` strings (clamped/backfilled to 5). Supply the signed-in
+    user's saved palette here for per-user colors.
+
+    When omitted, the slots seed from `extensions["etcher"]["colors"]`
+    (the same JSON the annotations ride in), then the preset palette.
+
+    Edits are reported via the `etcher:colors-changed` event (see below);
+    persist them wherever you keep per-user data and feed them back through
+    this attr (or the extension) on the next mount.
+    """
+  )
+
   attr(:nav_buttons, :list,
     default: nil,
     doc: """
@@ -242,11 +294,14 @@ defmodule Etcher.Layer do
         id -> id
       end
 
+    colors_json = if assigns[:colors], do: Jason.encode!(assigns.colors), else: nil
+
     assigns =
       assigns
       |> assign(:tools_json, tools_json)
       |> assign(:layer_id, layer_id)
       |> assign(:nav_buttons_csv, nav_buttons_csv(assigns[:nav_buttons]))
+      |> assign(:colors_json, colors_json)
 
     ~H"""
     <div
@@ -256,6 +311,7 @@ defmodule Etcher.Layer do
       data-tools={@tools_json}
       data-nav-buttons={@nav_buttons_csv}
       data-toolbar={@toolbar == false && "false"}
+      data-colors={@colors_json}
       class="hidden"
       aria-hidden="true"
       {@rest}

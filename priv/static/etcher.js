@@ -60,6 +60,8 @@
   //       tool:        getTool(), selectTool(toolKey), tools(),
   //                    exitDrawing()  // alias for selectTool(null)
   //       color:       getColor(), setColor(c), swatches()
+  //       palette:     getColors(), setColors([hex,...]),
+  //                    setSlotColor(i, hex)   // 5 editable slots
   //       history:     undo(), redo(), canUndo(), canRedo()
   //       shapes:      getShapes(), getShape(uuid),
   //                    selectShape(uuid), unselectShape(),
@@ -73,6 +75,7 @@
   //   etcher:mode-changed       { detail: { annotationMode } }
   //   etcher:tool-changed       { detail: { tool } }
   //   etcher:color-changed      { detail: { color } }
+  //   etcher:colors-changed     { detail: { colors } }  // slot palette edited; also pushed to LiveView
   //   etcher:visibility-changed { detail: { visible } }
   //   etcher:history-changed    { detail: { canUndo, canRedo } }
   // ===========================================================================
@@ -107,18 +110,13 @@
   //
   // Consumers shipping a non-conventional input-owning overlay can
   // append a selector via `Etcher.registerInputOwnerSelector(...)`.
-  // Max number of recently-used colors remembered in `localStorage`.
-  // The list is also the source of the toolbar's inline swatches —
-  // recents fill the row first, presets backfill any unused slots
-  // so a new user still sees a starter palette before they've
-  // picked anything. MRU order (most-recent at index 0) with
-  // move-to-front on re-pick.
-  var RECENT_COLORS_KEY = "etcher.recentColors";
-  var RECENT_COLORS_MAX = 5;
-  // Hard cap on how many swatches render inline in the toolbar.
-  // Matches RECENT_COLORS_MAX so a user with a full recents list
-  // sees their entire palette without overflow.
-  var TOOLBAR_SWATCH_LIMIT = 5;
+  // The toolbar carries this many fixed, editable color slots. Clicking
+  // a slot selects it; editing in the hue picker overwrites that slot's
+  // color in place. The palette is seeded per-layer (the `data-colors`
+  // attr, else `extensions.etcher.colors`, else the presets) and
+  // persisted by the consumer through the `etcher:colors-changed` hook
+  // — Etcher keeps no localStorage copy and never reorders the row.
+  var COLOR_SLOTS = 5;
 
   var DEFAULT_INPUT_OWNER_SELECTORS = [
     ".etcher-handle",
@@ -1037,6 +1035,13 @@
       // blue swatch in the active palette, else the first swatch) so
       // the picker has a non-empty selected state on first open and
       // consumers can override the starting color.
+      // Fixed editable color slots — seeded for real in `_buildToolbar`
+      // (and `_renderInitial` for headless layers) once the handle and
+      // its `extensions.etcher.colors` are readable. `activeColor` starts
+      // at the configured default and is re-pointed at the selected slot
+      // when the palette seeds.
+      self._colorSlots = [];      // up to COLOR_SLOTS hex strings
+      self._activeSlot = 0;       // index of the selected slot
       self.activeColor = resolveDefaultColor();
       self.draftState = null;     // per-tool drawing state
 
@@ -1087,6 +1092,19 @@
           // Color -----------------------------------------------------
           getColor: function() { return self.activeColor; },
           setColor: function(color) { self._selectColor(color); },
+          // The fixed editable palette. `getColors` returns a copy;
+          // `setColors` replaces the whole palette (clamped/backfilled to
+          // COLOR_SLOTS); `setSlotColor` overwrites one slot. Programmatic
+          // setters don't auto-persist — the consumer decides when to
+          // call them and owns storage (they fire no `etcher:colors-changed`).
+          getColors: function() { return (self._colorSlots || []).slice(); },
+          setColors: function(arr) {
+            self._colorSlots = self._sanitizeColorSlots(arr);
+            if (self._activeSlot >= self._colorSlots.length) self._activeSlot = 0;
+            self._refreshToolbarSwatches();
+            self._selectColor(self._colorSlots[self._activeSlot]);
+          },
+          setSlotColor: function(i, hex) { self._setSlotColor(i, hex); },
           swatches: function() {
             return resolveColorSwatches().map(function(s) {
               return { color: s.color, title: s.title };
@@ -2189,7 +2207,7 @@
       // insertions on a detached element work the same and `bar`
       // ends up in the DOM at the bottom of this method.
       self.toolbar = bar;
-      self._recentColors = self._loadRecentColors();
+      // Seeds `_colorSlots` (if empty) and renders the slot row.
       self._refreshToolbarSwatches();
 
       var divider3 = document.createElement("div");
@@ -2294,8 +2312,12 @@
         if (toolBtns[i].dataset.tool !== activeToolKey) toolsQueue.push(toolBtns[i]);
       }
       var swatchQueue = [];
+      // Pin the active slot by index (two slots can share a color, so a
+      // color compare could pin the wrong/both swatches).
       for (var j = swatchBtns.length - 1; j >= 0; j--) {
-        if (swatchBtns[j].dataset.color !== self.activeColor) swatchQueue.push(swatchBtns[j]);
+        if (Number(swatchBtns[j].dataset.slot) !== self._activeSlot) {
+          swatchQueue.push(swatchBtns[j]);
+        }
       }
 
       // Walk the two queues in lockstep so both groups visually shrink
@@ -2482,8 +2504,12 @@
         if (s.color === self.activeColor) b.classList.add("is-selected");
         b.addEventListener("click", function(e) {
           e.preventDefault();
+          // Presets are a quick way to set the selected slot to a known
+          // color — overwrite the active slot in place (same as a hue-
+          // ring pick) and persist, rather than spawning a new entry.
+          self._setSlotColor(self._activeSlot, s.color);
           self._selectColor(s.color);
-          self._pushRecentColor(s.color);
+          self._emitColorsChanged();
           self._closePopup();
         });
         presetRow.appendChild(b);
@@ -2573,6 +2599,24 @@
     // `ImageData` so each ring pixel maps to its angle's hue at full
     // saturation + 50% lightness. A 1-pixel alpha falloff at both
     // edges softens the otherwise-aliased ring boundary.
+    // Move the hue-ring + lightness knobs to match the active slot's
+    // color. Only repositions for custom (non-preset) colors — the
+    // picker's saturation is locked at 100, so presets aren't faithfully
+    // representable and the knobs are left where the user last put them.
+    // The preview chip is owned by `_selectColor` (shows the real active
+    // color), so we don't touch it here.
+    _syncPickerToActiveColor: function() {
+      if (!this._pickerRing) return;
+      var presets = this._presetColors || [];
+      if (!this.activeColor || presets.indexOf(this.activeColor) !== -1) return;
+      if (!/^#[0-9a-f]{6}$/i.test(this.activeColor)) return;
+      var hsl = hexToHsl(this.activeColor);
+      this._pickerHue = hsl.h;
+      this._pickerLightness = hsl.l;
+      this._drawLightnessSlider();
+      this._positionPickerKnobs();
+    },
+
     _drawHueRing: function() {
       var canvas = this._pickerRing;
       if (!canvas) return;
@@ -2663,9 +2707,10 @@
 
     // Pointer wiring for both the hue ring and the lightness slider.
     // Both support press + drag (the user can scrub continuously
-    // without lifting their finger); on every move we recompute and
-    // `_selectColor` immediately so the in-flight draft / edit
-    // updates live. `pointerup` commits the chosen color to recents.
+    // without lifting their finger); on every move we overwrite the
+    // selected slot's color and `_selectColor` immediately so the
+    // in-flight draft / edit updates live. `pointerup` commits the
+    // edited slot via `_emitColorsChanged` (the persistence hook).
     _wirePickerInput: function() {
       var self = this;
       var ring = self._pickerRing;
@@ -2683,6 +2728,7 @@
         self._positionPickerKnobs();
         var hex = hslToHex(self._pickerHue, 100, self._pickerLightness);
         self._updatePickerPreview();
+        self._setSlotColor(self._activeSlot, hex);
         self._selectColor(hex);
       }
 
@@ -2695,6 +2741,7 @@
         self._positionPickerKnobs();
         var hex = hslToHex(self._pickerHue, 100, self._pickerLightness);
         self._updatePickerPreview();
+        self._setSlotColor(self._activeSlot, hex);
         self._selectColor(hex);
       }
 
@@ -2710,8 +2757,8 @@
             el.removeEventListener("pointerup", up);
             el.removeEventListener("pointercancel", up);
             try { el.releasePointerCapture(ev.pointerId); } catch (_) {}
-            // Commit the final picked color to recents on release.
-            self._pushRecentColor(self.activeColor);
+            // Commit the edited slot on release — persist via the hook.
+            self._emitColorsChanged();
           }
           el.addEventListener("pointermove", move);
           el.addEventListener("pointerup", up);
@@ -2724,146 +2771,121 @@
     },
 
     // -------------------------------------------------------------------------
-    // Recent custom colors
+    // Color slots
     //
-    // Stored in localStorage under a single global key (not per-
-    // `fresco_id`) so a user's palette follows them across projects.
-    // Capped at `RECENT_COLORS_MAX`; FIFO eviction when a new color
-    // joins. Preset colors are never persisted — the recents row is
-    // dedicated to picks made through the hue ring / slider.
+    // The toolbar carries `COLOR_SLOTS` fixed swatches. Clicking one
+    // selects it (sets the active draw color); editing in the hue picker
+    // overwrites the selected slot's color in place. The palette is
+    // seeded per-layer and persisted by the consumer through the
+    // `etcher:colors-changed` hook — no localStorage, no MRU reordering,
+    // so a slot stays put once a user customizes it.
     // -------------------------------------------------------------------------
 
-    _loadRecentColors: function() {
-      try {
-        var raw = window.localStorage && window.localStorage.getItem(RECENT_COLORS_KEY);
-        if (!raw) return [];
-        var arr = JSON.parse(raw);
-        if (!Array.isArray(arr)) return [];
-        return arr
-          .filter(function(c) { return typeof c === "string" && /^#[0-9a-f]{6}$/i.test(c); })
-          .slice(0, RECENT_COLORS_MAX);
-      } catch (_) {
-        return [];
-      }
-    },
-
-    _saveRecentColors: function() {
-      try {
-        if (!window.localStorage) return;
-        window.localStorage.setItem(
-          RECENT_COLORS_KEY,
-          JSON.stringify(this._recentColors || [])
-        );
-      } catch (_) { /* private mode / quota → silently degrade */ }
-    },
-
-    _pushRecentColor: function(color) {
-      if (typeof color !== "string" || !/^#[0-9a-f]{6}$/i.test(color)) return;
-      color = color.toLowerCase();
-      var list = this._recentColors || [];
-      // Dedupe + move-to-front so re-picking an existing color
-      // bumps it to the head of the MRU list. Both presets and
-      // custom picks land here — the toolbar's inline swatches
-      // ARE the recents display now, so any selection that the
-      // user makes should propagate to that surface.
-      var idx = list.indexOf(color);
-      if (idx !== -1) list.splice(idx, 1);
-      list.unshift(color);
-      if (list.length > RECENT_COLORS_MAX) list.length = RECENT_COLORS_MAX;
-      this._recentColors = list;
-      this._saveRecentColors();
-      this._refreshToolbarSwatches();
-    },
-
-    // Compute the effective inline-toolbar palette by walking sources
-    // in priority order until TOOLBAR_SWATCH_LIMIT slots are filled:
-    //
-    //   1. `_recentColors` — the user's explicit MRU history.
-    //   2. Canvas-frequent colors — top N colors on existing shapes.
-    //      Only consulted when recents is empty: the user hasn't
-    //      explicitly picked anything yet, so we infer their palette
-    //      from what's already drawn on the canvas (existing
-    //      annotations from a prior session, hydrated extensions).
-    //   3. Static preset list — final backfill so the row is always
-    //      full even on an empty canvas with empty recents.
-    //
-    // Once the user picks any color, `_recentColors` becomes non-
-    // empty and source (2) stops contributing — explicit history
-    // wins over inferred usage.
-    _buildToolbarSwatchList: function() {
+    // Coerce an arbitrary list into exactly COLOR_SLOTS valid `#rrggbb`
+    // entries, backfilling short / invalid lists from the preset palette
+    // so the row is always full. Returns lowercased hex strings.
+    _sanitizeColorSlots: function(list) {
+      var presets = resolveColorSwatches().map(function(s) { return s.color; });
       var out = [];
-      var seen = Object.create(null);
-      function take(list) {
-        if (!list) return;
-        for (var i = 0; i < list.length && out.length < TOOLBAR_SWATCH_LIMIT; i++) {
-          var c = (list[i] || "").toLowerCase();
-          if (!c || seen[c]) continue;
-          out.push(c);
-          seen[c] = true;
-        }
+      function valid(c) { return typeof c === "string" && /^#[0-9a-f]{6}$/i.test(c); }
+      (Array.isArray(list) ? list : []).forEach(function(c) {
+        if (out.length < COLOR_SLOTS && valid(c)) out.push(c.toLowerCase());
+      });
+      for (var i = 0; out.length < COLOR_SLOTS && i < presets.length; i++) {
+        if (valid(presets[i])) out.push(presets[i].toLowerCase());
       }
-
-      var recents = this._recentColors || [];
-      take(recents);
-
-      // Canvas-frequent colors as the implicit-history fallback,
-      // active only when the user has no saved recents.
-      if (recents.length === 0) {
-        take(this._computeCanvasFrequentColors());
-      }
-
-      var presets = (this._presetColors && this._presetColors.length)
-        ? this._presetColors
-        : resolveColorSwatches().map(function(s) { return s.color; });
-      take(presets);
-
+      // Last resort if the presets were somehow unusable.
+      while (out.length < COLOR_SLOTS) out.push("#000000");
       return out;
     },
 
-    // Tally `style.color` across the current shapes list and return
-    // the top TOOLBAR_SWATCH_LIMIT colors by frequency. Used as the
-    // bootstrap palette when the user has no saved recents but the
-    // canvas already has annotations (e.g., a hydrated `.fresco`
-    // file from a prior session).
-    _computeCanvasFrequentColors: function() {
-      var counts = Object.create(null);
-      (this.shapes || []).forEach(function(s) {
-        var c = s && s.style && s.style.color;
-        if (typeof c !== "string") return;
-        c = c.toLowerCase();
-        if (!/^#[0-9a-f]{6}$/.test(c)) return;
-        counts[c] = (counts[c] || 0) + 1;
-      });
-      var entries = Object.keys(counts).map(function(c) {
-        return { color: c, n: counts[c] };
-      });
-      // Most-used first. Ties resolve by insertion order, which is
-      // close enough to draw order — no need for an explicit
-      // secondary key.
-      entries.sort(function(a, b) { return b.n - a.n; });
-      return entries.slice(0, TOOLBAR_SWATCH_LIMIT).map(function(e) {
-        return e.color;
-      });
+    // Seed `_colorSlots` + `_activeSlot`. Priority: the layer's
+    // `data-colors` attr → the viewer's `extensions.etcher.colors` (the
+    // same JSON annotations ride in) → the preset palette. The starting
+    // selection prefers a slot matching `window.Etcher.defaultColor`,
+    // else slot 0. Idempotent at mount; never re-run after a user edit.
+    _seedColorSlots: function() {
+      var seed = null;
+      try {
+        var raw = this.el && this.el.dataset && this.el.dataset.colors;
+        if (raw) {
+          var parsed = JSON.parse(raw);
+          if (Array.isArray(parsed) && parsed.length) seed = parsed;
+        }
+      } catch (_) { /* malformed attr → fall through */ }
+
+      if (!seed && this.handle && typeof this.handle.getExtension === "function") {
+        try {
+          var ext = this.handle.getExtension("etcher");
+          if (ext && Array.isArray(ext.colors) && ext.colors.length) seed = ext.colors;
+        } catch (_) { /* no extension → fall through */ }
+      }
+
+      this._colorSlots = this._sanitizeColorSlots(seed);
+
+      var def = window.Etcher && typeof window.Etcher.defaultColor === "string"
+        ? window.Etcher.defaultColor.toLowerCase()
+        : null;
+      var idx = def ? this._colorSlots.indexOf(def) : -1;
+      this._activeSlot = idx === -1 ? 0 : idx;
+      this.activeColor = this._colorSlots[this._activeSlot];
     },
 
-    // Rebuild the toolbar's inline swatch row from `_recentColors`
-    // (with preset backfill). Called on initial mount and after
-    // every `_pushRecentColor` so the row stays in sync with the
-    // user's MRU palette.
-    //
-    // Existing swatch buttons (direct children of the toolbar) are
-    // removed and rebuilt rather than diffed — the row is at most
-    // TOOLBAR_SWATCH_LIMIT items and rebuilds are user-driven
-    // (color picks), not per-frame.
+    // Select slot `i` — make it the active draw color. Pure selection:
+    // no palette mutation and no persist (editing the hue picker is what
+    // mutates a slot). Clamps out-of-range indices defensively.
+    _selectSlot: function(i) {
+      if (!this._colorSlots || !this._colorSlots.length) return;
+      if (i < 0 || i >= this._colorSlots.length) i = 0;
+      this._activeSlot = i;
+      this._selectColor(this._colorSlots[i]);
+    },
+
+    // Overwrite slot `i`'s color and repaint just that swatch. Used by
+    // the hue ring / slider (on the active slot, as the user drags) and
+    // by the programmatic API. Does not persist — `_emitColorsChanged`
+    // fires once on commit (pointer-release).
+    _setSlotColor: function(i, hex) {
+      if (typeof hex !== "string" || !/^#[0-9a-f]{6}$/i.test(hex)) return;
+      if (!this._colorSlots || i < 0 || i >= this._colorSlots.length) return;
+      hex = hex.toLowerCase();
+      this._colorSlots[i] = hex;
+      var btn = (this.swatchEls || [])[i];
+      if (btn) {
+        btn.dataset.color = hex;
+        btn.title = hex;
+        btn.style.background = hex;
+        btn.setAttribute("aria-label", "Color slot " + (i + 1) + ": " + hex);
+      }
+      if (i === this._activeSlot) this.activeColor = hex;
+    },
+
+    // Generic persistence hook for the color palette — fires on every
+    // committed slot edit. Two channels (mirrors `etcher:annotations-
+    // changed` + the lifecycle CustomEvents) so consumers can persist
+    // server-side (LiveView `handle_event` → DB / user meta) or in pure
+    // JS. Etcher stores nothing itself.
+    _emitColorsChanged: function() {
+      var colors = (this._colorSlots || []).slice();
+      if (this.pushEventTo) {
+        this.pushEventTo(this.el, "etcher:colors-changed", {
+          fresco_id: this.frescoId || null,
+          colors: colors
+        });
+      }
+      this._dispatch("etcher:colors-changed", { colors: colors });
+    },
+
+    // Rebuild the toolbar's inline swatch row from `_colorSlots`. Stable
+    // order (slot index = position); the selected slot gets
+    // `.is-selected`. Seeds the palette on first call. Rebuilt rather
+    // than diffed — the row is at most COLOR_SLOTS items and rebuilds are
+    // user-driven (slot picks / edits), not per-frame.
     _refreshToolbarSwatches: function() {
       var self = this;
       if (!self.toolbar || !self.colorsMoreBtn) return;
-      // Cache presets the first time we hit this path so the
-      // backfill in `_buildToolbarSwatchList` has data even when
-      // `_buildColorsPopup` hasn't run yet.
-      if (!self._presetColors) {
-        self._presetColors = resolveColorSwatches().map(function(s) { return s.color; });
-      }
+      if (!self._colorSlots || !self._colorSlots.length) self._seedColorSlots();
+
       // Strip old swatches that are direct children of the toolbar.
       // (Popup swatches live inside `.etcher-popup` and are unaffected
       // by this scoped query.)
@@ -2875,56 +2897,26 @@
         }
       });
 
-      var list = self._buildToolbarSwatchList();
-      self.swatchEls = list.map(function(color) {
+      self.swatchEls = self._colorSlots.map(function(color, i) {
         var b = document.createElement("button");
         b.type = "button";
         b.className = "etcher-swatch";
         b.dataset.color = color;
+        b.dataset.slot = String(i);
         b.title = color;
-        b.setAttribute("aria-label", "Color: " + color);
+        b.setAttribute("aria-label", "Color slot " + (i + 1) + ": " + color);
         b.style.background = color;
-        if (color === self.activeColor) b.classList.add("is-selected");
+        if (i === self._activeSlot) b.classList.add("is-selected");
         b.addEventListener("click", function(e) {
           e.preventDefault();
-          self._selectColor(color);
-          self._pushRecentColor(color);
+          self._selectSlot(i);
         });
         self.toolbar.insertBefore(b, self.colorsMoreBtn);
         return b;
       });
 
-      // Sync `activeColor` to the leftmost swatch when it isn't
-      // represented in the freshly-built row. This covers two cases:
-      //
-      //   1. Initial mount — `resolveDefaultColor()` may pick blue
-      //      (the legacy default) but the toolbar's leftmost slot
-      //      could be a recent or a canvas-frequent color the user
-      //      has been working with. Snapping to that swatch makes
-      //      \"what's highlighted\" match \"what will draw\" on
-      //      first paint.
-      //
-      //   2. Hydration — `_renderInitial` re-runs the refresh after
-      //      shapes load, which may reshuffle the row's leading
-      //      color via the canvas-frequent fallback. Re-sync so
-      //      the next stroke uses the new leftmost.
-      //
-      // Once any color is explicitly picked, `_pushRecentColor`
-      // moves it to the front of recents, so `activeColor` and the
-      // leftmost swatch agree — the `inList` check makes this branch
-      // a no-op in the steady state.
-      if (self.swatchEls && self.swatchEls.length > 0) {
-        var inList = self.swatchEls.some(function(b) {
-          return b.dataset.color === self.activeColor;
-        });
-        if (!inList) {
-          self._selectColor(self.swatchEls[0].dataset.color);
-        }
-      }
-
-      // Layout may have changed (different number of swatches or
-      // different active item position) — re-run the overflow
-      // pinning so the active swatch stays visible.
+      // Layout may have changed (active slot moved) — re-run the
+      // overflow pinning so the active swatch stays visible.
       self._layoutToolbar();
     },
 
@@ -2938,6 +2930,10 @@
       var popup = kind === "tools" ? this.toolsPopup : this.colorsPopup;
       var trigger = kind === "tools" ? this.toolsMoreBtn : this.colorsMoreBtn;
       if (!popup || !trigger) return;
+
+      // The hue picker edits the selected slot, so start its knobs at
+      // that slot's color when the colors popup opens.
+      if (kind === "colors") this._syncPickerToActiveColor();
 
       // Position above the trigger. Both popup and trigger live in
       // the same container so we work in its coordinate space.
@@ -3303,9 +3299,12 @@
       // Sync `.is-selected` across the main toolbar swatches AND
       // the compact-mode colors popup. Same alternate-UI rationale
       // as the tool-button sync above.
+      // Toolbar swatches highlight by slot index (two slots can hold the
+      // same color, so a color match would light up both).
+      var activeSlot = this._activeSlot;
       if (this.swatchEls) {
-        this.swatchEls.forEach(function(el) {
-          el.classList.toggle("is-selected", el.dataset.color === color);
+        this.swatchEls.forEach(function(el, i) {
+          el.classList.toggle("is-selected", i === activeSlot);
         });
       }
       if (this.colorsPopupBtns) {
@@ -7032,12 +7031,11 @@
         self._emitChanged();
       }
 
-      // Canvas may have just gained shapes — if recents is empty,
-      // the inline toolbar palette should bootstrap from the
-      // canvas-frequent colors instead of falling straight to the
-      // static presets. Re-running the refresh picks that up.
-      // No-op when recents are already populated.
-      self._refreshToolbarSwatches();
+      // Ensure the color palette is seeded even for headless layers
+      // (toolbar disabled) so `getColors()` is populated. The toolbar
+      // build already seeds when present; this only fills an empty
+      // palette and never clobbers a user edit.
+      if (!self._colorSlots || !self._colorSlots.length) self._seedColorSlots();
     },
 
     _renderAnnotation: function(ann) {

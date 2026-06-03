@@ -194,7 +194,9 @@
     close:    '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>',
     // Three horizontal dots — overflow / "more" trigger in the
     // compact mobile toolbar. Heroicons solid `EllipsisHorizontal`.
-    more:     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 12a2 2 0 1 1-4 0 2 2 0 0 1 4 0Zm8 0a2 2 0 1 1-4 0 2 2 0 0 1 4 0Zm6 2a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"/></svg>'
+    more:     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 12a2 2 0 1 1-4 0 2 2 0 0 1 4 0Zm8 0a2 2 0 1 1-4 0 2 2 0 0 1 4 0Zm6 2a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"/></svg>',
+    // Artist's palette — the colors `[⋯]` trigger (opens the picker).
+    palette: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21a9 9 0 1 1 0-18 9 8 0 0 1 9 8 4.5 4 0 0 1-4.5 4H14a2 2 0 0 0-1 3.75A1.3 1.3 0 0 1 12 21Z"/><circle cx="7.5" cy="10.5" r="1.1" fill="currentColor" stroke="none"/><circle cx="12" cy="7.5" r="1.1" fill="currentColor" stroke="none"/><circle cx="16.5" cy="10.5" r="1.1" fill="currentColor" stroke="none"/></svg>'
   };
 
   // ===========================================================================
@@ -261,6 +263,9 @@
       "  outline: 2px solid rgba(255, 255, 255, 0.7); outline-offset: 1px;",
       "}",
       ".etcher-toolbar svg { width: 18px; height: 18px; }",
+      // The colors palette trigger gets a larger glyph so it reads
+      // clearly as the color picker rather than a tiny mark.
+      ".etcher-toolbar .etcher-more[data-more='colors'] svg { width: 24px; height: 24px; }",
       ".etcher-toolbar .etcher-divider {",
       "  width: 1px; background: rgba(255, 255, 255, 0.2); margin: 4px 2px;",
       "}",
@@ -2161,44 +2166,15 @@
 
       var divider2 = document.createElement("div");
       divider2.className = "etcher-divider";
-      // Survives in compact mode — separates the tools group from
-      // the undo/redo group.
+      // Survives in compact mode — separates the tools group from the
+      // colors group. Undo / redo are NOT inline on the toolbar; they
+      // live permanently inside the tools `[⋯]` popup.
       divider2.setAttribute("data-compact-keep", "");
       bar.appendChild(divider2);
 
-      // Undo / redo — operates on the local history stack of in-session
-      // mutations. Disabled when there's nothing to undo/redo. Keyboard
-      // shortcuts (Cmd/Ctrl+Z, +Shift) are wired in `_wireKeyboard`.
-      self.undoBtn = document.createElement("button");
-      self.undoBtn.type = "button";
-      self.undoBtn.title = "Undo (⌘Z)";
-      self.undoBtn.setAttribute("aria-label", "Undo");
-      self.undoBtn.innerHTML = ICONS.undo;
-      self.undoBtn.addEventListener("click", function(e) {
-        e.preventDefault();
-        self._undo();
-      });
-      bar.appendChild(self.undoBtn);
-
-      self.redoBtn = document.createElement("button");
-      self.redoBtn.type = "button";
-      self.redoBtn.title = "Redo (⌘⇧Z)";
-      self.redoBtn.setAttribute("aria-label", "Redo");
-      self.redoBtn.innerHTML = ICONS.redo;
-      self.redoBtn.addEventListener("click", function(e) {
-        e.preventDefault();
-        self._redo();
-      });
-      bar.appendChild(self.redoBtn);
-
-      var dividerUndo = document.createElement("div");
-      dividerUndo.className = "etcher-divider";
-      bar.appendChild(dividerUndo);
-      // Stored so `_layoutToolbar` can collapse it together with the
-      // undo/redo buttons — once those move to the popup, this
-      // divider would otherwise sit adjacent to the previous one.
-      self._undoSwatchesDivider = dividerUndo;
-
+      // Undo / redo render only inside the tools `[⋯]` popup (built in
+      // `_buildToolsPopup`). Keyboard shortcuts (Cmd/Ctrl+Z, +Shift) are
+      // wired in `_wireKeyboard`. Keep their disabled state fresh.
       self._refreshUndoButtons();
 
       // Compact-mode overflow trigger for colors. Sits right after
@@ -2319,8 +2295,11 @@
       }
 
       // Available width: container minus a comfort margin so the
-      // toolbar doesn't kiss the viewer edges.
-      var available = container.clientWidth - 24;
+      // toolbar doesn't kiss the viewer edges — a 32px gutter each side
+      // (collapses a tool into the `[⋯]` / palette menus well before the
+      // bar reaches the page sides). Buttons keep their natural size;
+      // overflow HIDES the extras rather than shrinking anything.
+      var available = container.clientWidth - 64;
       if (available <= 0) return;
       if (self.toolbar.scrollWidth <= available) return;  // already fits
 
@@ -2340,37 +2319,48 @@
         }
       }
 
-      // Walk the two queues in lockstep so both groups visually shrink
-      // at the same rate. When a group's first item is about to be
-      // hidden, reveal its `[⋯]` trigger so the collapsed items are
-      // reachable. Showing the trigger also adds width to the
-      // toolbar — the loop re-measures after each hide, so any extra
-      // chrome converges naturally.
+      // Hide one button at a time from whichever group currently
+      // occupies MORE horizontal space, so tools and color swatches
+      // converge to an even ~50/50 split instead of tools (which start
+      // with far more buttons) keeping the lion's share. The pinned
+      // active tool / swatch are excluded from the queues, so each group
+      // always keeps at least its selected item.
+      //
+      // (The `[⋯]` triggers aren't toggled here: the tools trigger is
+      // always shown via `_syncToolsPopup`, the colors trigger always
+      // via CSS — both because each popup holds permanent content.)
+      function visibleWidth(btns) {
+        var w = 0;
+        for (var k = 0; k < btns.length; k++) {
+          if (!btns[k].classList.contains("etcher-overflow-hidden")) {
+            w += btns[k].offsetWidth;
+          }
+        }
+        return w;
+      }
+
       var tIdx = 0, sIdx = 0;
-      var toolsMoreShown = false, colorsMoreShown = false;
       while (tIdx < toolsQueue.length || sIdx < swatchQueue.length) {
-        if (tIdx < toolsQueue.length) {
-          if (!toolsMoreShown && self.toolsMoreBtn) {
-            self.toolsMoreBtn.classList.add("is-active");
-            toolsMoreShown = true;
-            // First hide in the tools group: collapse the intra-group
-            // divider too so a single visible item doesn't sit next
-            // to a stray separator.
-            if (self._cursorToolsDivider) {
-              self._cursorToolsDivider.classList.add("etcher-overflow-hidden");
-            }
+        var hideTool;
+        if (tIdx >= toolsQueue.length) {
+          hideTool = false;                       // tools exhausted
+        } else if (sIdx >= swatchQueue.length) {
+          hideTool = true;                        // swatches exhausted
+        } else {
+          hideTool = visibleWidth(toolBtns) >= visibleWidth(swatchBtns);
+        }
+
+        if (hideTool) {
+          // First tool hidden: collapse the cursor/tools divider so a
+          // lone visible tool doesn't sit beside a stray separator.
+          if (tIdx === 0 && self._cursorToolsDivider) {
+            self._cursorToolsDivider.classList.add("etcher-overflow-hidden");
           }
           toolsQueue[tIdx++].classList.add("etcher-overflow-hidden");
-          if (self.toolbar.scrollWidth <= available) return;
-        }
-        if (sIdx < swatchQueue.length) {
-          if (!colorsMoreShown && self.colorsMoreBtn) {
-            self.colorsMoreBtn.classList.add("is-active");
-            colorsMoreShown = true;
-          }
+        } else {
           swatchQueue[sIdx++].classList.add("etcher-overflow-hidden");
-          if (self.toolbar.scrollWidth <= available) return;
         }
+        if (self.toolbar.scrollWidth <= available) return;
       }
 
       // Last resort: tools + swatches are fully collapsed and the
@@ -2415,22 +2405,19 @@
         if (hidden) anyToolHidden = true;
       });
 
-      // Undo / redo (and their divider) only belong in the popup when the
-      // history group was collapsed off the toolbar as a last resort.
-      var histHidden = !!(self.undoBtn &&
-        self.undoBtn.classList.contains("etcher-overflow-hidden"));
-      if (self.popupUndoBtn) self.popupUndoBtn.style.display = histHidden ? "" : "none";
-      if (self.popupRedoBtn) self.popupRedoBtn.style.display = histHidden ? "" : "none";
+      // Undo / redo live permanently in the popup, so they're always
+      // shown. Their divider only appears when overflowed tools sit
+      // above them — otherwise it'd be a stray rule at the top.
+      if (self.popupUndoBtn) self.popupUndoBtn.style.display = "";
+      if (self.popupRedoBtn) self.popupRedoBtn.style.display = "";
       if (self._popupHistoryDivider) {
-        self._popupHistoryDivider.style.display = histHidden ? "" : "none";
+        self._popupHistoryDivider.style.display = anyToolHidden ? "" : "none";
       }
 
-      // `[⋯]` is shown ONLY when there are hidden tools in the popup.
-      // History (undo/redo) alone never keeps it open — an empty-of-tools
-      // popup must hide the trigger. In the extreme-narrow last resort
-      // where history collapses, the tools are already hidden too, so the
-      // trigger still shows and undo/redo remain reachable inside it.
-      if (self.toolsMoreBtn) self.toolsMoreBtn.classList.toggle("is-active", anyToolHidden);
+      // The popup always carries undo / redo, so the `[⋯]` trigger is
+      // always available; it additionally gains the overflowed tools
+      // when the toolbar narrows.
+      if (self.toolsMoreBtn) self.toolsMoreBtn.classList.add("is-active");
     },
 
     // Compact-mode `[⋯]` trigger. Calls into a kind-specific opener
@@ -2444,7 +2431,9 @@
       btn.dataset.more = kind;
       btn.title = title;
       btn.setAttribute("aria-label", title);
-      btn.innerHTML = ICONS.more;
+      // Colors trigger opens the color picker, so it wears a palette;
+      // the tools trigger keeps the generic overflow dots.
+      btn.innerHTML = kind === "colors" ? ICONS.palette : ICONS.more;
       btn.addEventListener("click", function(e) {
         e.preventDefault();
         e.stopPropagation();

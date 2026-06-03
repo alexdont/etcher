@@ -2644,10 +2644,11 @@
           // Presets are a quick way to set the selected slot to a known
           // color — overwrite the active slot in place (same as a hue-
           // ring pick) and persist, rather than spawning a new entry.
+          // Keep the picker open (it only closes on an outside click) so
+          // the user can keep adjusting.
           self._setSlotColor(self._activeSlot, s.color);
           self._selectColor(s.color);
           self._emitColorsChanged();
-          self._closePopup();
         });
         presetRow.appendChild(b);
         return b;

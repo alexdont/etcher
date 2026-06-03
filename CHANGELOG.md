@@ -4,6 +4,38 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.5.5] — 2026-06-03
+
+### Changed
+
+- **Toolbar overflow now splits space evenly between the tools and the
+  color swatches.** The old lockstep collapse left the drawing tools
+  with the lion's share (~70/30); the bar now sheds whichever group is
+  currently wider, converging to a ~50/50 split as it narrows. Each
+  group always keeps its selected item.
+- **Undo / redo collapse as a single unit.** They sit inline whenever the
+  bar fits, but the moment it runs short both fold into the tools `[⋯]`
+  popup together — before any individual tool — and pop back out as a
+  pair when there's room again.
+- **The colors `[⋯]` wears a palette icon** instead of the generic
+  overflow dots, so it reads as the picker.
+- A 32px gutter is kept on each side: the bar collapses a control into
+  the menus before reaching the viewer edges rather than touching them.
+
+### Added
+
+- **Overflowed color slots are reachable in the colors popup.** When the
+  customizable swatches don't all fit on the toolbar, the collapsed ones
+  appear in a row above the preset colors; picking one selects it (it
+  pins back onto the bar) without closing the picker.
+
+### Fixed
+
+- **The colors popup stays open until an outside click.** Choosing a
+  preset or an overflowed slot, or dragging the hue ring / lightness
+  slider, no longer dismisses it — only clicking outside (or re-toggling
+  the trigger / exiting annotation mode) closes it.
+
 ## [0.5.4] — 2026-06-03
 
 ### Added

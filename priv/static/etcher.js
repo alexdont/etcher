@@ -2167,14 +2167,45 @@
       var divider2 = document.createElement("div");
       divider2.className = "etcher-divider";
       // Survives in compact mode — separates the tools group from the
-      // colors group. Undo / redo are NOT inline on the toolbar; they
-      // live permanently inside the tools `[⋯]` popup.
+      // undo/redo group.
       divider2.setAttribute("data-compact-keep", "");
       bar.appendChild(divider2);
 
-      // Undo / redo render only inside the tools `[⋯]` popup (built in
-      // `_buildToolsPopup`). Keyboard shortcuts (Cmd/Ctrl+Z, +Shift) are
-      // wired in `_wireKeyboard`. Keep their disabled state fresh.
+      // Undo / redo — inline whenever the whole bar fits; treated as a
+      // single unit that collapses into the tools `[⋯]` popup BOTH AT
+      // ONCE the moment the bar runs short (before any tool/swatch — see
+      // `_computeToolbarOverflow`). Disabled when there's nothing to
+      // undo/redo. Shortcuts (Cmd/Ctrl+Z, +Shift) are wired in
+      // `_wireKeyboard`.
+      self.undoBtn = document.createElement("button");
+      self.undoBtn.type = "button";
+      self.undoBtn.title = "Undo (⌘Z)";
+      self.undoBtn.setAttribute("aria-label", "Undo");
+      self.undoBtn.innerHTML = ICONS.undo;
+      self.undoBtn.addEventListener("click", function(e) {
+        e.preventDefault();
+        self._undo();
+      });
+      bar.appendChild(self.undoBtn);
+
+      self.redoBtn = document.createElement("button");
+      self.redoBtn.type = "button";
+      self.redoBtn.title = "Redo (⌘⇧Z)";
+      self.redoBtn.setAttribute("aria-label", "Redo");
+      self.redoBtn.innerHTML = ICONS.redo;
+      self.redoBtn.addEventListener("click", function(e) {
+        e.preventDefault();
+        self._redo();
+      });
+      bar.appendChild(self.redoBtn);
+
+      var dividerUndo = document.createElement("div");
+      dividerUndo.className = "etcher-divider";
+      bar.appendChild(dividerUndo);
+      // Collapsed together with undo/redo when the pair folds into the
+      // menu (so it doesn't sit adjacent to divider2 once they're gone).
+      self._undoSwatchesDivider = dividerUndo;
+
       self._refreshUndoButtons();
 
       // Compact-mode overflow trigger for colors. Sits right after
@@ -2303,6 +2334,19 @@
       if (available <= 0) return;
       if (self.toolbar.scrollWidth <= available) return;  // already fits
 
+      // Undo / redo are treated as ONE unit: the moment the bar runs
+      // short on room they collapse together (both at once) into the
+      // tools `[⋯]` popup, before any individual tool/swatch is touched.
+      // So they're inline only while the whole bar fits; any overflow
+      // folds the pair first (often enough on its own, leaving every
+      // tool visible).
+      if (self.undoBtn) self.undoBtn.classList.add("etcher-overflow-hidden");
+      if (self.redoBtn) self.redoBtn.classList.add("etcher-overflow-hidden");
+      if (self._undoSwatchesDivider) {
+        self._undoSwatchesDivider.classList.add("etcher-overflow-hidden");
+      }
+      if (self.toolbar.scrollWidth <= available) return;
+
       // Build the hideable queues — non-active items in right-to-left
       // order so the rightmost button collapses first.
       var activeToolKey = self.activeTool == null ? "cursor" : self.activeTool;
@@ -2362,26 +2406,6 @@
         }
         if (self.toolbar.scrollWidth <= available) return;
       }
-
-      // Last resort: tools + swatches are fully collapsed and the
-      // toolbar still doesn't fit. Hide undo / redo together with
-      // their preceding divider; they remain reachable through the
-      // tools popup (which renders them under a hairline at the
-      // bottom). Tools-more must be visible so the popup is
-      // accessible — guard against the edge case where overflow
-      // started mid-history (no tools to hide) by lighting it up
-      // here too.
-      if (self.undoBtn) self.undoBtn.classList.add("etcher-overflow-hidden");
-      if (self.redoBtn) self.redoBtn.classList.add("etcher-overflow-hidden");
-      if (self._undoSwatchesDivider) {
-        self._undoSwatchesDivider.classList.add("etcher-overflow-hidden");
-      }
-      if (self.toolsMoreBtn && !self.toolsMoreBtn.classList.contains("is-active")) {
-        self.toolsMoreBtn.classList.add("is-active");
-        if (self._cursorToolsDivider) {
-          self._cursorToolsDivider.classList.add("etcher-overflow-hidden");
-        }
-      }
     },
 
     // Keep the tools `[⋯]` popup in lockstep with the overflow state:
@@ -2405,19 +2429,24 @@
         if (hidden) anyToolHidden = true;
       });
 
-      // Undo / redo live permanently in the popup, so they're always
-      // shown. Their divider only appears when overflowed tools sit
-      // above them — otherwise it'd be a stray rule at the top.
-      if (self.popupUndoBtn) self.popupUndoBtn.style.display = "";
-      if (self.popupRedoBtn) self.popupRedoBtn.style.display = "";
+      // Undo / redo appear in the popup ONLY when their inline buttons
+      // were collapsed off the toolbar (the pair folds into the menu when
+      // the bar runs short) — otherwise they ride out on the toolbar
+      // itself. The divider shows only when overflowed tools ALSO sit
+      // above them.
+      var histHidden = !!(self.undoBtn &&
+        self.undoBtn.classList.contains("etcher-overflow-hidden"));
+      if (self.popupUndoBtn) self.popupUndoBtn.style.display = histHidden ? "" : "none";
+      if (self.popupRedoBtn) self.popupRedoBtn.style.display = histHidden ? "" : "none";
       if (self._popupHistoryDivider) {
-        self._popupHistoryDivider.style.display = anyToolHidden ? "" : "none";
+        self._popupHistoryDivider.style.display = (histHidden && anyToolHidden) ? "" : "none";
       }
 
-      // The popup always carries undo / redo, so the `[⋯]` trigger is
-      // always available; it additionally gains the overflowed tools
-      // when the toolbar narrows.
-      if (self.toolsMoreBtn) self.toolsMoreBtn.classList.add("is-active");
+      // `[⋯]` shows only when the popup has content — overflowed tools
+      // and/or collapsed undo/redo.
+      if (self.toolsMoreBtn) {
+        self.toolsMoreBtn.classList.toggle("is-active", anyToolHidden || histHidden);
+      }
     },
 
     // Compact-mode `[⋯]` trigger. Calls into a kind-specific opener

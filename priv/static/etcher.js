@@ -2292,6 +2292,7 @@
       // `[⋯]` trigger shows only when something is actually hidden.
       this._computeToolbarOverflow();
       this._syncToolsPopup();
+      this._syncColorsPopup();
     },
 
     _computeToolbarOverflow: function() {
@@ -2449,6 +2450,48 @@
       }
     },
 
+    // Mirror the overflowed color slots into the colors popup (above the
+    // preset row) so the user's customizable colors stay reachable when
+    // they don't fit on the toolbar. Rebuilt from the current overflow
+    // state each pass; the row + its divider hide when every slot is
+    // inline. Clicking one selects that slot (it then pins back onto the
+    // toolbar) and keeps the picker open so it can be tweaked.
+    _syncColorsPopup: function() {
+      var self = this;
+      var row = self.colorsPopupSlotsRow;
+      if (!row) return;
+      while (row.firstChild) row.removeChild(row.firstChild);
+
+      var anyHidden = false;
+      (self.swatchEls || []).forEach(function(toolbarSwatch, i) {
+        if (!toolbarSwatch.classList.contains("etcher-overflow-hidden")) return;
+        anyHidden = true;
+        var color = toolbarSwatch.dataset.color;
+        var b = document.createElement("button");
+        b.type = "button";
+        b.className = "etcher-swatch";
+        b.dataset.color = color;
+        b.dataset.slot = String(i);
+        b.title = color;
+        b.setAttribute("aria-label", "Color slot " + (i + 1) + ": " + color);
+        b.style.background = color;
+        b.addEventListener("click", function(e) {
+          e.preventDefault();
+          // Select the slot but keep the picker open so the user can
+          // immediately tweak it on the wheel; re-aim the wheel at the
+          // freshly-selected color.
+          self._selectSlot(i);
+          self._syncPickerToActiveColor();
+        });
+        row.appendChild(b);
+      });
+
+      row.style.display = anyHidden ? "" : "none";
+      if (self.colorsPopupSlotsDivider) {
+        self.colorsPopupSlotsDivider.style.display = anyHidden ? "" : "none";
+      }
+    },
+
     // Compact-mode `[⋯]` trigger. Calls into a kind-specific opener
     // (`_openToolsPopup` / `_openColorsPopup`); both pop above the
     // button anchored to the toolbar.
@@ -2566,6 +2609,22 @@
       // default colors even after the user's palette has drifted.
       var picker = document.createElement("div");
       picker.className = "etcher-picker";
+
+      // Overflowed color slots — the user's customizable swatches that
+      // don't fit on the toolbar appear here, above the permanent preset
+      // row, so they stay reachable. Populated by `_syncColorsPopup`;
+      // this row and its divider hide when every slot fits inline.
+      var slotsRow = document.createElement("div");
+      slotsRow.className = "etcher-presets etcher-popup-slots";
+      slotsRow.style.display = "none";
+      picker.appendChild(slotsRow);
+      self.colorsPopupSlotsRow = slotsRow;
+
+      var slotsDivider = document.createElement("div");
+      slotsDivider.className = "etcher-popup-divider";
+      slotsDivider.style.display = "none";
+      picker.appendChild(slotsDivider);
+      self.colorsPopupSlotsDivider = slotsDivider;
 
       var presetColors = resolveColorSwatches().map(function(s) { return s.color; });
       self._presetColors = presetColors;
@@ -3010,8 +3069,12 @@
       if (!popup || !trigger) return;
 
       // The hue picker edits the selected slot, so start its knobs at
-      // that slot's color when the colors popup opens.
-      if (kind === "colors") this._syncPickerToActiveColor();
+      // that slot's color when the colors popup opens; refresh the
+      // overflowed-slots row so collapsed colors are reachable.
+      if (kind === "colors") {
+        this._syncPickerToActiveColor();
+        this._syncColorsPopup();
+      }
       // Defensive: make sure the tools popup reflects the current overflow
       // set right before it's shown (in case a layout pass was missed).
       if (kind === "tools") this._syncToolsPopup();

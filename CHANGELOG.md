@@ -4,6 +4,31 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.5.4] — 2026-06-03
+
+### Added
+
+- **Fixed editable color slots + `colors-changed` save hook.** Replaces
+  the MRU recent-colors model with 5 fixed, editable slots: clicking a
+  slot selects it; editing via the hue picker / popup presets overwrites
+  that slot in place (no reordering, no localStorage). The palette seeds
+  per-layer from the new `:colors` attr on `Etcher.layer`, then
+  `extensions.etcher.colors`, then presets. Every committed edit fires
+  `etcher:colors-changed` on two channels (LiveView `pushEvent` +
+  bubbling `CustomEvent`) so the consumer owns persistence — Etcher
+  stores nothing. Adds `getColors` / `setColors` / `setSlotColor` to the
+  layer API.
+
+### Fixed
+
+- **The colors `[⋯]` is now always visible.** It's the permanent entry
+  to the hue-wheel picker, not a swatch-overflow indicator, but it was
+  gated on `.is-active` (overflow) — so when the palette fit inline it
+  vanished, leaving hosts (e.g. PhoenixKit's media browser) with no way
+  to open the picker. The tools `[⋯]` stays overflow-gated and now lights
+  only when a tool is actually hidden (never for undo/redo alone), via a
+  `_computeToolbarOverflow` / `_syncToolsPopup` split.
+
 ## [0.5.3] — 2026-05-28
 
 ### Fixed

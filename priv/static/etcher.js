@@ -281,10 +281,22 @@
       // tool or swatch had to be collapsed into the popup. The
       // popups they trigger are positioned absolutely against the
       // toolbar's container.
-      ".etcher-more {",
+      // Scoped under `.etcher-toolbar` so these beat the generic
+      // `.etcher-toolbar button { display: inline-flex }` rule above
+      // (0,2,0 / 0,3,0 vs 0,1,1) — otherwise the `[⋯]` trigger would
+      // stay visible regardless of `.is-active` and open an empty popup
+      // when nothing actually overflowed.
+      ".etcher-toolbar .etcher-more {",
       "  display: none;",
       "}",
-      ".etcher-more.is-active {",
+      ".etcher-toolbar .etcher-more.is-active {",
+      "  display: inline-flex;",
+      "}",
+      // The colors `[⋯]` is the permanent entry to the hue-wheel picker,
+      // not just a swatch-overflow indicator — so it's always visible,
+      // independent of `.is-active`. (The tools `[⋯]` stays overflow-
+      // gated above.)
+      ".etcher-toolbar .etcher-more[data-more='colors'] {",
       "  display: inline-flex;",
       "}",
       ".etcher-popup {",
@@ -2268,6 +2280,14 @@
     //   - `_setAnnotationMode(true)` after the toolbar becomes visible
     //   - `_selectTool` / `_selectColor` (active item changed → re-pin)
     _layoutToolbar: function() {
+      // Compute which buttons overflow (tagging them hidden), then sync
+      // the tools popup so it carries ONLY the hidden tools and the
+      // `[⋯]` trigger shows only when something is actually hidden.
+      this._computeToolbarOverflow();
+      this._syncToolsPopup();
+    },
+
+    _computeToolbarOverflow: function() {
       var self = this;
       if (!self.toolbar) return;
       // Toolbar is `display: none` until annotation mode is on; bail
@@ -2374,6 +2394,45 @@
       }
     },
 
+    // Keep the tools `[⋯]` popup in lockstep with the overflow state:
+    // show only the popup buttons whose main-toolbar counterpart is
+    // currently hidden (the active tool is pinned, so it never appears),
+    // surface undo / redo only when the history group itself overflowed,
+    // and light the `[⋯]` trigger iff the popup actually has something to
+    // offer. Driven from `_layoutToolbar` after every overflow pass, so
+    // a wider toolbar that fits everything hides the trigger outright.
+    _syncToolsPopup: function() {
+      var self = this;
+      if (!self.toolsPopup || !self.toolbar) return;
+
+      var anyToolHidden = false;
+      (self.toolsPopupBtns || []).forEach(function(pb) {
+        var main = self.toolbar.querySelector(
+          'button[data-tool="' + pb.dataset.tool + '"]'
+        );
+        var hidden = !!(main && main.classList.contains("etcher-overflow-hidden"));
+        pb.style.display = hidden ? "" : "none";
+        if (hidden) anyToolHidden = true;
+      });
+
+      // Undo / redo (and their divider) only belong in the popup when the
+      // history group was collapsed off the toolbar as a last resort.
+      var histHidden = !!(self.undoBtn &&
+        self.undoBtn.classList.contains("etcher-overflow-hidden"));
+      if (self.popupUndoBtn) self.popupUndoBtn.style.display = histHidden ? "" : "none";
+      if (self.popupRedoBtn) self.popupRedoBtn.style.display = histHidden ? "" : "none";
+      if (self._popupHistoryDivider) {
+        self._popupHistoryDivider.style.display = histHidden ? "" : "none";
+      }
+
+      // `[⋯]` is shown ONLY when there are hidden tools in the popup.
+      // History (undo/redo) alone never keeps it open — an empty-of-tools
+      // popup must hide the trigger. In the extreme-narrow last resort
+      // where history collapses, the tools are already hidden too, so the
+      // trigger still shows and undo/redo remain reachable inside it.
+      if (self.toolsMoreBtn) self.toolsMoreBtn.classList.toggle("is-active", anyToolHidden);
+    },
+
     // Compact-mode `[⋯]` trigger. Calls into a kind-specific opener
     // (`_openToolsPopup` / `_openColorsPopup`); both pop above the
     // button anchored to the toolbar.
@@ -2436,6 +2495,7 @@
       var historyDivider = document.createElement("div");
       historyDivider.className = "etcher-popup-divider";
       popup.appendChild(historyDivider);
+      self._popupHistoryDivider = historyDivider;
 
       self.popupUndoBtn = document.createElement("button");
       self.popupUndoBtn.type = "button";
@@ -2934,6 +2994,9 @@
       // The hue picker edits the selected slot, so start its knobs at
       // that slot's color when the colors popup opens.
       if (kind === "colors") this._syncPickerToActiveColor();
+      // Defensive: make sure the tools popup reflects the current overflow
+      // set right before it's shown (in case a layout pass was missed).
+      if (kind === "tools") this._syncToolsPopup();
 
       // Position above the trigger. Both popup and trigger live in
       // the same container so we work in its coordinate space.

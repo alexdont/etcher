@@ -6543,7 +6543,10 @@
       var dx = cb.x - ca.x, dy = cb.y - ca.y;
       var contPer100 = Math.sqrt(dx * dx + dy * dy) || 100;
       var imgPerCont = 100 / contPer100;
-      var TARGET_SCREEN_PX = 2.5;
+      // Higher = looser fit = fewer anchors/handles. ~8px on screen keeps
+      // the curve faithful while collapsing a hand-drawn stroke to a
+      // handful of nodes.
+      var TARGET_SCREEN_PX = 8;
       return Math.max(0.5, TARGET_SCREEN_PX * imgPerCont);
     },
 

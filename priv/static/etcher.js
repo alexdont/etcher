@@ -2881,7 +2881,10 @@
                  this.editingShape.style)
         ? this.editingShape.style
         : this._currentMarkerStyle();
-      var width = src.width || 10;
+      // `src.width` is image px; the slider works in on-screen px, so scale it
+      // up by the current zoom for display (inverse of what `_setMarkerStyle-
+      // Prop` stores).
+      var width = Math.max(1, Math.round((src.width || 10) * this._markerScale()));
       var opacity = src.opacity == null ? 1 : src.opacity;
       var dash = src.dash || "solid";
       if (this._markerWeightInput) {
@@ -2908,8 +2911,10 @@
       if (onMarker) {
         if (!this._markerStyleBefore) this._markerStyleBefore = this._snapshotShape(shape);
         shape.style = Object.assign({}, shape.style || {});
-        shape.style[prop] = value;
-        this._applyMarkerStyle(shape.el, shape.style);
+        // The weight slider is on-screen px; store it as image px so the
+        // stroke scales with zoom. Opacity/dash are zoom-independent.
+        shape.style[prop] = prop === "width" ? value / this._markerScale() : value;
+        this._renderShape(shape);
       } else {
         this.markerStyle = this.markerStyle || {};
         this.markerStyle[prop] = value;
@@ -3695,7 +3700,7 @@
       if (shape && shape.uuid) {
         var historyBefore = this._snapshotShape(shape);
         shape.style = Object.assign({}, shape.style || {}, { color: color });
-        if (shape.kind === "marker") this._applyMarkerStyle(shape.el, shape.style);
+        if (shape.kind === "marker") this._renderShape(shape);
         else this._applyShapeColor(shape.el, color);
         // Keep the inline title sibling in sync with the shape color.
         if (shape.titleGroup) shape.titleGroup.style.color = color || "";
@@ -3865,6 +3870,12 @@
             if (isFinite(lMinX) && isFinite(lMinY)) {
               bboxTopImage = { x: (lMinX + lMaxX) / 2, y: lMinY };
             }
+          }
+          // Markers re-apply their style every render so the stroke width
+          // (and dash) track the current zoom — `_renderShape` runs on every
+          // pan/zoom frame. Drafts have no `style` yet → use the tool default.
+          if (shape.kind === "marker") {
+            self._applyMarkerStyle(el, shape.style || self._currentMarkerStyle(), self._markerScale());
           }
           break;
         }
@@ -7057,9 +7068,12 @@
     // color rides the shared `activeColor` palette like every other tool.
     _currentMarkerStyle: function() {
       var m = this.markerStyle || {};
+      // `markerStyle.width` is the default thickness in ON-SCREEN px (the
+      // slider's domain). Convert to image px for storage so the rendered
+      // width tracks zoom; `_applyMarkerStyle` multiplies it back by scale.
       return {
         color: this.activeColor || "#3b82f6",
-        width: m.width || 10,
+        width: (m.width || 10) / this._markerScale(),
         opacity: m.opacity == null ? 1 : m.opacity,
         dash: m.dash || "solid"
       };
@@ -7069,10 +7083,28 @@
     // width + opacity + round caps, and a dash pattern derived from the width
     // (dotted = zero-length dashes rendered as dots by the round caps). No
     // fill — a marker is a stroke, not a filled region.
-    _applyMarkerStyle: function(el, style) {
+    // Container px per image px at the current zoom. Strip mode renders shapes
+    // in image-px user units (the per-image SVG viewBox scales them), so its
+    // markers already track the content — scale is 1 there.
+    _markerScale: function() {
+      if (this.handleKind === "strip") return 1;
+      try {
+        var a = this._imageToContainer({ x: 0, y: 0 });
+        var b = this._imageToContainer({ x: 0, y: 1 });
+        return Math.abs(b.y - a.y) || 1;
+      } catch (e) {
+        return 1;
+      }
+    },
+
+    _applyMarkerStyle: function(el, style, scale) {
       if (!el) return;
       var s = style || {};
-      var w = s.width || 10;
+      scale = scale || 1;
+      // `style.width` is stored in IMAGE px; multiply by the zoom so the
+      // stroke scales with the content (thicker zoomed in, thinner out) like
+      // ink on the image, instead of a fixed on-screen thickness.
+      var w = (s.width || 10) * scale;
       el.style.stroke = s.color || this.activeColor || "#3b82f6";
       el.style.fill = "none";
       el.style.fillOpacity = "";
@@ -7108,12 +7140,13 @@
     _strokeNearPoint: function(shape, pt) {
       var flat = this._freehandFlatten(shape.geometry);
       if (!flat || flat.length < 1) return false;
-      var w = (shape.style && shape.style.width) || 10;
-      var tolScreen = w / 2 + 6;
+      // Width is image px (zoom-anchored); half of it is the stroke radius in
+      // image space. Add a 6px on-screen grab pad, converted to image px.
+      var wImg = (shape.style && shape.style.width) || 10;
       var a = this._imageToContainer({ x: 0, y: 0 });
       var b = this._imageToContainer({ x: 0, y: 1 });
       var perImagePx = Math.abs(b.y - a.y) || 1;
-      var tolImg = tolScreen / perImagePx;
+      var tolImg = wImg / 2 + 6 / perImagePx;
       var tol2 = tolImg * tolImg;
       if (flat.length === 1) {
         var ex = flat[0][0] - pt.x, ey = flat[0][1] - pt.y;
@@ -8083,12 +8116,10 @@
       }
       this.shapes.push(shape);
       this._renderShape(shape);
-      // Apply persisted appearance. Markers restore their full style
-      // (color + thickness/opacity/dash); other kinds restore just the
-      // color (`%{color: "#fca5a5"}`). No style → CSS default.
-      if (shape.kind === "marker") {
-        this._applyMarkerStyle(el, shape.style);
-      } else if (shape.style && shape.style.color) {
+      // Apply persisted appearance. Markers are styled (and zoom-scaled) by
+      // `_renderShape` above; other kinds restore their persisted color here.
+      // No style → CSS default.
+      if (shape.kind !== "marker" && shape.style && shape.style.color) {
         this._applyShapeColor(el, shape.style.color);
       }
       this._attachShapeInteractions(shape);
@@ -9592,8 +9623,10 @@
       shape.style = snap.style == null ? null : JSON.parse(JSON.stringify(snap.style));
       shape.metadata = snap.metadata == null ? null : JSON.parse(JSON.stringify(snap.metadata));
       this._renderShape(shape);
-      if (shape.kind === "marker") this._applyMarkerStyle(shape.el, shape.style);
-      else if (shape.style && shape.style.color) this._applyShapeColor(shape.el, shape.style.color);
+      // Markers are styled (zoom-scaled) by `_renderShape`; others recolor.
+      if (shape.kind !== "marker" && shape.style && shape.style.color) {
+        this._applyShapeColor(shape.el, shape.style.color);
+      }
       if (this.editingShape === shape) {
         // Rebuild rather than reposition: an undo/redo can change the node
         // count or a node's smooth/corner type, which the handle elements

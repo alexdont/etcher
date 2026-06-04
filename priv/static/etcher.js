@@ -7823,7 +7823,11 @@
       // is the cursor; passing it does NOT exit any inline edit mode
       // the afterCreate hook may have entered (text / callout), since
       // `_selectTool` only calls `_exitEditMode` when toolKey != null.
-      this._selectTool(null);
+      //
+      // EXCEPT the marker: it's a sketch tool the user typically uses for
+      // several strokes in a row, so it stays armed until they pick another
+      // tool (or cursor) themselves.
+      if (kind !== "marker") this._selectTool(null);
     },
 
     // Returns the shape's bottom-left corner in container px (the

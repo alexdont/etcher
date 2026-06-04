@@ -3709,6 +3709,13 @@
       var handleColor = color || "#3b82f6";
       (this.handles || []).forEach(function(h) { h.style.color = handleColor; });
       (this.titleHandles || []).forEach(function(h) { h.style.color = handleColor; });
+      // The freehand/marker pen editor's anchors, bezier handles, and their
+      // tether lines live outside `handles`, so repaint them here too — else
+      // a recolor wouldn't reach the points/handles until a reselect.
+      if (this.freehandEditor) {
+        this.freehandEditor.controls.forEach(function(c) { c.el.style.color = handleColor; });
+        this.freehandEditor.lines.forEach(function(l) { l.el.style.color = handleColor; });
+      }
     },
 
     _applyShapeColor: function(el, color) {

@@ -169,6 +169,7 @@
     circle:   '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><circle cx="12" cy="12" r="7.5"/></svg>',
     polygon:  '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3.5 21 9.5 18 20H6L3 9.5 12 3.5Z"/></svg>',
     freehand: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3 17.25c2-2 3-4 5-4s2.5 2 4.5 2 3-2 5-2 2.5 1 3.5 1"/></svg>',
+    marker: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9.53 16.122a3 3 0 0 0-5.78 1.128 2.25 2.25 0 0 1-2.4 2.245 4.5 4.5 0 0 0 8.4-2.245c0-.399-.078-.78-.22-1.128Zm0 0a15.998 15.998 0 0 0 3.388-1.62m-5.043-.025a15.994 15.994 0 0 1 1.622-3.395m3.42 3.42a15.995 15.995 0 0 0 4.764-4.648l3.876-5.814a1.151 1.151 0 0 0-1.597-1.597L14.146 6.32a15.996 15.996 0 0 0-4.649 4.763m3.42 3.42a6.776 6.776 0 0 0-3.42-3.42"/></svg>',
     // Callout / leader line — small filled dot at the anchor, a thin
     // diagonal line, and a sample "T" at the text endpoint. Mimics
     // the blueprint-callout shape so the toolbar icon advertises what
@@ -319,6 +320,32 @@
       ".etcher-popup[data-kind=\"colors\"] {",
       "  width: 192px; align-items: center;",
       "}",
+      // Marker style popup: stacked rows (weight slider, opacity slider, dash
+      // picker) opened by re-clicking the active marker tool button.
+      ".etcher-popup[data-kind=\"marker\"] {",
+      "  width: 200px; flex-direction: column; align-items: stretch;",
+      "  gap: 10px; padding: 10px;",
+      "}",
+      ".etcher-marker-row { display: flex; flex-direction: column; gap: 4px; }",
+      ".etcher-marker-row-head {",
+      "  display: flex; justify-content: space-between; align-items: center;",
+      "  color: #fff; font-size: 11px; opacity: 0.85;",
+      "}",
+      ".etcher-marker-row input[type=\"range\"] {",
+      "  width: 100%; accent-color: #fff; cursor: pointer; margin: 0;",
+      "}",
+      ".etcher-marker-dash { display: flex; gap: 6px; }",
+      ".etcher-marker-dash button {",
+      "  flex: 1 1 0; height: 30px; border: 1px solid rgba(255, 255, 255, 0.25);",
+      "  background: transparent; border-radius: 6px; cursor: pointer;",
+      "  display: inline-flex; align-items: center; justify-content: center;",
+      "  transition: background 120ms ease, border-color 120ms ease;",
+      "}",
+      ".etcher-marker-dash button:hover { background: rgba(255, 255, 255, 0.12); }",
+      ".etcher-marker-dash button.is-selected {",
+      "  background: rgba(255, 255, 255, 0.22); border-color: rgba(255, 255, 255, 0.6);",
+      "}",
+      ".etcher-marker-dash svg { display: block; }",
       ".etcher-popup button[data-tool] {",
       "  width: 36px; height: 36px; border: none; padding: 0;",
       "  display: inline-flex; align-items: center; justify-content: center;",
@@ -477,6 +504,13 @@
       // works everywhere else.
       ".etcher-shape.is-editing {",
       "  pointer-events: visiblePainted;",
+      "}",
+      // Marker strokes: never filled (a marker is a stroke), round caps/joins
+      // so the line reads like a felt-tip. Width / opacity / dash come from
+      // the per-stroke style applied inline by `_applyMarkerStyle`.
+      ".etcher-marker {",
+      "  fill: none;",
+      "  stroke-linecap: round; stroke-linejoin: round;",
       "}",
       // Reveal-pulse: a brief halo flash triggered by
       // `handle.revealShape(uuid, { pulse: true })` so users
@@ -818,6 +852,7 @@
     circle:    { icon: ICONS.circle,    title: "Circle" },
     polygon:   { icon: ICONS.polygon,   title: "Polygon (double-click to close)" },
     freehand:  { icon: ICONS.freehand,  title: "Freehand" },
+    marker:    { icon: ICONS.marker,    title: "Marker" },
     callout:   { icon: ICONS.callout,   title: "Callout (point at something, write a label)" },
     text:      { icon: ICONS.text,      title: "Text label (drag a box, then type)" },
     dimension: { icon: ICONS.dimension, title: "Dimension (line with arrows + slidable label)" },
@@ -1376,6 +1411,10 @@
       if (this.colorsPopup && this.colorsPopup.parentNode) {
         this.colorsPopup.parentNode.removeChild(this.colorsPopup);
         this.colorsPopup = null;
+      }
+      if (this.markerPopup && this.markerPopup.parentNode) {
+        this.markerPopup.parentNode.removeChild(this.markerPopup);
+        this.markerPopup = null;
       }
       if (this._toolbarResizeObserver) {
         try { this._toolbarResizeObserver.disconnect(); } catch (_) {}
@@ -2272,6 +2311,7 @@
       // first open isn't worth the complexity — they're cheap.
       self._buildToolsPopup();
       self._buildColorsPopup();
+      self._buildMarkerPopup();
 
       // Re-run the overflow layout on every container resize. The
       // observer fires immediately on attach so the initial layout
@@ -2750,6 +2790,141 @@
       self.colorsPopup = popup;
     },
 
+    // Marker style popup: weight + opacity sliders and a dash picker. Opened
+    // by re-clicking the active marker tool button. Edits `markerStyle` — the
+    // default applied to new strokes (color stays on the shared palette).
+    _buildMarkerPopup: function() {
+      var self = this;
+      var popup = document.createElement("div");
+      popup.className = "etcher-popup";
+      popup.dataset.kind = "marker";
+      popup.setAttribute("data-fresco-no-capture", "");
+
+      function sliderRow(labelText) {
+        var row = document.createElement("div");
+        row.className = "etcher-marker-row";
+        var head = document.createElement("div");
+        head.className = "etcher-marker-row-head";
+        var label = document.createElement("span");
+        label.textContent = labelText;
+        var val = document.createElement("span");
+        head.appendChild(label);
+        head.appendChild(val);
+        var input = document.createElement("input");
+        input.type = "range";
+        row.appendChild(head);
+        row.appendChild(input);
+        popup.appendChild(row);
+        return { input: input, val: val };
+      }
+
+      // Weight (stroke width, px).
+      var w = sliderRow("Weight");
+      w.input.min = "1"; w.input.max = "40"; w.input.step = "1";
+      self._markerWeightInput = w.input;
+      self._markerWeightVal = w.val;
+      w.input.addEventListener("input", function() {
+        w.val.textContent = w.input.value + "px";
+        self._setMarkerStyleProp("width", parseInt(w.input.value, 10), false);
+      });
+      w.input.addEventListener("change", function() {
+        self._setMarkerStyleProp("width", parseInt(w.input.value, 10), true);
+      });
+
+      // Opacity (0–100% → 0.0–1.0).
+      var o = sliderRow("Opacity");
+      o.input.min = "10"; o.input.max = "100"; o.input.step = "5";
+      self._markerOpacityInput = o.input;
+      self._markerOpacityVal = o.val;
+      o.input.addEventListener("input", function() {
+        o.val.textContent = o.input.value + "%";
+        self._setMarkerStyleProp("opacity", parseInt(o.input.value, 10) / 100, false);
+      });
+      o.input.addEventListener("change", function() {
+        self._setMarkerStyleProp("opacity", parseInt(o.input.value, 10) / 100, true);
+      });
+
+      // Dash style.
+      var dashRow = document.createElement("div");
+      dashRow.className = "etcher-marker-dash";
+      function dashIcon(dash) {
+        var da = dash === "dashed" ? ' stroke-dasharray="7 5"'
+               : dash === "dotted" ? ' stroke-dasharray="0.01 6"' : '';
+        return '<svg width="40" height="8" viewBox="0 0 40 8"><line x1="3" y1="4" x2="37" y2="4" ' +
+               'stroke="#fff" stroke-width="3" stroke-linecap="round"' + da + '/></svg>';
+      }
+      self._markerDashBtns = ["solid", "dashed", "dotted"].map(function(dash) {
+        var b = document.createElement("button");
+        b.type = "button";
+        b.dataset.dash = dash;
+        b.title = dash;
+        b.setAttribute("aria-label", "Dash: " + dash);
+        b.innerHTML = dashIcon(dash);
+        b.addEventListener("click", function(e) {
+          e.preventDefault();
+          self._setMarkerStyleProp("dash", dash, true);
+          self._syncMarkerPopup();
+        });
+        dashRow.appendChild(b);
+        return b;
+      });
+      popup.appendChild(dashRow);
+
+      self.handle.container.appendChild(popup);
+      self.markerPopup = popup;
+    },
+
+    // Reflect the current marker style (the editing marker's if one is
+    // selected, else the tool default) onto the popup controls.
+    _syncMarkerPopup: function() {
+      var src = (this.editingShape && this.editingShape.kind === "marker" &&
+                 this.editingShape.style)
+        ? this.editingShape.style
+        : this._currentMarkerStyle();
+      var width = src.width || 10;
+      var opacity = src.opacity == null ? 1 : src.opacity;
+      var dash = src.dash || "solid";
+      if (this._markerWeightInput) {
+        this._markerWeightInput.value = width;
+        this._markerWeightVal.textContent = width + "px";
+      }
+      if (this._markerOpacityInput) {
+        var pct = Math.round(opacity * 100);
+        this._markerOpacityInput.value = pct;
+        this._markerOpacityVal.textContent = pct + "%";
+      }
+      (this._markerDashBtns || []).forEach(function(b) {
+        b.classList.toggle("is-selected", b.dataset.dash === dash);
+      });
+    },
+
+    // Set one marker style property. When a marker stroke is selected, edits
+    // that stroke (applied live; committed with emit + undo on slider release
+    // / dash click). Otherwise edits `markerStyle` — the default for new
+    // strokes — so styling an existing stroke doesn't move the tool default.
+    _setMarkerStyleProp: function(prop, value, commit) {
+      var shape = this.editingShape;
+      var onMarker = shape && shape.kind === "marker";
+      if (onMarker) {
+        if (!this._markerStyleBefore) this._markerStyleBefore = this._snapshotShape(shape);
+        shape.style = Object.assign({}, shape.style || {});
+        shape.style[prop] = value;
+        this._applyMarkerStyle(shape.el, shape.style);
+      } else {
+        this.markerStyle = this.markerStyle || {};
+        this.markerStyle[prop] = value;
+      }
+      if (commit) {
+        if (onMarker && shape.uuid) {
+          this._emitChanged();
+          if (this._markerStyleBefore) {
+            this._pushUndo(shape.uuid, this._markerStyleBefore, this._snapshotShape(shape));
+          }
+        }
+        this._markerStyleBefore = null;
+      }
+    },
+
     // Paint the hue ring once. The torus is drawn pixel-by-pixel via
     // `ImageData` so each ring pixel maps to its angle's hue at full
     // saturation + 50% lightness. A 1-pixel alpha falloff at both
@@ -3082,9 +3257,14 @@
     },
 
     _openPopup: function(kind) {
-      var popup = kind === "tools" ? this.toolsPopup : this.colorsPopup;
-      var trigger = kind === "tools" ? this.toolsMoreBtn : this.colorsMoreBtn;
+      var popup = kind === "tools" ? this.toolsPopup
+                : kind === "colors" ? this.colorsPopup
+                : this.markerPopup;
+      var trigger = kind === "tools" ? this.toolsMoreBtn
+                  : kind === "colors" ? this.colorsMoreBtn
+                  : this._markerToolBtn;
       if (!popup || !trigger) return;
+      if (kind === "marker") this._syncMarkerPopup();
 
       // The hue picker edits the selected slot, so start its knobs at
       // that slot's color when the colors popup opens; refresh the
@@ -3150,6 +3330,7 @@
     _closePopup: function() {
       if (this.toolsPopup) this.toolsPopup.classList.remove("is-open");
       if (this.colorsPopup) this.colorsPopup.classList.remove("is-open");
+      if (this.markerPopup) this.markerPopup.classList.remove("is-open");
       this._openPopupKind = null;
       if (this._popupOutsideClick) {
         document.removeEventListener("pointerdown", this._popupOutsideClick, true);
@@ -3162,13 +3343,27 @@
       var btn = document.createElement("button");
       btn.type = "button";
       btn.dataset.tool = toolKey;
-      btn.title = title;
+      btn.title = toolKey === "marker" ? title + " (click again for style)" : title;
       btn.setAttribute("aria-label", title);
       btn.innerHTML = icon;
       btn.addEventListener("click", function(e) {
         e.preventDefault();
+        // The marker button doubles as the style entry. It opens the style
+        // popup (weight / opacity / dash) when either the marker tool is
+        // already active (edits the default for new strokes) OR a marker
+        // stroke is currently selected (edits that stroke). Otherwise it
+        // selects the tool.
+        if (toolKey === "marker" &&
+            (self.activeTool === "marker" ||
+             (self.editingShape && self.editingShape.kind === "marker"))) {
+          self._togglePopup("marker");
+          return;
+        }
         self._selectTool(toolKey === "cursor" ? null : toolKey);
       });
+      // The marker button doubles as the style-popup trigger; keep a ref
+      // so `_openPopup("marker")` can anchor the popup to it.
+      if (toolKey === "marker") self._markerToolBtn = btn;
       return btn;
     },
 
@@ -3500,7 +3695,8 @@
       if (shape && shape.uuid) {
         var historyBefore = this._snapshotShape(shape);
         shape.style = Object.assign({}, shape.style || {}, { color: color });
-        this._applyShapeColor(shape.el, color);
+        if (shape.kind === "marker") this._applyMarkerStyle(shape.el, shape.style);
+        else this._applyShapeColor(shape.el, color);
         // Keep the inline title sibling in sync with the shape color.
         if (shape.titleGroup) shape.titleGroup.style.color = color || "";
         this._emitChanged();
@@ -3629,6 +3825,7 @@
           }
           break;
         }
+        case "marker":
         case "freehand": {
           if (g.nodes) {
             // Vector curve: draw the cubic-bezier path; derive the title-
@@ -4213,6 +4410,10 @@
           var dx = pt.x - g.cx, dy = pt.y - g.cy;
           return dx * dx + dy * dy <= g.r * g.r;
         }
+        // A marker is an open stroke, not an enclosed region — hit it by
+        // proximity to the line (within half its thickness + a grab pad).
+        case "marker":
+          return this._strokeNearPoint(shape, pt);
         case "polygon":
         case "freehand": {
           // Ray-casting: count edge crossings to the right of `pt`.
@@ -4289,9 +4490,11 @@
           var d  = Math.sqrt(dx * dx + dy * dy) || 1;
           return { x: c.x + (dx / d) * r, y: c.y + (dy / d) * r };
         }
+        case "marker":
         case "polygon":
         case "freehand": {
-          var src = shape.kind === "freehand" ? self._freehandFlatten(g) : (g.points || []);
+          var isStroke = shape.kind === "freehand" || shape.kind === "marker";
+          var src = isStroke ? self._freehandFlatten(g) : (g.points || []);
           var pts = src.map(function(p) {
             return self._imageToContainer({ x: p[0], y: p[1] });
           });
@@ -4745,6 +4948,7 @@
         case "circle":    this._startCircle(pt, e); break;
         case "polygon":   this._polygonClick(pt); break;
         case "freehand":  this._startFreehand(pt, e); break;
+        case "marker":    this._startMarker(pt, e); break;
         case "callout":   this._calloutClick(pt); break;
         case "text":      this._startText(pt, e); break;
         case "dimension": this._startDimension(pt, e); break;
@@ -4782,6 +4986,7 @@
         case "rectangle": this._updateRectangle(pt); break;
         case "circle":    this._updateCircle(pt); break;
         case "freehand":  this._appendFreehand(pt); break;
+        case "marker":    this._appendFreehand(pt); break;
         case "text":      this._updateText(pt); break;
         case "dimension": this._updateDimension(pt); break;
         case "line":      this._updateDimension(pt); break;
@@ -4802,6 +5007,7 @@
         case "rectangle": this._commitRectangle(pt); break;
         case "circle":    this._commitCircle(pt); break;
         case "freehand":  this._commitFreehand(pt); break;
+        case "marker":    this._commitFreehand(pt); break;
         case "text":      this._commitText(pt); break;
         case "dimension": this._commitDimension(pt); break;
         case "line":      this._commitDimension(pt); break;
@@ -5173,10 +5379,11 @@
         // input-owner — clicking in a comment composer that happens
         // to sit over a text shape shouldn't open the shape's editor.
         if (isInputOwner(e.target, self.overlayWrapper)) return;
-        // While a freehand curve is being edited, a double-click on the
-        // stroke inserts a new node there (anchor dblclick is handled on the
-        // handle itself and stops propagation, so it won't reach here).
-        if (self.editingShape && self.editingShape.kind === "freehand" &&
+        // While a freehand/marker curve is being edited, a double-click on
+        // the stroke inserts a new node there (anchor dblclick is handled on
+        // the handle itself and stops propagation, so it won't reach here).
+        if (self.editingShape &&
+            (self.editingShape.kind === "freehand" || self.editingShape.kind === "marker") &&
             self.editingShape.geometry && self.editingShape.geometry.nodes) {
           var ipt;
           try { ipt = self._toImage(e); } catch (_) { return; }
@@ -5618,6 +5825,7 @@
           return { x: g.cx - g.r, y: g.cy - g.r, w: 2 * g.r, h: 2 * g.r };
         case "polygon":
           return fromPoints(g.points);
+        case "marker":
         case "freehand": {
           if (g.nodes) {
             var flat = this._freehandFlatten(g);
@@ -6549,16 +6757,16 @@
     // fixed on-screen target so the simplification feels the same at every
     // zoom level. (1 container px ≈ `imgPerCont` image px at the current
     // zoom; strip mode is identity so this collapses to the raw target.)
-    _freehandFitTolerance: function() {
+    _freehandFitTolerance: function(targetScreenPx) {
       var ca = this._imageToContainer({ x: 0,   y: 0 });
       var cb = this._imageToContainer({ x: 100, y: 0 });
       var dx = cb.x - ca.x, dy = cb.y - ca.y;
       var contPer100 = Math.sqrt(dx * dx + dy * dy) || 100;
       var imgPerCont = 100 / contPer100;
-      // Higher = looser fit = fewer anchors/handles. ~8px on screen keeps
-      // the curve faithful while collapsing a hand-drawn stroke to a
-      // handful of nodes.
-      var TARGET_SCREEN_PX = 8;
+      // Higher = looser fit = fewer anchors/handles. Freehand defaults to
+      // ~8px (a handful of nodes); the marker passes a tighter target so it
+      // tracks difficult shapes faithfully with more anchors.
+      var TARGET_SCREEN_PX = targetScreenPx || 8;
       return Math.max(0.5, TARGET_SCREEN_PX * imgPerCont);
     },
 
@@ -6814,15 +7022,100 @@
       return d;
     },
 
-    _startFreehand: function(pt, e) {
+    _startFreehand: function(pt, e) { this._startStroke(pt, e, "freehand"); },
+    _startMarker: function(pt, e) { this._startStroke(pt, e, "marker"); },
+
+    // Shared capture for both freehand and marker: a raw <polyline> draft
+    // grown sample-by-sample, simplified + fitted to bezier nodes on release
+    // by `_commitFreehand`. The only per-tool difference is styling — a marker
+    // wears `.etcher-marker` and its thickness/opacity/dash style.
+    _startStroke: function(pt, e, kind) {
       var path = svgEl("polyline", { "stroke-width": "2", fill: "none" });
       path.classList.add("etcher-shape", "is-draft");
-      this._applyShapeColor(path, this.activeColor);
+      if (kind === "marker") {
+        path.classList.add("etcher-marker");
+        this._applyMarkerStyle(path, this._currentMarkerStyle());
+      } else {
+        this._applyShapeColor(path, this.activeColor);
+      }
       this.svg.appendChild(path);
       var geom = { points: [[pt.x, pt.y]] };
-      this.draftState = { kind: "freehand", geometry: geom, el: path };
+      this.draftState = { kind: kind, geometry: geom, el: path };
       this._renderShape(this.draftState);
       try { e.target.setPointerCapture(e.pointerId); } catch (_) {}
+    },
+
+    // The default style new marker strokes are drawn with. Thickness/opacity/
+    // dash are tool-level state (`markerStyle`) the style popup will edit;
+    // color rides the shared `activeColor` palette like every other tool.
+    _currentMarkerStyle: function() {
+      var m = this.markerStyle || {};
+      return {
+        color: this.activeColor || "#3b82f6",
+        width: m.width || 10,
+        opacity: m.opacity == null ? 1 : m.opacity,
+        dash: m.dash || "solid"
+      };
+    },
+
+    // Paint a marker style onto its <path>/<polyline> element: stroke color +
+    // width + opacity + round caps, and a dash pattern derived from the width
+    // (dotted = zero-length dashes rendered as dots by the round caps). No
+    // fill — a marker is a stroke, not a filled region.
+    _applyMarkerStyle: function(el, style) {
+      if (!el) return;
+      var s = style || {};
+      var w = s.width || 10;
+      el.style.stroke = s.color || this.activeColor || "#3b82f6";
+      el.style.fill = "none";
+      el.style.fillOpacity = "";
+      el.style.strokeOpacity = String(s.opacity == null ? 1 : s.opacity);
+      el.style.strokeLinecap = "round";
+      el.style.strokeLinejoin = "round";
+      el.setAttribute("stroke-width", w);
+      if (s.dash === "dashed") {
+        el.setAttribute("stroke-dasharray", (w * 2.2) + " " + (w * 1.6));
+      } else if (s.dash === "dotted") {
+        el.setAttribute("stroke-dasharray", "0.01 " + (w * 1.8));
+      } else {
+        el.removeAttribute("stroke-dasharray");
+      }
+    },
+
+    // Squared image-px distance from point `p` ({x,y}) to segment a→b
+    // (each [x,y]). Standard clamp-to-segment projection.
+    _sqDistToSeg: function(p, a, b) {
+      var x = a[0], y = a[1], dx = b[0] - x, dy = b[1] - y;
+      if (dx !== 0 || dy !== 0) {
+        var t = ((p.x - x) * dx + (p.y - y) * dy) / (dx * dx + dy * dy);
+        if (t > 1) { x = b[0]; y = b[1]; }
+        else if (t > 0) { x += dx * t; y += dy * t; }
+      }
+      dx = p.x - x; dy = p.y - y;
+      return dx * dx + dy * dy;
+    },
+
+    // True when `pt` lands on a marker's stroke — within half the stroke
+    // width plus a grab pad. Width/pad are on-screen px, so convert to image
+    // px at the current zoom before comparing to the flattened curve.
+    _strokeNearPoint: function(shape, pt) {
+      var flat = this._freehandFlatten(shape.geometry);
+      if (!flat || flat.length < 1) return false;
+      var w = (shape.style && shape.style.width) || 10;
+      var tolScreen = w / 2 + 6;
+      var a = this._imageToContainer({ x: 0, y: 0 });
+      var b = this._imageToContainer({ x: 0, y: 1 });
+      var perImagePx = Math.abs(b.y - a.y) || 1;
+      var tolImg = tolScreen / perImagePx;
+      var tol2 = tolImg * tolImg;
+      if (flat.length === 1) {
+        var ex = flat[0][0] - pt.x, ey = flat[0][1] - pt.y;
+        return ex * ex + ey * ey <= tol2;
+      }
+      for (var i = 0; i < flat.length - 1; i++) {
+        if (this._sqDistToSeg(pt, flat[i], flat[i + 1]) <= tol2) return true;
+      }
+      return false;
     },
 
     _appendFreehand: function(pt) {
@@ -6840,29 +7133,37 @@
         this._cancelDraft();
         return;
       }
+      var kind = this.draftState.kind || "freehand";
       var oldEl = this.draftState.el;
       // Simplify + fit the raw samples into bezier nodes. RDP runs a touch
       // tighter than the fit tolerance so it only strips genuine jitter and
       // leaves real curvature for the fitter to model.
-      var tol = this._freehandFitTolerance();
+      // Markers fit tight (~2px → more anchors) so hard shapes stay faithful;
+      // freehand stays loose (~8px) for fewer handles.
+      var tol = this._freehandFitTolerance(kind === "marker" ? 2 : 8);
       var simplified = this._rdpSimplify(pts, tol * 0.6);
       var beziers = this._fitCurve(simplified, tol);
       // Degenerate fit (e.g. a single dot) — keep the raw polyline so the
       // stroke is never lost; it stays in the legacy {points} format.
       if (!beziers || !beziers.length) {
         oldEl.classList.remove("is-draft");
-        this._finalizeShape("freehand", { points: pts }, oldEl);
+        this._finalizeShape(kind, { points: pts }, oldEl);
         return;
       }
       var nodes = this._beziersToNodes(beziers);
       var path = svgEl("path", { "stroke-width": "2", fill: "none" });
       path.classList.add("etcher-shape");
-      this._applyShapeColor(path, this.activeColor);
+      if (kind === "marker") {
+        path.classList.add("etcher-marker");
+        this._applyMarkerStyle(path, this._currentMarkerStyle());
+      } else {
+        this._applyShapeColor(path, this.activeColor);
+      }
       this.svg.appendChild(path);
       oldEl.remove();
       this.draftState.el = path;
       this.draftState.geometry = { nodes: nodes };
-      this._finalizeShape("freehand", { nodes: nodes }, path);
+      this._finalizeShape(kind, { nodes: nodes }, path);
     },
 
     // -------------------------------------------------------------------------
@@ -7105,6 +7406,7 @@
           var dx = pt.x - g.cx, dy = pt.y - g.cy;
           return dx * dx + dy * dy <= g.r * g.r;
         }
+        case "marker":
         case "polygon":
         case "freehand":
           return this._shapeContainsImagePoint(shape, pt);
@@ -7403,7 +7705,11 @@
       // hit-test that relied on the topmost-element heuristic; the
       // data attr is the explicit-opt-in path.
       el.setAttribute("data-fresco-suppress-tap", "");
-      var style = this.activeColor ? { color: this.activeColor } : null;
+      // Markers persist their full appearance (color + thickness/opacity/
+      // dash); every other kind just carries its color when one was picked.
+      var style = kind === "marker"
+        ? this._currentMarkerStyle()
+        : (this.activeColor ? { color: this.activeColor } : null);
       var shape = {
         uuid: uuid,
         kind: kind,
@@ -7571,10 +7877,12 @@
         case "rectangle": el = svgEl("rect");                       break;
         case "circle":    el = svgEl("circle");                     break;
         case "polygon":   el = svgEl("polygon");                    break;
+        case "marker":
         case "freehand":
           el = (ann.geometry && ann.geometry.nodes)
             ? svgEl("path", { fill: "none" })
             : svgEl("polyline", { fill: "none" });
+          if (ann.kind === "marker") el.classList.add("etcher-marker");
           break;
         case "text": {
           // <g> wrapping a hit-zone <rect> and a content <text>. The
@@ -7768,10 +8076,12 @@
       }
       this.shapes.push(shape);
       this._renderShape(shape);
-      // Apply persisted color (if any) — the `style` field carries
-      // `%{color: "#fca5a5"}` for shapes that were drawn with a swatch
-      // selected. Shapes without a style fall back to the CSS default.
-      if (shape.style && shape.style.color) {
+      // Apply persisted appearance. Markers restore their full style
+      // (color + thickness/opacity/dash); other kinds restore just the
+      // color (`%{color: "#fca5a5"}`). No style → CSS default.
+      if (shape.kind === "marker") {
+        this._applyMarkerStyle(el, shape.style);
+      } else if (shape.style && shape.style.color) {
         this._applyShapeColor(el, shape.style.color);
       }
       this._attachShapeInteractions(shape);
@@ -7802,10 +8112,12 @@
       this.editingShape = shape;
       shape.el.classList.add("is-editing");
       this._hideTooltip();
-      // Fitted freehand curves get the dedicated pen editor (anchors +
-      // bezier handles); every other kind — and legacy {points} freehand —
-      // uses the generic vertex handles.
-      if (shape.kind === "freehand" && shape.geometry && shape.geometry.nodes) {
+      // Fitted freehand AND marker curves get the dedicated pen editor
+      // (anchors + bezier handles) — a marker is just a freehand stroke with
+      // marker styling, so it edits identically. Every other kind — and
+      // legacy {points} strokes — uses the generic vertex handles.
+      if ((shape.kind === "freehand" || shape.kind === "marker") &&
+          shape.geometry && shape.geometry.nodes) {
         this._renderFreehandEditor(shape);
       } else {
         this._renderHandles(shape);
@@ -7839,6 +8151,10 @@
         // part of editing — never let it tear down edit mode. Bezier
         // handles in particular sit out in empty space off the curve.
         if (e.target.closest(".etcher-handle")) return;
+        // Clicks on Etcher's own toolbar / popups (e.g. opening the marker
+        // style popup for the selected stroke, or dragging its sliders) are
+        // part of editing, not a dismissal.
+        if (e.target.closest(".etcher-toolbar") || e.target.closest(".etcher-popup")) return;
         if (isInputOwner(e.target, self.overlayWrapper)) return;
         try {
           var pt = self._toImage(e);
@@ -7870,7 +8186,10 @@
     // against the live `editingShape` so subsequent re-renders can
     // re-apply `.is-selected` to the same dots.
     _selectVertex: function(shape, idx, additive) {
-      if (!shape || (shape.kind !== "polygon" && shape.kind !== "freehand")) return;
+      if (!shape ||
+          (shape.kind !== "polygon" && shape.kind !== "freehand" && shape.kind !== "marker")) {
+        return;
+      }
       if (this.editingShape !== shape) return;
       if (!this.selectedVertexIndices) this.selectedVertexIndices = new Set();
       if (additive) {
@@ -7925,10 +8244,11 @@
       var shape = this.editingShape;
       var sel = this.selectedVertexIndices;
       if (!shape || !sel || sel.size === 0) return false;
-      // Freehand: drop the selected node(s); a curve needs at least 2 nodes
-      // (one segment) to survive. The new first/last nodes shed their now-
-      // dangling outer handles so the endpoints stay clean.
-      if (shape.kind === "freehand" && shape.geometry && shape.geometry.nodes) {
+      // Freehand / marker: drop the selected node(s); a curve needs at least
+      // 2 nodes (one segment) to survive. The new first/last nodes shed their
+      // now-dangling outer handles so the endpoints stay clean.
+      if ((shape.kind === "freehand" || shape.kind === "marker") &&
+          shape.geometry && shape.geometry.nodes) {
         var nodes = shape.geometry.nodes;
         if (nodes.length - sel.size < 2) return false;
         var fHistory = this._snapshotShape(shape);
@@ -8407,7 +8727,7 @@
 
     _renderFreehandEditor: function(shape) {
       this._removeFreehandEditor();
-      if (!shape || shape.kind !== "freehand" ||
+      if (!shape || (shape.kind !== "freehand" && shape.kind !== "marker") ||
           !shape.geometry || !shape.geometry.nodes) {
         return;
       }
@@ -9262,7 +9582,8 @@
       shape.style = snap.style == null ? null : JSON.parse(JSON.stringify(snap.style));
       shape.metadata = snap.metadata == null ? null : JSON.parse(JSON.stringify(snap.metadata));
       this._renderShape(shape);
-      if (shape.style && shape.style.color) this._applyShapeColor(shape.el, shape.style.color);
+      if (shape.kind === "marker") this._applyMarkerStyle(shape.el, shape.style);
+      else if (shape.style && shape.style.color) this._applyShapeColor(shape.el, shape.style.color);
       if (this.editingShape === shape) {
         // Rebuild rather than reposition: an undo/redo can change the node
         // count or a node's smooth/corner type, which the handle elements

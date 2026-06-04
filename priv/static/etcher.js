@@ -171,6 +171,7 @@
     freehand: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3 17.25c2-2 3-4 5-4s2.5 2 4.5 2 3-2 5-2 2.5 1 3.5 1"/></svg>',
     marker: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9.53 16.122a3 3 0 0 0-5.78 1.128 2.25 2.25 0 0 1-2.4 2.245 4.5 4.5 0 0 0 8.4-2.245c0-.399-.078-.78-.22-1.128Zm0 0a15.998 15.998 0 0 0 3.388-1.62m-5.043-.025a15.994 15.994 0 0 1 1.622-3.395m3.42 3.42a15.995 15.995 0 0 0 4.764-4.648l3.876-5.814a1.151 1.151 0 0 0-1.597-1.597L14.146 6.32a15.996 15.996 0 0 0-4.649 4.763m3.42 3.42a6.776 6.776 0 0 0-3.42-3.42"/></svg>',
     grabber: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15 10.5V6a1.5 1.5 0 0 0-3 0m3 4.5V4.5a1.5 1.5 0 0 0-3 0v6m3 0V9a1.5 1.5 0 0 1 3 0v5.25a6.75 6.75 0 0 1-6.75 6.75H9.75a6.75 6.75 0 0 1-5.74-3.2l-2.39-3.86a1.5 1.5 0 0 1 2.46-1.72L6 15.75V6a1.5 1.5 0 0 1 3 0v4.5m3 0V6"/></svg>',
+    sliders: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75"/></svg>',
     // Callout / leader line — small filled dot at the anchor, a thin
     // diagonal line, and a sample "T" at the text endpoint. Mimics
     // the blueprint-callout shape so the toolbar icon advertises what
@@ -265,9 +266,9 @@
       "  outline: 2px solid rgba(255, 255, 255, 0.7); outline-offset: 1px;",
       "}",
       ".etcher-toolbar svg { width: 18px; height: 18px; }",
-      // The colors palette trigger gets a larger glyph so it reads
-      // clearly as the color picker rather than a tiny mark.
-      ".etcher-toolbar .etcher-more[data-more='colors'] svg { width: 24px; height: 24px; }",
+      // The line-parameters trigger (sliders) sits where the palette used
+      // to be; give it a slightly larger glyph so it reads as a control.
+      ".etcher-toolbar .etcher-more[data-more='params'] svg { width: 22px; height: 22px; }",
       ".etcher-toolbar .etcher-divider {",
       "  width: 1px; background: rgba(255, 255, 255, 0.2); margin: 4px 2px;",
       "}",
@@ -299,11 +300,11 @@
       ".etcher-toolbar .etcher-more.is-active {",
       "  display: inline-flex;",
       "}",
-      // The colors `[⋯]` is the permanent entry to the hue-wheel picker,
-      // not just a swatch-overflow indicator — so it's always visible,
-      // independent of `.is-active`. (The tools `[⋯]` stays overflow-
-      // gated above.)
-      ".etcher-toolbar .etcher-more[data-more='colors'] {",
+      // The params `[⋯]` (line thickness / opacity / dash) is a permanent
+      // toolbar entry — always visible, independent of `.is-active`. (The
+      // hue picker now opens from the swatches; the tools `[⋯]` stays
+      // overflow-gated above.)
+      ".etcher-toolbar .etcher-more[data-more='params'] {",
       "  display: inline-flex;",
       "}",
       ".etcher-popup {",
@@ -323,7 +324,7 @@
       "}",
       // Marker style popup: stacked rows (weight slider, opacity slider, dash
       // picker) opened by re-clicking the active marker tool button.
-      ".etcher-popup[data-kind=\"marker\"] {",
+      ".etcher-popup[data-kind=\"marker\"], .etcher-popup[data-kind=\"params\"] {",
       "  width: 200px; flex-direction: column; align-items: stretch;",
       "  gap: 10px; padding: 10px;",
       "}",
@@ -1425,6 +1426,10 @@
         this.markerPopup.parentNode.removeChild(this.markerPopup);
         this.markerPopup = null;
       }
+      if (this.paramsPopup && this.paramsPopup.parentNode) {
+        this.paramsPopup.parentNode.removeChild(this.paramsPopup);
+        this.paramsPopup = null;
+      }
       if (this._toolbarResizeObserver) {
         try { this._toolbarResizeObserver.disconnect(); } catch (_) {}
         this._toolbarResizeObserver = null;
@@ -2277,8 +2282,14 @@
       // the swatches so the layout reads `[active_swatch] [⋯]` when
       // only one is visible; swatches are inserted before it by
       // `_refreshToolbarSwatches`.
-      self.colorsMoreBtn = self._makeMoreButton("colors", "More colors");
-      bar.appendChild(self.colorsMoreBtn);
+      // The rightmost colors-group button is now the line-parameters entry
+      // (thickness / opacity / dash). The hue picker moved onto the swatches
+      // (click the active swatch again, or double-tap any swatch). Aliased to
+      // `colorsMoreBtn` so the overflow layout + swatch-insertion anchor keep
+      // working against the same element.
+      self.paramsBtn = self._makeMoreButton("params", "Line parameters");
+      self.colorsMoreBtn = self.paramsBtn;
+      bar.appendChild(self.paramsBtn);
 
       // Inline toolbar swatches reflect the user's effective palette:
       // recents first (MRU), then preset colors backfilling any
@@ -2321,6 +2332,7 @@
       self._buildToolsPopup();
       self._buildColorsPopup();
       self._buildMarkerPopup();
+      self._buildParamsPopup();
 
       // Re-run the overflow layout on every container resize. The
       // observer fires immediately on attach so the initial layout
@@ -2569,9 +2581,9 @@
       btn.dataset.more = kind;
       btn.title = title;
       btn.setAttribute("aria-label", title);
-      // Colors trigger opens the color picker, so it wears a palette;
+      // Params trigger wears sliders (line thickness / opacity / dash);
       // the tools trigger keeps the generic overflow dots.
-      btn.innerHTML = kind === "colors" ? ICONS.palette : ICONS.more;
+      btn.innerHTML = kind === "params" ? ICONS.sliders : ICONS.more;
       btn.addEventListener("click", function(e) {
         e.preventDefault();
         e.stopPropagation();
@@ -2939,6 +2951,198 @@
       }
     },
 
+    // ----- Line parameters (global drawing style) ----------------------------
+    // Thickness / opacity / dash applied to every NEW non-marker stroke shape
+    // (rectangle, circle, polygon, freehand). The marker keeps its own style.
+
+    _isStrokeShape: function(kind) {
+      return kind === "rectangle" || kind === "circle" ||
+             kind === "polygon" || kind === "freehand";
+    },
+
+    // The line params a new stroke shape adopts: the active color plus the
+    // current global thickness / opacity / dash (on-screen px, like the slot
+    // shapes have always used).
+    _currentLineParams: function() {
+      var lp = this.lineParams || {};
+      return {
+        color: this.activeColor || null,
+        width: lp.width || 2,
+        opacity: lp.opacity == null ? 1 : lp.opacity,
+        dash: lp.dash || "solid"
+      };
+    },
+
+    // Paint thickness / opacity / dash onto a stroke shape's element. Width is
+    // an inline style (so the hover/select stroke-width:3 rules don't override
+    // and visibly re-thin the line); dash is a presentation attribute.
+    _applyLineParams: function(el, style) {
+      if (!el) return;
+      var s = style || {};
+      var w = s.width || 2;
+      el.style.strokeWidth = w + "px";
+      el.removeAttribute("stroke-width");
+      el.style.strokeOpacity = String(s.opacity == null ? 1 : s.opacity);
+      if (s.dash === "dashed") {
+        el.setAttribute("stroke-dasharray", (w * 2.2) + " " + (w * 1.6));
+      } else if (s.dash === "dotted") {
+        el.setAttribute("stroke-dasharray", "0.01 " + (w * 1.8));
+      } else {
+        el.removeAttribute("stroke-dasharray");
+      }
+    },
+
+    // Params popup: weight + opacity sliders and a dash picker, opened by the
+    // toolbar sliders button. Edits `lineParams` — the default for new stroke
+    // shapes. (Structurally a twin of the marker popup, reusing its CSS.)
+    _buildParamsPopup: function() {
+      var self = this;
+      var popup = document.createElement("div");
+      popup.className = "etcher-popup";
+      popup.dataset.kind = "params";
+      popup.setAttribute("data-fresco-no-capture", "");
+
+      function sliderRow(labelText) {
+        var row = document.createElement("div");
+        row.className = "etcher-marker-row";
+        var head = document.createElement("div");
+        head.className = "etcher-marker-row-head";
+        var label = document.createElement("span");
+        label.textContent = labelText;
+        var val = document.createElement("span");
+        head.appendChild(label);
+        head.appendChild(val);
+        var input = document.createElement("input");
+        input.type = "range";
+        row.appendChild(head);
+        row.appendChild(input);
+        popup.appendChild(row);
+        return { input: input, val: val };
+      }
+
+      var w = sliderRow("Thickness");
+      w.input.min = "1"; w.input.max = "40"; w.input.step = "1";
+      self._paramsWeightInput = w.input;
+      self._paramsWeightVal = w.val;
+      w.input.addEventListener("input", function() {
+        w.val.textContent = w.input.value + "px";
+        self._setLineParam("width", parseInt(w.input.value, 10), false);
+      });
+      w.input.addEventListener("change", function() {
+        self._setLineParam("width", parseInt(w.input.value, 10), true);
+      });
+
+      var o = sliderRow("Opacity");
+      o.input.min = "10"; o.input.max = "100"; o.input.step = "5";
+      self._paramsOpacityInput = o.input;
+      self._paramsOpacityVal = o.val;
+      o.input.addEventListener("input", function() {
+        o.val.textContent = o.input.value + "%";
+        self._setLineParam("opacity", parseInt(o.input.value, 10) / 100, false);
+      });
+      o.input.addEventListener("change", function() {
+        self._setLineParam("opacity", parseInt(o.input.value, 10) / 100, true);
+      });
+
+      var dashRow = document.createElement("div");
+      dashRow.className = "etcher-marker-dash";
+      function dashIcon(dash) {
+        var da = dash === "dashed" ? ' stroke-dasharray="7 5"'
+               : dash === "dotted" ? ' stroke-dasharray="0.01 6"' : '';
+        return '<svg width="40" height="8" viewBox="0 0 40 8"><line x1="3" y1="4" x2="37" y2="4" ' +
+               'stroke="#fff" stroke-width="3" stroke-linecap="round"' + da + '/></svg>';
+      }
+      self._paramsDashBtns = ["solid", "dashed", "dotted"].map(function(dash) {
+        var b = document.createElement("button");
+        b.type = "button";
+        b.dataset.dash = dash;
+        b.title = dash;
+        b.setAttribute("aria-label", "Dash: " + dash);
+        b.innerHTML = dashIcon(dash);
+        b.addEventListener("click", function(e) {
+          e.preventDefault();
+          self._setLineParam("dash", dash, true);
+          self._syncParamsPopup();
+        });
+        dashRow.appendChild(b);
+        return b;
+      });
+      popup.appendChild(dashRow);
+
+      self.handle.container.appendChild(popup);
+      self.paramsPopup = popup;
+    },
+
+    // The shape the params popup is currently editing: the selected stroke
+    // shape or marker, if any. Null → the popup edits the global default.
+    _paramsTargetShape: function() {
+      var s = this.editingShape;
+      if (s && (s.kind === "marker" || this._isStrokeShape(s.kind))) return s;
+      return null;
+    },
+
+    _syncParamsPopup: function() {
+      var shape = this._paramsTargetShape();
+      var width, opacity, dash;
+      if (shape) {
+        var st = shape.style || {};
+        // A marker stores width in image px (zoom-anchored) → show on-screen.
+        width = shape.kind === "marker"
+          ? Math.max(1, Math.round((st.width || 2) * this._markerScale()))
+          : (st.width || 2);
+        opacity = st.opacity == null ? 1 : st.opacity;
+        dash = st.dash || "solid";
+      } else {
+        var lp = this.lineParams || {};
+        width = lp.width || 2;
+        opacity = lp.opacity == null ? 1 : lp.opacity;
+        dash = lp.dash || "solid";
+      }
+      if (this._paramsWeightInput) {
+        this._paramsWeightInput.value = width;
+        this._paramsWeightVal.textContent = width + "px";
+      }
+      if (this._paramsOpacityInput) {
+        var pct = Math.round(opacity * 100);
+        this._paramsOpacityInput.value = pct;
+        this._paramsOpacityVal.textContent = pct + "%";
+      }
+      (this._paramsDashBtns || []).forEach(function(b) {
+        b.classList.toggle("is-selected", b.dataset.dash === dash);
+      });
+    },
+
+    // Set one line param. When a stroke shape or marker is selected, edits
+    // that shape live (committed with emit + undo on slider release / dash
+    // click); otherwise edits `lineParams` — the default for new shapes.
+    _setLineParam: function(prop, value, commit) {
+      var shape = this._paramsTargetShape();
+      if (shape) {
+        if (!this._lineParamBefore) this._lineParamBefore = this._snapshotShape(shape);
+        shape.style = Object.assign({}, shape.style || {});
+        // Slider thickness is on-screen px; a marker stores it in image px.
+        if (prop === "width" && shape.kind === "marker") {
+          shape.style.width = value / this._markerScale();
+        } else {
+          shape.style[prop] = value;
+        }
+        if (shape.kind === "marker") this._renderShape(shape);
+        else this._applyLineParams(shape.el, shape.style);
+      } else {
+        this.lineParams = this.lineParams || {};
+        this.lineParams[prop] = value;
+      }
+      if (commit) {
+        if (shape && shape.uuid) {
+          this._emitChanged();
+          if (this._lineParamBefore) {
+            this._pushUndo(shape.uuid, this._lineParamBefore, this._snapshotShape(shape));
+          }
+        }
+        this._lineParamBefore = null;
+      }
+    },
+
     // Paint the hue ring once. The torus is drawn pixel-by-pixel via
     // `ImageData` so each ring pixel maps to its angle's hue at full
     // saturation + 50% lightness. A 1-pixel alpha falloff at both
@@ -3178,6 +3382,18 @@
     // Select slot `i` — make it the active draw color. Pure selection:
     // no palette mutation and no persist (editing the hue picker is what
     // mutates a slot). Clamps out-of-range indices defensively.
+    // Toggle the hue picker (colors popup) anchored to a swatch — the new
+    // entry point for editing a slot's color now that the palette button is
+    // the line-parameters button.
+    _openColorsForSwatch: function(i, swatchEl) {
+      if (this._openPopupKind === "colors") {
+        this._closePopup();
+        return;
+      }
+      this._colorsTrigger = swatchEl;
+      this._openPopup("colors");
+    },
+
     _selectSlot: function(i) {
       if (!this._colorSlots || !this._colorSlots.length) return;
       if (i < 0 || i >= this._colorSlots.length) i = 0;
@@ -3253,7 +3469,15 @@
         if (i === self._activeSlot) b.classList.add("is-selected");
         b.addEventListener("click", function(e) {
           e.preventDefault();
-          self._selectSlot(i);
+          // Click an inactive swatch → select it. Click the already-active
+          // swatch again (or double-tap any swatch, whose 2nd click lands on
+          // the now-active one) → open the hue picker to edit that color.
+          if (self._activeSlot === i) {
+            self._openColorsForSwatch(i, b);
+          } else {
+            self._closePopup();
+            self._selectSlot(i);
+          }
         });
         self.toolbar.insertBefore(b, self.colorsMoreBtn);
         return b;
@@ -3273,12 +3497,18 @@
     _openPopup: function(kind) {
       var popup = kind === "tools" ? this.toolsPopup
                 : kind === "colors" ? this.colorsPopup
+                : kind === "params" ? this.paramsPopup
                 : this.markerPopup;
+      // The colors (hue) popup now opens from a swatch, so it anchors to the
+      // swatch that triggered it (`_colorsTrigger`); falls back to the params
+      // button if opened without one.
       var trigger = kind === "tools" ? this.toolsMoreBtn
-                  : kind === "colors" ? this.colorsMoreBtn
+                  : kind === "colors" ? (this._colorsTrigger || this.paramsBtn)
+                  : kind === "params" ? this.paramsBtn
                   : this._markerToolBtn;
       if (!popup || !trigger) return;
       if (kind === "marker") this._syncMarkerPopup();
+      if (kind === "params") this._syncParamsPopup();
 
       // The hue picker edits the selected slot, so start its knobs at
       // that slot's color when the colors popup opens; refresh the
@@ -3345,6 +3575,7 @@
       if (this.toolsPopup) this.toolsPopup.classList.remove("is-open");
       if (this.colorsPopup) this.colorsPopup.classList.remove("is-open");
       if (this.markerPopup) this.markerPopup.classList.remove("is-open");
+      if (this.paramsPopup) this.paramsPopup.classList.remove("is-open");
       this._openPopupKind = null;
       if (this._popupOutsideClick) {
         document.removeEventListener("pointerdown", this._popupOutsideClick, true);
@@ -3357,27 +3588,13 @@
       var btn = document.createElement("button");
       btn.type = "button";
       btn.dataset.tool = toolKey;
-      btn.title = toolKey === "marker" ? title + " (click again for style)" : title;
+      btn.title = title;
       btn.setAttribute("aria-label", title);
       btn.innerHTML = icon;
       btn.addEventListener("click", function(e) {
         e.preventDefault();
-        // The marker button doubles as the style entry. It opens the style
-        // popup (weight / opacity / dash) when either the marker tool is
-        // already active (edits the default for new strokes) OR a marker
-        // stroke is currently selected (edits that stroke). Otherwise it
-        // selects the tool.
-        if (toolKey === "marker" &&
-            (self.activeTool === "marker" ||
-             (self.editingShape && self.editingShape.kind === "marker"))) {
-          self._togglePopup("marker");
-          return;
-        }
         self._selectTool(toolKey === "cursor" ? null : toolKey);
       });
-      // The marker button doubles as the style-popup trigger; keep a ref
-      // so `_openPopup("marker")` can anchor the popup to it.
-      if (toolKey === "marker") self._markerToolBtn = btn;
       return btn;
     },
 
@@ -7182,6 +7399,9 @@
         this._applyMarkerStyle(path, this._currentMarkerStyle());
       } else {
         this._applyShapeColor(path, this.activeColor);
+        // Freehand is a stroke shape — preview the global line params while
+        // drawing so the draft matches the committed thickness/dash.
+        this._applyLineParams(path, this._currentLineParams());
       }
       this.svg.appendChild(path);
       var geom = { points: [[pt.x, pt.y]] };
@@ -7194,15 +7414,16 @@
     // dash are tool-level state (`markerStyle`) the style popup will edit;
     // color rides the shared `activeColor` palette like every other tool.
     _currentMarkerStyle: function() {
-      var m = this.markerStyle || {};
-      // `markerStyle.width` is the default thickness in ON-SCREEN px (the
-      // slider's domain). Convert to image px for storage so the rendered
-      // width tracks zoom; `_applyMarkerStyle` multiplies it back by scale.
+      // Markers pull thickness / opacity / dash from the global line params
+      // (the Parameters button) — same source as the other stroke shapes.
+      // Width is on-screen px; convert to image px so the rendered marker
+      // tracks zoom (`_applyMarkerStyle` multiplies it back by scale).
+      var lp = this.lineParams || {};
       return {
         color: this.activeColor || "#3b82f6",
-        width: (m.width || 10) / this._markerScale(),
-        opacity: m.opacity == null ? 1 : m.opacity,
-        dash: m.dash || "solid"
+        width: (lp.width || 2) / this._markerScale(),
+        opacity: lp.opacity == null ? 1 : lp.opacity,
+        dash: lp.dash || "solid"
       };
     },
 
@@ -7876,11 +8097,13 @@
       // hit-test that relied on the topmost-element heuristic; the
       // data attr is the explicit-opt-in path.
       el.setAttribute("data-fresco-suppress-tap", "");
-      // Markers persist their full appearance (color + thickness/opacity/
-      // dash); every other kind just carries its color when one was picked.
-      var style = kind === "marker"
-        ? this._currentMarkerStyle()
-        : (this.activeColor ? { color: this.activeColor } : null);
+      // Markers persist their full appearance; stroke shapes (rect / circle /
+      // polygon / freehand) adopt the global line params (color + thickness /
+      // opacity / dash); every other kind just carries its color.
+      var style;
+      if (kind === "marker") style = this._currentMarkerStyle();
+      else if (this._isStrokeShape(kind)) style = this._currentLineParams();
+      else style = this.activeColor ? { color: this.activeColor } : null;
       var shape = {
         uuid: uuid,
         kind: kind,
@@ -7909,6 +8132,7 @@
       }
       this.shapes.push(shape);
       this._renderShape(shape);
+      if (this._isStrokeShape(kind)) this._applyLineParams(el, style);
       this._attachShapeInteractions(shape);
 
       this._emitChanged();
@@ -8257,6 +8481,9 @@
       if (shape.kind !== "marker" && shape.style && shape.style.color) {
         this._applyShapeColor(el, shape.style.color);
       }
+      // Restore persisted line params (thickness / opacity / dash) on stroke
+      // shapes; older annotations without them fall back to the 2px default.
+      if (this._isStrokeShape(shape.kind)) this._applyLineParams(el, shape.style);
       this._attachShapeInteractions(shape);
     },
 
@@ -9762,6 +9989,7 @@
       if (shape.kind !== "marker" && shape.style && shape.style.color) {
         this._applyShapeColor(shape.el, shape.style.color);
       }
+      if (this._isStrokeShape(shape.kind)) this._applyLineParams(shape.el, shape.style);
       if (this.editingShape === shape) {
         // Rebuild rather than reposition: an undo/redo can change the node
         // count or a node's smooth/corner type, which the handle elements

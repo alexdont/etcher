@@ -642,6 +642,13 @@
       "  filter: drop-shadow(0 0 3px rgba(245, 158, 11, 0.7));",
       "}",
       ".etcher-shape.is-multi-selected.is-moving { cursor: grabbing; }",
+      // Marquee rectangle drawn while box-selecting on the cursor tool.
+      ".etcher-marquee {",
+      "  position: absolute; pointer-events: none; z-index: 11;",
+      "  border: 1px solid rgba(59, 130, 246, 0.9);",
+      "  background: rgba(59, 130, 246, 0.12);",
+      "  border-radius: 1px;",
+      "}",
       ".etcher-handle {",
       // Stroke + interactive fills bind to `currentColor` so a handle
       // inherits the shape's painted color (set via `style.color`
@@ -3588,6 +3595,10 @@
         self._closePopup();
       }
 
+      // Lock/unlock drag-pan for box-select now that the mode (and thus
+      // whether the cursor tool is "armed") has changed.
+      self._applyPanLock();
+
       self._dispatch("etcher:mode-changed", { annotationMode: on });
     },
 
@@ -3663,7 +3674,24 @@
       // newly-active button never sits in the collapsed set.
       self._layoutToolbar();
 
+      // Lock Fresco's drag-pan while the cursor tool is active (canvas mode)
+      // so a drag does box-select instead of panning — the grabber tool is
+      // now the way to pan.
+      self._applyPanLock();
+
       self._dispatch("etcher:tool-changed", { tool: toolKey });
+    },
+
+    // Lock single-pointer drag-pan when the cursor tool is active in
+    // annotation mode on a canvas, freeing the drag for marquee box-select.
+    // Pinch + wheel zoom are unaffected (setPanLocked only gates drag-pan).
+    // Strip mode keeps native scroll; the grabber + browse mode keep pan.
+    _applyPanLock: function() {
+      if (this.handleKind !== "canvas") return;
+      if (!this.handle || typeof this.handle.setPanLocked !== "function") return;
+      try {
+        this.handle.setPanLocked(!!this.annotationMode && this.activeTool == null);
+      } catch (_) {}
     },
 
     // Color picker — affects the active draft if drawing, the editing
@@ -5331,9 +5359,24 @@
           }
         }
         if (!hit) {
-          // Empty click in annotation cursor mode (no modifier)
-          // clears any active multi-selection — same affordance
-          // most graphics apps use for \"click outside to deselect\".
+          // Empty press in annotation cursor mode on a canvas: begin a
+          // marquee box-select. Shift extends the current group; without it
+          // the group resets now (a plain click with no drag just deselects).
+          if (self.annotationMode && self.activeTool == null &&
+              self.handleKind === "canvas") {
+            if (!e.shiftKey) self._clearSelection();
+            self._exitEditMode();
+            self._boxSelect = {
+              startX: e.clientX,
+              startY: e.clientY,
+              startImg: ptDirect,
+              additive: !!e.shiftKey,
+              moved: false,
+              el: null
+            };
+            return;
+          }
+          // Strip / browse: keep the deselect-on-empty-click affordance.
           if (self.annotationMode && self.activeTool == null && !e.shiftKey &&
               self.selectedShapes && self.selectedShapes.length > 0) {
             self._clearSelection();
@@ -5391,12 +5434,31 @@
         };
       };
       self._docPointerMove = function(e) {
+        if (self._boxSelect) {
+          var bs = self._boxSelect;
+          if (!bs.moved) {
+            var bdx = e.clientX - bs.startX, bdy = e.clientY - bs.startY;
+            if (bdx * bdx + bdy * bdy < 16) return; // 4px before the marquee shows
+            bs.moved = true;
+          }
+          self._updateBoxSelect(e);
+          return;
+        }
         if (!self._pendingTap) return;
         var dx = e.clientX - self._pendingTap.startX;
         var dy = e.clientY - self._pendingTap.startY;
         if (dx * dx + dy * dy > 25) self._pendingTap = null; // 5px dead-zone
       };
       self._docPointerUp = function(e) {
+        if (self._boxSelect) {
+          var bs = self._boxSelect;
+          self._boxSelect = null;
+          if (bs.el && bs.el.parentNode) bs.el.parentNode.removeChild(bs.el);
+          // A real drag selects the enclosed shapes; a no-move press was
+          // just a deselect click (already handled on pointerdown).
+          if (bs.moved) self._commitBoxSelect(bs, e);
+          return;
+        }
         var tap = self._pendingTap;
         self._pendingTap = null;
         if (!tap) return;
@@ -5864,7 +5926,10 @@
         case "circle":
           return { x: g.cx - g.r, y: g.cy - g.r, w: 2 * g.r, h: 2 * g.r };
         case "polygon":
-          return fromPoints(g.points);
+          // `g.points` are [x,y] tuples; `fromPoints` reads {x,y}.
+          return fromPoints((g.points || []).map(function(p) {
+            return { x: p[0], y: p[1] };
+          }));
         case "marker":
         case "freehand": {
           if (g.nodes) {
@@ -6155,6 +6220,46 @@
     _isInSelection: function(shape) {
       return !!(this.selectedShapes &&
                 this.selectedShapes.indexOf(shape) !== -1);
+    },
+
+    // Draw/resize the marquee rectangle (container px) during a box-select.
+    _updateBoxSelect: function(e) {
+      var bs = this._boxSelect;
+      if (!bs) return;
+      if (!bs.el) {
+        var box = document.createElement("div");
+        box.className = "etcher-marquee";
+        this.overlayWrapper.appendChild(box);
+        bs.el = box;
+      }
+      var r = this.handle.container.getBoundingClientRect();
+      var x1 = bs.startX - r.left, y1 = bs.startY - r.top;
+      var x2 = e.clientX - r.left, y2 = e.clientY - r.top;
+      bs.el.style.left = Math.min(x1, x2) + "px";
+      bs.el.style.top = Math.min(y1, y2) + "px";
+      bs.el.style.width = Math.abs(x2 - x1) + "px";
+      bs.el.style.height = Math.abs(y2 - y1) + "px";
+    },
+
+    // Select every shape the marquee touches (bbox intersection, in image
+    // px). Non-additive box-selects already cleared the group on press.
+    _commitBoxSelect: function(bs, e) {
+      var self = this;
+      var endImg;
+      try { endImg = self._toImage(e); } catch (_) { return; }
+      var s0 = bs.startImg;
+      if (!s0) return;
+      var bx1 = Math.min(s0.x, endImg.x), by1 = Math.min(s0.y, endImg.y);
+      var bx2 = Math.max(s0.x, endImg.x), by2 = Math.max(s0.y, endImg.y);
+      (self.shapes || []).forEach(function(s) {
+        if (!s.uuid) return;
+        var bb = self._shapeBBoxImagePx(s);
+        if (!bb) return;
+        if (bb.x <= bx2 && bb.x + bb.w >= bx1 &&
+            bb.y <= by2 && bb.y + bb.h >= by1) {
+          self._addToSelection(s);
+        }
+      });
     },
 
     // Drag every multi-selected shape together. `anchorShape` is the

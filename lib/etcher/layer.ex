@@ -29,7 +29,7 @@ defmodule Etcher.Layer do
 
       <Etcher.layer
         fresco_id="board"
-        tools={[:rectangle, :circle, :polygon, :freehand, :callout, :text, :dimension, :eraser]}
+        tools={[:grabber, :rectangle, :circle, :polygon, :freehand, :marker, :callout, :text, :dimension, :eraser]}
       />
 
   ## Strip mode
@@ -126,12 +126,13 @@ defmodule Etcher.Layer do
   ## Tools
 
   Configure which drawing tools appear in the bottom toolbar. The default
-  exposes all eight drawing kinds plus the eraser:
+  exposes the navigation grabber, all drawing kinds, and the eraser:
 
-      tools={[:rectangle, :circle, :polygon, :freehand, :callout, :text, :dimension, :line, :eraser]}
+      tools={[:grabber, :rectangle, :circle, :polygon, :freehand, :marker, :callout, :text, :dimension, :line, :eraser]}
 
   Subsetting hides specific tools (e.g. only `:rectangle, :freehand`).
-  Drop `:eraser` if you don't want users deleting from the toolbar.
+  Drop `:eraser` if you don't want users deleting from the toolbar, or
+  `:grabber` if pan-only mode isn't needed.
 
   ## Annotation hydration
 

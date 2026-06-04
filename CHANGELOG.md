@@ -4,6 +4,65 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.6.0] — 2026-06-04
+
+### Added
+
+- **Freehand is now a vector curve tool with a pen editor.** A stroke is
+  simplified (Ramer–Douglas–Peucker) and fitted (Schneider's algorithm,
+  the one Paper.js uses) into a sparse run of cubic-bezier nodes on
+  release, stored as `geometry.nodes` and rendered as an SVG `<path>`.
+  Selecting a stroke opens the editor: drag **anchors** and their
+  **bezier handles**, **double-click the curve** to insert a node, select
+  a node and press **Delete** to remove it, **double-click an anchor** to
+  toggle corner (independent handles) ⇄ smooth (mirrored, equal-length
+  handles). Legacy `{points}` freehand still renders.
+- **Marker tool** — a freeform stroke rendered thick, opaque, round-capped
+  in the selected color, with the same simplify-and-fit pipeline and full
+  pen-editor parity. Each stroke carries its appearance
+  (`color` / `width` / `opacity` / `dash`) in `style`; thickness is
+  zoom-anchored (scales with the image like ink). The tool stays armed for
+  several strokes in a row.
+- **Grabber (hand) tool** — pan-only navigation, like Photoshop/Affinity.
+  The overlay stays click-through so a drag pans Fresco, and shape
+  hover/selection is suppressed while it's active. Grouped beside the
+  cursor.
+- **Marquee box-select on the cursor tool.** Drag empty canvas to select
+  every shape the marquee touches (Shift extends the group); the group
+  feeds the existing multi-select move / delete. Drag-pan is locked in
+  cursor mode (panning now lives on the grabber); wheel/pinch zoom still
+  work.
+- **Parameters button** (line thickness / opacity / dash) replaces the
+  palette `[⋯]`. It sets the global default for every new stroke shape
+  (rectangle, circle, polygon, freehand, marker); with a shape — or a
+  multi-selection — selected it edits those live, with undo.
+- **Multi-selection styling** — color and line params apply across a
+  box/shift selection at once.
+- **Color pickup on select** — selecting a shape switches the toolbar's
+  active color to that shape's color (activating a matching swatch, or
+  eyedropping into the active slot).
+
+### Changed
+
+- **The palette `[⋯]` is now the Parameters button; the hue picker opens
+  from the swatches.** Click the active swatch again, or double-tap any
+  swatch, to edit that color. The colors popup still holds the hue ring,
+  presets, and overflowed slots.
+- Shape tooltips are suppressed while the marker tool is active so they
+  don't sit over what you're drawing.
+
+### Fixed
+
+- Markers no longer collapse to a 3px line on hover/select (thickness is
+  applied as an inline style so the state-class rules can't override it).
+- The pen editor's anchors, handles, and tethers recolor live when the
+  shape's color changes, instead of waiting for a reselect.
+- Clicks on Etcher's own toolbar / popups no longer clear the selection or
+  drop a shape out of edit mode (an empty-canvas press was being read as a
+  box-select).
+- `_shapeBBoxImagePx` for polygons read `.x` / `.y` off `[x, y]` tuples and
+  produced a `NaN` bbox — used by box-select and multi-image routing.
+
 ## [0.5.5] — 2026-06-03
 
 ### Changed

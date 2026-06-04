@@ -5,10 +5,11 @@ defmodule Etcher do
 
   An *etcher* is the tool that incises marks into a surface — Etcher the
   library does the same digitally: users draw shapes (rectangle, circle,
-  polygon, freehand, callout, text, dimension) on top of a `<Fresco.canvas>`;
-  the LiveView fires events with the resulting annotations; the consumer
-  stores them inside the canvas's `extensions.etcher` blob and saves
-  the whole canvas to a `.fresco` file.
+  polygon, freehand, marker, callout, text, dimension, line) on top of a
+  `<Fresco.canvas>`, with a grabber (hand) tool for panning; the LiveView
+  fires events with the resulting annotations; the consumer stores them
+  inside the canvas's `extensions.etcher` blob and saves the whole canvas
+  to a `.fresco` file.
 
   ## Architecture
 
@@ -36,7 +37,7 @@ defmodule Etcher do
       def deps do
         [
           {:fresco, "~> 0.5"},
-          {:etcher, "~> 0.3"}
+          {:etcher, "~> 0.6"}
         ]
       end
 

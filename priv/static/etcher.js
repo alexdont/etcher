@@ -7111,7 +7111,11 @@
       el.style.strokeOpacity = String(s.opacity == null ? 1 : s.opacity);
       el.style.strokeLinecap = "round";
       el.style.strokeLinejoin = "round";
-      el.setAttribute("stroke-width", w);
+      // Inline style (not a presentation attribute) so the generic
+      // `.is-hovered` / `.is-selected` CSS rules — which set stroke-width:3 —
+      // don't override and visually thin the marker on hover/select.
+      el.style.strokeWidth = w + "px";
+      el.removeAttribute("stroke-width");
       if (s.dash === "dashed") {
         el.setAttribute("stroke-dasharray", (w * 2.2) + " " + (w * 1.6));
       } else if (s.dash === "dotted") {

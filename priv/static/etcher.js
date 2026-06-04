@@ -170,6 +170,7 @@
     polygon:  '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3.5 21 9.5 18 20H6L3 9.5 12 3.5Z"/></svg>',
     freehand: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3 17.25c2-2 3-4 5-4s2.5 2 4.5 2 3-2 5-2 2.5 1 3.5 1"/></svg>',
     marker: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9.53 16.122a3 3 0 0 0-5.78 1.128 2.25 2.25 0 0 1-2.4 2.245 4.5 4.5 0 0 0 8.4-2.245c0-.399-.078-.78-.22-1.128Zm0 0a15.998 15.998 0 0 0 3.388-1.62m-5.043-.025a15.994 15.994 0 0 1 1.622-3.395m3.42 3.42a15.995 15.995 0 0 0 4.764-4.648l3.876-5.814a1.151 1.151 0 0 0-1.597-1.597L14.146 6.32a15.996 15.996 0 0 0-4.649 4.763m3.42 3.42a6.776 6.776 0 0 0-3.42-3.42"/></svg>',
+    grabber: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15 10.5V6a1.5 1.5 0 0 0-3 0m3 4.5V4.5a1.5 1.5 0 0 0-3 0v6m3 0V9a1.5 1.5 0 0 1 3 0v5.25a6.75 6.75 0 0 1-6.75 6.75H9.75a6.75 6.75 0 0 1-5.74-3.2l-2.39-3.86a1.5 1.5 0 0 1 2.46-1.72L6 15.75V6a1.5 1.5 0 0 1 3 0v4.5m3 0V6"/></svg>',
     // Callout / leader line — small filled dot at the anchor, a thin
     // diagonal line, and a sample "T" at the text endpoint. Mimics
     // the blueprint-callout shape so the toolbar icon advertises what
@@ -853,6 +854,7 @@
     polygon:   { icon: ICONS.polygon,   title: "Polygon (double-click to close)" },
     freehand:  { icon: ICONS.freehand,  title: "Freehand" },
     marker:    { icon: ICONS.marker,    title: "Marker" },
+    grabber:   { icon: ICONS.grabber,   title: "Grab (pan only)" },
     callout:   { icon: ICONS.callout,   title: "Callout (point at something, write a label)" },
     text:      { icon: ICONS.text,      title: "Text label (drag a box, then type)" },
     dimension: { icon: ICONS.dimension, title: "Dimension (line with arrows + slidable label)" },
@@ -3627,7 +3629,13 @@
       // catch their own hover + click independently via CSS, so the
       // wrapper can stay `pointer-events: none` in every other state and
       // let background clicks pass through to OSD's canvas.
-      var drawingNow = toolKey != null;
+      // The grabber (hand) tool pans only: even though it's an active tool,
+      // it must NOT capture pointer events — they pass through the overlay to
+      // Fresco so a drag pans. Selection is suppressed separately in the doc
+      // listeners (they bail while the grabber is active). So it counts as
+      // "not drawing" for capture purposes.
+      var grabbing = toolKey === "grabber";
+      var drawingNow = toolKey != null && !grabbing;
       if (self.overlayWrapper) {
         self.overlayWrapper.style.pointerEvents = drawingNow ? "auto" : "none";
         self.overlayWrapper.classList.toggle("is-drawing", drawingNow);
@@ -3642,7 +3650,14 @@
         self.handle.container.classList.toggle("etcher-strip-drawing", drawingNow);
         self.handle.container.style.cursor = drawingNow ? "crosshair" : "";
       }
-      if (drawingNow) self._hideTooltip();
+      // Grabber shows a hand/grab cursor on the viewer; events pass through
+      // the click-through overlay to Fresco for panning. Cleared when leaving
+      // the tool (strip mode already manages its own cursor above).
+      if (self.handle && self.handle.container) {
+        if (grabbing) self.handle.container.style.cursor = "grab";
+        else if (self.handleKind !== "strip") self.handle.container.style.cursor = "";
+      }
+      if (drawingNow || grabbing) self._hideTooltip();
 
       // Active tool changed → re-pin in the overflow layout so the
       // newly-active button never sits in the collapsed set.
@@ -5246,6 +5261,11 @@
       }
 
       self._docMouseMove = function(e) {
+        // Grabber (hand) tool: pan only — never hover or highlight shapes.
+        if (self.activeTool === "grabber") {
+          if (self._hoveredShape) self._setHoveredShape(null, false);
+          return;
+        }
         if (!overContainer(e)) {
           if (self._hoveredShape) self._setHoveredShape(null, false);
           return;
@@ -5279,6 +5299,8 @@
       // actual pan since shapes are `pointer-events: none`.
       self._docPointerDown = function(e) {
         if (e.button !== 0) return;
+        // Grabber (hand) tool: the press is a pan, never a shape tap.
+        if (self.activeTool === "grabber") return;
         if (!overContainer(e)) return;
         // A handle/title/toolbar/modal element under the cursor
         // handles its own event; don't shadow it with a shape tap.

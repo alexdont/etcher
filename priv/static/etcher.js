@@ -3073,16 +3073,24 @@
       self.paramsPopup = popup;
     },
 
-    // The shape the params popup is currently editing: the selected stroke
-    // shape or marker, if any. Null → the popup edits the global default.
-    _paramsTargetShape: function() {
-      var s = this.editingShape;
-      if (s && (s.kind === "marker" || this._isStrokeShape(s.kind))) return s;
-      return null;
+    // The shapes the params popup edits: the multi-selection if there is one,
+    // else the single shape in edit mode — filtered to stroke/marker kinds.
+    // Empty → the popup edits the global default for new shapes.
+    _paramsTargetShapes: function() {
+      var self = this;
+      function eligible(s) {
+        return !!s && (s.kind === "marker" || self._isStrokeShape(s.kind));
+      }
+      if (this.selectedShapes && this.selectedShapes.length) {
+        return this.selectedShapes.filter(eligible);
+      }
+      if (eligible(this.editingShape)) return [this.editingShape];
+      return [];
     },
 
     _syncParamsPopup: function() {
-      var shape = this._paramsTargetShape();
+      // Reflect the first target shape (the group shares one set of controls).
+      var shape = this._paramsTargetShapes()[0];
       var width, opacity, dash;
       if (shape) {
         var st = shape.style || {};
@@ -3112,32 +3120,42 @@
       });
     },
 
-    // Set one line param. When a stroke shape or marker is selected, edits
-    // that shape live (committed with emit + undo on slider release / dash
-    // click); otherwise edits `lineParams` — the default for new shapes.
+    // Set one line param. When shapes are selected (single edit-mode shape OR
+    // a box/shift multi-selection), edits all of them live — committed with a
+    // per-shape undo entry on slider release / dash click. Otherwise edits
+    // `lineParams`, the default for new shapes.
     _setLineParam: function(prop, value, commit) {
-      var shape = this._paramsTargetShape();
-      if (shape) {
-        if (!this._lineParamBefore) this._lineParamBefore = this._snapshotShape(shape);
-        shape.style = Object.assign({}, shape.style || {});
-        // Slider thickness is on-screen px; a marker stores it in image px.
-        if (prop === "width" && shape.kind === "marker") {
-          shape.style.width = value / this._markerScale();
-        } else {
-          shape.style[prop] = value;
+      var self = this;
+      var shapes = this._paramsTargetShapes();
+      if (shapes.length) {
+        if (!this._lineParamBefore) {
+          this._lineParamBefore = shapes.map(function(s) {
+            return { uuid: s.uuid, before: self._snapshotShape(s) };
+          });
         }
-        if (shape.kind === "marker") this._renderShape(shape);
-        else this._applyLineParams(shape.el, shape.style);
+        shapes.forEach(function(shape) {
+          shape.style = Object.assign({}, shape.style || {});
+          // Slider thickness is on-screen px; a marker stores it in image px.
+          if (prop === "width" && shape.kind === "marker") {
+            shape.style.width = value / self._markerScale();
+          } else {
+            shape.style[prop] = value;
+          }
+          if (shape.kind === "marker") self._renderShape(shape);
+          else self._applyLineParams(shape.el, shape.style);
+        });
       } else {
         this.lineParams = this.lineParams || {};
         this.lineParams[prop] = value;
       }
       if (commit) {
-        if (shape && shape.uuid) {
+        if (this._lineParamBefore && this._lineParamBefore.length) {
           this._emitChanged();
-          if (this._lineParamBefore) {
-            this._pushUndo(shape.uuid, this._lineParamBefore, this._snapshotShape(shape));
-          }
+          this._lineParamBefore.forEach(function(rec) {
+            if (!rec.uuid) return;
+            var shape = self.shapes.find(function(s) { return s.uuid === rec.uuid; });
+            if (shape) self._pushUndo(rec.uuid, rec.before, self._snapshotShape(shape));
+          });
         }
         this._lineParamBefore = null;
       }
@@ -3956,17 +3974,23 @@
 
       // Apply to the currently-edited shape and commit upstream so the
       // server's `style` field reflects the change.
-      var shape = this.editingShape;
-      if (shape && shape.uuid) {
-        var historyBefore = this._snapshotShape(shape);
+      // Recolor the whole selection: a box/shift multi-selection if present,
+      // else the single edit-mode shape. Each gets its own undo entry.
+      var self = this;
+      var colorTargets = (this.selectedShapes && this.selectedShapes.length)
+        ? this.selectedShapes.slice()
+        : (this.editingShape ? [this.editingShape] : []);
+      colorTargets.forEach(function(shape) {
+        if (!shape.uuid) return;
+        var before = self._snapshotShape(shape);
         shape.style = Object.assign({}, shape.style || {}, { color: color });
-        if (shape.kind === "marker") this._renderShape(shape);
-        else this._applyShapeColor(shape.el, color);
+        if (shape.kind === "marker") self._renderShape(shape);
+        else self._applyShapeColor(shape.el, color);
         // Keep the inline title sibling in sync with the shape color.
         if (shape.titleGroup) shape.titleGroup.style.color = color || "";
-        this._emitChanged();
-        this._pushUndo(shape.uuid, historyBefore, this._snapshotShape(shape));
-      }
+        self._pushUndo(shape.uuid, before, self._snapshotShape(shape));
+      });
+      if (colorTargets.length) self._emitChanged();
 
       // Repaint any active handles so the vertex dots match the new
       // shape color immediately instead of waiting for the next handle
@@ -5511,6 +5535,12 @@
           if (self._hoveredShape) self._setHoveredShape(null, false);
           return;
         }
+        // Over Etcher's own chrome (toolbar / popup / tooltip): no shape hover.
+        if (e.target.closest &&
+            e.target.closest(".etcher-toolbar, .etcher-popup, .etcher-tooltip")) {
+          if (self._hoveredShape) self._setHoveredShape(null, false);
+          return;
+        }
         if (!overContainer(e)) {
           if (self._hoveredShape) self._setHoveredShape(null, false);
           return;
@@ -5546,6 +5576,14 @@
         if (e.button !== 0) return;
         // Grabber (hand) tool: the press is a pan, never a shape tap.
         if (self.activeTool === "grabber") return;
+        // Clicks on Etcher's own chrome (toolbar, popups, tooltip) aren't
+        // canvas interactions — don't deselect, box-select, or tap. Without
+        // this, clicking the Parameters/colors UI while shapes are selected
+        // would wipe the selection (an empty-canvas press → box-select).
+        if (e.target.closest &&
+            e.target.closest(".etcher-toolbar, .etcher-popup, .etcher-tooltip")) {
+          return;
+        }
         if (!overContainer(e)) return;
         // A handle/title/toolbar/modal element under the cursor
         // handles its own event; don't shadow it with a shape tap.

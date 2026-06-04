@@ -5173,6 +5173,18 @@
         // input-owner — clicking in a comment composer that happens
         // to sit over a text shape shouldn't open the shape's editor.
         if (isInputOwner(e.target, self.overlayWrapper)) return;
+        // While a freehand curve is being edited, a double-click on the
+        // stroke inserts a new node there (anchor dblclick is handled on the
+        // handle itself and stops propagation, so it won't reach here).
+        if (self.editingShape && self.editingShape.kind === "freehand" &&
+            self.editingShape.geometry && self.editingShape.geometry.nodes) {
+          var ipt;
+          try { ipt = self._toImage(e); } catch (_) { return; }
+          if (self._freehandInsertNodeAt(self.editingShape, ipt)) {
+            e.preventDefault();
+            return;
+          }
+        }
         var pt;
         try { pt = self._toImage(e); } catch (_) { return; }
         var hit = self._shapeAt(pt);
@@ -7858,7 +7870,7 @@
     // against the live `editingShape` so subsequent re-renders can
     // re-apply `.is-selected` to the same dots.
     _selectVertex: function(shape, idx, additive) {
-      if (!shape || shape.kind !== "polygon") return;
+      if (!shape || (shape.kind !== "polygon" && shape.kind !== "freehand")) return;
       if (this.editingShape !== shape) return;
       if (!this.selectedVertexIndices) this.selectedVertexIndices = new Set();
       if (additive) {
@@ -7883,8 +7895,18 @@
     },
 
     _refreshVertexSelectionClass: function() {
-      var handles = this.handles || [];
       var sel = this.selectedVertexIndices;
+      // Freehand anchors live in the pen editor, not the generic `handles`
+      // array, so highlight them by node index there.
+      if (this.freehandEditor) {
+        this.freehandEditor.controls.forEach(function(c) {
+          if (c.type === "anchor") {
+            c.el.classList.toggle("is-selected", !!(sel && sel.has(c.nodeIdx)));
+          }
+        });
+        return;
+      }
+      var handles = this.handles || [];
       for (var i = 0; i < handles.length; i++) {
         handles[i].classList.toggle(
           "is-selected",
@@ -7902,9 +7924,30 @@
     _deleteSelectedVertex: function() {
       var shape = this.editingShape;
       var sel = this.selectedVertexIndices;
-      if (!shape || shape.kind !== "polygon" || !sel || sel.size === 0) {
-        return false;
+      if (!shape || !sel || sel.size === 0) return false;
+      // Freehand: drop the selected node(s); a curve needs at least 2 nodes
+      // (one segment) to survive. The new first/last nodes shed their now-
+      // dangling outer handles so the endpoints stay clean.
+      if (shape.kind === "freehand" && shape.geometry && shape.geometry.nodes) {
+        var nodes = shape.geometry.nodes;
+        if (nodes.length - sel.size < 2) return false;
+        var fHistory = this._snapshotShape(shape);
+        var fIdx = Array.from(sel).sort(function(a, b) { return b - a; });
+        var nextNodes = nodes.slice();
+        for (var fi = 0; fi < fIdx.length; fi++) nextNodes.splice(fIdx[fi], 1);
+        nextNodes[0].hIn = null;
+        nextNodes[nextNodes.length - 1].hOut = null;
+        shape.geometry = { nodes: nextNodes };
+        this.selectedVertexIndices.clear();
+        this._renderShape(shape);
+        this._renderFreehandEditor(shape);
+        if (shape.uuid) {
+          this._emitChanged();
+          this._pushUndo(shape.uuid, fHistory, this._snapshotShape(shape));
+        }
+        return true;
       }
+      if (shape.kind !== "polygon") return false;
       var pts = (shape.geometry && shape.geometry.points) || [];
       if (pts.length - sel.size < 3) return false;
       var historyBefore = this._snapshotShape(shape);
@@ -8412,6 +8455,9 @@
 
       this.freehandEditor = ed;
       this._positionFreehandEditor();
+      // Re-apply any node selection so the red highlight survives rebuilds
+      // (after an add/delete/toggle or an undo/redo).
+      this._refreshVertexSelectionClass();
     },
 
     _positionFreehandEditor: function() {
@@ -8483,9 +8529,16 @@
         handleEl.removeEventListener("pointerup", onUp);
         handleEl.removeEventListener("pointercancel", onUp);
         try { handleEl.releasePointerCapture(ev.pointerId); } catch (_) {}
-        if (dragged && shape.uuid) {
-          self._emitChanged();
-          self._pushUndo(shape.uuid, historyBefore, self._snapshotShape(shape));
+        if (dragged) {
+          self._clearVertexSelection();
+          if (shape.uuid) {
+            self._emitChanged();
+            self._pushUndo(shape.uuid, historyBefore, self._snapshotShape(shape));
+          }
+        } else {
+          // Pure click on an anchor → select it (red) so Backspace / Delete
+          // removes just this node; shift-click extends the selection set.
+          self._selectVertex(shape, idx, !!ev.shiftKey);
         }
       }
       handleEl.addEventListener("pointermove", onMove);
@@ -8571,6 +8624,69 @@
         this._emitChanged();
         this._pushUndo(shape.uuid, historyBefore, this._snapshotShape(shape));
       }
+    },
+
+    // Insert a node on the curve at the image-px point nearest `pt` (a double-
+    // click). Finds the closest segment + parameter t by sampling, bails if
+    // the click isn't close enough to the curve, then splits that cubic at t
+    // with De Casteljau — the split preserves the curve's exact shape, only
+    // adding an editable anchor. Returns true if a node was inserted.
+    _freehandInsertNodeAt: function(shape, pt) {
+      var nodes = shape.geometry && shape.geometry.nodes;
+      if (!nodes || nodes.length < 2) return false;
+      function add(a, b) { return [a[0] + b[0], a[1] + b[1]]; }
+      function sub(a, b) { return [a[0] - b[0], a[1] - b[1]]; }
+      function lerp(a, b, t) { return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]; }
+      function cubicAt(p0, p1, p2, p3, t) {
+        var mt = 1 - t, a = mt * mt * mt, b = 3 * mt * mt * t, c = 3 * mt * t * t, d = t * t * t;
+        return [
+          a * p0[0] + b * p1[0] + c * p2[0] + d * p3[0],
+          a * p0[1] + b * p1[1] + c * p2[1] + d * p3[1]
+        ];
+      }
+      var STEPS = 24;
+      var bestDist = Infinity, bestSeg = -1, bestT = 0;
+      for (var i = 0; i < nodes.length - 1; i++) {
+        var n0 = nodes[i], n1 = nodes[i + 1];
+        var p0 = n0.p, p1 = n0.hOut ? add(n0.p, n0.hOut) : n0.p;
+        var p2 = n1.hIn ? add(n1.p, n1.hIn) : n1.p, p3 = n1.p;
+        for (var s = 0; s <= STEPS; s++) {
+          var t = s / STEPS;
+          var q = cubicAt(p0, p1, p2, p3, t);
+          var dx = q[0] - pt.x, dy = q[1] - pt.y;
+          var d2 = dx * dx + dy * dy;
+          if (d2 < bestDist) { bestDist = d2; bestSeg = i; bestT = t; }
+        }
+      }
+      if (bestSeg < 0) return false;
+      // Only insert if the click landed reasonably on the stroke.
+      var tol = this._textDefaultBoxImagePx() * 0.8;
+      if (bestDist > tol * tol) return false;
+
+      var t = Math.min(0.999, Math.max(0.001, bestT));
+      var historyBefore = this._snapshotShape(shape);
+      var a0 = nodes[bestSeg], a1 = nodes[bestSeg + 1];
+      var c0 = a0.p, c1 = a0.hOut ? add(a0.p, a0.hOut) : a0.p;
+      var c2 = a1.hIn ? add(a1.p, a1.hIn) : a1.p, c3 = a1.p;
+      var l1 = lerp(c0, c1, t), t12 = lerp(c1, c2, t), r3 = lerp(c2, c3, t);
+      var l2 = lerp(l1, t12, t), r2 = lerp(t12, r3, t);
+      var m = lerp(l2, r2, t);
+      // Trim the neighbours' inner handles to the split (only where they had
+      // one — a straight join keeps its null handle and stays straight).
+      if (a0.hOut) a0.hOut = sub(l1, c0);
+      if (a1.hIn) a1.hIn = sub(r3, c3);
+      var newNode = { p: [m[0], m[1]], hIn: sub(l2, m), hOut: sub(r2, m), type: "smooth" };
+      nodes.splice(bestSeg + 1, 0, newNode);
+
+      // A pending node selection by index is now stale (indices shifted).
+      this._clearVertexSelection();
+      this._renderShape(shape);
+      this._renderFreehandEditor(shape);
+      if (shape.uuid) {
+        this._emitChanged();
+        this._pushUndo(shape.uuid, historyBefore, this._snapshotShape(shape));
+      }
+      return true;
     },
 
     // Returns image-px positions for each handle, in an order each kind's

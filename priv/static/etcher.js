@@ -648,6 +648,23 @@
       "  transform: scale(1.6); stroke-width: 3;",
       "  fill: currentColor; fill-opacity: 0.4;",
       "}",
+      // Freehand pen editor: thin tether from each anchor to its bezier
+      // control dots, and the control dots themselves (smaller + filled so
+      // they read as "handles" distinct from the white anchor dots). A
+      // corner anchor is shaded to set it apart from a smooth (white) one.
+      ".etcher-handle-line {",
+      "  stroke: currentColor; stroke-width: 1.25; stroke-opacity: 0.6;",
+      "  fill: none; pointer-events: none;",
+      "}",
+      ".etcher-bezier-handle {",
+      "  fill: currentColor; fill-opacity: 0.85; stroke: #fff; stroke-width: 1.5;",
+      "  pointer-events: auto; cursor: grab;",
+      "  transform-box: fill-box; transform-origin: center;",
+      "  transition: transform 80ms ease;",
+      "}",
+      ".etcher-bezier-handle:hover { transform: scale(1.5); }",
+      ".etcher-bezier-handle.is-dragging { cursor: grabbing; transform: scale(1.7); }",
+      ".etcher-anchor-handle.is-corner { fill: currentColor; fill-opacity: 0.5; }",
       // Midpoint "ghost" dot for polygon edges — faintly visible
       // whenever the polygon is in edit mode, so the user can see at
       // a glance where a new vertex would land. Fades to full
@@ -3597,8 +3614,7 @@
           bboxTopImage = { x: g.cx, y: g.cy - g.r };
           break;
         }
-        case "polygon":
-        case "freehand": {
+        case "polygon": {
           var minIX = Infinity, maxIX = -Infinity, minIY = Infinity;
           var pts = (g.points || []).map(function(p) {
             if (p[0] < minIX) minIX = p[0];
@@ -3610,6 +3626,41 @@
           el.setAttribute("points", pts);
           if (isFinite(minIX) && isFinite(minIY)) {
             bboxTopImage = { x: (minIX + maxIX) / 2, y: minIY };
+          }
+          break;
+        }
+        case "freehand": {
+          if (g.nodes) {
+            // Vector curve: draw the cubic-bezier path; derive the title-
+            // anchor bbox from the flattened curve so it hugs the real
+            // outline, not just the sparse anchor points.
+            el.setAttribute("d", self._freehandPathD(g.nodes, function(p) {
+              return self._imageToContainer({ x: p[0], y: p[1] });
+            }));
+            var flat = self._freehandFlatten(g);
+            var fMinX = Infinity, fMaxX = -Infinity, fMinY = Infinity;
+            for (var fi = 0; fi < flat.length; fi++) {
+              if (flat[fi][0] < fMinX) fMinX = flat[fi][0];
+              if (flat[fi][0] > fMaxX) fMaxX = flat[fi][0];
+              if (flat[fi][1] < fMinY) fMinY = flat[fi][1];
+            }
+            if (isFinite(fMinX) && isFinite(fMinY)) {
+              bboxTopImage = { x: (fMinX + fMaxX) / 2, y: fMinY };
+            }
+          } else {
+            // Legacy raw polyline (pre-vector strokes).
+            var lMinX = Infinity, lMaxX = -Infinity, lMinY = Infinity;
+            var lpts = (g.points || []).map(function(p) {
+              if (p[0] < lMinX) lMinX = p[0];
+              if (p[0] > lMaxX) lMaxX = p[0];
+              if (p[1] < lMinY) lMinY = p[1];
+              var s = self._imageToContainer({ x: p[0], y: p[1] });
+              return s.x + "," + s.y;
+            }).join(" ");
+            el.setAttribute("points", lpts);
+            if (isFinite(lMinX) && isFinite(lMinY)) {
+              bboxTopImage = { x: (lMinX + lMaxX) / 2, y: lMinY };
+            }
           }
           break;
         }
@@ -4165,7 +4216,9 @@
         case "polygon":
         case "freehand": {
           // Ray-casting: count edge crossings to the right of `pt`.
-          var pts = g.points || [];
+          // Freehand curves are flattened to a polyline first so the test
+          // follows the rendered bezier outline, not the sparse anchors.
+          var pts = shape.kind === "freehand" ? this._freehandFlatten(g) : (g.points || []);
           if (pts.length < 3) return false;
           var inside = false;
           for (var i = 0, j = pts.length - 1; i < pts.length; j = i++) {
@@ -4238,7 +4291,8 @@
         }
         case "polygon":
         case "freehand": {
-          var pts = (g.points || []).map(function(p) {
+          var src = shape.kind === "freehand" ? self._freehandFlatten(g) : (g.points || []);
+          var pts = src.map(function(p) {
             return self._imageToContainer({ x: p[0], y: p[1] });
           });
           var best = null;
@@ -5551,8 +5605,21 @@
         case "circle":
           return { x: g.cx - g.r, y: g.cy - g.r, w: 2 * g.r, h: 2 * g.r };
         case "polygon":
-        case "freehand":
           return fromPoints(g.points);
+        case "freehand": {
+          if (g.nodes) {
+            var flat = this._freehandFlatten(g);
+            if (!flat.length) return null;
+            var aMinX = flat[0][0], aMinY = flat[0][1], aMaxX = aMinX, aMaxY = aMinY;
+            for (var fi = 1; fi < flat.length; fi++) {
+              var fp = flat[fi];
+              if (fp[0] < aMinX) aMinX = fp[0]; else if (fp[0] > aMaxX) aMaxX = fp[0];
+              if (fp[1] < aMinY) aMinY = fp[1]; else if (fp[1] > aMaxY) aMaxY = fp[1];
+            }
+            return { x: aMinX, y: aMinY, w: aMaxX - aMinX, h: aMaxY - aMinY };
+          }
+          return fromPoints(g.points);
+        }
         case "line":
         case "dimension": {
           var ax = g.a[0], ay = g.a[1], bx = g.b[0], by = g.b[1];
@@ -6452,7 +6519,285 @@
 
     // -------------------------------------------------------------------------
     // Freehand
+    //
+    // A freehand stroke is captured as a raw polyline while the pointer is
+    // down (every ~2px sample), then on release it is *simplified and fitted*
+    // into a sparse run of cubic-bezier nodes. The committed geometry is
+    // `{ nodes: [{ p:[x,y], hIn:[dx,dy]|null, hOut:[dx,dy]|null, type }] }` in
+    // image px — `p` is the anchor, `hIn`/`hOut` are control handles stored as
+    // offsets from the anchor (null = no handle on that side, i.e. a straight
+    // join or a stroke endpoint), `type` is "smooth" (handles colinear, drag
+    // one and the other mirrors) or "corner" (handles move independently).
+    // Rendered as an SVG <path>. Legacy strokes saved in the old
+    // `{ points: [...] }` form still render as a <polyline> and are read via
+    // `_freehandFlatten`, so old canvases keep working untouched.
     // -------------------------------------------------------------------------
+
+    // Target error for the curve fit, expressed in IMAGE px but derived from a
+    // fixed on-screen target so the simplification feels the same at every
+    // zoom level. (1 container px ≈ `imgPerCont` image px at the current
+    // zoom; strip mode is identity so this collapses to the raw target.)
+    _freehandFitTolerance: function() {
+      var ca = this._imageToContainer({ x: 0,   y: 0 });
+      var cb = this._imageToContainer({ x: 100, y: 0 });
+      var dx = cb.x - ca.x, dy = cb.y - ca.y;
+      var contPer100 = Math.sqrt(dx * dx + dy * dy) || 100;
+      var imgPerCont = 100 / contPer100;
+      var TARGET_SCREEN_PX = 2.5;
+      return Math.max(0.5, TARGET_SCREEN_PX * imgPerCont);
+    },
+
+    // Ramer–Douglas–Peucker: drop points that lie within `epsilon` (image px)
+    // of the chord between their kept neighbours. A cheap denoise pass before
+    // the bezier fit so pointer jitter doesn't seed spurious control points.
+    _rdpSimplify: function(points, epsilon) {
+      if (points.length < 3) return points.slice();
+      var sqEps = epsilon * epsilon;
+      function sqSegDist(p, a, b) {
+        var x = a[0], y = a[1], dx = b[0] - x, dy = b[1] - y;
+        if (dx !== 0 || dy !== 0) {
+          var t = ((p[0] - x) * dx + (p[1] - y) * dy) / (dx * dx + dy * dy);
+          if (t > 1) { x = b[0]; y = b[1]; }
+          else if (t > 0) { x += dx * t; y += dy * t; }
+        }
+        dx = p[0] - x; dy = p[1] - y;
+        return dx * dx + dy * dy;
+      }
+      function simplify(pts, first, last, out) {
+        var maxSq = sqEps, index = -1;
+        for (var i = first + 1; i < last; i++) {
+          var sq = sqSegDist(pts[i], pts[first], pts[last]);
+          if (sq > maxSq) { index = i; maxSq = sq; }
+        }
+        if (index !== -1) {
+          if (index - first > 1) simplify(pts, first, index, out);
+          out.push(pts[index]);
+          if (last - index > 1) simplify(pts, index, last, out);
+        }
+      }
+      var out = [points[0]];
+      simplify(points, 0, points.length - 1, out);
+      out.push(points[points.length - 1]);
+      return out;
+    },
+
+    // Schneider's "Algorithm for Automatically Fitting Digitized Curves"
+    // (Graphics Gems, 1990) — the same fit Paper.js's path.simplify() uses.
+    // Input: a polyline (array of [x,y]) + a max error in image px. Output: an
+    // array of cubic beziers [[p0,c1,c2,p3], ...] sharing endpoints, each a
+    // [x,y] tuple. Recursively fits one cubic to the whole span, reparameter-
+    // izing with Newton–Raphson; if it can't hit the tolerance it splits at
+    // the worst point and fits each half. Self-contained — all vector math is
+    // local so it doesn't bloat the hook's method table.
+    _fitCurve: function(points, maxError) {
+      function sub(a, b) { return [a[0] - b[0], a[1] - b[1]]; }
+      function add(a, b) { return [a[0] + b[0], a[1] + b[1]]; }
+      function mul(a, s) { return [a[0] * s, a[1] * s]; }
+      function dot(a, b) { return a[0] * b[0] + a[1] * b[1]; }
+      function len(a) { return Math.sqrt(a[0] * a[0] + a[1] * a[1]); }
+      function normalize(a) { var m = len(a) || 1; return [a[0] / m, a[1] / m]; }
+
+      var pts = [];
+      for (var i = 0; i < points.length; i++) {
+        var p = points[i];
+        if (!pts.length ||
+            p[0] !== pts[pts.length - 1][0] || p[1] !== pts[pts.length - 1][1]) {
+          pts.push([p[0], p[1]]);
+        }
+      }
+      if (pts.length < 2) return [];
+
+      function q(ctrl, t) {
+        var mt = 1 - t;
+        var a = mul(ctrl[0], mt * mt * mt);
+        var b = mul(ctrl[1], 3 * mt * mt * t);
+        var c = mul(ctrl[2], 3 * mt * t * t);
+        var d = mul(ctrl[3], t * t * t);
+        return [a[0] + b[0] + c[0] + d[0], a[1] + b[1] + c[1] + d[1]];
+      }
+      function qprime(ctrl, t) {
+        var mt = 1 - t;
+        var a = mul(sub(ctrl[1], ctrl[0]), 3 * mt * mt);
+        var b = mul(sub(ctrl[2], ctrl[1]), 6 * mt * t);
+        var c = mul(sub(ctrl[3], ctrl[2]), 3 * t * t);
+        return [a[0] + b[0] + c[0], a[1] + b[1] + c[1]];
+      }
+      function qprimeprime(ctrl, t) {
+        var a = mul(add(sub(ctrl[2], mul(ctrl[1], 2)), ctrl[0]), 6 * (1 - t));
+        var b = mul(add(sub(ctrl[3], mul(ctrl[2], 2)), ctrl[1]), 6 * t);
+        return [a[0] + b[0], a[1] + b[1]];
+      }
+      function chordLengthParameterize(d) {
+        var u = [0];
+        for (var i = 1; i < d.length; i++) u[i] = u[i - 1] + len(sub(d[i], d[i - 1]));
+        var last = u[u.length - 1] || 1;
+        for (var j = 0; j < u.length; j++) u[j] /= last;
+        return u;
+      }
+      function generateBezier(d, u, t1, t2) {
+        var first = d[0], last = d[d.length - 1];
+        var bez = [first, null, null, last];
+        var nPts = d.length;
+        var A = [];
+        for (var i = 0; i < nPts; i++) {
+          var ui = u[i], mt = 1 - ui;
+          A.push([mul(t1, 3 * mt * mt * ui), mul(t2, 3 * mt * ui * ui)]);
+        }
+        var C = [[0, 0], [0, 0]], X = [0, 0];
+        for (var k = 0; k < nPts; k++) {
+          var a = A[k];
+          C[0][0] += dot(a[0], a[0]);
+          C[0][1] += dot(a[0], a[1]);
+          C[1][0] += dot(a[0], a[1]);
+          C[1][1] += dot(a[1], a[1]);
+          var tmp = sub(d[k], q([first, first, last, last], u[k]));
+          X[0] += dot(a[0], tmp);
+          X[1] += dot(a[1], tmp);
+        }
+        var det_C0_C1 = C[0][0] * C[1][1] - C[1][0] * C[0][1];
+        var det_C0_X  = C[0][0] * X[1]    - C[1][0] * X[0];
+        var det_X_C1  = X[0]    * C[1][1] - X[1]    * C[0][1];
+        var alpha_l = det_C0_C1 === 0 ? 0 : det_X_C1 / det_C0_C1;
+        var alpha_r = det_C0_C1 === 0 ? 0 : det_C0_X / det_C0_C1;
+        var segLength = len(sub(last, first));
+        var epsilon = 1e-6 * segLength;
+        if (alpha_l < epsilon || alpha_r < epsilon) {
+          var dist = segLength / 3;
+          bez[1] = add(first, mul(t1, dist));
+          bez[2] = add(last,  mul(t2, dist));
+        } else {
+          bez[1] = add(first, mul(t1, alpha_l));
+          bez[2] = add(last,  mul(t2, alpha_r));
+        }
+        return bez;
+      }
+      function computeMaxError(d, u, bez) {
+        var maxDist = 0, splitPoint = Math.floor(d.length / 2);
+        for (var i = 1; i < d.length - 1; i++) {
+          var v = sub(q(bez, u[i]), d[i]);
+          var dist = v[0] * v[0] + v[1] * v[1];
+          if (dist > maxDist) { maxDist = dist; splitPoint = i; }
+        }
+        return [maxDist, splitPoint];
+      }
+      function reparameterize(bez, d, u) {
+        return u.map(function(uu, i) {
+          var dd = sub(q(bez, uu), d[i]);
+          var qp = qprime(bez, uu);
+          var num = dot(dd, qp);
+          var den = dot(qp, qp) + dot(dd, qprimeprime(bez, uu));
+          return den === 0 ? uu : uu - num / den;
+        });
+      }
+
+      var MaxErrorSq = maxError * maxError;
+      function fitCubic(d, t1, t2) {
+        if (d.length === 2) {
+          var dist = len(sub(d[1], d[0])) / 3;
+          return [[d[0], add(d[0], mul(t1, dist)), add(d[1], mul(t2, dist)), d[1]]];
+        }
+        var u = chordLengthParameterize(d);
+        var bez = generateBezier(d, u, t1, t2);
+        var res = computeMaxError(d, u, bez);
+        var maxDist = res[0], splitPoint = res[1];
+        if (maxDist < MaxErrorSq) return [bez];
+        if (maxDist < MaxErrorSq * 4) {
+          for (var i = 0; i < 20; i++) {
+            var uPrime = reparameterize(bez, d, u);
+            bez = generateBezier(d, uPrime, t1, t2);
+            res = computeMaxError(d, uPrime, bez);
+            maxDist = res[0]; splitPoint = res[1];
+            if (maxDist < MaxErrorSq) return [bez];
+            u = uPrime;
+          }
+        }
+        var centerTangent = normalize(sub(d[splitPoint - 1], d[splitPoint + 1]));
+        var left  = fitCubic(d.slice(0, splitPoint + 1), t1, centerTangent);
+        var right = fitCubic(d.slice(splitPoint), mul(centerTangent, -1), t2);
+        return left.concat(right);
+      }
+
+      if (pts.length === 2) {
+        var t = normalize(sub(pts[1], pts[0]));
+        var dd = len(sub(pts[1], pts[0])) / 3;
+        return [[pts[0], add(pts[0], mul(t, dd)), sub(pts[1], mul(t, dd)), pts[1]]];
+      }
+      var leftTangent  = normalize(sub(pts[1], pts[0]));
+      var rightTangent = normalize(sub(pts[pts.length - 2], pts[pts.length - 1]));
+      return fitCubic(pts, leftTangent, rightTangent);
+    },
+
+    // Convert the fitter's bezier list into the stored node format. Adjacent
+    // beziers share an anchor, so node[k] carries the incoming handle from
+    // bez[k-1] and the outgoing handle into bez[k]. Interior nodes are
+    // "smooth" (the fit makes their handles colinear at the join); the two
+    // endpoints are "corner" with a single handle each.
+    _beziersToNodes: function(beziers) {
+      if (!beziers.length) return [];
+      function sub(a, b) { return [a[0] - b[0], a[1] - b[1]]; }
+      var first = beziers[0];
+      var nodes = [
+        { p: [first[0][0], first[0][1]], hIn: null, hOut: sub(first[1], first[0]), type: "corner" }
+      ];
+      for (var k = 0; k < beziers.length; k++) {
+        var b = beziers[k];
+        var p3 = b[3];
+        var hIn = sub(b[2], p3);
+        if (k < beziers.length - 1) {
+          nodes.push({ p: [p3[0], p3[1]], hIn: hIn, hOut: sub(beziers[k + 1][1], p3), type: "smooth" });
+        } else {
+          nodes.push({ p: [p3[0], p3[1]], hIn: hIn, hOut: null, type: "corner" });
+        }
+      }
+      return nodes;
+    },
+
+    // Sample a node run (or a legacy points array) into a dense polyline of
+    // image-px [x,y] points. Used everywhere the curve needs to be treated as
+    // a polygon: hit-testing, nearest-point for leader lines, and bbox.
+    _freehandFlatten: function(g, steps) {
+      if (!g) return [];
+      if (g.points) return g.points;
+      var nodes = g.nodes || [];
+      if (nodes.length === 0) return [];
+      if (nodes.length === 1) return [nodes[0].p.slice()];
+      steps = steps || 16;
+      function add(a, b) { return [a[0] + b[0], a[1] + b[1]]; }
+      function cubicAt(p0, p1, p2, p3, t) {
+        var mt = 1 - t, a = mt * mt * mt, b = 3 * mt * mt * t, c = 3 * mt * t * t, d = t * t * t;
+        return [
+          a * p0[0] + b * p1[0] + c * p2[0] + d * p3[0],
+          a * p0[1] + b * p1[1] + c * p2[1] + d * p3[1]
+        ];
+      }
+      var out = [nodes[0].p.slice()];
+      for (var i = 1; i < nodes.length; i++) {
+        var prev = nodes[i - 1], cur = nodes[i];
+        var p0 = prev.p, p3 = cur.p;
+        var p1 = prev.hOut ? add(prev.p, prev.hOut) : prev.p;
+        var p2 = cur.hIn ? add(cur.p, cur.hIn) : cur.p;
+        for (var s = 1; s <= steps; s++) out.push(cubicAt(p0, p1, p2, p3, s / steps));
+      }
+      return out;
+    },
+
+    // Build an SVG path `d` from nodes, projecting each anchor + handle through
+    // `mapPt` (image→container). A null handle collapses that side's control
+    // point onto the anchor, turning the segment into a straight line.
+    _freehandPathD: function(nodes, mapPt) {
+      if (!nodes || !nodes.length) return "";
+      function addv(a, b) { return [a[0] + b[0], a[1] + b[1]]; }
+      var d = "";
+      for (var i = 0; i < nodes.length; i++) {
+        var c = mapPt(nodes[i].p);
+        if (i === 0) { d = "M " + c.x + " " + c.y; continue; }
+        var prev = nodes[i - 1], cur = nodes[i];
+        var c1 = mapPt(prev.hOut ? addv(prev.p, prev.hOut) : prev.p);
+        var c2 = mapPt(cur.hIn ? addv(cur.p, cur.hIn) : cur.p);
+        d += " C " + c1.x + " " + c1.y + " " + c2.x + " " + c2.y + " " + c.x + " " + c.y;
+      }
+      return d;
+    },
 
     _startFreehand: function(pt, e) {
       var path = svgEl("polyline", { "stroke-width": "2", fill: "none" });
@@ -6480,9 +6825,29 @@
         this._cancelDraft();
         return;
       }
-      var el = this.draftState.el;
-      el.classList.remove("is-draft");
-      this._finalizeShape("freehand", { points: pts }, el);
+      var oldEl = this.draftState.el;
+      // Simplify + fit the raw samples into bezier nodes. RDP runs a touch
+      // tighter than the fit tolerance so it only strips genuine jitter and
+      // leaves real curvature for the fitter to model.
+      var tol = this._freehandFitTolerance();
+      var simplified = this._rdpSimplify(pts, tol * 0.6);
+      var beziers = this._fitCurve(simplified, tol);
+      // Degenerate fit (e.g. a single dot) — keep the raw polyline so the
+      // stroke is never lost; it stays in the legacy {points} format.
+      if (!beziers || !beziers.length) {
+        oldEl.classList.remove("is-draft");
+        this._finalizeShape("freehand", { points: pts }, oldEl);
+        return;
+      }
+      var nodes = this._beziersToNodes(beziers);
+      var path = svgEl("path", { "stroke-width": "2", fill: "none" });
+      path.classList.add("etcher-shape");
+      this._applyShapeColor(path, this.activeColor);
+      this.svg.appendChild(path);
+      oldEl.remove();
+      this.draftState.el = path;
+      this.draftState.geometry = { nodes: nodes };
+      this._finalizeShape("freehand", { nodes: nodes }, path);
     },
 
     // -------------------------------------------------------------------------
@@ -7191,7 +7556,11 @@
         case "rectangle": el = svgEl("rect");                       break;
         case "circle":    el = svgEl("circle");                     break;
         case "polygon":   el = svgEl("polygon");                    break;
-        case "freehand":  el = svgEl("polyline", { fill: "none" }); break;
+        case "freehand":
+          el = (ann.geometry && ann.geometry.nodes)
+            ? svgEl("path", { fill: "none" })
+            : svgEl("polyline", { fill: "none" });
+          break;
         case "text": {
           // <g> wrapping a hit-zone <rect> and a content <text>. The
           // group bind to `currentColor` so _applyShapeColor can recolor
@@ -7418,7 +7787,14 @@
       this.editingShape = shape;
       shape.el.classList.add("is-editing");
       this._hideTooltip();
-      this._renderHandles(shape);
+      // Fitted freehand curves get the dedicated pen editor (anchors +
+      // bezier handles); every other kind — and legacy {points} freehand —
+      // uses the generic vertex handles.
+      if (shape.kind === "freehand" && shape.geometry && shape.geometry.nodes) {
+        this._renderFreehandEditor(shape);
+      } else {
+        this._renderHandles(shape);
+      }
 
       // Polygons + rectangles use midpoint handles that follow the
       // cursor's nearest edge. The wrapper has pointer-events: none
@@ -7444,6 +7820,10 @@
         // chrome or any registered input-owner (modals, dialogs)
         // also keeps edit mode alive — the gesture belongs to that UI.
         if (e.target.closest(".etcher-shape")) return;
+        // A click on any edit handle (vertex, bezier control, anchor) is
+        // part of editing — never let it tear down edit mode. Bezier
+        // handles in particular sit out in empty space off the curve.
+        if (e.target.closest(".etcher-handle")) return;
         if (isInputOwner(e.target, self.overlayWrapper)) return;
         try {
           var pt = self._toImage(e);
@@ -7459,6 +7839,7 @@
       this.editingShape.el.classList.remove("is-editing");
       this._clearVertexSelection();
       this._removeHandles();
+      this._removeFreehandEditor();
       this._unwireMidpointTracker();
       this.editingShape = null;
       if (this._outsideClickHandler) {
@@ -7935,6 +8316,9 @@
       // editable vertices), so keep them in sync on pan/zoom via
       // a dedicated path.
       this._positionAllMidpointHandles(shape);
+      // Freehand pen-editor anchors/handles live outside the generic
+      // `handles` array — reposition them on the same pan/zoom tick.
+      if (this.freehandEditor) this._positionFreehandEditor();
     },
 
     _positionHandle: function(h, imagePt) {
@@ -7959,6 +8343,231 @@
       });
       this.handles = [];
       this._removeMidpointHandles();
+    },
+
+    // -----------------------------------------------------------------------
+    // Freehand node editor — the pen-tool surface for a fitted vector curve.
+    // Each node gets a draggable anchor plus (where present) its two bezier
+    // control handles, drawn as small dots tethered to the anchor by a thin
+    // line. Dragging an anchor slides the node and carries its handles along
+    // (they're stored as offsets); dragging a control handle reshapes the
+    // curve, mirroring the opposite handle when the node is "smooth".
+    // Double-click an anchor toggles smooth/corner. Lives parallel to the
+    // generic `handles` array because a bezier node has more than one
+    // editable point, so the flat index-by-position model doesn't fit.
+    // -----------------------------------------------------------------------
+
+    _vLen: function(v) { return Math.sqrt(v[0] * v[0] + v[1] * v[1]); },
+
+    _renderFreehandEditor: function(shape) {
+      this._removeFreehandEditor();
+      if (!shape || shape.kind !== "freehand" ||
+          !shape.geometry || !shape.geometry.nodes) {
+        return;
+      }
+      var self = this;
+      this._activateOverlayForShape(shape);
+      var nodes = shape.geometry.nodes;
+      var color = this._handleColor(shape);
+      var ed = { shape: shape, controls: [], lines: [] };
+
+      nodes.forEach(function(node, i) {
+        // Control handles (drawn first so the anchor dot sits on top).
+        ["in", "out"].forEach(function(side) {
+          if (!(side === "in" ? node.hIn : node.hOut)) return;
+          var line = svgEl("line", {});
+          line.classList.add("etcher-handle-line");
+          line.style.color = color;
+          self.svg.appendChild(line);
+          ed.lines.push({ el: line, nodeIdx: i, side: side });
+
+          var dot = svgEl("circle", { r: 4 });
+          dot.classList.add("etcher-handle", "etcher-bezier-handle");
+          dot.style.color = color;
+          self.svg.appendChild(dot);
+          ed.controls.push({ el: dot, type: side, nodeIdx: i });
+          dot.addEventListener("pointerdown", function(e) {
+            self._startBezierHandleDrag(shape, i, side, dot, e);
+          });
+        });
+
+        var anchor = svgEl("circle", { r: 5 });
+        anchor.classList.add("etcher-handle", "etcher-anchor-handle");
+        if (node.type === "corner") anchor.classList.add("is-corner");
+        anchor.style.color = color;
+        self.svg.appendChild(anchor);
+        ed.controls.push({ el: anchor, type: "anchor", nodeIdx: i });
+        anchor.addEventListener("pointerdown", function(e) {
+          self._startAnchorDrag(shape, i, anchor, e);
+        });
+        anchor.addEventListener("dblclick", function(e) {
+          e.preventDefault();
+          e.stopPropagation();
+          self._toggleNodeType(shape, i);
+        });
+      });
+
+      this.freehandEditor = ed;
+      this._positionFreehandEditor();
+    },
+
+    _positionFreehandEditor: function() {
+      var ed = this.freehandEditor;
+      if (!ed) return;
+      var self = this;
+      var nodes = (ed.shape.geometry && ed.shape.geometry.nodes) || [];
+      ed.lines.forEach(function(l) {
+        var node = nodes[l.nodeIdx];
+        var h = node && (l.side === "in" ? node.hIn : node.hOut);
+        if (!h) { l.el.style.display = "none"; return; }
+        l.el.style.display = "";
+        var a = self._imageToContainer({ x: node.p[0], y: node.p[1] });
+        var b = self._imageToContainer({ x: node.p[0] + h[0], y: node.p[1] + h[1] });
+        l.el.setAttribute("x1", a.x); l.el.setAttribute("y1", a.y);
+        l.el.setAttribute("x2", b.x); l.el.setAttribute("y2", b.y);
+      });
+      ed.controls.forEach(function(c) {
+        var node = nodes[c.nodeIdx];
+        if (!node) return;
+        var h = c.type === "in" ? node.hIn : c.type === "out" ? node.hOut : null;
+        if (c.type !== "anchor" && !h) { c.el.style.display = "none"; return; }
+        c.el.style.display = "";
+        var pt = c.type === "anchor"
+          ? { x: node.p[0], y: node.p[1] }
+          : { x: node.p[0] + h[0], y: node.p[1] + h[1] };
+        self._positionHandle(c.el, pt);
+      });
+    },
+
+    _removeFreehandEditor: function() {
+      var ed = this.freehandEditor;
+      if (!ed) return;
+      ed.controls.forEach(function(c) { if (c.el.parentNode) c.el.parentNode.removeChild(c.el); });
+      ed.lines.forEach(function(l) { if (l.el.parentNode) l.el.parentNode.removeChild(l.el); });
+      this.freehandEditor = null;
+    },
+
+    // Drag an anchor: translate the node by the pointer delta. Its handles
+    // ride along automatically because they're stored relative to the anchor.
+    _startAnchorDrag: function(shape, idx, handleEl, e) {
+      e.preventDefault();
+      e.stopPropagation();
+      try { handleEl.setPointerCapture(e.pointerId); } catch (_) {}
+      handleEl.classList.add("is-dragging");
+      this._hideTooltip();
+      var self = this;
+      var historyBefore = self._snapshotShape(shape);
+      var startP = shape.geometry.nodes[idx].p.slice();
+      var startPt = self._toImage(e);
+      var dragged = false;
+      function onMove(ev) {
+        var pt = self._toImage(ev);
+        if (!dragged) {
+          var aC = self._imageToContainer(startPt), bC = self._imageToContainer(pt);
+          if ((bC.x - aC.x) * (bC.x - aC.x) + (bC.y - aC.y) * (bC.y - aC.y) < 9) return;
+          dragged = true;
+        }
+        shape.geometry.nodes[idx].p = [
+          startP[0] + (pt.x - startPt.x),
+          startP[1] + (pt.y - startPt.y)
+        ];
+        self._renderShape(shape);
+        self._positionFreehandEditor();
+      }
+      function onUp(ev) {
+        handleEl.classList.remove("is-dragging");
+        handleEl.removeEventListener("pointermove", onMove);
+        handleEl.removeEventListener("pointerup", onUp);
+        handleEl.removeEventListener("pointercancel", onUp);
+        try { handleEl.releasePointerCapture(ev.pointerId); } catch (_) {}
+        if (dragged && shape.uuid) {
+          self._emitChanged();
+          self._pushUndo(shape.uuid, historyBefore, self._snapshotShape(shape));
+        }
+      }
+      handleEl.addEventListener("pointermove", onMove);
+      handleEl.addEventListener("pointerup", onUp);
+      handleEl.addEventListener("pointercancel", onUp);
+    },
+
+    // Drag a bezier control handle: set this side's offset to the cursor. If
+    // the node is "smooth" and the opposite handle exists, swing it to stay
+    // colinear while keeping its own length — the classic smooth-node feel.
+    _startBezierHandleDrag: function(shape, idx, side, handleEl, e) {
+      e.preventDefault();
+      e.stopPropagation();
+      try { handleEl.setPointerCapture(e.pointerId); } catch (_) {}
+      handleEl.classList.add("is-dragging");
+      this._hideTooltip();
+      var self = this;
+      var historyBefore = self._snapshotShape(shape);
+      var node = shape.geometry.nodes[idx];
+      var thisSide = side === "in" ? "hIn" : "hOut";
+      var oppSide = side === "in" ? "hOut" : "hIn";
+      var startPt = self._toImage(e);
+      var dragged = false;
+      function onMove(ev) {
+        var pt = self._toImage(ev);
+        if (!dragged) {
+          var aC = self._imageToContainer(startPt), bC = self._imageToContainer(pt);
+          if ((bC.x - aC.x) * (bC.x - aC.x) + (bC.y - aC.y) * (bC.y - aC.y) < 9) return;
+          dragged = true;
+        }
+        var v = [pt.x - node.p[0], pt.y - node.p[1]];
+        node[thisSide] = v;
+        if (node.type === "smooth" && node[oppSide]) {
+          var oppLen = self._vLen(node[oppSide]);
+          var vLen = self._vLen(v) || 1;
+          node[oppSide] = [-v[0] / vLen * oppLen, -v[1] / vLen * oppLen];
+        }
+        self._renderShape(shape);
+        self._positionFreehandEditor();
+      }
+      function onUp(ev) {
+        handleEl.classList.remove("is-dragging");
+        handleEl.removeEventListener("pointermove", onMove);
+        handleEl.removeEventListener("pointerup", onUp);
+        handleEl.removeEventListener("pointercancel", onUp);
+        try { handleEl.releasePointerCapture(ev.pointerId); } catch (_) {}
+        if (dragged && shape.uuid) {
+          self._emitChanged();
+          self._pushUndo(shape.uuid, historyBefore, self._snapshotShape(shape));
+        }
+      }
+      handleEl.addEventListener("pointermove", onMove);
+      handleEl.addEventListener("pointerup", onUp);
+      handleEl.addEventListener("pointercancel", onUp);
+    },
+
+    // Flip a node between smooth and corner. Going smooth re-colinearizes the
+    // two existing handles around their averaged direction so the curve snaps
+    // tangent-continuous; going corner just frees them to move independently.
+    _toggleNodeType: function(shape, idx) {
+      var node = shape.geometry.nodes[idx];
+      if (!node) return;
+      var historyBefore = this._snapshotShape(shape);
+      if (node.type === "smooth") {
+        node.type = "corner";
+      } else {
+        node.type = "smooth";
+        if (node.hIn && node.hOut) {
+          var inLen = this._vLen(node.hIn) || 1;
+          var outLen = this._vLen(node.hOut) || 1;
+          // Average the outgoing direction with the reversed incoming one.
+          var ax = -node.hIn[0] / inLen + node.hOut[0] / outLen;
+          var ay = -node.hIn[1] / inLen + node.hOut[1] / outLen;
+          var aLen = Math.sqrt(ax * ax + ay * ay) || 1;
+          ax /= aLen; ay /= aLen;
+          node.hOut = [ax * outLen, ay * outLen];
+          node.hIn = [-ax * inLen, -ay * inLen];
+        }
+      }
+      this._renderShape(shape);
+      this._renderFreehandEditor(shape);
+      if (shape.uuid) {
+        this._emitChanged();
+        this._pushUndo(shape.uuid, historyBefore, this._snapshotShape(shape));
+      }
     },
 
     // Returns image-px positions for each handle, in an order each kind's
@@ -8007,8 +8616,9 @@
             { x: g.a[0], y: g.a[1] },  // 0: endpoint A
             { x: g.b[0], y: g.b[1] }   // 1: endpoint B
           ];
-        // Freehand has too many points to edit individually for v1 —
-        // delete and redraw.
+        // Freehand (node format) is edited via the dedicated pen editor
+        // (`_renderFreehandEditor`), not this flat vertex-handle list.
+        // Legacy {points} freehand falls through here → delete and redraw.
         default:
           return [];
       }
@@ -8534,7 +9144,13 @@
       shape.metadata = snap.metadata == null ? null : JSON.parse(JSON.stringify(snap.metadata));
       this._renderShape(shape);
       if (shape.style && shape.style.color) this._applyShapeColor(shape.el, shape.style.color);
-      if (this.editingShape === shape) this._positionAllHandles(shape);
+      if (this.editingShape === shape) {
+        // Rebuild rather than reposition: an undo/redo can change the node
+        // count or a node's smooth/corner type, which the handle elements
+        // need to reflect, not just their positions.
+        if (this.freehandEditor) this._renderFreehandEditor(shape);
+        else this._positionAllHandles(shape);
+      }
       if (this.editingTitleShape === shape) this._positionAllTitleHandles(shape);
 
       this._emitChanged();

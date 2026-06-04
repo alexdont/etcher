@@ -2212,8 +2212,16 @@
       // \"tool\" — i.e., when no drawing tool is active).
       bar.appendChild(self._makeToolButton("cursor", ICONS.cursor, "Cursor"));
 
-      // Intra-group divider between the cursor and the drawing
-      // tools. Kept on wide viewports for visual rhythm; hidden by
+      // The grabber (hand) is a navigation tool, so it sits beside the cursor
+      // — in the same group, before the divider — not with the drawing tools.
+      if (self.tools.indexOf("grabber") !== -1 && TOOL_DEFS.grabber) {
+        bar.appendChild(
+          self._makeToolButton("grabber", ICONS.grabber, TOOL_DEFS.grabber.title)
+        );
+      }
+
+      // Intra-group divider between the cursor/grabber nav group and the
+      // drawing tools. Kept on wide viewports for visual rhythm; hidden by
       // `_layoutToolbar` once the tools group starts collapsing —
       // a divider next to a single visible item reads as a stray
       // mark, not a group separator.
@@ -2223,6 +2231,7 @@
       self._cursorToolsDivider = divider;
 
       self.tools.forEach(function(toolKey) {
+        if (toolKey === "grabber") return; // rendered beside the cursor above
         var def = TOOL_DEFS[toolKey];
         if (!def) return;
         bar.appendChild(self._makeToolButton(toolKey, def.icon, def.title));

@@ -8892,9 +8892,9 @@
         var v = [pt.x - node.p[0], pt.y - node.p[1]];
         node[thisSide] = v;
         if (node.type === "smooth" && node[oppSide]) {
-          var oppLen = self._vLen(node[oppSide]);
-          var vLen = self._vLen(v) || 1;
-          node[oppSide] = [-v[0] / vLen * oppLen, -v[1] / vLen * oppLen];
+          // Symmetrical: the opposite handle mirrors this one exactly —
+          // equal length, opposite direction.
+          node[oppSide] = [-v[0], -v[1]];
         }
         self._renderShape(shape);
         self._positionFreehandEditor();
@@ -8929,13 +8929,16 @@
         if (node.hIn && node.hOut) {
           var inLen = this._vLen(node.hIn) || 1;
           var outLen = this._vLen(node.hOut) || 1;
-          // Average the outgoing direction with the reversed incoming one.
+          // Average the outgoing direction with the reversed incoming one,
+          // then give both handles that direction and a single shared length
+          // — a clean symmetrical (mirrored, equal-length) node.
           var ax = -node.hIn[0] / inLen + node.hOut[0] / outLen;
           var ay = -node.hIn[1] / inLen + node.hOut[1] / outLen;
           var aLen = Math.sqrt(ax * ax + ay * ay) || 1;
           ax /= aLen; ay /= aLen;
-          node.hOut = [ax * outLen, ay * outLen];
-          node.hIn = [-ax * inLen, -ay * inLen];
+          var len = (inLen + outLen) / 2;
+          node.hOut = [ax * len, ay * len];
+          node.hIn = [-ax * len, -ay * len];
         }
       }
       this._renderShape(shape);

@@ -3409,6 +3409,33 @@
     // Select slot `i` — make it the active draw color. Pure selection:
     // no palette mutation and no persist (editing the hue picker is what
     // mutates a slot). Clamps out-of-range indices defensively.
+    // Pick up a selected shape's color into the toolbar so the active swatch
+    // (and the color new shapes draw with) matches what you just clicked. If
+    // a slot already holds that color, activate it; otherwise eyedrop it into
+    // the active slot. `_syncingColor` keeps `_selectColor` from re-applying
+    // the color back onto the shape (no spurious undo).
+    _syncToolbarColorToShape: function(shape) {
+      if (!shape || !shape.style || !shape.style.color) return;
+      if (!this._colorSlots || !this._colorSlots.length) return;
+      var color = shape.style.color;
+      if (this.activeColor === color &&
+          this._colorSlots[this._activeSlot] === color) {
+        return;
+      }
+      this._syncingColor = true;
+      try {
+        var idx = this._colorSlots.indexOf(color);
+        if (idx !== -1) {
+          this._selectSlot(idx);
+        } else {
+          this._setSlotColor(this._activeSlot, color);
+          this._selectColor(color);
+        }
+      } finally {
+        this._syncingColor = false;
+      }
+    },
+
     // Toggle the hue picker (colors popup) anchored to a swatch — the new
     // entry point for editing a slot's color now that the palette button is
     // the line-parameters button.
@@ -3985,10 +4012,14 @@
       // server's `style` field reflects the change.
       // Recolor the whole selection: a box/shift multi-selection if present,
       // else the single edit-mode shape. Each gets its own undo entry.
+      // When syncing the toolbar color FROM a just-selected shape, skip this
+      // — re-applying the same color would spuriously push an undo entry.
       var self = this;
-      var colorTargets = (this.selectedShapes && this.selectedShapes.length)
-        ? this.selectedShapes.slice()
-        : (this.editingShape ? [this.editingShape] : []);
+      var colorTargets = this._syncingColor
+        ? []
+        : (this.selectedShapes && this.selectedShapes.length)
+          ? this.selectedShapes.slice()
+          : (this.editingShape ? [this.editingShape] : []);
       colorTargets.forEach(function(shape) {
         if (!shape.uuid) return;
         var before = self._snapshotShape(shape);
@@ -8559,6 +8590,9 @@
       this.editingShape = shape;
       shape.el.classList.add("is-editing");
       this._hideTooltip();
+      // Pick up the shape's color into the toolbar (active swatch + the color
+      // new shapes draw with), so selecting a shape "switches" to its color.
+      this._syncToolbarColorToShape(shape);
       // Fitted freehand AND marker curves get the dedicated pen editor
       // (anchors + bezier handles) — a marker is just a freehand stroke with
       // marker styling, so it edits identically. Every other kind — and

@@ -5575,6 +5575,12 @@
           if (self._hoveredShape) self._setHoveredShape(null, false);
           return;
         }
+        // Marker tool: suppress shape hover + tooltips so they don't pop up
+        // over what you're drawing.
+        if (self.activeTool === "marker") {
+          if (self._hoveredShape) self._setHoveredShape(null, false);
+          return;
+        }
         // Over Etcher's own chrome (toolbar / popup / tooltip): no shape hover.
         if (e.target.closest &&
             e.target.closest(".etcher-toolbar, .etcher-popup, .etcher-tooltip")) {

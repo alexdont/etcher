@@ -135,7 +135,7 @@ Hydration is implicit: on mount, Etcher reads `handle.getExtension("etcher")` fr
 
 ### Client → server LiveView events
 
-The component emits two events.
+The component emits these events.
 
 #### `etcher:annotations-changed` — fires on every mutation
 
@@ -167,6 +167,10 @@ def handle_event("etcher:shape-drawn", %{"uuid" => uuid, "kind" => kind}, socket
 ```
 
 Payload: `%{"uuid", "kind"}`. Use this to drive UI keyed on actual user-draw intent (open a composer, focus a metadata form, fire an analytics event). It does **not** fire on undo/redo of a delete (which also adds a shape back into the canvas), drags, color picks, or programmatic shape additions via `layer.patchShape/2`. `etcher:annotations-changed` handles persistence; `etcher:shape-drawn` handles intent.
+
+#### `etcher:colors-changed` / `etcher:line-params-changed` — per-user defaults
+
+Two optional hooks for persisting per-user toolbar defaults (Etcher stores nothing itself). `etcher:colors-changed` (`%{"colors" => ["#rrggbb", ...]}`) fires when a color slot is edited; `etcher:line-params-changed` (`%{"line_params" => %{"width" => n, "opacity" => n, "dash" => "solid"|"dashed"|"dotted"}}`) fires when the Parameters popup changes the **global** stroke default (no shape selected). Seed them back via the `:colors` / `:line_params` attrs on the next mount. Editing a *selected* shape's style instead persists with the shape through `etcher:annotations-changed`. If you don't persist these, add a no-op `handle_event` clause (or a catch-all) so the unhandled event doesn't log noise.
 
 ### Geometry shapes
 
@@ -337,6 +341,11 @@ layer.getTool();              // → "rectangle" | null
 layer.swatches();             // → [{ color, title }, ...]
 layer.setColor("#fca5a5");
 layer.getColor();             // → "#fca5a5" | null
+
+// Line params (global stroke defaults) — parity with the palette;
+// setLineParams does NOT fire etcher:line-params-changed.
+layer.getLineParams();        // → { width?, opacity?, dash? }
+layer.setLineParams({ width: 8, opacity: 1, dash: "dashed" });
 
 // History
 if (layer.canUndo()) layer.undo();

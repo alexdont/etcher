@@ -76,6 +76,7 @@
   //   etcher:tool-changed       { detail: { tool } }
   //   etcher:color-changed      { detail: { color } }
   //   etcher:colors-changed     { detail: { colors } }  // slot palette edited; also pushed to LiveView
+  //   etcher:line-params-changed { detail: { line_params } }  // global stroke default edited; also pushed to LiveView
   //   etcher:visibility-changed { detail: { visible } }
   //   etcher:history-changed    { detail: { canUndo, canRedo } }
   // ===========================================================================
@@ -1190,6 +1191,16 @@
             });
           },
 
+          // Line params (global stroke defaults) — parity with the colors
+          // API. `getLineParams` returns a copy of the current overrides;
+          // `setLineParams` applies a `{width, opacity, dash}` map (clamped,
+          // per-key fallback) WITHOUT firing `etcher:line-params-changed` —
+          // the consumer drives it and owns storage, same as `setColors`.
+          getLineParams: function() {
+            return Object.assign({}, self.lineParams || {});
+          },
+          setLineParams: function(map) { self._setLineParamsDirect(map); },
+
           // History ---------------------------------------------------
           undo: function() { self._undo(); },
           redo: function() { self._redo(); },
@@ -1523,6 +1534,10 @@
     _init: function() {
       var self = this;
       var handle = self.handle;
+
+      // Seed the global stroke defaults from `data-line-params` before any
+      // drawing (independent of the handle type).
+      self._seedLineParams();
 
       // Handle-type dispatch (added in 0.4 with Fresco 0.5.3).
       //
@@ -3180,15 +3195,72 @@
       }
       if (commit) {
         if (this._lineParamBefore && this._lineParamBefore.length) {
+          // Edited selected shapes → per-shape style persists via the
+          // annotations-changed round-trip; not a global-default change.
           this._emitChanged();
           this._lineParamBefore.forEach(function(rec) {
             if (!rec.uuid) return;
             var shape = self.shapes.find(function(s) { return s.uuid === rec.uuid; });
             if (shape) self._pushUndo(rec.uuid, rec.before, self._snapshotShape(shape));
           });
+        } else {
+          // No shapes targeted → the popup edited the GLOBAL default. Notify
+          // the consumer so per-user line params can be persisted (mirror of
+          // the `etcher:colors-changed` hook).
+          this._emitLineParamsChanged();
         }
         this._lineParamBefore = null;
       }
+    },
+
+    // Seed `lineParams` from the host's `data-line-params` JSON at mount
+    // (set by the `:line_params` attr). Missing / invalid → built-in defaults.
+    _seedLineParams: function() {
+      try {
+        var raw = this.el && this.el.dataset && this.el.dataset.lineParams;
+        if (!raw) return;
+        var parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object") this._setLineParamsDirect(parsed);
+      } catch (_) { /* malformed attr → built-in defaults */ }
+    },
+
+    // Apply a line-params map key-by-key with the same clamp / validation the
+    // popup uses, skipping invalid keys (they fall back to the built-in
+    // default). Does NOT fire `etcher:line-params-changed` — used by the seed
+    // path and the programmatic `setLineParams`, which the consumer owns.
+    _setLineParamsDirect: function(map) {
+      if (!map || typeof map !== "object") return;
+      this.lineParams = this.lineParams || {};
+      if (typeof map.width === "number" && isFinite(map.width)) {
+        this.lineParams.width = Math.max(1, Math.min(40, map.width));
+      }
+      if (typeof map.opacity === "number" && isFinite(map.opacity)) {
+        this.lineParams.opacity = Math.max(0, Math.min(1, map.opacity));
+      }
+      if (map.dash === "solid" || map.dash === "dashed" || map.dash === "dotted") {
+        this.lineParams.dash = map.dash;
+      }
+      // Reflect into an open popup if it's showing the global default.
+      if (this.paramsPopup && this.paramsPopup.classList.contains("is-open")) {
+        this._syncParamsPopup();
+      }
+    },
+
+    // Persistence hook for the global stroke defaults — the `_emitColors-
+    // Changed` analogue. Fires on every committed global-default edit (slider
+    // release / dash click with no shape selected). Two channels (LiveView
+    // push + bubbling DOM event); Etcher stores nothing itself. Payload uses
+    // the resolved values (built-in fallback per missing key).
+    _emitLineParamsChanged: function() {
+      var lp = this._currentLineParams();
+      var payload = { width: lp.width, opacity: lp.opacity, dash: lp.dash };
+      if (this.pushEventTo) {
+        this.pushEventTo(this.el, "etcher:line-params-changed", {
+          fresco_id: this.frescoId || null,
+          line_params: payload
+        });
+      }
+      this._dispatch("etcher:line-params-changed", { line_params: payload });
     },
 
     // Paint the hue ring once. The torus is drawn pixel-by-pixel via

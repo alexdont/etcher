@@ -123,6 +123,31 @@ defmodule Etcher.Layer do
   `layer.setColors([...])`, `layer.setSlotColor(i, "#rrggbb")` on the
   `window.Etcher.layerFor(id)` handle.
 
+  ## Line params and the `etcher:line-params-changed` hook
+
+  The Parameters popup (thickness / opacity / dash) sets the global default
+  new strokes inherit. With **no shape selected**, committing a slider or
+  picking a dash reports the new default through the same two channels as
+  the colors hook, so you can persist per-user "ink":
+
+      def handle_event(
+            "etcher:line-params-changed",
+            %{"fresco_id" => "board", "line_params" => lp},
+            socket
+          ) when is_map(lp) do
+        # `lp` is %{"width" => n, "opacity" => n, "dash" => "solid"|"dashed"|
+        # "dotted"}. Persist it (e.g. in the current user's metadata) and feed
+        # it back through the `:line_params` attr on the next mount.
+        {:noreply, socket}
+      end
+
+  Seed the default with the `:line_params` attr; missing keys fall back to
+  the built-ins (`width: 2`, `opacity: 1`, `dash: "solid"`). Editing a
+  *selected* shape's style instead keeps flowing through
+  `etcher:annotations-changed` (it's saved with the shape) and does **not**
+  fire this event. Programmatic: `layer.getLineParams()` /
+  `layer.setLineParams(%{...})` (the latter doesn't echo the event).
+
   ## Tools
 
   Configure which drawing tools appear in the bottom toolbar. The default
@@ -250,6 +275,23 @@ defmodule Etcher.Layer do
     """
   )
 
+  attr(:line_params, :map,
+    default: nil,
+    doc: """
+    Optional seed for the global stroke defaults new shapes inherit —
+    `%{"width" => number, "opacity" => number, "dash" => "solid" | "dashed"
+    | "dotted"}`. Any missing key falls back to the built-in default
+    (`width: 2`, `opacity: 1`, `dash: "solid"`). Supply the signed-in user's
+    saved line params here for per-user ink.
+
+    When omitted, the built-in defaults apply (identical to prior behavior).
+    Edits made via the Parameters popup with no shape selected are reported
+    through the `etcher:line-params-changed` event; persist them per user and
+    feed them back through this attr on the next mount. (Per-shape style edits
+    keep flowing through `etcher:annotations-changed`.)
+    """
+  )
+
   attr(:nav_buttons, :list,
     default: nil,
     doc: """
@@ -297,12 +339,16 @@ defmodule Etcher.Layer do
 
     colors_json = if assigns[:colors], do: Jason.encode!(assigns.colors), else: nil
 
+    line_params_json =
+      if assigns[:line_params], do: Jason.encode!(assigns.line_params), else: nil
+
     assigns =
       assigns
       |> assign(:tools_json, tools_json)
       |> assign(:layer_id, layer_id)
       |> assign(:nav_buttons_csv, nav_buttons_csv(assigns[:nav_buttons]))
       |> assign(:colors_json, colors_json)
+      |> assign(:line_params_json, line_params_json)
 
     ~H"""
     <div
@@ -313,6 +359,7 @@ defmodule Etcher.Layer do
       data-nav-buttons={@nav_buttons_csv}
       data-toolbar={@toolbar == false && "false"}
       data-colors={@colors_json}
+      data-line-params={@line_params_json}
       class="hidden"
       aria-hidden="true"
       {@rest}

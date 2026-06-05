@@ -4,6 +4,22 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.6.5] — 2026-06-05
+
+### Added
+
+- **`:line_params` attr + `etcher:line-params-changed` event.** Seeds the
+  layer's global stroke defaults (`width` / `opacity` / `dash`) on mount —
+  any missing key falls back to the built-in default (`2` / `1` / `solid`)
+  — and echoes any change made via the Parameters popup *with no shape
+  selected*, so consumers can persist per-user line defaults exactly the
+  way `:colors` / `etcher:colors-changed` works. Editing a *selected*
+  shape's style keeps flowing through `etcher:annotations-changed`
+  (unchanged) and does not fire this event. New `getLineParams()` /
+  `setLineParams(map)` layer-instance methods; like `setColors`,
+  programmatic `setLineParams` does not fire the change event. New optional
+  attr defaults to `nil` → identical to prior behavior.
+
 ## [0.6.4] — 2026-06-05
 
 ### Fixed

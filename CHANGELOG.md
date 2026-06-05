@@ -4,6 +4,20 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.6.4] — 2026-06-05
+
+### Fixed
+
+- **Strip mode: freehand / marker strokes that cross an image boundary no
+  longer teleport.** Points captured while the cursor was over a later
+  image came back in that image's local coordinates (y reset near 0) but
+  were stored in the starting image's space, so the line snapped back to
+  the top. Cross-image points are now translated into the starting image's
+  coordinate space, so the stroke keeps drawing across the seam — it stays
+  anchored to the starting image and extends over the following images via
+  the overlays' `overflow: visible`. Bounded shapes (rectangle / circle /
+  text / dimension / line) still clamp to their starting image.
+
 ## [0.6.3] — 2026-06-05
 
 ### Changed

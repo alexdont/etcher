@@ -1924,21 +1924,29 @@
         var ev = e;
         var lock = self._stripActiveDraw;
         if (lock && self.draftState) {
-          var r = lock.rect;
-          var cx = Math.max(r.left, Math.min(r.right - 1, e.clientX));
-          var cy = Math.max(r.top, Math.min(r.bottom - 1, e.clientY));
-          if (cx !== e.clientX || cy !== e.clientY) {
-            ev = {
-              clientX: cx,
-              clientY: cy,
-              pointerId: e.pointerId,
-              pointerType: e.pointerType,
-              button: e.button,
-              buttons: e.buttons,
-              target: e.target,
-              preventDefault: function() { try { e.preventDefault(); } catch (_) {} },
-              stopPropagation: function() { try { e.stopPropagation(); } catch (_) {} }
-            };
+          // Freeform strokes (freehand / marker) may cross image boundaries —
+          // `_appendFreehand` translates the cross-image point into the
+          // starting image's space, so they're NOT clamped here. Bounded
+          // shapes (rect / circle / text / dimension / line) still clamp the
+          // drag to the starting image's screen rect.
+          var k = self.draftState.kind;
+          if (k !== "freehand" && k !== "marker") {
+            var r = lock.rect;
+            var cx = Math.max(r.left, Math.min(r.right - 1, e.clientX));
+            var cy = Math.max(r.top, Math.min(r.bottom - 1, e.clientY));
+            if (cx !== e.clientX || cy !== e.clientY) {
+              ev = {
+                clientX: cx,
+                clientY: cy,
+                pointerId: e.pointerId,
+                pointerType: e.pointerType,
+                button: e.button,
+                buttons: e.buttons,
+                target: e.target,
+                preventDefault: function() { try { e.preventDefault(); } catch (_) {} },
+                stopPropagation: function() { try { e.stopPropagation(); } catch (_) {} }
+              };
+            }
           }
           e.preventDefault();
         }
@@ -4104,6 +4112,39 @@
       // pixel coords. Strip draw paths consume `imageIdx`; canvas
       // draw paths ignore it (extra field is harmless).
       return this.handle.screenToImage({ x: e.clientX, y: e.clientY });
+    },
+
+    // Strip mode: translate a `{imageIdx, x, y}` point (in `imageIdx`'s own
+    // natural-px space) into the natural-px space of the stroke's STARTING
+    // image, so a freeform stroke that wanders into the next image keeps
+    // drawing in one overlay (which paints over later images via the
+    // overlays' absolute positioning + `overflow: visible`) instead of
+    // snapping back to the starting image's origin. Goes via display
+    // coordinates so differing per-image scales / widths are handled.
+    // Returns `[x, y]` (same shape `_appendFreehand` stores). No-op when the
+    // point is already in the starting image or page metadata is missing.
+    _stripTranslatePoint: function(pt, startIdx) {
+      if (pt.imageIdx === startIdx) return [pt.x, pt.y];
+      var src = this.pageOverlays && this.pageOverlays[pt.imageIdx];
+      var dst = this.pageOverlays && this.pageOverlays[startIdx];
+      if (!src || !dst || !src.page || !dst.page) return [pt.x, pt.y];
+      var sp = src.page, dp = dst.page;
+      if (!sp.height || !dp.height) return [pt.x, pt.y];
+      // Y (the cross-strip axis): point → display px down the strip →
+      // starting image's natural px. `top` / `height` / `naturalHeight` are
+      // always set, so this is the part that actually matters for a vertical
+      // strip.
+      var dispY = sp.top + (pt.y / (sp.naturalHeight || 1)) * sp.height;
+      var y = (dispY - dp.top) * (dp.naturalHeight || 1) / dp.height;
+      // X: only translatable when both pages carry a concrete width (a
+      // 100%-width layout leaves `width` null). Otherwise keep x as-is —
+      // stacked strip images share the horizontal axis closely enough.
+      var x = pt.x;
+      if (typeof sp.width === "number" && typeof dp.width === "number" && dp.width) {
+        var dispX = (sp.left || 0) + (pt.x / (sp.naturalWidth || 1)) * sp.width;
+        x = (dispX - (dp.left || 0)) * (dp.naturalWidth || 1) / dp.width;
+      }
+      return [x, y];
     },
 
     _imageToContainer: function(pt) {
@@ -7699,11 +7740,22 @@
     },
 
     _appendFreehand: function(pt) {
+      // Strip mode: a stroke can wander into the next image, where `pt` comes
+      // back in THAT image's local coords (y resets near 0). Translate it
+      // into the starting image's space so the stroke keeps extending instead
+      // of snapping back to the top. Canvas mode has no `imageIdx` → pass-thru.
+      var xy;
+      if (this.handleKind === "strip" && this._stripActiveDraw &&
+          typeof pt.imageIdx === "number") {
+        xy = this._stripTranslatePoint(pt, this._stripActiveDraw.imageIdx);
+      } else {
+        xy = [pt.x, pt.y];
+      }
       var pts = this.draftState.geometry.points;
       var last = pts[pts.length - 1];
-      var dx = pt.x - last[0], dy = pt.y - last[1];
+      var dx = xy[0] - last[0], dy = xy[1] - last[1];
       if (dx * dx + dy * dy < 4) return; // throttle: skip sub-2px moves in image px
-      pts.push([pt.x, pt.y]);
+      pts.push(xy);
       this._renderShape(this.draftState);
     },
 

@@ -4193,9 +4193,27 @@
             if (isFinite(fMinX) && isFinite(fMinY)) {
               bboxTopImage = { x: (fMinX + fMaxX) / 2, y: fMinY };
             }
+          } else if (shape.kind === "marker") {
+            // Marker: a smooth Catmull-Rom spline through the sparse, rounded
+            // points (its element is always a <path>). The spline does the
+            // smoothing, so the stored point set stays small. Bbox from the
+            // points — the spline hugs them closely enough for title / box-
+            // select. Drives both the live draft and the committed stroke.
+            var mp = g.points || [];
+            el.setAttribute("d", self._catmullRomPathD(mp, function(p) {
+              return self._imageToContainer({ x: p[0], y: p[1] });
+            }));
+            var mMinX = Infinity, mMaxX = -Infinity, mMinY = Infinity;
+            for (var mi = 0; mi < mp.length; mi++) {
+              if (mp[mi][0] < mMinX) mMinX = mp[mi][0];
+              if (mp[mi][0] > mMaxX) mMaxX = mp[mi][0];
+              if (mp[mi][1] < mMinY) mMinY = mp[mi][1];
+            }
+            if (isFinite(mMinX) && isFinite(mMinY)) {
+              bboxTopImage = { x: (mMinX + mMaxX) / 2, y: mMinY };
+            }
           } else {
-            // Raw polyline: markers (pixel-accurate, not fitted) store
-            // geometry as `{ points }`, as does legacy pre-vector freehand.
+            // Legacy pre-vector freehand: raw polyline (straight segments).
             var lMinX = Infinity, lMaxX = -Infinity, lMinY = Infinity;
             var lpts = (g.points || []).map(function(p) {
               if (p[0] < lMinX) lMinX = p[0];
@@ -7288,28 +7306,20 @@
       return out;
     },
 
-    // Light cleanup for a raw marker stroke on release — keeps the point-based
-    // geometry (no bezier nodes, no editing) but makes finger / mouse lines
-    // prettier. Two steps: (1) a small RDP pass strips capture jitter and
-    // redundant collinear samples; (2) Chaikin corner-cutting rounds the
-    // remaining corners into smooth curves. Endpoints are preserved so the
-    // stroke still starts/ends where the user drew. Tune via the two consts.
+    // Cleanup for a marker stroke on release. The marker renders as a
+    // Catmull-Rom spline through these points, so the *render* supplies the
+    // smoothness — here we just (1) RDP-simplify the raw samples down to a
+    // sparse set of control points the spline can curve through, and (2)
+    // round to whole canvas px (markers don't need sub-pixel precision). The
+    // result looks the same — smooth, following the stroke — but stores
+    // roughly 5–10× fewer, smaller points. Tune fidelity vs. size via
+    // SIMPLIFY_PX (lower = more points, tighter to the stroke).
     _smoothStroke: function(points) {
-      if (!points || points.length < 3) return points || [];
-      var DENOISE_PX = 2;  // RDP tolerance (on-screen px) — strips jitter
-      var PASSES = 2;      // Chaikin passes — higher = smoother (and denser)
-      var pts = this._rdpSimplify(points, this._freehandFitTolerance(DENOISE_PX));
-      for (var iter = 0; iter < PASSES && pts.length >= 3; iter++) {
-        var out = [pts[0]];
-        for (var i = 0; i < pts.length - 1; i++) {
-          var p = pts[i], q = pts[i + 1];
-          out.push([p[0] * 0.75 + q[0] * 0.25, p[1] * 0.75 + q[1] * 0.25]);
-          out.push([p[0] * 0.25 + q[0] * 0.75, p[1] * 0.25 + q[1] * 0.75]);
-        }
-        out.push(pts[pts.length - 1]);
-        pts = out;
-      }
-      return pts;
+      function round(p) { return [Math.round(p[0]), Math.round(p[1])]; }
+      if (!points || points.length < 3) return (points || []).map(round);
+      var SIMPLIFY_PX = 2;  // RDP tolerance (on-screen px) → control-point spacing
+      var pts = this._rdpSimplify(points, this._freehandFitTolerance(SIMPLIFY_PX));
+      return pts.map(round);
     },
 
     // Schneider's "Algorithm for Automatically Fitting Digitized Curves"
@@ -7530,15 +7540,47 @@
       return d;
     },
 
+    // Build a smooth cubic-bezier `d` that passes THROUGH every point — a
+    // Catmull-Rom spline converted to beziers. Lets a marker store only a
+    // sparse set of control points yet render as a smooth curve (the spline
+    // fills in the curvature). Each point is projected via `mapPt` first, so
+    // the math runs in container space. Endpoints are clamped (duplicated).
+    _catmullRomPathD: function(points, mapPt) {
+      var n = points.length;
+      if (!n) return "";
+      var p = [];
+      for (var i = 0; i < n; i++) { var c = mapPt(points[i]); p.push([c.x, c.y]); }
+      var d = "M " + p[0][0] + " " + p[0][1];
+      if (n === 1) return d;
+      for (var j = 0; j < n - 1; j++) {
+        var p0 = p[j - 1] || p[j];
+        var p1 = p[j];
+        var p2 = p[j + 1];
+        var p3 = p[j + 2] || p2;
+        // Catmull-Rom → bezier: control points are the anchors nudged by 1/6
+        // of the chord between their neighbours (tension 0.5).
+        var c1x = p1[0] + (p2[0] - p0[0]) / 6;
+        var c1y = p1[1] + (p2[1] - p0[1]) / 6;
+        var c2x = p2[0] - (p3[0] - p1[0]) / 6;
+        var c2y = p2[1] - (p3[1] - p1[1]) / 6;
+        d += " C " + c1x + " " + c1y + " " + c2x + " " + c2y + " " + p2[0] + " " + p2[1];
+      }
+      return d;
+    },
+
     _startFreehand: function(pt, e) { this._startStroke(pt, e, "freehand"); },
     _startMarker: function(pt, e) { this._startStroke(pt, e, "marker"); },
 
-    // Shared capture for both freehand and marker: a raw <polyline> draft
-    // grown sample-by-sample, simplified + fitted to bezier nodes on release
-    // by `_commitFreehand`. The only per-tool difference is styling — a marker
-    // wears `.etcher-marker` and its thickness/opacity/dash style.
+    // Shared capture for both freehand and marker. Freehand draws a raw
+    // <polyline> draft that's fitted to bezier nodes on release; a marker
+    // draws a <path> so its live preview (and committed stroke) render as a
+    // Catmull-Rom spline through the sampled points. `_commitFreehand` does
+    // the per-kind finalize. The other difference is styling — a marker wears
+    // `.etcher-marker` and its thickness/opacity/dash.
     _startStroke: function(pt, e, kind) {
-      var path = svgEl("polyline", { "stroke-width": "2", fill: "none" });
+      var path = kind === "marker"
+        ? svgEl("path", { "stroke-width": "2", fill: "none" })
+        : svgEl("polyline", { "stroke-width": "2", fill: "none" });
       path.classList.add("etcher-shape", "is-draft");
       if (kind === "marker") {
         path.classList.add("etcher-marker");
@@ -8430,7 +8472,10 @@
         case "polygon":   el = svgEl("polygon");                    break;
         case "marker":
         case "freehand":
-          el = (ann.geometry && ann.geometry.nodes)
+          // Markers always render as a <path> (Catmull-Rom spline through
+          // their points). Freehand uses a <path> for fitted bezier nodes,
+          // else a <polyline> for legacy raw points.
+          el = (ann.kind === "marker" || (ann.geometry && ann.geometry.nodes))
             ? svgEl("path", { fill: "none" })
             : svgEl("polyline", { fill: "none" });
           if (ann.kind === "marker") el.classList.add("etcher-marker");

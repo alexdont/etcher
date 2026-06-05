@@ -4,6 +4,19 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.6.3] — 2026-06-05
+
+### Changed
+
+- **Marker strokes are stored far more compactly.** A marker now keeps a
+  sparse set of RDP-simplified, whole-pixel control points and renders as a
+  Catmull-Rom spline through them, instead of a dense smoothed polyline. The
+  spline supplies the smoothness, so the result looks the same (smooth,
+  following the stroke) while the stored point set shrinks ~5–10× per stroke
+  — meaningful for pages with many marker annotations. Markers from earlier
+  versions still render. Control-point density is tunable via `SIMPLIFY_PX`
+  in `_smoothStroke`.
+
 ## [0.6.2] — 2026-06-05
 
 ### Changed

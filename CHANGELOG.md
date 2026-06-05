@@ -4,6 +4,24 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.6.1] — 2026-06-05
+
+### Added
+
+- **`readonly` annotation flag.** An annotation with `readonly: true` — a
+  top-level field alongside `uuid` / `kind` / `geometry` / `style` /
+  `metadata`, defaulting to `false` — still renders and responds to hover
+  and tooltip-pin, but skips edit mode, drag-to-move, color pickup, the
+  tooltip's delete button, the eraser, marquee + shift box-select, and the
+  pen editor. Clicking a locked shape in annotation mode pins its tooltip
+  (the browse-mode behavior) instead of selecting it.
+  `setShapeReadonly(uuid, bool)` flips the lock at runtime. The flag is
+  **render-only** — it's never echoed in `etcher:annotations-changed`, so
+  consumers recompute it from their own ownership data each render — and
+  the `.etcher-shape` element carries `data-readonly="true"` for styling.
+  It's a generic per-shape lock: Etcher has no user/ownership model, and it
+  is **not** a security boundary — keep your server-side filter on save.
+
 ## [0.6.0] — 2026-06-04
 
 ### Added

@@ -183,6 +183,31 @@ Payload: `%{"uuid", "kind"}`. Use this to drive UI keyed on actual user-draw int
 
 All coordinates are in canvas pixels — Fresco's pan/zoom rescales them automatically.
 
+## Read-only annotations
+
+Add `readonly: true` to any annotation to lock it — for layers that mix shapes from multiple authors (public manga annotations, multiplayer whiteboards, comment-on-image flows) where the current user shouldn't be able to touch shapes they don't own. A locked shape still renders and responds to hover and tooltip-pin, but the viewer can't enter edit mode, move/resize it, delete it (tooltip trash **or** eraser), box-select it, open its pen editor, or pick up its color. Clicking it in annotation mode pins its tooltip, the same as browse mode.
+
+```elixir
+annotations =
+  Enum.map(annotations, fn ann ->
+    Map.put(ann, "readonly", ann["owner_uuid"] != current_user.uuid)
+  end)
+```
+
+The flag is **render-time only**: Etcher never echoes `readonly` back in `etcher:annotations-changed`, so recompute it from your own ownership data on every render. Flip it at runtime (no re-render) via the layer API:
+
+```js
+Etcher.layerFor("board").setShapeReadonly(uuid, true)
+```
+
+A locked `.etcher-shape` element carries `data-readonly="true"`, so you can style locked shapes without specificity fights:
+
+```css
+.etcher-shape[data-readonly="true"] { opacity: 0.85; }
+```
+
+> **Not a security boundary.** `readonly` is UX, not enforcement — a determined client can flip it in DevTools. Keep a server-side filter that drops edits to annotations the user doesn't own when you persist `etcher:annotations-changed`.
+
 ## Persistence
 
 Etcher's component doesn't run any persistence itself — it emits `etcher:annotations-changed` and trusts the consumer. The canvas-extension model means every persistence shape works the same way:
@@ -321,10 +346,11 @@ if (layer.canRedo()) layer.redo();
 const shapes = layer.getShapes();
 // → [{ uuid, kind, geometry, style, metadata }, ...]
 const one = layer.getShape("uuid-…");
-layer.selectShape("uuid-…");  // pins the tooltip
+layer.selectShape("uuid-…");  // pins the tooltip (no-op + warn if readonly)
 layer.enterEditMode("uuid-…");
 layer.exitEditMode();
 layer.deleteShape("uuid-…");
+layer.setShapeReadonly("uuid-…", true);  // lock / unlock a shape (see Read-only annotations)
 
 // Live patch — merge metadata / style into an existing shape and
 // re-render. Use this when server-side state (comment count, author,

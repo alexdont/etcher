@@ -1226,7 +1226,20 @@
           },
           selectShape: function(uuid) {
             var shape = self.shapes.find(function(s) { return s.uuid === uuid; });
-            if (shape) self._pinTooltipFor(shape);
+            if (!shape) return;
+            if (shape.readonly) {
+              console.warn("[Etcher] selectShape ignored — shape is readonly:", uuid);
+              return;
+            }
+            self._pinTooltipFor(shape);
+          },
+          // Flip a shape's render-time lock without a re-render (parity with
+          // setColors). `true` disables edit / move / delete / pen-editor /
+          // box-select; hover + tooltip still work. Returns false if the uuid
+          // isn't on the layer. The flag is NOT persisted — re-renders that
+          // omit `readonly` reset it to false.
+          setShapeReadonly: function(uuid, bool) {
+            return self._setShapeReadonly(uuid, !!bool);
           },
           unselectShape: function() { self._unpinTooltip(); },
           enterEditMode: function(uuid) {
@@ -5423,6 +5436,7 @@
         }
         if (self.annotationMode && self.activeTool != null) return;
         if (!self.annotationMode) return;
+        if (shape.readonly) return; // locked → no inline text edit
         e.stopPropagation();
         e.preventDefault();
         self._enterEditMode(shape);
@@ -5523,14 +5537,14 @@
     _onShapeTap: function(shape) {
       if (!shape) return;
       var id = shape.uuid;
-      if (this.annotationMode) {
+      if (this.annotationMode && !shape.readonly) {
         // Edit handles only appear in annotation mode + cursor tool.
         this._enterEditMode(shape);
       } else {
-        // Outside annotation mode: pin the tooltip so the user can
-        // dwell on the comment preview without it timing out.
-        // Clicking the same shape again unpins; clicking another
-        // shape switches the pin.
+        // Browse mode, OR a locked (readonly) shape in annotation mode:
+        // pin the tooltip so the user can dwell on the comment preview
+        // without it timing out. Clicking the same shape again unpins;
+        // clicking another shape switches the pin.
         if (this.tooltipPinned && this._tooltipShape === shape) {
           this._unpinTooltip();
         } else {
@@ -5692,6 +5706,8 @@
         // browse mode or with a draw tool active, shift+click falls
         // through to the existing behavior.
         if (self.annotationMode && self.activeTool == null && e.shiftKey) {
+          // Locked shapes can't join a multi-selection (no group move/edit).
+          if (hit.readonly) { e.preventDefault(); return; }
           self._exitEditMode();
           self._toggleInSelection(hit);
           e.preventDefault();
@@ -5905,8 +5921,9 @@
       html += '<span class="etcher-tooltip-kind">' + (headerHtml || "") + '</span>';
       // Trash button stays Etcher-controlled — delete is a core UX,
       // consumers shouldn't have to reimplement it. Only shown for
-      // persisted shapes (temp drafts have no server-side uuid yet).
-      if (shape.uuid) {
+      // persisted shapes (temp drafts have no server-side uuid yet), and
+      // never for locked (readonly) shapes — the viewer can't delete them.
+      if (shape.uuid && !shape.readonly) {
         html += '<button type="button" class="etcher-tooltip-delete"' +
                 ' data-etcher-action="delete" title="Delete annotation"' +
                 ' aria-label="Delete annotation">' + ICONS.trash + '</button>';
@@ -6202,6 +6219,7 @@
         style: s.style || null,
         metadata: s.metadata || null
       };
+      if (s.readonly) d.readonly = true;
       if (typeof s.image_idx === "number") d.image_idx = s.image_idx;
       if (typeof s.image_id === "string") d.image_id = s.image_id;
       return d;
@@ -6523,6 +6541,24 @@
                 this.selectedShapes.indexOf(shape) !== -1);
     },
 
+    // Toggle a shape's render-time lock at runtime (public `setShapeReadonly`).
+    // Updates the `data-readonly` attr for styling, and — if the shape just
+    // became locked — drops it out of edit mode and any multi-selection.
+    _setShapeReadonly: function(uuid, bool) {
+      var shape = (this.shapes || []).find(function(s) { return s.uuid === uuid; });
+      if (!shape) return false;
+      shape.readonly = !!bool;
+      if (shape.el) {
+        if (shape.readonly) shape.el.setAttribute("data-readonly", "true");
+        else shape.el.removeAttribute("data-readonly");
+      }
+      if (shape.readonly) {
+        if (this.editingShape === shape) this._exitEditMode();
+        if (this._isInSelection(shape)) this._removeFromSelection(shape);
+      }
+      return true;
+    },
+
     // Draw/resize the marquee rectangle (container px) during a box-select.
     _updateBoxSelect: function(e) {
       var bs = this._boxSelect;
@@ -6554,6 +6590,7 @@
       var bx2 = Math.max(s0.x, endImg.x), by2 = Math.max(s0.y, endImg.y);
       (self.shapes || []).forEach(function(s) {
         if (!s.uuid) return;
+        if (s.readonly) return; // locked shapes can't be selected/edited
         var bb = self._shapeBBoxImagePx(s);
         if (!bb) return;
         if (bb.x <= bx2 && bb.x + bb.w >= bx1 &&
@@ -7831,6 +7868,8 @@
       // Kept as a thin alias so the eraser's call sites stay readable
       // ("hit one shape during a sweep") even though the underlying
       // logic now also drives the doc-level hover hit-test.
+      // Locked (readonly) shapes can't be erased.
+      if (shape.readonly) return false;
       return this._shapeContainsPoint(shape, pt);
     },
 
@@ -8522,8 +8561,14 @@
         metadata: ann.metadata || null,
         label: ann.label || null,
         style: ann.style || null,
+        // Render-time-only lock. `true` disables edit / move / delete / pen-
+        // editor / box-select while keeping hover + tooltip. Never echoed in
+        // `etcher:annotations-changed` — the consumer recomputes it from its
+        // own ownership data each render. See `data-readonly` for styling.
+        readonly: ann.readonly === true,
         el: el
       };
+      if (shape.readonly) el.setAttribute("data-readonly", "true");
       // Strip mode: keep `image_idx` on the shape so future emits round-
       // trip cleanly and so `_shapeAt` can filter hit-tests by page.
       if (this.handleKind === "strip" && typeof ann.image_idx === "number") {
@@ -8589,6 +8634,9 @@
       // ack'd by the server yet so an `etcher:updated` event for them
       // would point at a non-existent uuid.
       if (!shape || !shape.uuid) return;
+      // Locked shapes never enter edit mode (no handles, no color pickup,
+      // no move). Hover + tooltip-pin still work via `_onShapeTap`.
+      if (shape.readonly) return;
       if (this.editingShape === shape) return;
       this._exitEditMode();
       this._exitTitleEditMode();
@@ -9214,7 +9262,8 @@
 
     _renderFreehandEditor: function(shape) {
       this._removeFreehandEditor();
-      if (!shape || (shape.kind !== "freehand" && shape.kind !== "marker") ||
+      if (!shape || shape.readonly ||
+          (shape.kind !== "freehand" && shape.kind !== "marker") ||
           !shape.geometry || !shape.geometry.nodes) {
         return;
       }
@@ -9665,6 +9714,9 @@
     // small dead-zone so a stationary click on the shape body doesn't
     // emit a no-op `etcher:updated` event.
     _startShapeMove: function(shape, e) {
+      // Locked shape: no drag-to-move. Fall through to the tap path so a
+      // click still pins the tooltip (browse-mode behavior).
+      if (shape.readonly) { this._onShapeTap(shape); return; }
       var self = this;
       var el = shape.el;
       // Strip mode: make sure handle / drag-preview elements created

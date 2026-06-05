@@ -4194,7 +4194,8 @@
               bboxTopImage = { x: (fMinX + fMaxX) / 2, y: fMinY };
             }
           } else {
-            // Legacy raw polyline (pre-vector strokes).
+            // Raw polyline: markers (pixel-accurate, not fitted) store
+            // geometry as `{ points }`, as does legacy pre-vector freehand.
             var lMinX = Infinity, lMaxX = -Infinity, lMinY = Infinity;
             var lpts = (g.points || []).map(function(p) {
               if (p[0] < lMinX) lMinX = p[0];
@@ -6251,18 +6252,18 @@
           }));
         case "marker":
         case "freehand": {
-          if (g.nodes) {
-            var flat = this._freehandFlatten(g);
-            if (!flat.length) return null;
-            var aMinX = flat[0][0], aMinY = flat[0][1], aMaxX = aMinX, aMaxY = aMinY;
-            for (var fi = 1; fi < flat.length; fi++) {
-              var fp = flat[fi];
-              if (fp[0] < aMinX) aMinX = fp[0]; else if (fp[0] > aMaxX) aMaxX = fp[0];
-              if (fp[1] < aMinY) aMinY = fp[1]; else if (fp[1] > aMaxY) aMaxY = fp[1];
-            }
-            return { x: aMinX, y: aMinY, w: aMaxX - aMinX, h: aMaxY - aMinY };
+          // Flatten handles both formats: bezier `nodes` (sampled to a
+          // polyline) and raw/legacy `points` (returned as-is) — both as
+          // `[x, y]` tuples.
+          var flat = this._freehandFlatten(g);
+          if (!flat.length) return null;
+          var aMinX = flat[0][0], aMinY = flat[0][1], aMaxX = aMinX, aMaxY = aMinY;
+          for (var fi = 1; fi < flat.length; fi++) {
+            var fp = flat[fi];
+            if (fp[0] < aMinX) aMinX = fp[0]; else if (fp[0] > aMaxX) aMaxX = fp[0];
+            if (fp[1] < aMinY) aMinY = fp[1]; else if (fp[1] > aMaxY) aMaxY = fp[1];
           }
-          return fromPoints(g.points);
+          return { x: aMinX, y: aMinY, w: aMaxX - aMinX, h: aMaxY - aMinY };
         }
         case "line":
         case "dimension": {
@@ -7287,6 +7288,30 @@
       return out;
     },
 
+    // Light cleanup for a raw marker stroke on release — keeps the point-based
+    // geometry (no bezier nodes, no editing) but makes finger / mouse lines
+    // prettier. Two steps: (1) a small RDP pass strips capture jitter and
+    // redundant collinear samples; (2) Chaikin corner-cutting rounds the
+    // remaining corners into smooth curves. Endpoints are preserved so the
+    // stroke still starts/ends where the user drew. Tune via the two consts.
+    _smoothStroke: function(points) {
+      if (!points || points.length < 3) return points || [];
+      var DENOISE_PX = 2;  // RDP tolerance (on-screen px) — strips jitter
+      var PASSES = 2;      // Chaikin passes — higher = smoother (and denser)
+      var pts = this._rdpSimplify(points, this._freehandFitTolerance(DENOISE_PX));
+      for (var iter = 0; iter < PASSES && pts.length >= 3; iter++) {
+        var out = [pts[0]];
+        for (var i = 0; i < pts.length - 1; i++) {
+          var p = pts[i], q = pts[i + 1];
+          out.push([p[0] * 0.75 + q[0] * 0.25, p[1] * 0.75 + q[1] * 0.25]);
+          out.push([p[0] * 0.25 + q[0] * 0.75, p[1] * 0.25 + q[1] * 0.75]);
+        }
+        out.push(pts[pts.length - 1]);
+        pts = out;
+      }
+      return pts;
+    },
+
     // Schneider's "Algorithm for Automatically Fitting Digitized Curves"
     // (Graphics Gems, 1990) — the same fit Paper.js's path.simplify() uses.
     // Input: a polyline (array of [x,y]) + a max error in image px. Output: an
@@ -7648,12 +7673,21 @@
       }
       var kind = this.draftState.kind || "freehand";
       var oldEl = this.draftState.el;
-      // Simplify + fit the raw samples into bezier nodes. RDP runs a touch
-      // tighter than the fit tolerance so it only strips genuine jitter and
-      // leaves real curvature for the fitter to model.
-      // Markers fit tight (~2px → more anchors) so hard shapes stay faithful;
-      // freehand stays loose (~8px) for fewer handles.
-      var tol = this._freehandFitTolerance(kind === "marker" ? 2 : 8);
+
+      // Markers keep a point-based stroke (no bezier nodes / pen editor), but
+      // get a light smoothing pass on release so finger / mouse jitter reads
+      // as clean curves — close to what was drawn, just prettier. Still fully
+      // styleable + selectable. Freehand simplifies + fits to nodes below.
+      if (kind === "marker") {
+        oldEl.classList.remove("is-draft");
+        this._finalizeShape("marker", { points: this._smoothStroke(pts) }, oldEl);
+        return;
+      }
+
+      // Freehand: simplify (Ramer–Douglas–Peucker) + fit (Schneider) the raw
+      // samples into editable bezier nodes. RDP runs a touch tighter than the
+      // fit tolerance so it only strips jitter and leaves real curvature.
+      var tol = this._freehandFitTolerance(8);
       var simplified = this._rdpSimplify(pts, tol * 0.6);
       var beziers = this._fitCurve(simplified, tol);
       // Degenerate fit (e.g. a single dot) — keep the raw polyline so the
@@ -7666,17 +7700,12 @@
       var nodes = this._beziersToNodes(beziers);
       var path = svgEl("path", { "stroke-width": "2", fill: "none" });
       path.classList.add("etcher-shape");
-      if (kind === "marker") {
-        path.classList.add("etcher-marker");
-        this._applyMarkerStyle(path, this._currentMarkerStyle());
-      } else {
-        this._applyShapeColor(path, this.activeColor);
-      }
+      this._applyShapeColor(path, this.activeColor);
       this.svg.appendChild(path);
       oldEl.remove();
       this.draftState.el = path;
       this.draftState.geometry = { nodes: nodes };
-      this._finalizeShape(kind, { nodes: nodes }, path);
+      this._finalizeShape("freehand", { nodes: nodes }, path);
     },
 
     // -------------------------------------------------------------------------

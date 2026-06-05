@@ -4,6 +4,27 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.6.2] — 2026-06-05
+
+### Changed
+
+- **Markers draw as smoothed point strokes instead of fitted bezier
+  curves.** A marker now keeps the path you actually drew (pixel-accurate)
+  and gets a light cleanup on release — a small RDP denoise plus Chaikin
+  corner-cutting — so finger / mouse jitter reads as clean curves while
+  still following the stroke. Markers stay fully styleable (color /
+  thickness / opacity / dash) and selectable (click or box-select), but no
+  longer expose the bezier pen editor; reshaping a marker by dragging
+  anchors / handles isn't supported. Freehand keeps its fitted, node-
+  editable vector curve. Markers drawn in 0.6.0–0.6.1 (stored as `nodes`)
+  still render. Smoothing strength is tunable via `_smoothStroke`.
+
+### Fixed
+
+- `_shapeBBoxImagePx` flattens both stroke formats, fixing box-select and
+  bounding-box math for point-based markers and legacy `{points}`
+  freehand (it previously read `.x` / `.y` off `[x, y]` tuples → `NaN`).
+
 ## [0.6.1] — 2026-06-05
 
 ### Added

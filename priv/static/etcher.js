@@ -2209,6 +2209,17 @@
         handle.on("resize",    render),
         handle.on("open",      render)
       ];
+
+      // Fresco 0.7's `handle.setSources(...)` replaces the canvas image set
+      // (and, optionally, the `extensions` map) in place. Re-hydrate the
+      // overlay from the new `extensions.etcher` so chapter N's shapes don't
+      // linger on chapter N+1's images. No-op on Fresco < 0.7 (event never
+      // fires) and on strip mode (event is canvas-only).
+      if (typeof handle.on === "function") {
+        self._unsubViewport.push(
+          handle.on("sources-changed", function() { self._rehydrateFromExtension(); })
+        );
+      }
     },
 
     // -------------------------------------------------------------------------
@@ -8584,6 +8595,61 @@
       // build already seeds when present; this only fills an empty
       // palette and never clobbers a user edit.
       if (!self._colorSlots || !self._colorSlots.length) self._seedColorSlots();
+    },
+
+    // Re-hydrate the overlay after a Fresco `setSources` swap (canvas mode):
+    // tear down the current shapes + interaction state so nothing leaks
+    // across the swap, re-render from the new `extensions.etcher`, re-seed
+    // the per-canvas palette, and re-emit `annotations-changed` for consumer
+    // save handlers. Per-shape `readonly` flows in naturally — it lives on
+    // each annotation in the new array.
+    _rehydrateFromExtension: function() {
+      // Drop all interaction state tied to the outgoing shapes.
+      this._exitEditMode();
+      this._exitTitleEditMode();
+      this._clearSelection();
+      this._unpinTooltip();
+      this._hideTooltip();
+
+      // Remove every shape element (and its title sibling) from the overlay.
+      (this.shapes || []).forEach(function(s) {
+        if (s.el && s.el.parentNode) s.el.parentNode.removeChild(s.el);
+        if (s.titleGroup && s.titleGroup.parentNode) {
+          s.titleGroup.parentNode.removeChild(s.titleGroup);
+        }
+      });
+      this.shapes = [];
+
+      // Undo/redo across a full image swap is meaningless — reset it.
+      this._undoStack = [];
+      this._redoStack = [];
+      this._refreshUndoButtons();
+
+      // Re-render from the NEW canvas state. Fresco's setSources already
+      // replaced `data-extensions`, so `getExtension` returns the new set.
+      this._renderInitial();
+
+      // Re-seed the per-canvas palette from the new extension (per-user
+      // `:colors` attr still wins).
+      this._reseedColorsOnSwap();
+
+      // Tell consumer save handlers the live set changed.
+      this._emitChanged();
+    },
+
+    // Re-seed color slots from the swapped-in `extensions.etcher.colors`,
+    // unless the consumer supplied a per-user palette via the `:colors` attr
+    // (which always wins). No-op when the new extension carries no colors —
+    // the current palette is kept rather than reset.
+    _reseedColorsOnSwap: function() {
+      if (this.el && this.el.dataset && this.el.dataset.colors) return;
+      var ext = (this.handle && typeof this.handle.getExtension === "function")
+        ? this.handle.getExtension("etcher") : null;
+      if (!ext || !Array.isArray(ext.colors) || !ext.colors.length) return;
+      this._colorSlots = this._sanitizeColorSlots(ext.colors);
+      if (this._activeSlot >= this._colorSlots.length) this._activeSlot = 0;
+      this.activeColor = this._colorSlots[this._activeSlot];
+      this._refreshToolbarSwatches();
     },
 
     _renderAnnotation: function(ann) {

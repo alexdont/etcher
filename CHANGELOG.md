@@ -4,6 +4,28 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.6.6] — 2026-06-06
+
+### Added
+
+- **Re-hydrate on Fresco `setSources`.** When a `<Fresco.canvas>` swaps its
+  image set in place (Fresco 0.7's `handle.setSources`, which also fires a
+  `sources-changed` event), the overlay now rebuilds from the new
+  `extensions.etcher`: it tears down the current shapes + interaction state
+  (edit mode, selection, tooltip, undo/redo), re-renders the new
+  annotations, re-seeds the per-canvas palette from
+  `extensions.etcher.colors` (the `:colors` attr still wins), and re-emits
+  `etcher:annotations-changed` for consumer save handlers. Without this,
+  chapter N's shapes lingered on chapter N+1's images. Per-shape `readonly`
+  flows in naturally via the new annotations array. No-op on Fresco < 0.7
+  (the event never fires) and in strip mode (the event is canvas-only).
+
+### Changed
+
+- Widen the Fresco dependency to
+  `~> 0.5.9 or ~> 0.6.0 or ~> 0.7.0` so consumers can pull Fresco 0.7, where
+  `handle.setSources` lives.
+
 ## [0.6.5] — 2026-06-05
 
 ### Added

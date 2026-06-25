@@ -4,6 +4,19 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.7.1] — 2026-06-25
+
+### Fixed
+
+- **`Etcher.Raster` now renders marker and vector-freehand strokes.** `0.7.0`
+  skipped the `marker` kind entirely and only matched legacy point-based
+  `freehand`, so strokes from the marker tool — and from the current
+  vector-freehand tool, which persists cubic-bezier `nodes` rather than raw
+  `points` — were dropped from baked output (e.g. annotated thumbnails). Both
+  now flatten to a polyline; node-based strokes are subdivided the same way the
+  canvas does (mirrors `_freehandFlatten`), so a curved stroke reads as a curve,
+  not a chord.
+
 ## [0.7.0] — 2026-06-25
 
 ### Added

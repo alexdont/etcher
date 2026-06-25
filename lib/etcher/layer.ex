@@ -255,7 +255,18 @@ defmodule Etcher.Layer do
   )
 
   attr(:tools, :list,
-    default: [:grabber, :rectangle, :circle, :polygon, :freehand, :marker, :callout, :text, :dimension, :eraser],
+    default: [
+      :grabber,
+      :rectangle,
+      :circle,
+      :polygon,
+      :freehand,
+      :marker,
+      :callout,
+      :text,
+      :dimension,
+      :eraser
+    ],
     doc: "Subset of drawing tools to show in the toolbar."
   )
 

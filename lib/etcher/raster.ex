@@ -134,9 +134,15 @@ defmodule Etcher.Raster do
 
   defp shape_primitives("rectangle", %{} = g), do: rect(g)
   defp shape_primitives("text", %{} = g), do: rect(g)
-  defp shape_primitives("circle", g), do: with_keys(g, ["cx", "cy", "r"], &[{:circle, &1, &2, &3}])
+
+  defp shape_primitives("circle", g),
+    do: with_keys(g, ["cx", "cy", "r"], &[{:circle, &1, &2, &3}])
+
   defp shape_primitives("polygon", %{"points" => p}) when is_list(p), do: poly(:polygon, p)
-  defp shape_primitives("freehand", %{"points" => p}) when is_list(p), do: poly(:polyline, p)
+
+  defp shape_primitives(k, g) when k in ["freehand", "marker"],
+    do: poly(:polyline, stroke_points(g))
+
   defp shape_primitives(k, g) when k in ["line", "dimension"], do: ab_line(g)
 
   defp shape_primitives("callout", g) do
@@ -173,6 +179,49 @@ defmodule Etcher.Raster do
 
   defp poly(_tag, []), do: []
   defp poly(tag, points), do: [{tag, Enum.map(points, &pt/1)}]
+
+  # freehand/marker → a flat list of polyline points. Markers and legacy
+  # freehand store raw `points`; vector freehand stores cubic-bezier `nodes`
+  # (`%{"p" => [x, y], "hOut" => [dx, dy], "hIn" => [dx, dy]}`). Flatten the
+  # latter the same way the canvas does (mirrors Etcher's `_freehandFlatten`),
+  # so a curvy stroke reads as a curve in the baked output, not a chord.
+  defp stroke_points(g) do
+    case {get(g, "points"), get(g, "nodes")} do
+      {points, _} when is_list(points) and points != [] -> points
+      {_, nodes} when is_list(nodes) and nodes != [] -> flatten_nodes(nodes)
+      _ -> []
+    end
+  end
+
+  @flatten_steps 16
+
+  defp flatten_nodes([only]), do: [xy(get(only, "p"))]
+
+  defp flatten_nodes([first | _] = nodes) do
+    curve =
+      nodes
+      |> Enum.chunk_every(2, 1, :discard)
+      |> Enum.flat_map(fn [prev, cur] ->
+        p0 = xy(get(prev, "p"))
+        p3 = xy(get(cur, "p"))
+        p1 = add(p0, xy(get(prev, "hOut")))
+        p2 = add(p3, xy(get(cur, "hIn")))
+        for s <- 1..@flatten_steps, do: cubic(p0, p1, p2, p3, s / @flatten_steps)
+      end)
+
+    [xy(get(first, "p")) | curve]
+  end
+
+  defp add({ax, ay}, {bx, by}), do: {ax + bx, ay + by}
+
+  defp cubic({x0, y0}, {x1, y1}, {x2, y2}, {x3, y3}, t) do
+    mt = 1 - t
+    a = mt * mt * mt
+    b = 3 * mt * mt * t
+    c = 3 * mt * t * t
+    d = t * t * t
+    {a * x0 + b * x1 + c * x2 + d * x3, a * y0 + b * y1 + c * y2 + d * y3}
+  end
 
   # ── primitive → ImageMagick `-draw` ──────────────────────────────────────
 
@@ -219,12 +268,20 @@ defmodule Etcher.Raster do
     end
   end
 
-  # A point: `[x, y]`, `{x, y}`, or `%{"x" => , "y" =>}`. → `{xi, yi}`.
-  defp pt([x, y]), do: {num(x), num(y)}
-  defp pt({x, y}), do: {num(x), num(y)}
-  defp pt(%{"x" => x, "y" => y}), do: {num(x), num(y)}
-  defp pt(%{x: x, y: y}), do: {num(x), num(y)}
-  defp pt(_), do: {0, 0}
+  # A point, rounded to integers for output: `[x, y]`, `{x, y}`, or
+  # `%{"x" =>, "y" =>}` → `{xi, yi}`.
+  defp pt(p) do
+    {x, y} = xy(p)
+    {num(x), num(y)}
+  end
+
+  # The same point parse, but keeping float precision — used for bezier math
+  # where intermediate rounding would visibly kink the flattened curve.
+  defp xy([x, y]), do: {x, y}
+  defp xy({x, y}), do: {x, y}
+  defp xy(%{"x" => x, "y" => y}), do: {x, y}
+  defp xy(%{x: x, y: y}), do: {x, y}
+  defp xy(_), do: {0, 0}
 
   defp num(v) when is_number(v), do: round(v)
   defp num(_), do: 0

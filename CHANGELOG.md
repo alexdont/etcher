@@ -4,6 +4,20 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.7.0] — 2026-06-25
+
+### Added
+
+- **`Etcher.Raster` — server-side rendering of annotations.** A pure,
+  dependency-free counterpart to the browser overlay: turns persisted
+  `extensions.etcher` geometry into either ImageMagick `convert -draw`
+  arguments (`to_draw_args/2`, to bake shapes into a raster — e.g. an
+  annotated thumbnail) or a standalone `<svg>` string (`to_svg/2`, an
+  `object-cover`-aligned overlay). Single source of truth for "geometry →
+  drawn shape" on the server, mirroring the README wire format; accepts
+  string- or atom-keyed maps and skips unsupported/malformed shapes.
+  `primitives/1` exposes the normalised primitive list for custom backends.
+
 ## [0.6.6] — 2026-06-06
 
 ### Added

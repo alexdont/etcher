@@ -249,6 +249,30 @@ push_event(socket, "etcher:patch-shape", %{
 
 On the client, your JS bridges this to `layer.patchShape(uuid, {metadata})` — see [the `phoenix_kit.js` reference bridge](https://github.com/alexdont/phoenix_kit/blob/main/priv/static/assets/phoenix_kit.js) for a 12-line listener. Same pattern works for `style` updates or for `etcher:delete-shape` → `layer.deleteShape(uuid)`.
 
+## Server-side rendering
+
+Etcher draws shapes live (SVG) on the canvas in the browser. `Etcher.Raster` is the **server** counterpart: it turns the same persisted geometry into a static drawing, with no JavaScript and no canvas — for baking a thumbnail, an OG image, a PDF, or any place a shape needs to appear without a live LiveView.
+
+It's pure and dependency-free: it returns strings (ImageMagick draw-args or SVG markup) and leaves the actual rasterizing to you. Feed it the annotation list straight out of `extensions.etcher` (string **or** atom keys; it's the same wire format as the [geometry table](#geometry-shapes) above).
+
+**Bake shapes into a raster** — `to_draw_args/2` returns `convert` arguments to splice in *before* any resize/crop, so shapes are drawn in the image's pixel space and scale with it:
+
+```elixir
+draw_args = Etcher.Raster.to_draw_args(annotations, stroke_width: 4)
+
+System.cmd("convert",
+  [source_path] ++ draw_args ++
+    ["-resize", "400x400^", "-gravity", "center", "-extent", "400x400", "png:#{out}"])
+```
+
+**Overlay without rasterizing** — `to_svg/2` returns a standalone `<svg>` string. With `preserveAspectRatio="xMidYMid slice"` it crops identically to CSS `object-cover`, so it lines up over a cover-fit `<img>`:
+
+```elixir
+Etcher.Raster.to_svg(annotations, width: img.width, height: img.height, class: "absolute inset-0")
+```
+
+**Options:** `:stroke_width`, `:default_color` (fallback when a shape has no `style` colour), and for SVG `:width` / `:height` / `:class`. Outlines only — `text`, `eraser`, and unknown/malformed shapes are skipped, so one bad row never breaks a render. Need a different backend (PDF, Cairo, …)? `primitives/1` hands you the normalised `{primitive, colour}` list to render yourself.
+
 ## Customizing the tooltip
 
 Hovering or clicking an annotation pops up a small tooltip with a trash button (for persisted shapes) and three content slots: **header**, **footer**, and **body**. The defaults read a few generic `metadata` keys and degrade to just the shape kind if those are absent, but a consumer can replace any slot with its own rendering by setting `window.Etcher.tooltipSlots`:

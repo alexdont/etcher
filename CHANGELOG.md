@@ -4,6 +4,14 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.7.2] — 2026-07-06
+
+### Changed
+
+- Allow **fresco 0.8.x** (`~> 0.8.0` added to the version constraint). Fresco
+  0.8.0 is backward-compatible with the handle API Etcher uses — no code
+  changes required; this only widens the dependency so consumers can adopt it.
+
 ## [0.7.1] — 2026-06-25
 
 ### Fixed

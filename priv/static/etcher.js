@@ -4914,9 +4914,17 @@
           return this._strokeNearPoint(shape, pt);
         case "polygon":
         case "freehand": {
+          // Freehand is an open stroke first: hit by proximity to the
+          // curve, like a marker. The interior test below alone misses a
+          // plain drawn line — its closed footprint is near-zero area —
+          // which made freehand strokes unselectable and unmovable.
+          if (shape.kind === "freehand" && this._strokeNearPoint(shape, pt)) {
+            return true;
+          }
           // Ray-casting: count edge crossings to the right of `pt`.
           // Freehand curves are flattened to a polyline first so the test
           // follows the rendered bezier outline, not the sparse anchors.
+          // Kept for freehand too so a closed loop still hits inside.
           var pts = shape.kind === "freehand" ? this._freehandFlatten(g) : (g.points || []);
           if (pts.length < 3) return false;
           var inside = false;

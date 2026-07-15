@@ -106,7 +106,7 @@ defmodule MyAppWeb.PhotoLive do
   # it to open a composer / inspector / metadata-entry popup. Unlike
   # `annotations-changed`, this does NOT fire on undo/redo, drags, or
   # color picks — only on actual user-draw intent.
-  def handle_event("etcher:shape-drawn", %{"uuid" => uuid, "kind" => _kind}, socket) do
+  def handle_event("etcher:shape-drawn", %{"fresco_id" => _, "uuid" => uuid, "kind" => _kind}, socket) do
     {:noreply, assign(socket, :composing_uuid, uuid)}
   end
 end
@@ -163,10 +163,10 @@ The canonical handler pipes the array straight through `Fresco.Canvas.put_extens
 #### `etcher:shape-drawn` — fires only on real user draws
 
 ```elixir
-def handle_event("etcher:shape-drawn", %{"uuid" => uuid, "kind" => kind}, socket), do: ...
+def handle_event("etcher:shape-drawn", %{"fresco_id" => fresco_id, "uuid" => uuid, "kind" => kind}, socket), do: ...
 ```
 
-Payload: `%{"uuid", "kind"}`. Use this to drive UI keyed on actual user-draw intent (open a composer, focus a metadata form, fire an analytics event). It does **not** fire on undo/redo of a delete (which also adds a shape back into the canvas), drags, color picks, or programmatic shape additions via `layer.patchShape/2`. `etcher:annotations-changed` handles persistence; `etcher:shape-drawn` handles intent.
+Payload: `%{"fresco_id", "uuid", "kind"}`. Use this to drive UI keyed on actual user-draw intent (open a composer, focus a metadata form, fire an analytics event). It does **not** fire on undo/redo of a delete (which also adds a shape back into the canvas), drags, color picks, or programmatic shape additions via `layer.patchShape/2`. `etcher:annotations-changed` handles persistence; `etcher:shape-drawn` handles intent.
 
 #### `etcher:colors-changed` / `etcher:line-params-changed` — per-user defaults
 

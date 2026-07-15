@@ -8463,6 +8463,7 @@
       this._renderShape(shape);
       if (this._isStrokeShape(kind)) this._applyLineParams(el, style);
       this._attachShapeInteractions(shape);
+      this._pushUndoCreate(shape);
 
       this._emitChanged();
 
@@ -8487,6 +8488,7 @@
       // just drew a brand-new shape" subscribe to this event instead.
       if (this.pushEventTo) {
         this.pushEventTo(this.el, "etcher:shape-drawn", {
+          fresco_id: this.frescoId || null,
           uuid: shape.uuid,
           kind: shape.kind
         });
@@ -10094,6 +10096,17 @@
           return { cx: geom.cx + dx, cy: geom.cy + dy, r: geom.r };
         case "polygon":
         case "freehand":
+        case "marker":
+          // Node-based freehand (fitted beziers): shift each node's anchor;
+          // hIn/hOut stay untouched — they're offsets relative to the anchor.
+          if (geom.nodes) {
+            return {
+              nodes: geom.nodes.map(function(n) {
+                return Object.assign({}, n, { p: [n.p[0] + dx, n.p[1] + dy] });
+              })
+            };
+          }
+          // Point-based strokes (markers, legacy freehand) and polygons.
           return {
             points: (geom.points || []).map(function(p) {
               return [p[0] + dx, p[1] + dy];
@@ -10284,14 +10297,20 @@
         try { return JSON.parse(JSON.stringify(v)); } catch (_) { return v; }
       }
       var items = shapes.map(function(shape) {
+        var snapshot = {
+          kind: shape.kind,
+          geometry: clone(shape.geometry),
+          style: clone(shape.style),
+          metadata: clone(shape.metadata),
+          originalUuid: shape.uuid
+        };
+        // Preserve the image tag so a redo-after-undo re-attaches the
+        // shape to its page (strip) / host image (multi-image canvas)
+        // instead of reviving it untagged.
+        if (typeof shape.image_idx === "number") snapshot.image_idx = shape.image_idx;
+        if (typeof shape.image_id === "string") snapshot.image_id = shape.image_id;
         return {
-          snapshot: {
-            kind: shape.kind,
-            geometry: clone(shape.geometry),
-            style: clone(shape.style),
-            metadata: clone(shape.metadata),
-            originalUuid: shape.uuid
-          },
+          snapshot: snapshot,
           // Set when this item gets recreated by undo; cleared on redo.
           // Lets a second redo find the live shape to delete again.
           liveUuid: null
@@ -10301,6 +10320,54 @@
       if (this._undoStack.length > this._undoStackLimit) this._undoStack.shift();
       this._redoStack = [];
       this._refreshUndoButtons();
+    },
+
+    // Create op — a freshly-drawn shape. Undo deletes it; redo recreates
+    // it from the snapshot (bulk_delete's machinery, inverted). Without
+    // this, drawing a shape leaves no history entry at all and the undo
+    // button stays dead until the first drag/edit/delete.
+    _pushUndoCreate: function(shape) {
+      if (!shape || !shape.uuid) return;
+      this._undoStack = this._undoStack || [];
+      this._redoStack = this._redoStack || [];
+      function clone(v) {
+        if (v == null) return v;
+        try { return JSON.parse(JSON.stringify(v)); } catch (_) { return v; }
+      }
+      var snapshot = {
+        kind: shape.kind,
+        geometry: clone(shape.geometry),
+        style: clone(shape.style),
+        metadata: clone(shape.metadata),
+        originalUuid: shape.uuid
+      };
+      if (typeof shape.image_idx === "number") snapshot.image_idx = shape.image_idx;
+      if (typeof shape.image_id === "string") snapshot.image_id = shape.image_id;
+      this._undoStack.push({
+        type: "create",
+        item: { snapshot: snapshot, liveUuid: shape.uuid }
+      });
+      if (this._undoStack.length > this._undoStackLimit) this._undoStack.shift();
+      this._redoStack = [];
+      this._refreshUndoButtons();
+    },
+
+    // Shared deletion path for history ops (undo-of-create, redo-of-
+    // delete): drop the live shape without recording a new history entry.
+    _removeShapeForHistory: function(uuid) {
+      if (!uuid) return;
+      var shape = this.shapes.find(function(s) { return s.uuid === uuid; });
+      if (!shape) return;
+      if (this.editingShape === shape) this._exitEditMode();
+      if (this.editingTitleShape === shape) this._exitTitleEditMode();
+      var idx = this.shapes.indexOf(shape);
+      if (idx !== -1) {
+        if (shape.el && shape.el.parentNode) shape.el.parentNode.removeChild(shape.el);
+        if (shape.titleGroup && shape.titleGroup.parentNode) {
+          shape.titleGroup.parentNode.removeChild(shape.titleGroup);
+        }
+        this.shapes.splice(idx, 1);
+      }
     },
 
     _undo: function() {
@@ -10314,6 +10381,11 @@
           var uuid = self._recreateFromSnapshot(item.snapshot);
           item.liveUuid = uuid;
         });
+        this._redoStack.push(op);
+      } else if (op.type === "create") {
+        this._removeShapeForHistory(op.item.liveUuid);
+        op.item.liveUuid = null;
+        this._emitChanged();
         this._redoStack.push(op);
       } else if (op.type === "update") {
         this._redoStack.push(op);
@@ -10348,6 +10420,9 @@
         });
         self._emitChanged();
         this._undoStack.push(op);
+      } else if (op.type === "create") {
+        op.item.liveUuid = this._recreateFromSnapshot(op.item.snapshot);
+        this._undoStack.push(op);
       } else if (op.type === "update") {
         this._undoStack.push(op);
         this._applyHistorySnapshot(op.uuid, op.after);
@@ -10373,6 +10448,8 @@
         style: snap.style,
         metadata: snap.metadata
       };
+      if (typeof snap.image_idx === "number") ann.image_idx = snap.image_idx;
+      if (typeof snap.image_id === "string") ann.image_id = snap.image_id;
       this._renderAnnotation(ann);
       this._emitChanged();
       return ann.uuid;

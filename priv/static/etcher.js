@@ -169,8 +169,19 @@
     rectangle:'<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><rect x="4" y="6" width="16" height="12" rx="1.5"/></svg>',
     circle:   '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><circle cx="12" cy="12" r="7.5"/></svg>',
     polygon:  '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3.5 21 9.5 18 20H6L3 9.5 12 3.5Z"/></svg>',
-    freehand: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3 17.25c2-2 3-4 5-4s2.5 2 4.5 2 3-2 5-2 2.5 1 3.5 1"/></svg>',
-    marker: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9.53 16.122a3 3 0 0 0-5.78 1.128 2.25 2.25 0 0 1-2.4 2.245 4.5 4.5 0 0 0 8.4-2.245c0-.399-.078-.78-.22-1.128Zm0 0a15.998 15.998 0 0 0 3.388-1.62m-5.043-.025a15.994 15.994 0 0 1 1.622-3.395m3.42 3.42a15.995 15.995 0 0 0 4.764-4.648l3.876-5.814a1.151 1.151 0 0 0-1.597-1.597L14.146 6.32a15.996 15.996 0 0 0-4.649 4.763m3.42 3.42a6.776 6.776 0 0 0-3.42-3.42"/></svg>',
+    // Freehand-selection glyph, mirroring what the tool produces: a drawn
+    // half-circle arc with node dots at its start and end, the open side
+    // closed by a faint dashed edge, and a half-transparent fill in the
+    // enclosed region. Tilted a few degrees so it reads as a hand-drawn
+    // stroke, not a geometric arc primitive.
+    freehand: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><g transform="rotate(-10 12 12)"><path fill="currentColor" fill-opacity="0.25" stroke="none" d="M4.5 15.5A7.6 7.6 0 0 1 19.5 15.5Z"/><path stroke-opacity="0.45" stroke-dasharray="2.4 2" d="M4.5 15.5 19.5 15.5"/><path stroke-linecap="round" d="M4.5 15.5A7.6 7.6 0 0 1 19.5 15.5"/><circle cx="4.5" cy="15.5" r="1.5" fill="currentColor" stroke="none"/><circle cx="19.5" cy="15.5" r="1.5" fill="currentColor" stroke="none"/></g></svg>',
+    // Felt-tip marker (body, tapered shoulder, nib) leaving an ink trail —
+    // raw mark-making, as opposed to freehand's editable spline. Not a
+    // paint brush and not a chisel highlighter, both of which read wrong.
+    marker: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><g stroke-linecap="round" stroke-linejoin="round" transform="rotate(45 12 12)"><path d="M10 2h4a1 1 0 0 1 1 1v7h-6V3a1 1 0 0 1 1-1Z"/><path d="M9 10h6l-1 4h-4l-1-4Z"/><path d="M11.2 14h1.6v3h-1.6z"/></g><path stroke-linecap="round" d="M3 21c3-1.5 6-1.5 8-1"/></svg>',
+    // Eraser wedge over a surface line — the trash can it replaced reads
+    // as "delete row", not "rub shapes out by sweeping".
+    eraser: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path stroke-linecap="round" stroke-linejoin="round" d="M22 21H7"/><path stroke-linecap="round" stroke-linejoin="round" d="m5 11 9 9"/></svg>',
     grabber: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15 10.5V6a1.5 1.5 0 0 0-3 0m3 4.5V4.5a1.5 1.5 0 0 0-3 0v6m3 0V9a1.5 1.5 0 0 1 3 0v5.25a6.75 6.75 0 0 1-6.75 6.75H9.75a6.75 6.75 0 0 1-5.74-3.2l-2.39-3.86a1.5 1.5 0 0 1 2.46-1.72L6 15.75V6a1.5 1.5 0 0 1 3 0v4.5m3 0V6"/></svg>',
     sliders: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75"/></svg>',
     // Callout / leader line — small filled dot at the anchor, a thin
@@ -861,15 +872,59 @@
     rectangle: { icon: ICONS.rectangle, title: "Rectangle" },
     circle:    { icon: ICONS.circle,    title: "Circle" },
     polygon:   { icon: ICONS.polygon,   title: "Polygon (double-click to close)" },
-    freehand:  { icon: ICONS.freehand,  title: "Freehand" },
-    marker:    { icon: ICONS.marker,    title: "Marker" },
+    freehand:  { icon: ICONS.freehand,  title: "Freehand curve (editable — drag its nodes after drawing)" },
+    marker:    { icon: ICONS.marker,    title: "Marker (freehand ink stroke)" },
     grabber:   { icon: ICONS.grabber,   title: "Grab (pan only)" },
     callout:   { icon: ICONS.callout,   title: "Callout (point at something, write a label)" },
     text:      { icon: ICONS.text,      title: "Text label (drag a box, then type)" },
     dimension: { icon: ICONS.dimension, title: "Dimension (line with arrows + slidable label)" },
     line:      { icon: ICONS.line,      title: "Line" },
-    eraser:    { icon: ICONS.trash,     title: "Eraser (click and drag to wipe shapes)" }
+    eraser:    { icon: ICONS.eraser,    title: "Eraser (click and drag to wipe shapes)" }
   };
+
+  // ===========================================================================
+  // Per-tool mouse cursors — a small crosshair (the hotspot) with the tool's
+  // glyph as a badge at bottom-right, so the pointer itself says which tool
+  // is armed instead of every tool sharing one crosshair. Each layer is
+  // drawn twice (wide white underlay, then black) so the cursor stays
+  // legible over any imagery. Built lazily into data-URI cursor values;
+  // plain `crosshair` remains the fallback for browsers that reject
+  // SVG cursors. The cursor tool keeps the native arrow and the grabber
+  // keeps `grab` — those are set elsewhere.
+  // ===========================================================================
+
+  var CURSOR_BADGES = {
+    rectangle: '<rect x="4" y="6" width="16" height="12" rx="1.5"/>',
+    circle:    '<circle cx="12" cy="12" r="7.5"/>',
+    polygon:   '<path d="M12 3.5 21 9.5 18 20H6L3 9.5 12 3.5Z"/>',
+    freehand:  '<g transform="rotate(-10 12 12)"><path d="M4.5 15.5A7.6 7.6 0 0 1 19.5 15.5"/><path stroke-dasharray="2.4 2" d="M4.5 15.5 19.5 15.5"/><circle cx="4.5" cy="15.5" r="1.5"/><circle cx="19.5" cy="15.5" r="1.5"/></g>',
+    marker:    '<g transform="rotate(45 12 12)"><path d="M10 2h4a1 1 0 0 1 1 1v7h-6V3a1 1 0 0 1 1-1Z"/><path d="M9 10h6l-1 4h-4l-1-4Z"/><path d="M11.2 14h1.6v3h-1.6z"/></g><path d="M3 21c3-1.5 6-1.5 8-1"/>',
+    callout:   '<circle cx="3.5" cy="20" r="2"/><path d="M4 19.5 8.5 14 21 14"/>',
+    text:      '<path d="M5 6h14M12 6v12"/>',
+    dimension: '<path d="M5 12h14M5 12l3-3M5 12l3 3M19 12l-3-3M19 12l-3 3"/>',
+    line:      '<path d="M5 19 19 5"/>',
+    eraser:    '<path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/>'
+  };
+
+  var toolCursorCache = {};
+  function toolCursor(key) {
+    if (!key || !CURSOR_BADGES[key]) return null;
+    if (toolCursorCache[key]) return toolCursorCache[key];
+    var badge = CURSOR_BADGES[key];
+    var cross = '<path d="M6 1.5v9M1.5 6h9"/>';
+    var svg =
+      '<svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 30 30">' +
+      '<g fill="none" stroke="#fff" stroke-width="3.5" stroke-linecap="round">' + cross + '</g>' +
+      '<g fill="none" stroke="#000" stroke-width="1.5" stroke-linecap="round">' + cross + '</g>' +
+      '<g transform="translate(14 14) scale(0.65)">' +
+      '<g fill="none" stroke="#fff" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round">' + badge + '</g>' +
+      '<g fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + badge + '</g>' +
+      '</g></svg>';
+    var value =
+      'url("data:image/svg+xml,' + encodeURIComponent(svg) + '") 6 6, crosshair';
+    toolCursorCache[key] = value;
+    return value;
+  }
 
   // Default color palette — pastel rainbow plus monochrome bookends.
   // Consumers override via `window.Etcher.colorSwatches`. The default
@@ -3974,6 +4029,14 @@
       // whether the cursor tool is "armed") has changed.
       self._applyPanLock();
 
+      // Entering the mode arms the implicit cursor tool without a
+      // _selectTool call, so sync the container cursor here too: arrow
+      // while pan is locked, Fresco's grab back when the mode turns off.
+      if (self.handleKind !== "strip" && self.handle && self.handle.container &&
+          self.activeTool == null) {
+        self.handle.container.style.cursor = on ? "default" : "";
+      }
+
       self._dispatch("etcher:mode-changed", { annotationMode: on });
     },
 
@@ -4025,6 +4088,9 @@
       if (self.overlayWrapper) {
         self.overlayWrapper.style.pointerEvents = drawingNow ? "auto" : "none";
         self.overlayWrapper.classList.toggle("is-drawing", drawingNow);
+        // Per-tool cursor while a draw tool is armed; empty string falls
+        // back to the .is-drawing crosshair from the injected stylesheet.
+        self.overlayWrapper.style.cursor = drawingNow ? (toolCursor(toolKey) || "") : "";
       }
       // Strip mode has no overlay wrapper (per-image overlays sit on the
       // scroll container directly). Apply the crosshair cursor + is-
@@ -4034,14 +4100,22 @@
       // exit; `''` is the spec-correct way to clear an inline style.
       if (self.handleKind === "strip" && self.handle && self.handle.container) {
         self.handle.container.classList.toggle("etcher-strip-drawing", drawingNow);
-        self.handle.container.style.cursor = drawingNow ? "crosshair" : "";
+        self.handle.container.style.cursor =
+          drawingNow ? (toolCursor(toolKey) || "crosshair") : "";
       }
       // Grabber shows a hand/grab cursor on the viewer; events pass through
       // the click-through overlay to Fresco for panning. Cleared when leaving
       // the tool (strip mode already manages its own cursor above).
       if (self.handle && self.handle.container) {
         if (grabbing) self.handle.container.style.cursor = "grab";
-        else if (self.handleKind !== "strip") self.handle.container.style.cursor = "";
+        else if (self.handleKind !== "strip") {
+          // Cursor tool while annotating: drag-pan is locked (drag means
+          // box-select / shape-move), so Fresco's `grab` affordance would
+          // lie — show the plain arrow. Outside annotation mode, defer to
+          // Fresco's own cursor CSS.
+          self.handle.container.style.cursor =
+            self.annotationMode && toolKey == null ? "default" : "";
+        }
       }
       if (drawingNow || grabbing) self._hideTooltip();
 

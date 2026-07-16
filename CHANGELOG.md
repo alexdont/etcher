@@ -4,6 +4,63 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.8.0] — 2026-07-16
+
+### Added
+
+- **Fresh draws are undoable.** Committing a shape now pushes a `create` op
+  onto the history stack — undo deletes the just-drawn shape, redo recreates
+  it from a snapshot (same machinery as bulk-delete, inverted). Previously a
+  draw left no history entry at all: the undo/redo buttons stayed disabled
+  and ⌘Z did nothing until the first drag, edit, or delete.
+- **Per-tool mouse cursors.** While a drawing tool is armed, the pointer is a
+  small crosshair (the hotspot) with the tool's glyph badged bottom-right,
+  double-stroked white/black so it stays legible over any imagery. Data-URI
+  SVG cursors with plain `crosshair` as the fallback; applied in both canvas
+  and strip modes. The grabber keeps `grab`.
+
+### Changed
+
+- **Tool icons redrawn to match what the tools do.** Marker is now a felt-tip
+  marker leaving an ink trail (was a paint brush); Eraser is an eraser wedge
+  (was a trash can — the trash stays on the tooltip's delete button, where
+  deletion is what happens); Freehand is a hand-tilted half-circle stroke
+  with node dots at both ends, a faint dashed closing edge, and a
+  half-transparent fill — freeform draw, selection region, and editable
+  nodes in one glyph. Freehand/marker tooltips now spell out the
+  editable-curve vs ink-stroke distinction.
+- **`etcher:shape-drawn` payload now carries `fresco_id`** like every other
+  pushed event, so hosts rendering two viewers on one page can route it.
+  Additive — existing `%{"uuid" => _, "kind" => _}` handler clauses still
+  match.
+- **Cursor tool shows the plain arrow while annotating.** Fresco's `grab`
+  cursor leaked through even though Etcher locks drag-pan in cursor mode
+  (drag means box-select / shape-move); `grab` returns when the toolbar
+  closes.
+- **Allow fresco 0.9.x** (`~> 0.9.0` added to the version constraint).
+  Fresco 0.9.0 is backward-compatible with the handle API Etcher uses.
+
+### Fixed
+
+- **Marker strokes can be moved.** `_translateGeometry` had no `"marker"`
+  case, so dragging a marker ran the whole move interaction but returned the
+  geometry unchanged. Markers now translate their points like other strokes;
+  covers single drags and multi-selection group moves.
+- **Body-dragging a node-based freehand no longer destroys it.** The same
+  translate path replaced `{nodes: …}` geometry with an empty points array;
+  nodes now shift their anchors (`hIn`/`hOut` are anchor-relative and stay
+  untouched).
+- **Freehand strokes are selectable again.** The hit-test treated freehand as
+  a closed polygon (ray-casting only) — a drawn line encloses near-zero
+  area, so clicking directly on the stroke never hit: no edit handles, no
+  move, no pen editor. Freehand now hits by proximity to the curve first
+  (the marker's test, which already flattens node geometry), with the
+  interior test kept so closed loops still respond to clicks inside.
+- **Undo/redo of deletes keeps `image_idx` / `image_id`.** Bulk-delete
+  snapshots dropped the image tags, so a redo-after-undo revived shapes
+  untagged on strips and multi-image canvases (breaking per-page routing and
+  visibility toggling).
+
 ## [0.7.2] — 2026-07-06
 
 ### Changed

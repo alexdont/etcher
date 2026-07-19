@@ -4,6 +4,15 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.8.1] — 2026-07-19
+
+### Changed
+
+- **Allow fresco 0.10.x** (`~> 0.10.0` added to the version constraint).
+  Fresco 0.10.0 adds a counter-clockwise rotate button + `rotateLeft` /
+  `rotateRight` handle helpers; it's backward-compatible with the handle
+  API Etcher uses.
+
 ## [0.8.0] — 2026-07-16
 
 ### Added

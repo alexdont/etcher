@@ -4,6 +4,23 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.8.2] — 2026-07-20
+
+### Fixed
+
+- **Circles were invisible when drawn on a rotated canvas.** The circle
+  renderer computed its screen radius from only the x-component of the
+  projected edge point (`rp.x - c.x`). At 90°/270° an image-x offset
+  projects to a screen-*y* offset, so that difference collapsed to ~0 and
+  the `<circle>` rendered with radius 0 — the shape existed and hit-tested
+  correctly, it just didn't paint until you rotated back to 0°/180°. Now
+  uses the full projected distance (`hypot(rp.x-c.x, rp.y-c.y)`), which
+  equals `r × scale` at any rotation. Same fix applied to the circle
+  edge-anchor helper (handle/title placement). Other shapes were already
+  correct: strokes/polygons/lines/dimensions project every point, and
+  rect/text/callout use axis-aligned corner bboxes that stay valid under
+  90°-snapped rotation.
+
 ## [0.8.1] — 2026-07-19
 
 ### Changed

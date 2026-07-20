@@ -4353,7 +4353,12 @@
           var rp = self._imageToContainer({ x: g.cx + g.r, y: g.cy });
           el.setAttribute("cx", c.x);
           el.setAttribute("cy", c.y);
-          el.setAttribute("r", Math.abs(rp.x - c.x));
+          // Radius = full distance of the projected edge point, NOT just its
+          // x-component. Rotation is isometric, so `|rp - c|` == r * scale for
+          // any rotation; the old `rp.x - c.x` collapsed to ~0 at 90°/270°
+          // (an image-x offset projects to a screen-y offset there), which
+          // rendered the circle with radius 0 — invisible on a rotated canvas.
+          el.setAttribute("r", Math.hypot(rp.x - c.x, rp.y - c.y));
           bboxTopImage = { x: g.cx, y: g.cy - g.r };
           break;
         }
@@ -5065,7 +5070,10 @@
         case "circle": {
           var c  = self._imageToContainer({ x: g.cx, y: g.cy });
           var rp = self._imageToContainer({ x: g.cx + g.r, y: g.cy });
-          var r  = Math.abs(rp.x - c.x);
+          // Full projected distance, not the x-component — see the circle
+          // render case. `rp.x - c.x` collapsed to ~0 at 90°/270°, which
+          // pinned this edge anchor to the center on a rotated canvas.
+          var r  = Math.hypot(rp.x - c.x, rp.y - c.y);
           var dx = pt.x - c.x, dy = pt.y - c.y;
           var d  = Math.sqrt(dx * dx + dy * dy) || 1;
           return { x: c.x + (dx / d) * r, y: c.y + (dy / d) * r };

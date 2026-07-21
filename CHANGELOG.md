@@ -4,6 +4,30 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.9.0] — 2026-07-21
+
+### Added
+
+- **`image` shape kind.** Annotations can now be images. An image shape is
+  `{kind: "image", geometry: {x, y, w, h, href}}` where `href` is any image
+  URL (a `data:` URL works, so a pasted/dropped image needs no upload). It
+  renders as an SVG `<image>` positioned like a rectangle box
+  (`preserveAspectRatio="none"`, so a corner-drag scales it freely) and
+  reuses the rectangle's box geometry everywhere else — move, four-corner
+  resize, hit-test, bounding box, and selection handles all work with no
+  new interaction code. `href` rides inside `geometry`, so it travels with
+  the shape through `addShape`, the `etcher:annotations-changed` emit, and
+  the persisted extensions map. Add one via the layer API:
+  `window.Etcher.layerFor(id).addShape({kind: "image", geometry: {x, y, w, h, href}})`.
+  Images carry no stroke/fill styling and have no toolbar tool — they are
+  placed programmatically by the host.
+- **Coordinate helpers on the layer API** (`window.Etcher.layerFor(id)`):
+  `screenToImage({x, y})` and `imageToScreen({x, y})` expose the Fresco
+  handle's stable screen ↔ image round-trip, and `viewportCenterImage()`
+  returns the image-space point at the center of the visible viewport.
+  Together they let a host place a shape under the cursor (drag-drop) or at
+  the viewport center (paste / "Add image") without reaching into internals.
+
 ## [0.8.2] — 2026-07-20
 
 ### Fixed

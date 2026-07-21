@@ -1473,6 +1473,33 @@
             if (shape.el) {
               self._renderShape(shape);
             }
+          },
+
+          // Coordinate helpers — expose the Fresco handle's screen ↔ image
+          // round-trip so consumers can place shapes programmatically
+          // (drop an image under the cursor, paste one at the viewport
+          // center). Canvas handle: `screenToImage({x, y})` (client px) →
+          // `{x, y}` (canvas px); `imageToScreen` is the inverse. Strip
+          // handle returns/accepts the `{imageIdx, x, y}` shape instead.
+          // `null` if the handle lacks the method (defensive; both current
+          // handles implement both).
+          screenToImage: function(pt) {
+            return self.handle && typeof self.handle.screenToImage === "function"
+              ? self.handle.screenToImage(pt) : null;
+          },
+          imageToScreen: function(pt) {
+            return self.handle && typeof self.handle.imageToScreen === "function"
+              ? self.handle.imageToScreen(pt) : null;
+          },
+          // Image-space coordinate at the center of the visible viewport —
+          // the natural drop point for a pasted image or an "Add image"
+          // button. Canvas mode only (returns `null` on strip / no handle).
+          viewportCenterImage: function() {
+            if (!self.handle || typeof self.handle.screenToImage !== "function") return null;
+            var c = self.handle.container;
+            if (!c || typeof c.getBoundingClientRect !== "function") return null;
+            var r = c.getBoundingClientRect();
+            return self.handle.screenToImage({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
           }
         }
       };
@@ -4348,6 +4375,25 @@
           bboxTopImage = { x: g.x + g.w / 2, y: g.y };
           break;
         }
+        case "image": {
+          var itl = self._imageToContainer({ x: g.x,         y: g.y });
+          var ibr = self._imageToContainer({ x: g.x + g.w,   y: g.y + g.h });
+          el.setAttribute("x", Math.min(itl.x, ibr.x));
+          el.setAttribute("y", Math.min(itl.y, ibr.y));
+          el.setAttribute("width",  Math.abs(ibr.x - itl.x));
+          el.setAttribute("height", Math.abs(ibr.y - itl.y));
+          // Source lives in geometry so it travels with the shape (and through
+          // the collab delta). Only rewrite when it changes — swapping href
+          // every pan/zoom frame would restart image decode. `href` + the
+          // legacy `xlink:href` for older Safari.
+          var imgHref = g.href || "";
+          if (el.getAttribute("href") !== imgHref) {
+            el.setAttribute("href", imgHref);
+            el.setAttributeNS("http://www.w3.org/1999/xlink", "xlink:href", imgHref);
+          }
+          bboxTopImage = { x: g.x + g.w / 2, y: g.y };
+          break;
+        }
         case "circle": {
           var c  = self._imageToContainer({ x: g.cx, y: g.cy });
           var rp = self._imageToContainer({ x: g.cx + g.r, y: g.cy });
@@ -4978,6 +5024,7 @@
     _shapeContainsImagePoint: function(shape, pt) {
       var g = shape.geometry;
       switch (shape.kind) {
+        case "image":
         case "rectangle":
           return (
             pt.x >= g.x && pt.x <= g.x + g.w &&
@@ -5049,6 +5096,7 @@
       var self = this;
       var g = shape.geometry;
       switch (shape.kind) {
+        case "image":
         case "rectangle": {
           var tl = self._imageToContainer({ x: g.x,         y: g.y });
           var br = self._imageToContainer({ x: g.x + g.w,   y: g.y + g.h });
@@ -6472,6 +6520,7 @@
         return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
       }
       switch (shape.kind) {
+        case "image":
         case "rectangle":
         case "text":
           return { x: g.x, y: g.y, w: g.w, h: g.h };
@@ -8209,6 +8258,7 @@
       }
       var g = shape.geometry;
       switch (shape.kind) {
+        case "image":
         case "rectangle":
           return inRect(g);
         case "text":
@@ -8750,6 +8800,14 @@
 
       switch (ann.kind) {
         case "rectangle": el = svgEl("rect");                       break;
+        // Image object: an <image> positioned like a rectangle box. Shares
+        // rectangle's move / corner-resize / hit-test everywhere below; only
+        // its render + this element differ. `preserveAspectRatio="none"` lets
+        // a corner-drag resize scale it freely to the box.
+        case "image":
+          el = svgEl("image", { preserveAspectRatio: "none" });
+          el.classList.add("etcher-image");
+          break;
         case "circle":    el = svgEl("circle");                     break;
         case "polygon":   el = svgEl("polygon");                    break;
         case "marker":
@@ -9909,6 +9967,7 @@
     _handlePositions: function(shape) {
       var g = shape.geometry;
       switch (shape.kind) {
+        case "image":
         case "rectangle":
           return [
             { x: g.x,         y: g.y },          // 0: top-left
@@ -10179,6 +10238,10 @@
 
     _translateGeometry: function(kind, geom, dx, dy) {
       switch (kind) {
+        case "image":
+          // Same box move as a rectangle, but href rides along in geometry —
+          // rebuild explicitly or the source is dropped on every drag.
+          return { x: geom.x + dx, y: geom.y + dy, w: geom.w, h: geom.h, href: geom.href };
         case "rectangle":
         case "text":
           return { x: geom.x + dx, y: geom.y + dy, w: geom.w, h: geom.h };
@@ -10222,6 +10285,24 @@
 
     _applyHandleDrag: function(shape, idx, pt, startGeom, startPt) {
       switch (shape.kind) {
+        case "image": {
+          // Corner resize identical to a rectangle; only difference is href
+          // must survive into the rebuilt geometry.
+          var ig = startGeom;
+          var iright = ig.x + ig.w, ibottom = ig.y + ig.h;
+          var inx, iny, inw, inh;
+          switch (idx) {
+            case 0: inx = pt.x;  iny = pt.y;  inw = iright - pt.x;  inh = ibottom - pt.y; break;
+            case 1: inx = ig.x;  iny = pt.y;  inw = pt.x - ig.x;    inh = ibottom - pt.y; break;
+            case 2: inx = ig.x;  iny = ig.y;  inw = pt.x - ig.x;    inh = pt.y - ig.y;    break;
+            case 3: inx = pt.x;  iny = ig.y;  inw = iright - pt.x;  inh = pt.y - ig.y;    break;
+            default: return;
+          }
+          if (inw < 0) { inx += inw; inw = -inw; }
+          if (inh < 0) { iny += inh; inh = -inh; }
+          shape.geometry = { x: inx, y: iny, w: inw, h: inh, href: startGeom.href };
+          break;
+        }
         case "rectangle":
         case "text": {
           var g = startGeom;

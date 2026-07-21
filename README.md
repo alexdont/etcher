@@ -119,17 +119,60 @@ Open the page, click the pencil in Fresco's nav column → the bottom toolbar ap
 ```heex
 <Etcher.layer
   fresco_id="photo"
-  tools={[:rectangle, :circle, :polygon, :freehand, :callout, :text, :dimension, :line, :eraser]}
+  tools={[:image, :rectangle, :circle, :polygon, :freehand, :callout, :text, :dimension, :line, :eraser]}
 />
 ```
 
 | Attr | Required | Notes |
 |------|----------|-------|
 | `fresco_id` | yes | DOM id of the `<Fresco.canvas>` this layer attaches to. |
-| `tools` | no | Subset of drawing tools to expose. Defaults to all eight drawable kinds plus `:eraser`. |
+| `tools` | no | Subset of tools to expose. Defaults to all eight drawable kinds plus `:eraser`. Add `:image` for the [image tool](#images). |
+| `image_source` | no | `:file_picker` (default) or `:custom` — where the image tool gets its image. See [Images](#images). |
+| `paste_images` | no | `true` (default) inserts an image pasted onto the canvas; `false` disables it. See [Images](#images). |
 | `id` | no | DOM id of the layer host element. Defaults to `"etcher-layer-<fresco_id>"`. |
 
 Hydration is implicit: on mount, Etcher reads `handle.getExtension("etcher")` from the Fresco canvas it attaches to and renders whatever annotations are already inside `extensions.etcher.annotations`. There's no `:initial_annotations` attr — the canvas IS the source of truth.
+
+## Images
+
+Add `:image` to `tools` and the toolbar gains an image button. Unlike the drawing tools it's a **one-shot action, not a mode** — clicking it inserts an image and leaves your current tool selection alone. Inserted images are ordinary annotations (`kind: "image"`), so they move, resize (four corners), select, and persist exactly like a rectangle, and they sync through `etcher:annotations-changed` like everything else.
+
+An image annotation is `%{"kind" => "image", "geometry" => %{"x" => x, "y" => y, "w" => w, "h" => h, "href" => href}}`. The `href` is any image URL — a `data:` URL works, so a pasted or picked file needs no upload. It renders as an SVG `<image>`; the `href` lives inside `geometry`, so it travels with the shape everywhere (collab delta, persisted extensions map).
+
+**Where the image comes from — the `image_source` attr:**
+
+```heex
+<%!-- Default: the toolbar button opens the OS file picker and inserts the
+      chosen file as a data: URL. Nothing else to wire. --%>
+<Etcher.layer fresco_id="photo" tools={[:image, :rectangle, :text]} />
+
+<%!-- Custom: the button asks YOU for the image (your media library, an
+      upload modal, a URL prompt, …). --%>
+<Etcher.layer fresco_id="photo" tools={[:image]} image_source={:custom} />
+```
+
+With `image_source={:custom}`, clicking the image tool emits `etcher:image-insert-requested` — as **both** a LiveView hook event and a bubbling DOM `CustomEvent` — and does nothing else. Open your own picker, then hand the resulting URL back through the [layer API](#windowetcherlayerforfrescoid--programmatic-control):
+
+```js
+// Client-only host: listen for the request and insert when ready.
+document.addEventListener("etcher:image-insert-requested", (e) => {
+  openMyMediaLibrary().then((url) => {
+    window.Etcher.layerFor(e.detail.frescoId).insertImage(url);
+  });
+});
+```
+
+```elixir
+# LiveView host: handle the pushed event (open a modal, etc.), then push
+# a client event that calls layer.insertImage(url) — or just use the DOM
+# CustomEvent above. Add a no-op clause if you don't use it, so the event
+# doesn't log noise.
+def handle_event("etcher:image-insert-requested", %{"fresco_id" => _id}, socket), do: ...
+```
+
+**Paste** — pasting an image onto the canvas (⌘/Ctrl-V) inserts it automatically at the viewport center, no tool required. On by default; pastes into a focused text field (including Etcher's own text editor) are left alone. Disable per-layer with `paste_images={false}`. (Multiple visible canvas layers on one page would each insert a paste — single-canvas is the assumed common case.)
+
+Inserted images auto-size — the longest side is scaled to 800 canvas px — and center on the viewport (or on the point you pass to `insertImage`).
 
 ## Events
 
@@ -149,7 +192,7 @@ Payload: `%{"annotations" => [annotation_map, ...]}` — the full current list, 
 %{
   "uuid"     => "019e3c53-7734-76bf-b983-a2e158ef6e17",  # UUIDv7, client-assigned
   "kind"     => "rectangle" | "circle" | "polygon" | "freehand"
-              | "callout" | "text" | "dimension" | "line",
+              | "callout" | "text" | "dimension" | "line" | "image",
   "geometry" => %{ ... },        # shape-specific, canvas-pixel coords (see below)
   "style"    => %{ "color" => "#fca5a5" },  # optional
   "metadata" => %{ ... }          # optional, consumer-controlled
@@ -184,6 +227,7 @@ Two optional hooks for persisting per-user toolbar defaults (Etcher stores nothi
 | `text`      | `%{"x" => x, "y" => y, "w" => w, "h" => h}` |
 | `dimension` | `%{"a" => [x, y], "b" => [x, y]}` (label lives in `metadata.title` / `metadata.title_offset`) |
 | `line`      | `%{"a" => [x, y], "b" => [x, y]}` (title lives in `metadata.title`, rendered as a sibling label) |
+| `image`     | `%{"x" => x, "y" => y, "w" => w, "h" => h, "href" => href}` (see [Images](#images)) |
 
 All coordinates are in canvas pixels — Fresco's pan/zoom rescales them automatically.
 
@@ -392,7 +436,22 @@ layer.patchShape("uuid-…", {
   metadata: { comment_count: 3, comment_author: "Alice" },
   style:    { color: "#fca5a5" }
 });
+
+// Images (see the Images section)
+layer.insertImage(href);                       // place at viewport center, auto-sized
+layer.insertImage(href, { at: { x, y } });     // place at an image-space point
+layer.insertImage(href, { width, height });    // force a size (returns the uuid)
+layer.insertImage(href, { maxSide: 1200 });    // cap the longest side (default 800)
+layer.openImagePicker();                        // run the built-in OS file picker + insert
+
+// Coordinates — the Fresco handle's stable screen ↔ image round-trip,
+// for placing shapes under the cursor or at the viewport center.
+layer.screenToImage({ x: clientX, y: clientY }); // → { x, y } in canvas px
+layer.imageToScreen({ x, y });                   // inverse
+layer.viewportCenterImage();                     // → { x, y } at the viewport center
 ```
+
+`insertImage` returns the new shape's uuid when you pass `width`/`height` (the size is known immediately); otherwise it measures the image asynchronously and returns `null` — the shape still appears once the image decodes.
 
 ### Lifecycle DOM events
 
@@ -415,6 +474,7 @@ document.addEventListener("etcher:tooltip-show", (e) => {
 | `etcher:color-changed`      | `{ color: string }`            | Active color changed |
 | `etcher:visibility-changed` | `{ visible: bool }`            | Annotations hidden / shown |
 | `etcher:history-changed`    | `{ canUndo: bool, canRedo: bool }` | Undo/redo stack updated — useful for keeping a custom toolbar in sync |
+| `etcher:image-insert-requested` | `{ frescoId: string }`     | Image tool clicked while `image_source={:custom}` — open your picker, then call `layer.insertImage(href)` (also pushed as a LiveView event) |
 
 ### `window.Etcher.escapeHtml(value)` — escape helper
 

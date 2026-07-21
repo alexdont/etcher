@@ -133,5 +133,51 @@ defmodule EtcherTest do
 
       assert html =~ ~s(data-toolbar="false")
     end
+
+    test ":image in :tools renders the image tool into the payload" do
+      assigns = %{}
+
+      html =
+        rendered_to_string(~H"""
+        <Etcher.Layer.layer fresco_id="board" tools={[:rectangle, :image]} />
+        """)
+
+      assert html =~ "image"
+    end
+
+    test "image_source + paste_images default to omitted (file picker, paste on)" do
+      assigns = %{}
+
+      html =
+        rendered_to_string(~H"""
+        <Etcher.Layer.layer fresco_id="board" />
+        """)
+
+      # Defaults are the JS defaults, so no attribute is emitted.
+      refute html =~ "data-image-source"
+      refute html =~ "data-paste-images"
+    end
+
+    test "image_source: :custom emits data-image-source=\"custom\"" do
+      assigns = %{}
+
+      html =
+        rendered_to_string(~H"""
+        <Etcher.Layer.layer fresco_id="board" image_source={:custom} />
+        """)
+
+      assert html =~ ~s(data-image-source="custom")
+    end
+
+    test "paste_images: false emits data-paste-images=\"false\"" do
+      assigns = %{}
+
+      html =
+        rendered_to_string(~H"""
+        <Etcher.Layer.layer fresco_id="board" paste_images={false} />
+        """)
+
+      assert html =~ ~s(data-paste-images="false")
+    end
   end
 end

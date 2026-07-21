@@ -267,7 +267,40 @@ defmodule Etcher.Layer do
       :dimension,
       :eraser
     ],
-    doc: "Subset of drawing tools to show in the toolbar."
+    doc: """
+    Subset of tools to show in the toolbar. Drawing tools: `:grabber`,
+    `:rectangle`, `:circle`, `:polygon`, `:freehand`, `:marker`, `:callout`,
+    `:text`, `:dimension`, `:line`, `:eraser`. Add `:image` for the image
+    tool — a one-shot action (not a drawing mode) that inserts an image via
+    the OS file picker or a host uploader (see `:image_source`).
+    """
+  )
+
+  attr(:image_source, :atom,
+    default: :file_picker,
+    values: [:file_picker, :custom],
+    doc: """
+    What the `:image` toolbar tool does when clicked:
+
+    - `:file_picker` (default) — open the OS file picker and insert the
+      chosen file as a `data:` URL. Zero host code.
+    - `:custom` — emit `etcher:image-insert-requested` (a LiveView hook
+      event **and** a bubbling DOM `CustomEvent`) instead of picking a file.
+      The host opens its own uploader / media modal, then calls
+      `window.Etcher.layerFor(fresco_id).insertImage(href, opts)` with the
+      resulting URL. `opts` accepts `at: {x, y}` (image coords, default
+      viewport center) and `width`/`height` or `maxSide`.
+    """
+  )
+
+  attr(:paste_images, :boolean,
+    default: true,
+    doc: """
+    When `true` (default), an image pasted onto the canvas (⌘/Ctrl-V) is
+    inserted automatically at the viewport center — no `:image` tool
+    required. Pastes into a focused text field (including Etcher's own text
+    editor) are left alone. Set `false` to disable paste-to-insert.
+    """
   )
 
   attr(:colors, :list,
@@ -369,6 +402,8 @@ defmodule Etcher.Layer do
       data-tools={@tools_json}
       data-nav-buttons={@nav_buttons_csv}
       data-toolbar={@toolbar == false && "false"}
+      data-image-source={@image_source == :custom && "custom"}
+      data-paste-images={@paste_images == false && "false"}
       data-colors={@colors_json}
       data-line-params={@line_params_json}
       class="hidden"

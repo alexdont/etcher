@@ -183,6 +183,8 @@
     // as "delete row", not "rub shapes out by sweeping".
     eraser: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path stroke-linecap="round" stroke-linejoin="round" d="M22 21H7"/><path stroke-linecap="round" stroke-linejoin="round" d="m5 11 9 9"/></svg>',
     grabber: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15 10.5V6a1.5 1.5 0 0 0-3 0m3 4.5V4.5a1.5 1.5 0 0 0-3 0v6m3 0V9a1.5 1.5 0 0 1 3 0v5.25a6.75 6.75 0 0 1-6.75 6.75H9.75a6.75 6.75 0 0 1-5.74-3.2l-2.39-3.86a1.5 1.5 0 0 1 2.46-1.72L6 15.75V6a1.5 1.5 0 0 1 3 0v4.5m3 0V6"/></svg>',
+    // Heroicons photo — framed picture with a mountain horizon and a sun.
+    image:   '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z"/></svg>',
     sliders: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75"/></svg>',
     // Callout / leader line — small filled dot at the anchor, a thin
     // diagonal line, and a sample "T" at the text endpoint. Mimics
@@ -879,7 +881,12 @@
     text:      { icon: ICONS.text,      title: "Text label (drag a box, then type)" },
     dimension: { icon: ICONS.dimension, title: "Dimension (line with arrows + slidable label)" },
     line:      { icon: ICONS.line,      title: "Line" },
-    eraser:    { icon: ICONS.eraser,    title: "Eraser (click and drag to wipe shapes)" }
+    eraser:    { icon: ICONS.eraser,    title: "Eraser (click and drag to wipe shapes)" },
+    // `momentary` tools are one-shot actions, not persistent drawing modes:
+    // clicking fires an action and leaves the current tool selection alone
+    // (see `_invokeMomentaryTool`). Image insertion opens the OS file picker
+    // (or hands off to the host) rather than arming a draw gesture.
+    image:     { icon: ICONS.image,     title: "Insert image", momentary: true }
   };
 
   // ===========================================================================
@@ -1162,6 +1169,17 @@
       // Set for per-button gates.
       self._navButtonAllowlist = parseAllowlistAttr(self.el.dataset.navButtons);
       self.showToolbar = self.el.dataset.toolbar !== "false";
+
+      // Image tool + paste behavior.
+      //   image_source: "file_picker" (default) — the image tool opens the OS
+      //     file picker and inserts the chosen file as a data URL. "custom" —
+      //     the tool instead emits `etcher:image-insert-requested` (LiveView
+      //     hook event + bubbling DOM CustomEvent) so the host opens its own
+      //     uploader/modal, then calls `layerFor(id).insertImage(href)`.
+      //   paste_images (default true): an image pasted onto the canvas is
+      //     inserted automatically. Disable per-layer to opt out.
+      self.imageSource = self.el.dataset.imageSource === "custom" ? "custom" : "file_picker";
+      self.pasteImages = self.el.dataset.pasteImages !== "false";
 
       self.shapes = [];           // { uuid, kind, geometry, style?, metadata?, el }
       self.activeTool = null;     // null = cursor mode
@@ -1494,19 +1512,27 @@
           // Image-space coordinate at the center of the visible viewport —
           // the natural drop point for a pasted image or an "Add image"
           // button. Canvas mode only (returns `null` on strip / no handle).
-          viewportCenterImage: function() {
-            if (!self.handle || typeof self.handle.screenToImage !== "function") return null;
-            var c = self.handle.container;
-            if (!c || typeof c.getBoundingClientRect !== "function") return null;
-            var r = c.getBoundingClientRect();
-            return self.handle.screenToImage({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
-          }
+          viewportCenterImage: function() { return self._viewportCenterImage(); },
+
+          // Image insertion --------------------------------------------
+          // Place an image shape from a URL / data URL. `opts.at = {x, y}`
+          // (image coords, default viewport center); `opts.width`/`height`
+          // force a size (else natural size is measured and scaled to
+          // `opts.maxSide`, default 800 canvas px). Returns the uuid when a
+          // size is supplied, else null (shape still appears on decode).
+          // This is the entry point a `image_source: "custom"` host calls
+          // after its own uploader/modal resolves to a URL.
+          insertImage: function(href, opts) { return self._insertImageHref(href, opts || {}); },
+          // Open the built-in OS file picker and insert the chosen file —
+          // the same action the image tool performs in file_picker mode.
+          openImagePicker: function() { self._openImagePicker(); }
         }
       };
     },
 
     destroyed: function() {
       this._exitEditMode();
+      this._unwireImagePaste();
       this._removeTooltipOutsideClickHandler();
       this._clearCommentHighlights();
       this._unwireGlobalShapeListeners();
@@ -1682,6 +1708,7 @@
       if (self._chromeEnabled("pencil")) self._buildNavButton();
       self._wireUndoKeyboard();
       self._wireGlobalShapeListeners();
+      self._wireImagePaste();
 
       // Multi-image canvases (paged readers, lookbooks): subscribe
       // to Fresco's `image-visibility-change` and hide shapes whose
@@ -2757,6 +2784,12 @@
         b.innerHTML = entry.icon;
         b.addEventListener("click", function(e) {
           e.preventDefault();
+          var def = TOOL_DEFS[entry.key];
+          if (def && def.momentary) {
+            self._invokeMomentaryTool(entry.key);
+            self._closePopup();
+            return;
+          }
           self._selectTool(entry.key === "cursor" ? null : entry.key);
           self._closePopup();
         });
@@ -3833,6 +3866,8 @@
       btn.innerHTML = icon;
       btn.addEventListener("click", function(e) {
         e.preventDefault();
+        var def = TOOL_DEFS[toolKey];
+        if (def && def.momentary) { self._invokeMomentaryTool(toolKey); return; }
         self._selectTool(toolKey === "cursor" ? null : toolKey);
       });
       return btn;
@@ -3983,6 +4018,156 @@
         if (uuid) out.push(uuid);
       }
       return out;
+    },
+
+    // ---- Image insertion --------------------------------------------------
+    //
+    // The image toolbar tool is a *momentary* action, not a drawing mode:
+    // clicking it either opens the OS file picker (default) or hands off to
+    // the host (`image_source: "custom"`). Pasting an image onto the canvas
+    // routes through the same placement path. See `insertImage` on the public
+    // API for the programmatic entry point.
+
+    _invokeMomentaryTool: function(toolKey) {
+      if (toolKey === "image") this._invokeImageTool();
+    },
+
+    _invokeImageTool: function() {
+      if (this.imageSource === "custom") this._emitImageInsertRequested();
+      else this._openImagePicker();
+    },
+
+    // Ask the host to supply an image. Fires a LiveView hook event AND a
+    // bubbling DOM CustomEvent, so server-driven and JS-only hosts can both
+    // respond. The host opens its own modal / uploader, then calls
+    // `window.Etcher.layerFor(id).insertImage(href)` with the result.
+    _emitImageInsertRequested: function() {
+      var detail = { fresco_id: this.frescoId || null };
+      if (this.pushEventTo && this.el) {
+        try { this.pushEventTo(this.el, "etcher:image-insert-requested", detail); } catch (_) {}
+      }
+      this._dispatch("etcher:image-insert-requested", { frescoId: this.frescoId || null });
+    },
+
+    // Built-in OS file picker → data URL → insert. Uses a transient hidden
+    // <input> so nothing lingers in the DOM.
+    _openImagePicker: function() {
+      var self = this;
+      var input = document.createElement("input");
+      input.type = "file";
+      input.accept = "image/*";
+      input.style.display = "none";
+      document.body.appendChild(input);
+      input.addEventListener("change", function() {
+        var file = input.files && input.files[0];
+        if (file) self._insertImageFile(file);
+        if (input.parentNode) input.parentNode.removeChild(input);
+      });
+      input.click();
+    },
+
+    // Read a File as a data URL, then place it. `imagePt` (image coords) is
+    // optional — omitted for the picker (→ viewport center), set for a drop.
+    _insertImageFile: function(file, imagePt) {
+      var self = this;
+      if (!file || (file.type && file.type.indexOf("image/") !== 0)) return;
+      var reader = new FileReader();
+      reader.onload = function() {
+        if (typeof reader.result === "string") {
+          self._insertImageHref(reader.result, { at: imagePt });
+        }
+      };
+      reader.readAsDataURL(file);
+    },
+
+    // Place an image shape from a URL / data URL. `opts.at` = { x, y } in
+    // image coords (defaults to viewport center); `opts.width`/`opts.height`
+    // force a size, else the natural size is measured and scaled so its
+    // longest side fits `opts.maxSide` (default 800) canvas px. Returns the
+    // new shape uuid when a size is given up front, else null (the shape
+    // still appears once the image decodes — pass width/height if you need
+    // the uuid synchronously).
+    _insertImageHref: function(href, opts) {
+      var self = this;
+      if (typeof href !== "string" || !href) return null;
+      opts = opts || {};
+      var maxSide = typeof opts.maxSide === "number" ? opts.maxSide : 800;
+
+      function place(natW, natH) {
+        var w = natW > 0 ? natW : 400;
+        var h = natH > 0 ? natH : 300;
+        var scale = Math.min(1, maxSide / Math.max(w, h));
+        w = Math.round(w * scale);
+        h = Math.round(h * scale);
+        var center = (opts.at && typeof opts.at.x === "number")
+          ? opts.at
+          : self._viewportCenterImage();
+        if (!center) {
+          center = {
+            x: self.imageSize ? self.imageSize.x / 2 : 0,
+            y: self.imageSize ? self.imageSize.y / 2 : 0
+          };
+        }
+        return self._addShape({
+          kind: "image",
+          geometry: {
+            x: Math.round(center.x - w / 2),
+            y: Math.round(center.y - h / 2),
+            w: w, h: h, href: href
+          }
+        });
+      }
+
+      if (typeof opts.width === "number" && typeof opts.height === "number") {
+        return place(opts.width, opts.height);
+      }
+      var probe = new Image();
+      probe.onload = function() { place(probe.naturalWidth, probe.naturalHeight); };
+      probe.onerror = function() { place(0, 0); };
+      probe.src = href;
+      return null;
+    },
+
+    // Image-space coordinate at the center of the visible viewport. Canvas
+    // mode only (returns null on strip / before the handle is ready).
+    _viewportCenterImage: function() {
+      if (!this.handle || typeof this.handle.screenToImage !== "function") return null;
+      var c = this.handle.container;
+      if (!c || typeof c.getBoundingClientRect !== "function") return null;
+      var r = c.getBoundingClientRect();
+      return this.handle.screenToImage({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+    },
+
+    // Document-level paste → insert an image at the viewport center. Gated on
+    // `pasteImages`, the layer being visible, and the paste NOT landing in a
+    // text field (so pasting into etcher's text editor still types). One
+    // caveat: with multiple visible canvas layers on a page, each would
+    // insert — single-canvas is the assumed common case.
+    _wireImagePaste: function() {
+      var self = this;
+      if (self.pasteImages === false) return;
+      self._pasteHandler = function(e) {
+        if (self.pasteImages === false || self.annotationsVisible === false) return;
+        var t = e.target;
+        if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable === true)) return;
+        if (document.activeElement && document.activeElement.isContentEditable) return;
+        var items = (e.clipboardData && e.clipboardData.items) || [];
+        for (var i = 0; i < items.length; i++) {
+          var it = items[i];
+          if (it.kind === "file" && it.type && it.type.indexOf("image/") === 0) {
+            var file = it.getAsFile();
+            if (file) { e.preventDefault(); self._insertImageFile(file); return; }
+          }
+        }
+      };
+      document.addEventListener("paste", self._pasteHandler);
+    },
+
+    _unwireImagePaste: function() {
+      if (this._pasteHandler) {
+        document.removeEventListener("paste", this._pasteHandler);
+        this._pasteHandler = null;
+      }
     },
 
     _emitChanged: function() {

@@ -19,14 +19,28 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   the shape through `addShape`, the `etcher:annotations-changed` emit, and
   the persisted extensions map. Add one via the layer API:
   `window.Etcher.layerFor(id).addShape({kind: "image", geometry: {x, y, w, h, href}})`.
-  Images carry no stroke/fill styling and have no toolbar tool — they are
-  placed programmatically by the host.
-- **Coordinate helpers on the layer API** (`window.Etcher.layerFor(id)`):
-  `screenToImage({x, y})` and `imageToScreen({x, y})` expose the Fresco
-  handle's stable screen ↔ image round-trip, and `viewportCenterImage()`
-  returns the image-space point at the center of the visible viewport.
-  Together they let a host place a shape under the cursor (drag-drop) or at
-  the viewport center (paste / "Add image") without reaching into internals.
+  Images carry no stroke/fill styling.
+- **`:image` toolbar tool.** Add `:image` to `<Etcher.layer tools={[...]}>` and
+  the toolbar gains a photo button. It's a one-shot action, not a drawing
+  mode: clicking it inserts an image without changing the current tool. Two
+  ways to source the image, via the new `image_source` attr:
+  - `:file_picker` (default) — opens the OS file picker and inserts the chosen
+    file as a `data:` URL. Zero host code.
+  - `:custom` — emits `etcher:image-insert-requested` (a LiveView hook event
+    **and** a bubbling DOM `CustomEvent`) so the host opens its own uploader /
+    media modal, then calls `layerFor(id).insertImage(href, opts)` with the
+    result. Inserted images are auto-sized (longest side scaled to 800 canvas
+    px) and centered on the viewport (or `opts.at`).
+- **Paste-to-canvas, on by default.** Pasting an image (⌘/Ctrl-V) onto the
+  canvas inserts it at the viewport center — no `:image` tool required.
+  Pastes into a focused text field (including Etcher's own text editor) are
+  left alone. Disable per-layer with `paste_images={false}`.
+- **Layer API for image insertion + coordinates**
+  (`window.Etcher.layerFor(id)`): `insertImage(href, opts)` places an image
+  (`opts.at = {x, y}`, `opts.width`/`height`/`maxSide`), `openImagePicker()`
+  runs the built-in file picker, and `screenToImage`/`imageToScreen`/
+  `viewportCenterImage` expose the Fresco handle's screen ↔ image round-trip
+  so hosts can place shapes under the cursor or at the viewport center.
 
 ## [0.8.2] — 2026-07-20
 

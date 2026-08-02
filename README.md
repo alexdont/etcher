@@ -203,6 +203,15 @@ file picker. If the uploader rejects, resolves to a non-string, or throws,
 Etcher falls back to embedding and warns: a failed upload should cost bytes,
 not the user's paste.
 
+The shape appears and persists **immediately**, without waiting for the
+upload. Until your URL arrives it carries a reduced copy of the image (up to
+1600px, capped at ~400KB) so it survives a reload, shows up for other
+viewers, and stays usable if the upload never completes — a closed tab
+strands it there. Your canvas draws the full-quality original throughout;
+the reduced copy is what gets *saved*. Both are replaced by your URL on
+completion. Transparency is detected rather than assumed: an opaque PNG
+re-encodes as JPEG, one that uses its alpha channel stays PNG.
+
 ## Events
 
 ### Client → server LiveView events

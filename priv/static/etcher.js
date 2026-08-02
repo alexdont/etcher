@@ -1017,16 +1017,21 @@
   var DASH_MODES = ["solid", "dashed", "dotted", "none"];
   var FILL_MODES = ["none", "semi", "solid", "pattern"];
 
-  // A pasted image is persisted immediately as a thumbnail this big, so the
-  // shape has something to draw before its upload finishes — on a reload
+  // A pasted image is persisted immediately as a reduced copy, so the shape
+  // has something to draw before its upload finishes — on a reload
   // mid-upload, on a peer's screen, and permanently if the upload never
-  // lands. Small enough that carrying it in the annotation list costs
-  // nothing next to the full-resolution image (tens of KB against several
-  // MB), and it is replaced by the stored URL the moment the upload
-  // resolves. The local canvas keeps drawing the full-quality original
-  // throughout — the thumbnail is what gets *saved*, not what is shown here.
-  var PREVIEW_MAX_SIDE = 256;
-  var PREVIEW_QUALITY = 0.6;
+  // lands (a closed tab strands it there). That last case is why this is
+  // sized to be *looked at* rather than to be a thumbnail: 1600px is twice
+  // the 800 canvas px a placed image occupies, so it holds up zoomed in.
+  //
+  // The budget is the counterweight. This copy rides in the annotation list,
+  // which is re-sent on every edit, so it must stay far below the original —
+  // `_encodePreview` steps down through cheaper encodings until it fits.
+  // The local canvas draws the full-quality original throughout; this is
+  // what gets *saved*, not what you are looking at.
+  var PREVIEW_MAX_SIDE = 1600;
+  var PREVIEW_QUALITY = 0.85;
+  var PREVIEW_BYTE_BUDGET = 400 * 1024;
 
   // Where a shape's label sits, as `metadata.title_align = {h, v}`. Absent
   // means the label floats above the shape with a leader line — the default,
@@ -4994,35 +4999,92 @@
     //
     // `cb(objectUrl, thumbnailDataUrl|null, naturalW, naturalH)`.
     _makeImagePreview: function(file, cb) {
+      var self = this;
       var objectUrl = URL.createObjectURL(file);
       var img = new Image();
 
       img.onload = function() {
         var natW = img.naturalWidth || 0;
         var natH = img.naturalHeight || 0;
-        var thumb = null;
-        try {
-          var s = Math.min(1, PREVIEW_MAX_SIDE / Math.max(natW || 1, natH || 1));
-          var c = document.createElement("canvas");
-          c.width = Math.max(1, Math.round(natW * s));
-          c.height = Math.max(1, Math.round(natH * s));
-          c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
-          // PNG sources keep PNG so transparency doesn't composite to black;
-          // everything else takes JPEG, which is far smaller for photos.
-          thumb = file.type === "image/png"
-            ? c.toDataURL("image/png")
-            : c.toDataURL("image/jpeg", PREVIEW_QUALITY);
-        } catch (_) {
-          // Canvas export can throw (tainted canvas, out of memory). The
-          // shape still works, it just has nothing to show after a reload
-          // until the upload lands.
-          thumb = null;
-        }
-        cb(objectUrl, thumb, natW, natH);
+        cb(objectUrl, self._encodePreview(img, natW, natH, file.type), natW, natH);
       };
 
       img.onerror = function() { cb(objectUrl, null, 0, 0); };
       img.src = objectUrl;
+    },
+
+    // Best-looking encoding of `img` that fits `PREVIEW_BYTE_BUDGET`.
+    //
+    // Quality first, then size: full resolution at good quality is tried
+    // before anything is thrown away, and only a result that overruns the
+    // budget steps down. A screenshot usually lands on the first attempt.
+    //
+    // Transparency decides the format, not the source MIME. A PNG that turns
+    // out to be opaque — most pasted screenshots — re-encodes as JPEG for a
+    // fraction of the bytes; one that actually uses its alpha channel stays
+    // PNG at reduced size, because compositing it onto black to save bytes
+    // would be a worse picture, not a smaller one.
+    // Returns null if the canvas can't be exported at all (tainted, out of
+    // memory), which leaves the shape blank until its upload lands.
+    _encodePreview: function(img, natW, natH, mimeType) {
+      if (!natW || !natH) return null;
+      var self = this;
+      var alpha = mimeType === "image/png" && this._hasAlpha(img, natW, natH);
+
+      var attempts = alpha
+        ? [[1, "image/png", undefined], [0.6, "image/png", undefined],
+           [0.35, "image/png", undefined]]
+        : [[1, "image/jpeg", PREVIEW_QUALITY], [1, "image/jpeg", 0.7],
+           [0.6, "image/jpeg", 0.7], [0.35, "image/jpeg", 0.6]];
+
+      var smallest = null;
+      for (var i = 0; i < attempts.length; i++) {
+        var out = self._drawScaled(img, natW, natH, attempts[i][0], attempts[i][1], attempts[i][2]);
+        if (!out) continue;
+        if (out.length <= PREVIEW_BYTE_BUDGET) return out;
+        // Keep the last (smallest) as a floor: an over-budget preview still
+        // beats a shape with nothing to draw.
+        smallest = out;
+      }
+      return smallest;
+    },
+
+    _drawScaled: function(img, natW, natH, factor, mime, quality) {
+      try {
+        var fit = Math.min(1, PREVIEW_MAX_SIDE / Math.max(natW, natH)) * factor;
+        var c = document.createElement("canvas");
+        c.width = Math.max(1, Math.round(natW * fit));
+        c.height = Math.max(1, Math.round(natH * fit));
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+        return c.toDataURL(mime, quality);
+      } catch (_) {
+        return null;
+      }
+    },
+
+    // Does the image actually use its alpha channel? Sampled on a small
+    // downscale — a full-resolution scan of a phone screenshot is millions
+    // of pixels for a yes/no answer, and downscaling preserves any
+    // transparent region big enough to matter.
+    _hasAlpha: function(img, natW, natH) {
+      try {
+        var side = 64;
+        var s = Math.min(1, side / Math.max(natW, natH));
+        var c = document.createElement("canvas");
+        c.width = Math.max(1, Math.round(natW * s));
+        c.height = Math.max(1, Math.round(natH * s));
+        var ctx = c.getContext("2d");
+        ctx.drawImage(img, 0, 0, c.width, c.height);
+        var data = ctx.getImageData(0, 0, c.width, c.height).data;
+        for (var i = 3; i < data.length; i += 4) {
+          if (data[i] < 250) return true;
+        }
+        return false;
+      } catch (_) {
+        // Can't tell — assume it matters, since guessing wrong the other way
+        // paints transparent pixels black.
+        return true;
+      }
     },
 
     // Run `upload` for an already-placed pending shape, then swap the local

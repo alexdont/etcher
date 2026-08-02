@@ -220,6 +220,7 @@
     close:    '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>',
     // Three horizontal dots — overflow / "more" trigger in the
     // compact mobile toolbar. Heroicons solid `EllipsisHorizontal`.
+    duplicate: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.6" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M15 5.5A1.5 1.5 0 0 0 13.5 4h-8A1.5 1.5 0 0 0 4 5.5v8A1.5 1.5 0 0 0 5.5 15"/></svg>',
     more:     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 12a2 2 0 1 1-4 0 2 2 0 0 1 4 0Zm8 0a2 2 0 1 1-4 0 2 2 0 0 1 4 0Zm6 2a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"/></svg>',
     // Artist's palette — the colors `[⋯]` trigger (opens the picker).
     palette: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21a9 9 0 1 1 0-18 9 8 0 0 1 9 8 4.5 4 0 0 1-4.5 4H14a2 2 0 0 0-1 3.75A1.3 1.3 0 0 1 12 21Z"/><circle cx="7.5" cy="10.5" r="1.1" fill="currentColor" stroke="none"/><circle cx="12" cy="7.5" r="1.1" fill="currentColor" stroke="none"/><circle cx="16.5" cy="10.5" r="1.1" fill="currentColor" stroke="none"/></svg>'
@@ -330,6 +331,90 @@
       ".etcher-toolbar .etcher-more[data-more='params'] {",
       "  display: inline-flex;",
       "}",
+      // Secondary action bar — undo/redo/delete/duplicate/more, floating just
+      // above the tool bar. Split out so the tool bar stays a row of tools
+      // and nothing else: a first-time user reading it left-to-right meets
+      // only things that change what they are about to draw.
+      ".etcher-actionbar {",
+      "  position: absolute; z-index: 11; display: none;",
+      "  align-items: center; gap: 2px;",
+      "  padding: 4px 6px; border-radius: 10px;",
+      "  background: rgba(0, 0, 0, 0.72);",
+      "  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);",
+      "  pointer-events: auto;",
+      "}",
+      ".etcher-actionbar.is-active { display: flex; }",
+      ".etcher-actionbar button {",
+      "  width: 30px; height: 30px; display: inline-flex;",
+      "  align-items: center; justify-content: center;",
+      "  border: 0; background: none; color: #fff; cursor: pointer;",
+      "  border-radius: 7px; padding: 0;",
+      "}",
+      ".etcher-actionbar button svg { width: 17px; height: 17px; }",
+      ".etcher-actionbar button:hover:not(:disabled) {",
+      "  background: rgba(255, 255, 255, 0.14);",
+      "}",
+      ".etcher-actionbar button:disabled { opacity: 0.35; cursor: default; }",
+      // The arrange menu. Popup buttons are styled per `data-kind`, and this
+      // kind had no rules — its buttons laid out at 0x0, so the menu opened
+      // as an empty pill.
+      ".etcher-popup[data-kind=\"actions\"] { gap: 4px; }",
+      ".etcher-popup[data-kind=\"actions\"] button {",
+      "  width: 34px; height: 34px; display: inline-flex;",
+      "  align-items: center; justify-content: center;",
+      "  border: 0; background: none; color: #fff; cursor: pointer;",
+      "  border-radius: 8px; padding: 0;",
+      "}",
+      ".etcher-popup[data-kind=\"actions\"] button svg { width: 18px; height: 18px; }",
+      ".etcher-popup[data-kind=\"actions\"] button:hover:not(:disabled) {",
+      "  background: rgba(255, 255, 255, 0.14);",
+      "}",
+      ".etcher-popup[data-kind=\"actions\"] button:disabled {",
+      "  opacity: 0.35; cursor: default;",
+      "}",
+      ".etcher-actionbar .etcher-divider {",
+      "  width: 1px; height: 18px; margin: 0 3px;",
+      "  background: rgba(255, 255, 255, 0.2);",
+      "}",
+      // Style panel — colours and stroke settings, docked to the top-right.
+      // Off the tool bar entirely: those are properties of what you draw,
+      // not tools, and mixing the two is what made the old single bar hard
+      // to scan. Mirrors tldraw's placement.
+      ".etcher-stylepanel {",
+      "  position: absolute; top: 12px; right: 12px; z-index: 11;",
+      "  display: none; flex-direction: column; gap: 10px;",
+      "  padding: 10px; border-radius: 12px;",
+      "  background: rgba(0, 0, 0, 0.72);",
+      "  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);",
+      "  pointer-events: auto; width: 190px; max-width: calc(100vw - 24px);",
+      "}",
+      ".etcher-stylepanel.is-active { display: flex; }",
+      ".etcher-stylepanel-swatches {",
+      "  display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px;",
+      "}",
+      ".etcher-stylepanel .etcher-swatch { width: 100%; height: 24px; }",
+      // The params block is the existing popup, re-parented and stripped of
+      // its floating chrome so it reads as a section of the panel.
+      // Beats `.etcher-popup[data-kind="params"]`'s own fixed width, which
+      // was sized for a floating popup and overflows the panel otherwise.
+      ".etcher-stylepanel .etcher-popup,",
+      ".etcher-stylepanel .etcher-popup[data-kind=\"params\"] {",
+      "  position: static; display: flex; flex-direction: column;",
+      "  width: 100%; min-width: 0; padding: 0; gap: 8px;",
+      "  background: none; box-shadow: none; z-index: auto;",
+      "}",
+      ".etcher-stylepanel .etcher-popup input[type=\"range\"] {",
+      "  width: 100%; min-width: 0;",
+      "}",
+      // The dash choices are a row of equal cells rather than a wrapping
+      // strip, so they can't push past the panel edge.
+      ".etcher-stylepanel .etcher-marker-dash {",
+      "  display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px;",
+      "}",
+      ".etcher-stylepanel .etcher-marker-dash > * { width: 100%; min-width: 0; }",
+      ".etcher-stylepanel-divider {",
+      "  height: 1px; background: rgba(255, 255, 255, 0.18);",
+      "}",
       ".etcher-popup {",
       "  position: absolute; z-index: 12; display: none;",
       "  background: rgba(0, 0, 0, 0.85); border-radius: 10px;",
@@ -338,7 +423,20 @@
       "}",
       ".etcher-popup.is-open { display: flex; flex-wrap: wrap; }",
       // Tools popup: 5-col grid so 9 tools + cursor fit in 2 rows.
-      ".etcher-popup[data-kind=\"tools\"] { width: 222px; }",
+      // Tools popup: a 4-column grid, the shape-picker shape users expect
+      // from every other canvas app. Sized so the extras land in tidy rows
+      // rather than a ragged wrap.
+      ".etcher-popup[data-kind=\"tools\"] {",
+      "  display: none; width: auto;",
+      "  grid-template-columns: repeat(4, 36px);",
+      "}",
+      ".etcher-popup[data-kind=\"tools\"].is-open { display: grid; }",
+      // Dividers and the history/arrange rows span the grid rather than
+      // eating a single cell.
+      ".etcher-popup[data-kind=\"tools\"] .etcher-popup-divider {",
+      "  grid-column: 1 / -1; height: 1px; margin: 4px 0;",
+      "  background: rgba(255, 255, 255, 0.18);",
+      "}",
       // Colors popup: row of preset swatches + recents row + custom
       // picker. Fixed width so the hue ring lays out predictably and
       // the popup doesn't jitter when recents toggle visibility.
@@ -878,6 +976,29 @@
   // ===========================================================================
   // Tool descriptors
   // ===========================================================================
+
+  // Tools that earn a permanent slot on the bar. Everything else is still
+  // available — it lives in the `[⋯]` grid — but a first-time user meets a
+  // short, legible row instead of a wall of twelve icons. Ordered as they
+  // appear; `cursor` is rendered separately and always leads.
+  // What the "last used" slot holds before the user has picked anything
+  // from the `[⋯]` grid. A square is the thing people reach for first.
+  var DEFAULT_PINNED_TOOL = "rectangle";
+
+  // Etcher's own UI. A pointer event landing on any of it must not reach the
+  // canvas handlers, which would clear the selection the controls act on.
+  // Kept as one constant because it is only ever wrong by omission.
+  var CHROME_SELECTOR =
+    ".etcher-toolbar, .etcher-actionbar, .etcher-stylepanel, " +
+    ".etcher-popup, .etcher-tooltip";
+
+  var ESSENTIAL_TOOLS = [
+    "grabber", "freehand", "eraser", "line", "text", "callout", "image"
+  ];
+
+  // Gap between the dots of a "dotted" stroke, as a multiple of its width.
+  // Shared by shapes and markers so the two read as the same dot pattern.
+  var DOT_GAP_RATIO = 2.4;
 
   var TOOL_DEFS = {
     rectangle: { icon: ICONS.rectangle, title: "Rectangle" },
@@ -1487,7 +1608,7 @@
             if (fields.style && typeof fields.style === "object") {
               shape.style = Object.assign({}, shape.style || {}, fields.style);
               if (shape.style.color && shape.el) {
-                self._applyShapeColor(shape.el, shape.style.color);
+                self._applyShapeColor(shape.el, shape.style.color, shape.style);
               }
             }
             // Re-render the shape so DOM that derives from metadata
@@ -1561,6 +1682,21 @@
     },
 
     destroyed: function() {
+      this._closeActionMenu();
+      if (this.actionBar && this.actionBar.parentNode) {
+        this.actionBar.parentNode.removeChild(this.actionBar);
+      }
+      if (this.actionMenu && this.actionMenu.parentNode) {
+        this.actionMenu.parentNode.removeChild(this.actionMenu);
+      }
+      this.actionMenu = null;
+      if (this.stylePanel && this.stylePanel.parentNode) {
+        this.stylePanel.parentNode.removeChild(this.stylePanel);
+      }
+      this.stylePanel = null;
+      this.swatchHost = null;
+      this.actionBar = null;
+
       this._exitEditMode();
       this._unwireImagePaste();
       this._removeTooltipOutsideClickHandler();
@@ -1728,7 +1864,7 @@
       self.imageSize = { x: size.width, y: size.height };
 
       self._buildOverlay();
-      if (self.showToolbar) self._buildToolbar();
+      if (self.showToolbar) { self._buildToolbar(); self._buildActionBar(); self._buildStylePanel(); }
       // Visibility toggle goes above the annotation-mode pencil so
       // it reads "look first, edit second" top-to-bottom. Both are
       // gated by the `:nav_buttons` allowlist so consumers shipping
@@ -1819,7 +1955,7 @@
 
       self._buildStripOverlays();
       self._buildStripTooltip();
-      if (self.showToolbar) self._buildToolbar();
+      if (self.showToolbar) { self._buildToolbar(); self._buildActionBar(); self._buildStylePanel(); }
       if (self._chromeEnabled("visibility")) self._buildVisibilityButton();
       if (self._chromeEnabled("pencil")) self._buildNavButton();
       self._wireUndoKeyboard();
@@ -2436,21 +2572,25 @@
         if (toolKey === "grabber") return; // rendered beside the cursor above
         var def = TOOL_DEFS[toolKey];
         if (!def) return;
+        // Non-essentials are reachable only through the `[⋯]` grid, so they
+        // get no bar button at all. `_syncToolsPopup` keeps them permanently
+        // visible there rather than only on overflow.
+        if (ESSENTIAL_TOOLS.indexOf(toolKey) === -1) return;
         bar.appendChild(self._makeToolButton(toolKey, def.icon, def.title));
       });
+
+      // The "last used" slot: whichever non-essential tool was picked most
+      // recently from the `[⋯]` grid, kept one click away. Drawing three
+      // rectangles in a row otherwise means three trips through the menu.
+      self.pinnedToolBtn = self._makePinnedToolButton();
+      bar.appendChild(self.pinnedToolBtn);
+      self._renderPinnedTool();
 
       // Compact-mode overflow trigger for tools. Sits right after the
       // tool buttons so the layout reads `[active_tool] [⋯]`
       // when only one tool is visible. Tap to open the tools popup.
       self.toolsMoreBtn = self._makeMoreButton("tools", "More tools");
       bar.appendChild(self.toolsMoreBtn);
-
-      var divider2 = document.createElement("div");
-      divider2.className = "etcher-divider";
-      // Survives in compact mode — separates the tools group from the
-      // undo/redo group.
-      divider2.setAttribute("data-compact-keep", "");
-      bar.appendChild(divider2);
 
       // Undo / redo — inline whenever the whole bar fits; treated as a
       // single unit that collapses into the tools `[⋯]` popup BOTH AT
@@ -2467,7 +2607,6 @@
         e.preventDefault();
         self._undo();
       });
-      bar.appendChild(self.undoBtn);
 
       self.redoBtn = document.createElement("button");
       self.redoBtn.type = "button";
@@ -2478,50 +2617,6 @@
         e.preventDefault();
         self._redo();
       });
-      bar.appendChild(self.redoBtn);
-
-      // Arrange (z-order). Inline on the bar rather than only in the `[⋯]`
-      // popup: that popup's trigger is hidden whenever the toolbar fits
-      // (see `_syncToolsPopup`), so buttons living solely inside it are
-      // unreachable on a wide screen — keyboard-only, which defeats the
-      // point of having buttons. The whole group is hidden until something
-      // is selected, so it costs nothing the rest of the time, and it
-      // overflows into the popup like any other group when space is short.
-      self.arrangeGroupEls = [];
-
-      var arrangeDividerBar = document.createElement("div");
-      arrangeDividerBar.className = "etcher-divider";
-      bar.appendChild(arrangeDividerBar);
-      self._arrangeDivider = arrangeDividerBar;
-      self.arrangeGroupEls.push(arrangeDividerBar);
-
-      self.arrangeBarBtns = [
-        { where: "front", icon: ICONS.toFront, title: "Bring to front (\u2318])" },
-        { where: "forward", icon: ICONS.forward, title: "Bring forward (])" },
-        { where: "backward", icon: ICONS.backward, title: "Send backward ([)" },
-        { where: "back", icon: ICONS.toBack, title: "Send to back (\u2318[)" }
-      ].map(function(entry) {
-        var b = document.createElement("button");
-        b.type = "button";
-        b.dataset.arrange = entry.where;
-        b.title = entry.title;
-        b.setAttribute("aria-label", entry.title);
-        b.innerHTML = entry.icon;
-        b.addEventListener("click", function(e) {
-          e.preventDefault();
-          self._arrange(entry.where);
-        });
-        bar.appendChild(b);
-        self.arrangeGroupEls.push(b);
-        return b;
-      });
-
-      var dividerUndo = document.createElement("div");
-      dividerUndo.className = "etcher-divider";
-      bar.appendChild(dividerUndo);
-      // Collapsed together with undo/redo when the pair folds into the
-      // menu (so it doesn't sit adjacent to divider2 once they're gone).
-      self._undoSwatchesDivider = dividerUndo;
 
       self._refreshUndoButtons();
 
@@ -2534,9 +2629,12 @@
       // (click the active swatch again, or double-tap any swatch). Aliased to
       // `colorsMoreBtn` so the overflow layout + swatch-insertion anchor keep
       // working against the same element.
-      self.paramsBtn = self._makeMoreButton("params", "Line parameters");
-      self.colorsMoreBtn = self.paramsBtn;
-      bar.appendChild(self.paramsBtn);
+      // Colours and line parameters moved to the docked style panel
+      // (`_buildStylePanel`), so the bar carries neither the swatch row nor
+      // a params trigger any more. The references are cleared rather than
+      // left dangling — every remaining use of them is guarded.
+      self.paramsBtn = null;
+      self.colorsMoreBtn = null;
 
       // Inline toolbar swatches reflect the user's effective palette:
       // recents first (MRU), then preset colors backfilling any
@@ -2549,12 +2647,13 @@
       // insertions on a detached element work the same and `bar`
       // ends up in the DOM at the bottom of this method.
       self.toolbar = bar;
-      // Seeds `_colorSlots` (if empty) and renders the slot row.
-      self._refreshToolbarSwatches();
 
+      // The bar's only remaining separator: tools | exit. Undo/redo moved to
+      // the action bar and the swatches to the style panel, so the two
+      // dividers that used to bracket them had nothing left to separate and
+      // rendered as stray marks.
       var divider3 = document.createElement("div");
       divider3.className = "etcher-divider";
-      // Survives in compact mode — separates swatches from close.
       divider3.setAttribute("data-compact-keep", "");
       bar.appendChild(divider3);
 
@@ -2620,6 +2719,292 @@
       this._syncColorsPopup();
     },
 
+    // Secondary action bar: things you do TO the drawing, kept off the tool
+    // bar so that stays a legible row of tools. Undo and redo live here
+    // (always enabled-or-not, never selection-dependent); delete and
+    // duplicate act on the selection; `⋮` holds the arrange actions, which
+    // are selection-scoped and too niche to spend permanent bar space on.
+    _buildActionBar: function() {
+      var self = this;
+      var container = self.handle.container;
+
+      var bar = document.createElement("div");
+      bar.className = "etcher-actionbar";
+      bar.setAttribute("data-fresco-no-capture", "");
+      if (self.handleKind === "strip") bar.setAttribute("data-strip", "");
+
+      function mk(icon, title, onClick) {
+        var b = document.createElement("button");
+        b.type = "button";
+        b.title = title;
+        b.setAttribute("aria-label", title.replace(/\s*\(.*\)$/, ""));
+        b.innerHTML = icon;
+        b.addEventListener("click", function(e) {
+          e.preventDefault();
+          onClick();
+        });
+        bar.appendChild(b);
+        return b;
+      }
+
+      // Reuse the existing undo/redo elements so `_refreshUndoButtons`
+      // keeps driving their disabled state unchanged.
+      self.undoBtn.title = "Undo (\u2318Z)";
+      self.redoBtn.title = "Redo (\u2318\u21e7Z)";
+      bar.appendChild(self.undoBtn);
+      bar.appendChild(self.redoBtn);
+
+      var div1 = document.createElement("div");
+      div1.className = "etcher-divider";
+      bar.appendChild(div1);
+
+      self.actionDeleteBtn = mk(ICONS.trash, "Delete (\u232b)", function() {
+        self._deleteSelection();
+      });
+      self.actionDuplicateBtn = mk(ICONS.duplicate, "Duplicate (\u2318D)", function() {
+        self._duplicateSelection();
+      });
+
+      var div2 = document.createElement("div");
+      div2.className = "etcher-divider";
+      bar.appendChild(div2);
+
+      // Arrange sits behind the `⋮` rather than inline: four more icons made
+      // the bar noticeably wider than the tool bar under it, and these are
+      // occasional actions with keyboard shortcuts for anyone who reaches
+      // for them often.
+      self.actionMoreBtn = mk(ICONS.more, "Arrange", function() {
+        self._toggleActionMenu();
+      });
+
+      container.appendChild(bar);
+      self.actionBar = bar;
+
+      self._buildActionMenu();
+      self._syncActionBar();
+      self._positionActionBar();
+    },
+
+    // The `⋮` menu: the four arrange actions, as a row.
+    _buildActionMenu: function() {
+      var self = this;
+      var menu = document.createElement("div");
+      menu.className = "etcher-popup";
+      menu.dataset.kind = "actions";
+      menu.setAttribute("data-fresco-no-capture", "");
+
+      self.actionArrangeBtns = [
+        { where: "front", icon: ICONS.toFront, title: "Bring to front (\u2318])" },
+        { where: "forward", icon: ICONS.forward, title: "Bring forward (])" },
+        { where: "backward", icon: ICONS.backward, title: "Send backward ([)" },
+        { where: "back", icon: ICONS.toBack, title: "Send to back (\u2318[)" }
+      ].map(function(entry) {
+        var b = document.createElement("button");
+        b.type = "button";
+        b.dataset.arrange = entry.where;
+        b.title = entry.title;
+        b.setAttribute("aria-label", entry.title.replace(/\s*\(.*\)$/, ""));
+        b.innerHTML = entry.icon;
+        b.addEventListener("click", function(e) {
+          e.preventDefault();
+          self._arrange(entry.where);
+          // Left open — nudging something forward a few steps is the common
+          // case, same reasoning as the undo button.
+        });
+        menu.appendChild(b);
+        return b;
+      });
+
+      self.handle.container.appendChild(menu);
+      self.actionMenu = menu;
+    },
+
+    _toggleActionMenu: function() {
+      var self = this;
+      if (!self.actionMenu) return;
+      var open = self.actionMenu.classList.contains("is-open");
+      self._closeActionMenu();
+      if (open) return;
+
+      var barRect = self.actionBar.getBoundingClientRect();
+      var contRect = self.handle.container.getBoundingClientRect();
+      self.actionMenu.classList.add("is-open");
+      var mRect = self.actionMenu.getBoundingClientRect();
+      self.actionMenu.style.left =
+        Math.max(4, barRect.right - contRect.left - mRect.width) + "px";
+      self.actionMenu.style.top =
+        barRect.top - contRect.top - mRect.height - 6 + "px";
+      self.actionMoreBtn.classList.add("is-active");
+
+      self._onActionMenuOutside = function(e) {
+        if (self.actionMenu.contains(e.target) ||
+            self.actionMoreBtn.contains(e.target)) return;
+        self._closeActionMenu();
+      };
+      document.addEventListener("pointerdown", self._onActionMenuOutside, true);
+    },
+
+    _closeActionMenu: function() {
+      if (!this.actionMenu) return;
+      this.actionMenu.classList.remove("is-open");
+      if (this.actionMoreBtn) this.actionMoreBtn.classList.remove("is-active");
+      if (this._onActionMenuOutside) {
+        document.removeEventListener("pointerdown", this._onActionMenuOutside, true);
+        this._onActionMenuOutside = null;
+      }
+    },
+
+    // Docked style panel: the swatch row plus the stroke parameters, both
+    // taken off the tool bar.
+    //
+    // The params section is the existing params popup, re-parented here and
+    // restyled by CSS into a static block. Reusing the element outright
+    // keeps every slider, its wiring and its sync logic exactly as it was —
+    // this is a relocation, not a reimplementation.
+    _buildStylePanel: function() {
+      var self = this;
+
+      var panel = document.createElement("div");
+      panel.className = "etcher-stylepanel";
+      panel.setAttribute("data-fresco-no-capture", "");
+      if (self.handleKind === "strip") panel.setAttribute("data-strip", "");
+
+      var swatches = document.createElement("div");
+      swatches.className = "etcher-stylepanel-swatches";
+      panel.appendChild(swatches);
+      self.swatchHost = swatches;
+
+      var divider = document.createElement("div");
+      divider.className = "etcher-stylepanel-divider";
+      panel.appendChild(divider);
+
+      // `_buildParamsPopup` runs during setup and appends to the container;
+      // move that element in here if it exists yet, otherwise leave a slot
+      // and adopt it on the next sync.
+      if (self.paramsPopup) panel.appendChild(self.paramsPopup);
+
+      self.handle.container.appendChild(panel);
+      self.stylePanel = panel;
+
+      // Seeds `_colorSlots` (if empty) and renders the slot row into the
+      // panel — previously done inline while building the tool bar.
+      self._refreshToolbarSwatches();
+      self._syncStylePanel();
+    },
+
+    // The panel is only meaningful while annotating, same as the tool bar.
+    _syncStylePanel: function() {
+      if (!this.stylePanel) return;
+      // Adopt the params popup if it was built after the panel.
+      if (this.paramsPopup && this.paramsPopup.parentNode !== this.stylePanel) {
+        this.stylePanel.appendChild(this.paramsPopup);
+      }
+      this.stylePanel.classList.toggle("is-active", !!this.annotationMode);
+    },
+
+    // Parked just above the tool bar and flush with its left edge, the way
+    // tldraw's sits. Recomputed rather than expressed in CSS because the
+    // tool bar's width changes as tools overflow.
+    _positionActionBar: function() {
+      var self = this;
+      if (!self.actionBar || !self.toolbar) return;
+      var t = self.toolbar.getBoundingClientRect();
+      var c = self.handle.container.getBoundingClientRect();
+      if (!t.width) return;
+      self.actionBar.style.left = Math.round(t.left - c.left) + "px";
+      self.actionBar.style.top =
+        Math.round(t.top - c.top - self.actionBar.offsetHeight - 4) + "px";
+    },
+
+    // Delete whatever is selected, matching the Backspace/Delete key path so
+    // undo and server sync behave identically however it was triggered.
+    _deleteSelection: function() {
+      if (this.selectedShapes && this.selectedShapes.length) {
+        this._deleteSelectedShapes();
+        return true;
+      }
+      if (this.editingShape) {
+        this._deleteShape(this.editingShape);
+        return true;
+      }
+      return false;
+    },
+
+    // Copy the selection, nudged down-right so the copy is visibly its own
+    // object rather than sitting exactly on the original.
+    _duplicateSelection: function() {
+      var self = this;
+      var targets = self._arrangeTargets().filter(function(s) {
+        return s && self.shapes.indexOf(s) !== -1;
+      });
+      if (!targets.length) return false;
+
+      function clone(v) {
+        if (v == null) return v;
+        try { return JSON.parse(JSON.stringify(v)); } catch (_) { return v; }
+      }
+
+      var OFFSET = 16;
+      var made = [];
+      targets.forEach(function(s) {
+        var payload = {
+          kind: s.kind,
+          geometry: self._translateGeometry(s.kind, clone(s.geometry), OFFSET, OFFSET)
+        };
+        if (s.style != null) payload.style = clone(s.style);
+        if (s.metadata != null) payload.metadata = clone(s.metadata);
+        if (typeof s.image_idx === "number") payload.image_idx = s.image_idx;
+        if (typeof s.image_id === "string") payload.image_id = s.image_id;
+        var uuid = self._addShape(payload);
+        if (uuid) made.push(uuid);
+      });
+      if (!made.length) return false;
+
+      // One history entry per copy. A bulk duplicate therefore takes as many
+      // undos as it made copies — acceptable for the common single-shape
+      // case, and better than the alternative of no history at all.
+      self._clearSelection();
+      self._exitEditMode();
+      made.forEach(function(uuid) {
+        var shape = self.shapes.find(function(x) { return x.uuid === uuid; });
+        if (!shape) return;
+        self._pushUndoCreate(shape);
+        self._addToSelection(shape);
+      });
+      // A single copy goes straight into edit mode so it can be dragged
+      // immediately, which is what duplicate is usually for.
+      if (made.length === 1) {
+        var only = self.shapes.find(function(x) { return x.uuid === made[0]; });
+        if (only) self._enterEditMode(only);
+      }
+      self._syncActionBar();
+      return true;
+    },
+
+    // Everything on the action bar except undo/redo (which
+    // `_refreshUndoButtons` owns) is selection-scoped, so the enabled state
+    // is computed in one place — including arrange, which otherwise started
+    // life enabled because its own sync only ran on selection changes and
+    // nothing selects anything at mount.
+    _syncActionBar: function() {
+      var has = !!(this.selectedShapes && this.selectedShapes.length) || !!this.editingShape;
+      if (this.actionDeleteBtn) this.actionDeleteBtn.disabled = !has;
+      if (this.actionDuplicateBtn) this.actionDuplicateBtn.disabled = !has;
+
+      var canArrange = this._canArrange();
+      (this.actionArrangeBtns || []).forEach(function(b) {
+        b.disabled = !canArrange;
+      });
+      // Arrange is all the `⋮` holds, so disable the trigger too rather than
+      // opening onto four dead buttons.
+      if (this.actionMoreBtn) this.actionMoreBtn.disabled = !canArrange;
+      if (!canArrange) this._closeActionMenu();
+
+      if (this.actionBar) {
+        this.actionBar.classList.toggle("is-active", !!this.annotationMode);
+      }
+    },
+
     _computeToolbarOverflow: function() {
       var self = this;
       if (!self.toolbar) return;
@@ -2647,9 +3032,6 @@
       }
       if (self.undoBtn) self.undoBtn.classList.remove("etcher-overflow-hidden");
       if (self.redoBtn) self.redoBtn.classList.remove("etcher-overflow-hidden");
-      if (self._undoSwatchesDivider) {
-        self._undoSwatchesDivider.classList.remove("etcher-overflow-hidden");
-      }
 
       // Available width: container minus a comfort margin so the
       // toolbar doesn't kiss the viewer edges — a 32px gutter each side
@@ -2666,11 +3048,6 @@
       // So they're inline only while the whole bar fits; any overflow
       // folds the pair first (often enough on its own, leaving every
       // tool visible).
-      if (self.undoBtn) self.undoBtn.classList.add("etcher-overflow-hidden");
-      if (self.redoBtn) self.redoBtn.classList.add("etcher-overflow-hidden");
-      if (self._undoSwatchesDivider) {
-        self._undoSwatchesDivider.classList.add("etcher-overflow-hidden");
-      }
       if (self.toolbar.scrollWidth <= available) return;
 
       // Build the hideable queues — non-active items in right-to-left
@@ -2748,9 +3125,13 @@
       var anyToolHidden = false;
       (self.toolsPopupBtns || []).forEach(function(pb) {
         var main = self.toolbar.querySelector(
-          'button[data-tool="' + pb.dataset.tool + '"]'
+          'button[data-tool="' + pb.dataset.tool + '"]:not([data-pinned-tool])'
         );
-        var hidden = !!(main && main.classList.contains("etcher-overflow-hidden"));
+        // No bar button means a non-essential tool: the popup is its only
+        // home, so it is always shown. Otherwise mirror the overflow state.
+        var hidden = main
+          ? main.classList.contains("etcher-overflow-hidden")
+          : true;
         pb.style.display = hidden ? "" : "none";
         if (hidden) anyToolHidden = true;
       });
@@ -2773,6 +3154,9 @@
       if (self.toolsMoreBtn) {
         self.toolsMoreBtn.classList.toggle("is-active", anyToolHidden || histHidden);
       }
+      // The bar's width just changed, so the action bar above it has to
+      // move with it.
+      self._positionActionBar();
     },
 
     // Mirror the overflowed color slots into the colors popup (above the
@@ -2916,64 +3300,17 @@
       });
       popup.appendChild(self.popupRedoBtn);
 
-      // Hairline + arrange (z-order). Lives in the overflow rather than the
-      // main bar deliberately: these act on a selection, so they're dead
-      // weight most of the time, and four more always-visible icons is
-      // exactly the crowding the overflow exists to absorb. Keyboard users
-      // have ] / [ and never need to open this.
-      var arrangeDivider = document.createElement("div");
-      arrangeDivider.className = "etcher-popup-divider";
-      popup.appendChild(arrangeDivider);
-      self._popupArrangeDivider = arrangeDivider;
-
-      self.arrangeBtns = [
-        { where: "front", icon: ICONS.toFront, title: "Bring to front (⌘])" },
-        { where: "forward", icon: ICONS.forward, title: "Bring forward (])" },
-        { where: "backward", icon: ICONS.backward, title: "Send backward ([)" },
-        { where: "back", icon: ICONS.toBack, title: "Send to back (⌘[)" }
-      ].map(function(entry) {
-        var b = document.createElement("button");
-        b.type = "button";
-        b.dataset.arrange = entry.where;
-        b.title = entry.title;
-        b.setAttribute("aria-label", entry.title);
-        b.innerHTML = entry.icon;
-        b.addEventListener("click", function(e) {
-          e.preventDefault();
-          self._arrange(entry.where);
-          // Left open on purpose — nudging something forward a few steps
-          // is the common case, same reasoning as the undo button above.
-        });
-        popup.appendChild(b);
-        return b;
-      });
-
       self.handle.container.appendChild(popup);
       self.toolsPopup = popup;
-      self._syncArrangeButtons();
     },
 
     // Show the arrange group only when there's something to arrange, and
-    // keep the popup copies disabled in lockstep. Called on every selection
-    // change as well as after each arrange.
+    // Kept as the name the selection paths already call; the state itself
+    // lives in `_syncActionBar` so there is one source of truth. Buttons are
+    // disabled rather than hidden, so the bar keeps a stable shape instead
+    // of shuffling sideways as the selection comes and goes.
     _syncArrangeButtons: function() {
-      var enabled = this._canArrange();
-
-      // Inline group: hidden outright with nothing selected. Four permanently
-      // greyed-out icons would be four icons of noise on a canvas toolbar.
-      (this.arrangeGroupEls || []).forEach(function(el) {
-        el.style.display = enabled ? "" : "none";
-      });
-      (this.arrangeBarBtns || []).forEach(function(b) { b.disabled = !enabled; });
-
-      // Popup copies stay present but disabled — the popup is a menu, and a
-      // menu whose contents come and go is harder to learn than one with a
-      // stable shape.
-      (this.arrangeBtns || []).forEach(function(b) { b.disabled = !enabled; });
-
-      // Showing or hiding a whole group changes the bar's width, so the
-      // overflow pass has to run again or the `[⋯]` state goes stale.
-      if (typeof this._layoutToolbar === "function") this._layoutToolbar();
+      this._syncActionBar();
     },
 
     // Colors popup: preset swatches + recent-customs row + a
@@ -3294,11 +3631,25 @@
       el.style.strokeOpacity = String(s.opacity == null ? 1 : s.opacity);
       if (s.dash === "dashed") {
         el.setAttribute("stroke-dasharray", (w * 2.2) + " " + (w * 1.6));
+        el.style.strokeLinecap = "";
       } else if (s.dash === "dotted") {
-        el.setAttribute("stroke-dasharray", "0.01 " + (w * 1.8));
+        // A zero-length dash only paints as a dot under a round linecap.
+        // Shapes default to `butt`, where these rendered as nothing at all —
+        // "dotted" looked identical to no line. Markers happened to work
+        // because their own CSS already rounds the caps.
+        //
+        // Gap is 2.4× the width, not 1.8×: the round cap paints each
+        // zero-length dash as a disc a full `w` across, so at 1.8× the discs
+        // nearly touched and read as a bumpy solid line. Markers use the same
+        // ratio so a dotted marker and a dotted outline look alike.
+        el.setAttribute("stroke-dasharray", "0.01 " + (w * DOT_GAP_RATIO));
+        el.style.strokeLinecap = "round";
       } else {
         el.removeAttribute("stroke-dasharray");
+        el.style.strokeLinecap = "";
       }
+      // Opacity applies to the body as well as the outline.
+      this._applyFill(el, s);
     },
 
     // Params popup: weight + opacity sliders and a dash picker, opened by the
@@ -3378,6 +3729,41 @@
       });
       popup.appendChild(dashRow);
 
+      // Fill mode. Rides the same `_setLineParam` path as thickness and dash,
+      // so selection targeting, live preview and undo all come for free.
+      var fillRow = document.createElement("div");
+      fillRow.className = "etcher-marker-dash";
+
+      // The explicit width/height matter: the row stretches its children to
+      // full width, so an SVG sized only by `viewBox` scales up to fill the
+      // whole button. The dash icons pin theirs for the same reason.
+      function fillIcon(mode) {
+        var body = mode === "none" ? ""
+          : '<rect x="4.5" y="4.5" width="15" height="15" rx="2.5" fill="currentColor" fill-opacity="' +
+            (mode === "solid" ? "1" : "0.28") + '" stroke="none"/>';
+        return '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" ' +
+               'viewBox="0 0 24 24" fill="none" ' +
+               'stroke="currentColor" stroke-width="1.6" aria-hidden="true">' + body +
+               '<rect x="4.5" y="4.5" width="15" height="15" rx="2.5"/></svg>';
+      }
+
+      self._paramsFillBtns = ["none", "semi", "solid"].map(function(mode) {
+        var b = document.createElement("button");
+        b.type = "button";
+        b.dataset.fill = mode;
+        b.title = "Fill: " + mode;
+        b.setAttribute("aria-label", "Fill: " + mode);
+        b.innerHTML = fillIcon(mode);
+        b.addEventListener("click", function(e) {
+          e.preventDefault();
+          self._setLineParam("fill", mode, true);
+          self._syncParamsPopup();
+        });
+        fillRow.appendChild(b);
+        return b;
+      });
+      popup.appendChild(fillRow);
+
       self.handle.container.appendChild(popup);
       self.paramsPopup = popup;
     },
@@ -3400,7 +3786,7 @@
     _syncParamsPopup: function() {
       // Reflect the first target shape (the group shares one set of controls).
       var shape = this._paramsTargetShapes()[0];
-      var width, opacity, dash;
+      var width, opacity, dash, fill;
       if (shape) {
         var st = shape.style || {};
         // A marker stores width in image px (zoom-anchored) → show on-screen.
@@ -3409,11 +3795,13 @@
           : (st.width || 2);
         opacity = st.opacity == null ? 1 : st.opacity;
         dash = st.dash || "solid";
+        fill = st.fill || "semi";
       } else {
         var lp = this.lineParams || {};
         width = lp.width || 2;
         opacity = lp.opacity == null ? 1 : lp.opacity;
         dash = lp.dash || "solid";
+        fill = lp.fill || "semi";
       }
       if (this._paramsWeightInput) {
         this._paramsWeightInput.value = width;
@@ -3426,6 +3814,9 @@
       }
       (this._paramsDashBtns || []).forEach(function(b) {
         b.classList.toggle("is-selected", b.dataset.dash === dash);
+      });
+      (this._paramsFillBtns || []).forEach(function(b) {
+        b.classList.toggle("is-selected", b.dataset.fill === fill);
       });
     },
 
@@ -3854,19 +4245,14 @@
     // user-driven (slot picks / edits), not per-frame.
     _refreshToolbarSwatches: function() {
       var self = this;
-      if (!self.toolbar || !self.colorsMoreBtn) return;
+      var host = self.swatchHost;
+      if (!host) return;
       if (!self._colorSlots || !self._colorSlots.length) self._seedColorSlots();
 
-      // Strip old swatches that are direct children of the toolbar.
-      // (Popup swatches live inside `.etcher-popup` and are unaffected
-      // by this scoped query.)
-      Array.prototype.slice.call(
-        self.toolbar.children
-      ).forEach(function(child) {
-        if (child.classList && child.classList.contains("etcher-swatch")) {
-          self.toolbar.removeChild(child);
-        }
-      });
+      // Swatches live in the style panel now, so the host owns nothing else
+      // and can simply be emptied. (Popup swatches live inside
+      // `.etcher-popup` and are untouched by this.)
+      while (host.firstChild) host.removeChild(host.firstChild);
 
       self.swatchEls = self._colorSlots.map(function(color, i) {
         var b = document.createElement("button");
@@ -3890,13 +4276,9 @@
             self._selectSlot(i);
           }
         });
-        self.toolbar.insertBefore(b, self.colorsMoreBtn);
+        host.appendChild(b);
         return b;
       });
-
-      // Layout may have changed (active slot moved) — re-run the
-      // overflow pinning so the active swatch stays visible.
-      self._layoutToolbar();
     },
 
     _togglePopup: function(kind) {
@@ -4009,6 +4391,70 @@
         self._selectTool(toolKey === "cursor" ? null : toolKey);
       });
       return btn;
+    },
+
+    // Like `_makeToolButton`, but its tool changes over time, so the click
+    // handler reads the current one off the element instead of closing over
+    // a fixed key.
+    _makePinnedToolButton: function() {
+      var self = this;
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.setAttribute("data-pinned-tool", "");
+      btn.addEventListener("click", function(e) {
+        e.preventDefault();
+        var toolKey = btn.dataset.tool;
+        if (!toolKey) return;
+        var def = TOOL_DEFS[toolKey];
+        if (def && def.momentary) { self._invokeMomentaryTool(toolKey); return; }
+        self._selectTool(toolKey);
+      });
+      return btn;
+    },
+
+    // Point the slot at `_pinnedTool`, falling back to the default and then
+    // to whatever extra this editor actually has — a host whose `tools` list
+    // omits every non-essential gets no slot at all rather than a dead one.
+    _renderPinnedTool: function() {
+      var self = this;
+      var btn = self.pinnedToolBtn;
+      if (!btn) return;
+
+      var extras = (self.tools || []).filter(function(t) {
+        return ESSENTIAL_TOOLS.indexOf(t) === -1 && TOOL_DEFS[t];
+      });
+      if (!extras.length) {
+        btn.style.display = "none";
+        return;
+      }
+
+      var key = self._pinnedTool;
+      if (extras.indexOf(key) === -1) {
+        key = extras.indexOf(DEFAULT_PINNED_TOOL) !== -1
+          ? DEFAULT_PINNED_TOOL
+          : extras[0];
+      }
+      self._pinnedTool = key;
+
+      var def = TOOL_DEFS[key];
+      btn.style.display = "";
+      btn.dataset.tool = key;
+      btn.title = def.title;
+      btn.setAttribute("aria-label", def.title);
+      btn.innerHTML = def.icon;
+      // The active ring follows `data-tool`, so re-assert it after a swap.
+      btn.classList.toggle("is-selected", self.activeTool === key);
+    },
+
+    // Called whenever a tool is chosen; only non-essentials claim the slot.
+    _rememberPinnedTool: function(toolKey) {
+      if (!toolKey) return;
+      if (ESSENTIAL_TOOLS.indexOf(toolKey) !== -1) return;
+      if (!TOOL_DEFS[toolKey]) return;
+      if (this._pinnedTool === toolKey) return;
+      this._pinnedTool = toolKey;
+      this._renderPinnedTool();
+      this._syncToolsPopup();
     },
 
     _buildNavButton: function() {
@@ -4352,6 +4798,10 @@
       if (self.annotationMode === on) return;
       self.annotationMode = on;
       if (self.toolbar) self.toolbar.classList.toggle("is-active", on);
+      self._syncActionBar();
+      self._syncStylePanel();
+      if (!on) self._closeActionMenu();
+      if (on) self._positionActionBar();
       // Toolbar just became visible (or just hid). When visible, run
       // the overflow layout immediately — `_layoutToolbar` bails when
       // the toolbar is hidden, so the `off` path is a no-op.
@@ -4413,6 +4863,8 @@
       // compact-mode tools popup. The popup is an alternate UI; its
       // buttons must reflect the same selected state so re-opening
       // it shows the current tool highlighted.
+      self._rememberPinnedTool(toolKey);
+
       function syncToolButtons(root) {
         if (!root) return;
         root.querySelectorAll("button[data-tool]").forEach(function(b) {
@@ -4553,7 +5005,7 @@
         var before = self._snapshotShape(shape);
         shape.style = Object.assign({}, shape.style || {}, { color: color });
         if (shape.kind === "marker") self._renderShape(shape);
-        else self._applyShapeColor(shape.el, color);
+        else self._applyShapeColor(shape.el, color, shape.style);
         // Keep the inline title sibling in sync with the shape color.
         if (shape.titleGroup) shape.titleGroup.style.color = color || "";
         self._pushUndo(shape.uuid, before, self._snapshotShape(shape));
@@ -4575,7 +5027,7 @@
       }
     },
 
-    _applyShapeColor: function(el, color) {
+    _applyShapeColor: function(el, color, style) {
       if (!el) return;
       // Callout shapes use a <g> with `currentColor`-bound children
       // (line stroke + dot fill + text fill). Setting `style.color` on
@@ -4589,12 +5041,53 @@
       if (color) {
         el.style.stroke = color;
         el.style.fill = color;
-        el.style.fillOpacity = "0.18";
       } else {
         el.style.stroke = "";
         el.style.fill = "";
-        el.style.fillOpacity = "";
       }
+      this._applyFill(el, style);
+    },
+
+    // Which kinds can hold a fill at all. Decided from the SVG tag rather
+    // than the shape kind so this needs no plumbing at the call sites: an
+    // open path (line, freehand, marker) filling itself would be nonsense.
+    _isFillableEl: function(el) {
+      var tag = el && el.tagName && el.tagName.toLowerCase();
+      return tag === "rect" || tag === "circle" || tag === "polygon";
+    },
+
+    // Fill mode + opacity in one place, so the colour path and the params
+    // path can't disagree about it.
+    //
+    // `fill` is "none" | "semi" | "solid", defaulting to "semi" — what every
+    // shape looked like before the mode existed, so untouched drawings are
+    // unchanged. Fill opacity is multiplied by the shape's overall opacity;
+    // previously the slider moved only `stroke-opacity`, so dragging it to
+    // nothing still left a visible tinted body.
+    _applyFill: function(el, style) {
+      if (!el) return;
+      if (!this._isFillableEl(el)) {
+        el.style.fill = "none";
+        el.style.fillOpacity = "";
+        return;
+      }
+      var s = style || {};
+      var mode = s.fill || "semi";
+      var opacity = s.opacity == null ? 1 : s.opacity;
+
+      if (mode === "none") {
+        el.style.fill = "none";
+        el.style.fillOpacity = "";
+        return;
+      }
+      // Restore the body colour rather than assume it survived. Switching to
+      // "none" writes `fill: none` onto the element, and the params path —
+      // which is where the mode gets flipped — never touches the colour, so
+      // without this a shape could never come back from "none". Stroke and
+      // fill are always painted the same colour on a fillable shape, so the
+      // stroke is the reliable source for what the body should be.
+      el.style.fill = el.style.stroke || s.color || "";
+      el.style.fillOpacity = String((mode === "solid" ? 1 : 0.18) * opacity);
     },
 
     // -------------------------------------------------------------------------
@@ -6201,7 +6694,7 @@
         }
         // Over Etcher's own chrome (toolbar / popup / tooltip): no shape hover.
         if (e.target.closest &&
-            e.target.closest(".etcher-toolbar, .etcher-popup, .etcher-tooltip")) {
+            e.target.closest(CHROME_SELECTOR)) {
           if (self._hoveredShape) self._setHoveredShape(null, false);
           return;
         }
@@ -6245,7 +6738,7 @@
         // this, clicking the Parameters/colors UI while shapes are selected
         // would wipe the selection (an empty-canvas press → box-select).
         if (e.target.closest &&
-            e.target.closest(".etcher-toolbar, .etcher-popup, .etcher-tooltip")) {
+            e.target.closest(CHROME_SELECTOR)) {
           return;
         }
         if (!overContainer(e)) return;
@@ -8496,7 +8989,7 @@
       if (s.dash === "dashed") {
         el.setAttribute("stroke-dasharray", (w * 2.2) + " " + (w * 1.6));
       } else if (s.dash === "dotted") {
-        el.setAttribute("stroke-dasharray", "0.01 " + (w * 1.8));
+        el.setAttribute("stroke-dasharray", "0.01 " + (w * DOT_GAP_RATIO));
       } else {
         el.removeAttribute("stroke-dasharray");
       }
@@ -9682,7 +10175,7 @@
         // Clicks on Etcher's own toolbar / popups (e.g. opening the marker
         // style popup for the selected stroke, or dragging its sliders) are
         // part of editing, not a dismissal.
-        if (e.target.closest(".etcher-toolbar") || e.target.closest(".etcher-popup")) return;
+        if (e.target.closest(CHROME_SELECTOR)) return;
         if (isInputOwner(e.target, self.overlayWrapper)) return;
         try {
           var pt = self._toImage(e);

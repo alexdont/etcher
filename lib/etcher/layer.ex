@@ -208,6 +208,44 @@ defmodule Etcher.Layer do
   either `image_idx` (strip) or `image_id` (canvas multi-image)
   attached so routing UI doesn't need to scrape DOM data-attrs.
 
+  ## Z-order (arrange)
+
+  Shapes paint in list order, so the newest covers everything drawn before
+  it — an image pasted after a caption hides it. The four arrange actions
+  move the current selection (the multi-selection when there is one, else
+  the shape in edit mode) through that order:
+
+      layer.bringToFront();   // ⌘] — past everything
+      layer.bringForward();   // ]  — one step
+      layer.sendBackward();   // [  — one step
+      layer.sendToBack();     // ⌘[ — behind everything
+
+  Each returns `true` when something actually moved and `false` at the edge
+  or with nothing selected, so external buttons can reflect that;
+  `layer.canArrange()` answers the same question without moving anything.
+  The same four sit in the toolbar's `[⋯]` overflow, disabled until
+  something is selected — they act on a selection rather than being drawing
+  modes, so they belong with undo/redo rather than in `:tools`.
+
+  Reordering is undoable and re-emits `etcher:annotations-changed` with the
+  new order, so a host that persists the annotation list persists the
+  layering with it, and collaborators receive it like any other edit.
+
+  `layer.setShapeOrder(uuids)` forces an explicit order — shapes missing
+  from the list keep their relative position at the end. It deliberately
+  records no undo entry and emits nothing, because it exists for applying an
+  order that arrived from somewhere authoritative (a peer, a server load),
+  where echoing it back would loop.
+
+  ### Reaching a buried shape
+
+  A pointer event only ever reaches the topmost shape under it, which would
+  leave anything fully covered impossible to select — and so impossible to
+  arrange out from underneath. Tapping the same spot again therefore walks
+  *down* the stack instead of re-selecting the top, putting the covered
+  shape two taps away. Moving more than ~14px, or pausing longer than 1.5s,
+  starts a fresh cycle.
+
   ## Programmatic API
 
   Each mounted layer registers a handle on `window.Etcher.layerFor(id)`:

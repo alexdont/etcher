@@ -163,6 +163,15 @@
     cursor:   '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4 11.07 21l2.51-7.39L20.97 11.1 4 4Z"/></svg>',
     undo:     '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 15 4 10l5-5"/><path d="M4 10h11a5 5 0 0 1 0 10h-4"/></svg>',
     redo:     '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 15l5-5-5-5"/><path d="M20 10H9a5 5 0 0 0 0 10h4"/></svg>',
+    // Arrange (z-order). One metaphor across all four: the tinted square is
+    // the object, the chevrons are the direction it travels through the
+    // stack, and doubling them means "all the way" (⏭ against ▶). An
+    // earlier pass used a horizontal arrow for the single steps, which read
+    // as "move right" rather than "move a layer up".
+    toFront:  '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="14" width="16" height="7" rx="2" fill="currentColor" fill-opacity="0.18"/><path d="M8 10.5 12 6.5l4 4"/><path d="M8 6 12 2l4 4"/></svg>',
+    toBack:   '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3" width="16" height="7" rx="2" fill="currentColor" fill-opacity="0.18"/><path d="M8 13.5 12 17.5l4-4"/><path d="M8 18 12 22l4-4"/></svg>',
+    forward:  '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="12" width="16" height="9" rx="2" fill="currentColor" fill-opacity="0.18"/><path d="M8 8 12 4l4 4"/></svg>',
+    backward: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3" width="16" height="9" rx="2" fill="currentColor" fill-opacity="0.18"/><path d="M8 16 12 20l4-4"/></svg>',
     // Heroicons eye / eye-slash.
     eye:      '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/></svg>',
     eyeSlash: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 0 0 1.934 11.683a1.012 1.012 0 0 0 0 .639C3.423 16.49 7.36 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.451 10.451 0 0 1 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639a10.51 10.51 0 0 1-4.193 5.371M6.228 6.228 3 3m3.228 3.228 3.65 3.65m7.894 7.894L21 21m-3.228-3.228-3.65-3.65m0 0a3 3 0 1 0-4.243-4.243m4.242 4.242L9.88 9.88"/></svg>',
@@ -1523,6 +1532,27 @@
           // This is the entry point a `image_source: "custom"` host calls
           // after its own uploader/modal resolves to a URL.
           insertImage: function(href, opts) { return self._insertImageHref(href, opts || {}); },
+
+          // Z-order -----------------------------------------------------
+          // Move the current selection (multi-selection, else the shape in
+          // edit mode). Each returns true when something actually moved —
+          // false at the edge, or with nothing selected — so a consumer
+          // driving its own buttons can reflect that. Undoable, and they
+          // emit `etcher:annotations-changed` with the new order, so a
+          // host that persists the list persists the layering for free.
+          bringToFront: function() { return self._arrange("front"); },
+          sendToBack: function() { return self._arrange("back"); },
+          bringForward: function() { return self._arrange("forward"); },
+          sendBackward: function() { return self._arrange("backward"); },
+          // True when there is a selection to arrange — for enabling
+          // external buttons without reaching into internals.
+          canArrange: function() { return self._canArrange(); },
+          // Force an explicit order by uuid. Shapes absent from the list
+          // keep their relative position at the end. Does NOT record undo
+          // or re-emit — intended for applying an order that came from
+          // somewhere authoritative (a peer, a server load), where echoing
+          // it straight back would loop.
+          setShapeOrder: function(uuids) { self._applyShapeOrder(uuids); },
           // Open the built-in OS file picker and insert the chosen file —
           // the same action the image tool performs in file_picker mode.
           openImagePicker: function() { self._openImagePicker(); }
@@ -2199,6 +2229,22 @@
           }
         }
 
+        // Arrange the selection: ] / [ step one layer, ⌘/Ctrl + ] / [ jump
+        // to the extremes. Matches Figma / Illustrator / Sketch, so it's
+        // muscle memory for anyone who arranges things for a living.
+        // `e.key` is the bracket regardless of modifier on every layout we
+        // care about; falls through untouched when nothing is selected so
+        // the host page keeps the keystroke.
+        if (e.key === "]" || e.key === "[") {
+          if (!self._canArrange()) return;
+          var toExtreme = e.metaKey || e.ctrlKey;
+          var where = e.key === "]"
+            ? (toExtreme ? "front" : "forward")
+            : (toExtreme ? "back" : "backward");
+          if (self._arrange(where)) e.preventDefault();
+          return;
+        }
+
         var meta = e.metaKey || e.ctrlKey;
         if (!meta) return;
         if (e.key === "z" || e.key === "Z") {
@@ -2433,6 +2479,42 @@
         self._redo();
       });
       bar.appendChild(self.redoBtn);
+
+      // Arrange (z-order). Inline on the bar rather than only in the `[⋯]`
+      // popup: that popup's trigger is hidden whenever the toolbar fits
+      // (see `_syncToolsPopup`), so buttons living solely inside it are
+      // unreachable on a wide screen — keyboard-only, which defeats the
+      // point of having buttons. The whole group is hidden until something
+      // is selected, so it costs nothing the rest of the time, and it
+      // overflows into the popup like any other group when space is short.
+      self.arrangeGroupEls = [];
+
+      var arrangeDividerBar = document.createElement("div");
+      arrangeDividerBar.className = "etcher-divider";
+      bar.appendChild(arrangeDividerBar);
+      self._arrangeDivider = arrangeDividerBar;
+      self.arrangeGroupEls.push(arrangeDividerBar);
+
+      self.arrangeBarBtns = [
+        { where: "front", icon: ICONS.toFront, title: "Bring to front (\u2318])" },
+        { where: "forward", icon: ICONS.forward, title: "Bring forward (])" },
+        { where: "backward", icon: ICONS.backward, title: "Send backward ([)" },
+        { where: "back", icon: ICONS.toBack, title: "Send to back (\u2318[)" }
+      ].map(function(entry) {
+        var b = document.createElement("button");
+        b.type = "button";
+        b.dataset.arrange = entry.where;
+        b.title = entry.title;
+        b.setAttribute("aria-label", entry.title);
+        b.innerHTML = entry.icon;
+        b.addEventListener("click", function(e) {
+          e.preventDefault();
+          self._arrange(entry.where);
+        });
+        bar.appendChild(b);
+        self.arrangeGroupEls.push(b);
+        return b;
+      });
 
       var dividerUndo = document.createElement("div");
       dividerUndo.className = "etcher-divider";
@@ -2834,8 +2916,64 @@
       });
       popup.appendChild(self.popupRedoBtn);
 
+      // Hairline + arrange (z-order). Lives in the overflow rather than the
+      // main bar deliberately: these act on a selection, so they're dead
+      // weight most of the time, and four more always-visible icons is
+      // exactly the crowding the overflow exists to absorb. Keyboard users
+      // have ] / [ and never need to open this.
+      var arrangeDivider = document.createElement("div");
+      arrangeDivider.className = "etcher-popup-divider";
+      popup.appendChild(arrangeDivider);
+      self._popupArrangeDivider = arrangeDivider;
+
+      self.arrangeBtns = [
+        { where: "front", icon: ICONS.toFront, title: "Bring to front (⌘])" },
+        { where: "forward", icon: ICONS.forward, title: "Bring forward (])" },
+        { where: "backward", icon: ICONS.backward, title: "Send backward ([)" },
+        { where: "back", icon: ICONS.toBack, title: "Send to back (⌘[)" }
+      ].map(function(entry) {
+        var b = document.createElement("button");
+        b.type = "button";
+        b.dataset.arrange = entry.where;
+        b.title = entry.title;
+        b.setAttribute("aria-label", entry.title);
+        b.innerHTML = entry.icon;
+        b.addEventListener("click", function(e) {
+          e.preventDefault();
+          self._arrange(entry.where);
+          // Left open on purpose — nudging something forward a few steps
+          // is the common case, same reasoning as the undo button above.
+        });
+        popup.appendChild(b);
+        return b;
+      });
+
       self.handle.container.appendChild(popup);
       self.toolsPopup = popup;
+      self._syncArrangeButtons();
+    },
+
+    // Show the arrange group only when there's something to arrange, and
+    // keep the popup copies disabled in lockstep. Called on every selection
+    // change as well as after each arrange.
+    _syncArrangeButtons: function() {
+      var enabled = this._canArrange();
+
+      // Inline group: hidden outright with nothing selected. Four permanently
+      // greyed-out icons would be four icons of noise on a canvas toolbar.
+      (this.arrangeGroupEls || []).forEach(function(el) {
+        el.style.display = enabled ? "" : "none";
+      });
+      (this.arrangeBarBtns || []).forEach(function(b) { b.disabled = !enabled; });
+
+      // Popup copies stay present but disabled — the popup is a menu, and a
+      // menu whose contents come and go is harder to learn than one with a
+      // stable shape.
+      (this.arrangeBtns || []).forEach(function(b) { b.disabled = !enabled; });
+
+      // Showing or hiding a whole group changes the bar's width, so the
+      // overflow pass has to run again or the `[⋯]` state goes stale.
+      if (typeof this._layoutToolbar === "function") this._layoutToolbar();
     },
 
     // Colors popup: preset swatches + recent-customs row + a
@@ -6139,6 +6277,11 @@
             hit = self._shapeAt(ptDirect);
           }
         }
+        // Repeat taps in one spot reach past the topmost shape. This is the
+        // path that picks a *new* selection; tapping the already-editing
+        // shape is swallowed by its own listener and cycles in
+        // `_startShapeMove` instead, sharing the same `_tapCycle` state.
+        if (hit) hit = self._cycleTapTarget(hit, e);
         if (!hit) {
           // Empty press in annotation cursor mode on a canvas: begin a
           // marquee box-select. Shift extends the current group; without it
@@ -6979,6 +7122,7 @@
       if (this.selectedShapes.indexOf(shape) !== -1) return;
       this.selectedShapes.push(shape);
       shape.el.classList.add("is-multi-selected");
+      this._syncArrangeButtons();
     },
 
     _removeFromSelection: function(shape) {
@@ -6987,6 +7131,7 @@
       if (idx === -1) return;
       list.splice(idx, 1);
       if (shape.el) shape.el.classList.remove("is-multi-selected");
+      this._syncArrangeButtons();
     },
 
     _toggleInSelection: function(shape) {
@@ -7001,6 +7146,7 @@
         if (s && s.el) s.el.classList.remove("is-multi-selected");
       });
       this.selectedShapes = [];
+      this._syncArrangeButtons();
     },
 
     _isInSelection: function(shape) {
@@ -7177,6 +7323,253 @@
       self.selectedShapes = [];
       self._hideTooltip();
       self._emitChanged();
+    },
+
+    // -------------------------------------------------------------------------
+    // Tap-cycling
+    //
+    // Selection resolves to the topmost shape under the point and stops
+    // there, so anything fully covered is unreachable — you cannot select
+    // it, which means you cannot arrange it out from under whatever covers
+    // it. Most painful on touch, where there is no precision to hunt for an
+    // uncovered sliver, but it bites with a mouse too.
+    //
+    // Tapping the same place repeatedly therefore walks *down* the stack,
+    // reusing the same per-kind geometric hit-test ordinary selection runs
+    // on (`_shapeContainsPoint`). It has to be geometric: shapes are
+    // `pointer-events: none` so pan and zoom pass through them, which means
+    // the DOM cannot hit-test them at all.
+    // -------------------------------------------------------------------------
+
+    // Screen px the pointer may wander between taps and still count as "the
+    // same place" — a finger never lands twice on the same pixel.
+    _TAP_CYCLE_SLOP: 14,
+    // After this long, a tap reads as fresh intent, not a continuation.
+    _TAP_CYCLE_MS: 1500,
+
+    // All shapes under an image-space point, topmost first.
+    //
+    // Deliberately built on `_shapeContainsPoint` — the same per-kind test
+    // `_shapeAt` uses — rather than `document.elementsFromPoint`. Shapes are
+    // `pointer-events: none` by design so pan and zoom pass through them, so
+    // the DOM cannot hit-test them at all; selection has always been
+    // geometric. Reusing that keeps cycling agreeing exactly with what a
+    // plain click would have picked.
+    _shapesAtImagePoint: function(pt) {
+      var self = this;
+      if (!self.shapes || !pt) return [];
+      var stripMode = self.handleKind === "strip";
+      var ptImageIdx = stripMode && typeof pt.imageIdx === "number" ? pt.imageIdx : null;
+
+      var out = [];
+      for (var i = self.shapes.length - 1; i >= 0; i--) {
+        var s = self.shapes[i];
+        if (!s.uuid) continue;
+        if (stripMode && s.image_idx !== ptImageIdx) continue;
+        if (self._shapeContainsPoint(s, pt)) out.push(s);
+      }
+      return out;
+    },
+
+    // Given the shape a plain hit-test picked, return the one the user
+    // means: that same shape on a first tap, the next one down on a repeat.
+    _cycleTapTarget: function(shape, e) {
+      var self = this;
+      if (!e || typeof e.clientX !== "number") return shape;
+      // Only while selecting — with a drawing tool armed a tap is drawing,
+      // and outside annotation mode it is browsing.
+      if (!self.annotationMode || self.activeTool != null) return shape;
+
+      var pt;
+      try { pt = self._toImage(e); } catch (_) { return shape; }
+
+      var now = (typeof performance !== "undefined" && performance.now)
+        ? performance.now()
+        : Date.now();
+      var prev = self._tapCycle;
+      var dx = prev ? e.clientX - prev.x : Infinity;
+      var dy = prev ? e.clientY - prev.y : Infinity;
+      var samePlace =
+        !!prev &&
+        (dx * dx + dy * dy) <= self._TAP_CYCLE_SLOP * self._TAP_CYCLE_SLOP &&
+        (now - prev.t) <= self._TAP_CYCLE_MS;
+
+      var stack = self._shapesAtImagePoint(pt);
+      // Nothing overlapping here — still record the tap so a later one
+      // nearby doesn't inherit a stale index.
+      if (stack.length < 2) {
+        self._tapCycle = { x: e.clientX, y: e.clientY, t: now, index: 0 };
+        return shape;
+      }
+
+      var index;
+      if (samePlace) {
+        index = (prev.index + 1) % stack.length;
+      } else {
+        // Start from whatever a plain hit-test picked rather than assuming
+        // the top, so the first tap agrees with an ordinary click.
+        var at = stack.indexOf(shape);
+        index = at === -1 ? 0 : at;
+      }
+
+      self._tapCycle = { x: e.clientX, y: e.clientY, t: now, index: index };
+      return stack[index] || shape;
+    },
+
+    // -------------------------------------------------------------------------
+    // Z-order (arrange)
+    //
+    // Paint order is simply position in `this.shapes`: `_renderAnnotation`
+    // appends each new shape's node to the SVG, so the newest paints last and
+    // covers whatever is under it. That's why an image pasted after a caption
+    // hides it, with no way out — nothing reordered the list.
+    //
+    // The array is the source of truth (it's what `_emitChanged` serializes,
+    // so consumers persist the order for free); the DOM is brought back in
+    // line afterwards by `_syncShapeOrder`.
+    // -------------------------------------------------------------------------
+
+    // Shapes the arrange actions apply to: the multi-selection when there is
+    // one, else the shape in edit mode. Mirrors `_paramsTargetShapes` but
+    // without its kind filter — arranging means something for every kind, and
+    // images and text are exactly the two that filter excludes.
+    _arrangeTargets: function() {
+      if (this.selectedShapes && this.selectedShapes.length) {
+        return this.selectedShapes.slice();
+      }
+      if (this.editingShape) return [this.editingShape];
+      return [];
+    },
+
+    _canArrange: function() {
+      return !!this.annotationMode && this._arrangeTargets().length > 0;
+    },
+
+    // `where` is "front" | "back" | "forward" | "backward".
+    _arrange: function(where) {
+      var self = this;
+      var targets = self._arrangeTargets().filter(function(s) {
+        return s && self.shapes.indexOf(s) !== -1;
+      });
+      if (targets.length === 0) return false;
+
+      var before = self.shapes.map(function(s) { return s.uuid; });
+      if (!self._reorderShapes(targets, where)) return false;
+
+      self._syncShapeOrder();
+      self._pushUndoReorder(before, self.shapes.map(function(s) { return s.uuid; }));
+      self._emitChanged();
+      self._syncArrangeButtons();
+      return true;
+    },
+
+    // Reorders `this.shapes` in place. Returns false when the move is a
+    // no-op (already at the edge), so the caller can skip the undo entry and
+    // the change event rather than filling history with nothing.
+    _reorderShapes: function(targets, where) {
+      var self = this;
+      var picked = new Set(targets);
+      var next;
+
+      if (where === "front" || where === "back") {
+        var rest = self.shapes.filter(function(s) { return !picked.has(s); });
+        // Keep targets in their existing relative order rather than
+        // selection order, or arranging a multi-selection reshuffles it.
+        var group = self.shapes.filter(function(s) { return picked.has(s); });
+        next = where === "front" ? rest.concat(group) : group.concat(rest);
+      } else {
+        // Step one position. Walk from the end for "forward" and from the
+        // start for "backward" so a block of adjacent targets slides as a
+        // unit instead of each one trampling the next.
+        next = self.shapes.slice();
+        var step = where === "forward" ? 1 : -1;
+        var order = [];
+        next.forEach(function(s, i) { if (picked.has(s)) order.push(i); });
+        if (where === "forward") order.reverse();
+
+        for (var k = 0; k < order.length; k++) {
+          var i = order[k];
+          var j = i + step;
+          // At the edge, or blocked by another selected shape already
+          // parked there — leave this one where it is.
+          if (j < 0 || j >= next.length) continue;
+          if (picked.has(next[j])) continue;
+          var tmp = next[i];
+          next[i] = next[j];
+          next[j] = tmp;
+        }
+      }
+
+      var changed = next.some(function(s, i) { return s !== self.shapes[i]; });
+      if (!changed) return false;
+      self.shapes = next;
+      return true;
+    },
+
+    // Bring the SVG in line with the array.
+    //
+    // Shapes share the SVG with transient chrome — edit handles, the
+    // in-progress draft, the inline text editor — all appended last and all
+    // of which MUST stay on top to stay clickable. So rather than
+    // re-appending shapes (which would bury that chrome), they're inserted
+    // before the trailing run of nodes we don't own.
+    _syncShapeOrder: function() {
+      var svg = this.svg;
+      if (!svg) return;
+
+      var owned = new Set();
+      this.shapes.forEach(function(s) {
+        if (s.el) owned.add(s.el);
+        if (s.titleGroup) owned.add(s.titleGroup);
+      });
+
+      var anchor = null;
+      for (var i = svg.childNodes.length - 1; i >= 0; i--) {
+        if (owned.has(svg.childNodes[i])) break;
+        anchor = svg.childNodes[i];
+      }
+
+      this.shapes.forEach(function(s) {
+        if (s.el && s.el.parentNode === svg) svg.insertBefore(s.el, anchor);
+        // A shape's title rides directly above it.
+        if (s.titleGroup && s.titleGroup.parentNode === svg) {
+          svg.insertBefore(s.titleGroup, anchor);
+        }
+      });
+    },
+
+    // Restore a recorded order (undo/redo, or a peer's order in a
+    // collaborative host). Shapes created since the entry was recorded
+    // aren't in `uuids`; they keep their relative position at the end
+    // rather than being dropped.
+    _applyShapeOrder: function(uuids) {
+      var remaining = {};
+      this.shapes.forEach(function(s) { remaining[s.uuid] = s; });
+
+      var next = [];
+      (uuids || []).forEach(function(uuid) {
+        var shape = remaining[uuid];
+        if (shape) {
+          next.push(shape);
+          delete remaining[uuid];
+        }
+      });
+      this.shapes.forEach(function(s) {
+        if (remaining[s.uuid]) next.push(s);
+      });
+
+      this.shapes = next;
+      this._syncShapeOrder();
+      this._syncArrangeButtons();
+    },
+
+    _pushUndoReorder: function(before, after) {
+      this._undoStack = this._undoStack || [];
+      this._redoStack = this._redoStack || [];
+      this._undoStack.push({ type: "reorder", before: before, after: after });
+      if (this._undoStack.length > this._undoStackLimit) this._undoStack.shift();
+      this._redoStack = [];
+      this._refreshUndoButtons();
     },
 
     _deleteShape: function(shape) {
@@ -9242,6 +9635,7 @@
 
       this.editingShape = shape;
       shape.el.classList.add("is-editing");
+      this._syncArrangeButtons();
       this._hideTooltip();
       // Pick up the shape's color into the toolbar (active swatch + the color
       // new shapes draw with), so selecting a shape "switches" to its color.
@@ -9311,6 +9705,7 @@
         document.removeEventListener("click", this._outsideClickHandler, true);
         this._outsideClickHandler = null;
       }
+      this._syncArrangeButtons();
     },
 
     // Mark polygon vertices as the Backspace / Delete target. Plain
@@ -10314,6 +10709,10 @@
     // small dead-zone so a stationary click on the shape body doesn't
     // emit a no-op `etcher:updated` event.
     _startShapeMove: function(shape, e) {
+      // Tapping the same spot again reaches for whatever is underneath —
+      // without this, a shape covered by a larger one can never be selected,
+      // and so can never be arranged out from under it.
+      shape = this._cycleTapTarget(shape, e);
       // Locked shape: no drag-to-move. Fall through to the tap path so a
       // click still pins the tooltip (browse-mode behavior).
       if (shape.readonly) { this._onShapeTap(shape); return; }
@@ -10746,6 +11145,10 @@
       } else if (op.type === "update") {
         this._redoStack.push(op);
         this._applyHistorySnapshot(op.uuid, op.before);
+      } else if (op.type === "reorder") {
+        this._redoStack.push(op);
+        this._applyShapeOrder(op.before);
+        this._emitChanged();
       }
       this._refreshUndoButtons();
     },
@@ -10782,6 +11185,10 @@
       } else if (op.type === "update") {
         this._undoStack.push(op);
         this._applyHistorySnapshot(op.uuid, op.after);
+      } else if (op.type === "reorder") {
+        this._undoStack.push(op);
+        this._applyShapeOrder(op.after);
+        this._emitChanged();
       }
       this._refreshUndoButtons();
     },

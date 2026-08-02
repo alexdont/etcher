@@ -174,6 +174,35 @@ def handle_event("etcher:image-insert-requested", %{"fresco_id" => _id}, socket)
 
 Inserted images auto-size — the longest side is scaled to 800 canvas px — and center on the viewport (or on the point you pass to `insertImage`).
 
+**Uploading instead of embedding — `setImageUploader`:**
+
+By default an image file becomes a base64 data URL living in the shape's
+`geometry.href`. That is fine for a scratch canvas and expensive everywhere
+else: Etcher re-emits the **whole** annotation list on every edit, so an
+embedded screenshot is re-sent in full every time anything changes. A couple
+of images is enough to push routine edits past a socket's frame limit, and
+past it the edit fails with nothing the user can act on.
+
+If you persist annotations over a socket, hand the bytes to your storage
+instead and keep a URL in the shape:
+
+```javascript
+window.Etcher.layerFor("board").setImageUploader(async (file, ctx) => {
+  const body = new FormData();
+  body.append("file", file);
+  const res = await fetch("/uploads", { method: "POST", body });
+  return (await res.json()).url;   // becomes geometry.href
+});
+
+// Or once, for every layer on the page:
+window.Etcher.imageUploader = async (file, ctx) => { /* … */ };
+```
+
+Covers every path that yields a file — paste, drag-drop, and the built-in
+file picker. If the uploader rejects, resolves to a non-string, or throws,
+Etcher falls back to embedding and warns: a failed upload should cost bytes,
+not the user's paste.
+
 ## Events
 
 ### Client → server LiveView events
@@ -443,6 +472,8 @@ layer.insertImage(href, { at: { x, y } });     // place at an image-space point
 layer.insertImage(href, { width, height });    // force a size (returns the uuid)
 layer.insertImage(href, { maxSide: 1200 });    // cap the longest side (default 800)
 layer.openImagePicker();                        // run the built-in OS file picker + insert
+layer.setImageUploader(fn);                     // upload files instead of embedding them
+layer.setImageUploader(null);                   // back to embedding as a data URL
 
 // Coordinates — the Fresco handle's stable screen ↔ image round-trip,
 // for placing shapes under the cursor or at the viewport center.

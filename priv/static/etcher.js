@@ -1712,6 +1712,25 @@
           // after its own uploader/modal resolves to a URL.
           insertImage: function(href, opts) { return self._insertImageHref(href, opts || {}); },
 
+          // Hand image FILES (pasted, dropped, or picked) to the host instead
+          // of embedding them. `fn(file, ctx)` returns a Promise of a URL,
+          // which becomes the shape's `href`; ctx carries `{frescoId}`.
+          //
+          // Worth setting whenever the annotation list is persisted over a
+          // socket: without it a pasted screenshot lives in the shape as a
+          // base64 data URL, and since the whole list is re-emitted on every
+          // edit, that image is re-sent in full every time anything changes.
+          // A couple of screenshots is enough to push ordinary edits past a
+          // socket frame limit, at which point edits fail silently.
+          //
+          // Rejecting (or resolving to a non-string) falls back to embedding,
+          // so a failed upload costs size rather than the user's work. Pass
+          // null to clear. `window.Etcher.imageUploader` sets the same thing
+          // for every layer; this one wins.
+          setImageUploader: function(fn) {
+            self._uploadImageFn = typeof fn === "function" ? fn : null;
+          },
+
           // Z-order -----------------------------------------------------
           // Move the current selection (multi-selection, else the shape in
           // edit mode). Each returns true when something actually moved —
@@ -4905,9 +4924,52 @@
 
     // Read a File as a data URL, then place it. `imagePt` (image coords) is
     // optional — omitted for the picker (→ viewport center), set for a drop.
+    // Every path that produces an image FILE — paste, drag-drop, the file
+    // picker — funnels through here. With a host uploader registered the
+    // bytes go to the host's storage and the shape carries a URL; without
+    // one they're embedded as a base64 data URL (see `setImageUploader` for
+    // why that gets expensive).
     _insertImageFile: function(file, imagePt) {
       var self = this;
       if (!file || (file.type && file.type.indexOf("image/") !== 0)) return;
+
+      var upload = this._imageUploader();
+      if (!upload) return this._embedImageFile(file, imagePt);
+
+      // Falling back to an embed on failure trades size for the user's work,
+      // which is the right way round: the alternative is a paste that looks
+      // like it landed and then isn't there after a reload.
+      var settled = false;
+      function embed(why) {
+        if (settled) return;
+        settled = true;
+        if (window.console && console.warn) {
+          console.warn("[Etcher] image upload failed; embedding instead:", why);
+        }
+        self._embedImageFile(file, imagePt);
+      }
+
+      var pending;
+      try {
+        pending = upload(file, { frescoId: self.frescoId });
+      } catch (e) {
+        return embed(e);
+      }
+      if (!pending || typeof pending.then !== "function") {
+        return embed("uploader did not return a promise");
+      }
+      pending.then(function(href) {
+        if (settled) return;
+        if (typeof href !== "string" || !href) {
+          return embed("uploader resolved without a URL");
+        }
+        settled = true;
+        self._insertImageHref(href, { at: imagePt });
+      }, embed);
+    },
+
+    _embedImageFile: function(file, imagePt) {
+      var self = this;
       var reader = new FileReader();
       reader.onload = function() {
         if (typeof reader.result === "string") {
@@ -4915,6 +4977,16 @@
         }
       };
       reader.readAsDataURL(file);
+    },
+
+    // Per-layer uploader wins over the global one, so a page with several
+    // layers can route one of them somewhere else.
+    _imageUploader: function() {
+      if (typeof this._uploadImageFn === "function") return this._uploadImageFn;
+      if (window.Etcher && typeof window.Etcher.imageUploader === "function") {
+        return window.Etcher.imageUploader;
+      }
+      return null;
     },
 
     // Place an image shape from a URL / data URL. `opts.at` = { x, y } in

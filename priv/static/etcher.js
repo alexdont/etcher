@@ -3976,6 +3976,11 @@
         }
         shape.metadata = Object.assign({}, shape.metadata || {}, { title_align: next });
         self._renderShape(shape);
+        // The resize handles sit on the label's corners, so they have to
+        // follow it to its new anchor — same as during a drag. Without
+        // this they stay where the label used to be until title-edit mode
+        // is toggled off and back on.
+        if (self.editingTitleShape === shape) self._positionAllTitleHandles(shape);
         if (shape.uuid) self._pushUndo(shape.uuid, before, self._snapshotShape(shape));
       });
       this._emitChanged();

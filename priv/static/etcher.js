@@ -389,6 +389,28 @@
       "  pointer-events: auto; width: 190px; max-width: calc(100vw - 24px);",
       "}",
       ".etcher-stylepanel.is-active { display: flex; }",
+      // Narrow container: the docked panel would eat the canvas, so it
+      // becomes a popup over the tool bar, opened by `.etcher-style-trigger`.
+      // JS owns the offsets (the tool bar's height and width both move), so
+      // only the things CSS can settle live here.
+      ".etcher-stylepanel[data-compact] {",
+      "  top: auto; right: auto; width: 232px;",
+      "  max-width: calc(100% - 24px); max-height: calc(100% - 96px);",
+      "  overflow-y: auto;",
+      "}",
+      ".etcher-stylepanel[data-compact]:not(.is-open) { display: none; }",
+      ".etcher-style-trigger {",
+      "  position: absolute; z-index: 11; display: none;",
+      "  align-items: center; justify-content: center;",
+      "  padding: 0; border: 0; cursor: pointer; border-radius: 10px;",
+      "  background: rgba(0, 0, 0, 0.7); color: #fff;",
+      "  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3); pointer-events: auto;",
+      "}",
+      ".etcher-style-trigger.is-active { display: inline-flex; }",
+      ".etcher-style-trigger.is-open { background: rgba(255, 255, 255, 0.22); }",
+      // The stroke previews the active colour, so the button says what it
+      // opens without needing a label next to a canvas.
+      ".etcher-style-trigger svg { display: block; }",
       ".etcher-stylepanel-swatches {",
       "  display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px;",
       "}",
@@ -1001,6 +1023,7 @@
   // Kept as one constant because it is only ever wrong by omission.
   var CHROME_SELECTOR =
     ".etcher-toolbar, .etcher-actionbar, .etcher-stylepanel, " +
+    ".etcher-style-trigger, " +
     ".etcher-popup, .etcher-tooltip";
 
   var ESSENTIAL_TOOLS = [
@@ -1029,6 +1052,10 @@
   // `_encodePreview` steps down through cheaper encodings until it fits.
   // The local canvas draws the full-quality original throughout; this is
   // what gets *saved*, not what you are looking at.
+  // Width the tool bar must leave free on a compact layout: the style
+  // trigger's square (it matches the bar's height) plus the gap between them.
+  var COMPACT_TRIGGER_RESERVE = 60;
+
   var PREVIEW_MAX_SIDE = 1600;
   var PREVIEW_QUALITY = 0.85;
   var PREVIEW_BYTE_BUDGET = 400 * 1024;
@@ -2810,6 +2837,10 @@
       this._computeToolbarOverflow();
       this._syncToolsPopup();
       this._syncColorsPopup();
+      // The tool bar just changed width or height, and both the action bar
+      // and the style trigger are parked against its edges.
+      this._positionActionBar();
+      this._syncStylePanel();
     },
 
     // Secondary action bar: things you do TO the drawing, kept off the tool
@@ -2978,11 +3009,133 @@
 
       self.handle.container.appendChild(panel);
       self.stylePanel = panel;
+      self._buildStyleTrigger();
 
       // Seeds `_colorSlots` (if empty) and renders the slot row into the
       // panel — previously done inline while building the tool bar.
       self._refreshToolbarSwatches();
       self._syncStylePanel();
+    },
+
+    // The button that opens the style panel when it can't be docked. Lives
+    // beside the tool bar rather than inside it: the bar is a row of tools
+    // and this isn't one, and keeping it out means the bar's overflow logic
+    // doesn't have to reason about a button that must never be collapsed.
+    _buildStyleTrigger: function() {
+      var self = this;
+      if (self.styleTrigger) return;
+
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "etcher-style-trigger";
+      btn.setAttribute("data-fresco-no-capture", "");
+      btn.title = "Style";
+      btn.setAttribute("aria-label", "Style");
+      btn.setAttribute("aria-expanded", "false");
+      btn.addEventListener("click", function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        self._toggleStylePanel();
+      });
+
+      self.handle.container.appendChild(btn);
+      self.styleTrigger = btn;
+      self._renderStyleTriggerIcon();
+    },
+
+    // A brush stroke in the active colour, so the closed button still shows
+    // what it would open onto.
+    _renderStyleTriggerIcon: function() {
+      if (!this.styleTrigger) return;
+      var color = this.activeColor || "#ffffff";
+      this.styleTrigger.innerHTML =
+        '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" ' +
+        'stroke="' + escapeHtml(color) + '" stroke-width="3" ' +
+        'stroke-linecap="round" aria-hidden="true">' +
+        '<path d="M4 16c3-6 5 4 8-2s5-6 8-4"/></svg>';
+    },
+
+    // Docked panel or popup? Decided on the CONTAINER, not the viewport —
+    // the layer can be embedded in a column on an otherwise wide page, and
+    // it's the space around the canvas that determines whether a permanent
+    // 190px panel is affordable.
+    _isCompactLayout: function() {
+      var c = this.handle && this.handle.container;
+      if (!c || typeof c.getBoundingClientRect !== "function") return false;
+      return c.getBoundingClientRect().width < 720;
+    },
+
+    _toggleStylePanel: function(force) {
+      if (!this.stylePanel) return;
+      var open = typeof force === "boolean"
+        ? force
+        : !this.stylePanel.classList.contains("is-open");
+      this.stylePanel.classList.toggle("is-open", open);
+      if (this.styleTrigger) {
+        this.styleTrigger.classList.toggle("is-open", open);
+        this.styleTrigger.setAttribute("aria-expanded", open ? "true" : "false");
+      }
+      if (open) this._positionStyleChrome();
+      this._wireStylePanelOutsideClick(open);
+    },
+
+    // Tapping the canvas closes the popup. Etcher's own chrome is excluded,
+    // or picking a colour would close the panel the colours are in.
+    _wireStylePanelOutsideClick: function(on) {
+      var self = this;
+      if (on && !self._stylePanelOutside) {
+        self._stylePanelOutside = function(e) {
+          if (e.target.closest && e.target.closest(CHROME_SELECTOR)) return;
+          self._toggleStylePanel(false);
+        };
+        document.addEventListener("pointerdown", self._stylePanelOutside, true);
+      } else if (!on && self._stylePanelOutside) {
+        document.removeEventListener("pointerdown", self._stylePanelOutside, true);
+        self._stylePanelOutside = null;
+      }
+    },
+
+    // Park the trigger beside the tool bar and the popup above it. Measured
+    // rather than expressed in CSS because the tool bar's width changes as
+    // tools overflow and its height with the button size.
+    _positionStyleChrome: function() {
+      var self = this;
+      if (!self.styleTrigger || !self.toolbar || !self.handle) return;
+      var c = self.handle.container.getBoundingClientRect();
+      var t = self.toolbar.getBoundingClientRect();
+      if (!t.width || !c.width) return;
+
+      var gap = 8;
+      var margin = 12;
+      var h = Math.round(t.height);
+      self.styleTrigger.style.height = h + "px";
+      self.styleTrigger.style.width = h + "px";
+
+      // Beside the bar when there's room for it. On a narrow container there
+      // often isn't: the bar collapses tools into `[⋯]` but bottoms out at a
+      // width it can't go under, and squeezing the trigger in anyway would
+      // just park it on top of the bar. So it stacks above the bar's right
+      // end instead — the action bar already occupies the left of that row.
+      var right = Math.round(t.right - c.left);
+      var top;
+      var left;
+      if (right + gap + h <= c.width - margin) {
+        left = right + gap;
+        top = Math.round(t.top - c.top);
+      } else {
+        left = Math.round(c.width - h - margin);
+        top = Math.round(t.top - c.top) - h - gap;
+      }
+      self.styleTrigger.style.left = Math.max(margin, left) + "px";
+      self.styleTrigger.style.top = Math.max(margin, top) + "px";
+
+      if (self.stylePanel && self.stylePanel.hasAttribute("data-compact")) {
+        // Opens upward off the trigger, right-aligned to the container so it
+        // covers canvas rather than hanging off the side.
+        self.stylePanel.style.left = "auto";
+        self.stylePanel.style.right = margin + "px";
+        self.stylePanel.style.bottom = Math.round(c.height - top + gap) + "px";
+      }
     },
 
     // The panel is only meaningful while annotating, same as the tool bar.
@@ -2993,6 +3146,31 @@
         this.stylePanel.appendChild(this.paramsPopup);
       }
       this.stylePanel.classList.toggle("is-active", !!this.annotationMode);
+
+      // Docked on a roomy container, a popup on a narrow one. Re-evaluated
+      // on every sync so a rotation or a resized split view moves it without
+      // the layer being rebuilt.
+      var compact = this._isCompactLayout();
+      if (compact) {
+        this.stylePanel.setAttribute("data-compact", "");
+      } else {
+        this.stylePanel.removeAttribute("data-compact");
+        // Leaving the popup's measured offsets behind would drag the docked
+        // panel down to wherever the tool bar was.
+        this.stylePanel.style.left = "";
+        this.stylePanel.style.right = "";
+        this.stylePanel.style.bottom = "";
+        this._toggleStylePanel(false);
+      }
+
+      if (this.styleTrigger) {
+        this.styleTrigger.classList.toggle(
+          "is-active",
+          compact && !!this.annotationMode
+        );
+        this._renderStyleTriggerIcon();
+      }
+      if (compact) this._positionStyleChrome();
     },
 
     // Parked just above the tool bar and flush with its left edge, the way
@@ -3135,6 +3313,10 @@
       // bar reaches the page sides). Buttons keep their natural size;
       // overflow HIDES the extras rather than shrinking anything.
       var available = container.clientWidth - 64;
+      // Compact layout parks the style trigger beside the bar, so that space
+      // isn't the bar's to use. Without reserving it the bar grows to the
+      // full width and the trigger has nowhere to go but on top of it.
+      if (self._isCompactLayout()) available -= COMPACT_TRIGGER_RESERVE;
       if (available <= 0) return;
       if (self.toolbar.scrollWidth <= available) return;  // already fits
 

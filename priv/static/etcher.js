@@ -4936,22 +4936,82 @@
       var upload = this._imageUploader();
       if (!upload) return this._embedImageFile(file, imagePt);
 
-      // Falling back to an embed on failure trades size for the user's work,
-      // which is the right way round: the alternative is a paste that looks
-      // like it landed and then isn't there after a reload.
-      var settled = false;
+      // Place the image *now*, against a local object URL, and upload behind
+      // it. Waiting for the upload first meant a paste did nothing visible
+      // for however long the transfer took — on a big screenshot the canvas
+      // just sat there and the paste looked lost. The placeholder renders
+      // half-transparent with a progress bar so it reads as "arriving", and
+      // `_pendingUpload` keeps it out of `_emitChanged`: a blob: URL belongs
+      // to this document alone, so persisting or broadcasting one would hand
+      // peers a broken image and leave the board holding a dead reference.
+      var previewUrl = URL.createObjectURL(file);
+
+      // Placing before uploading also removes a race — the upload can't
+      // finish before there's a shape to put the URL on.
+      this._insertImageHref(previewUrl, {
+        at: imagePt,
+        onPlaced: function(uuid) { self._startTrackedUpload(uuid, file, previewUrl, upload); }
+      });
+    },
+
+    // Run `upload` for an already-placed pending shape, then swap the local
+    // preview for the stored URL. Failure embeds the bytes instead, so the
+    // paste survives at the cost of payload size — the alternative is an
+    // image the user can see that quietly never persists.
+    _startTrackedUpload: function(uuid, file, previewUrl, upload) {
+      var self = this;
+      var shape = self._shapeByUuid(uuid);
+      if (!shape) return;
+      shape._pendingUpload = true;
+      shape._uploadProgress = 0;
+      self._renderShape(shape);
+
+      function release() {
+        var s = self._shapeByUuid(uuid);
+        // Clear against the captured reference, not the lookup: if the user
+        // deleted the image mid-upload it is gone from `this.shapes` but its
+        // progress bar is a child of the overlay and would outlive it.
+        self._clearUploadProgress(shape);
+        if (s) {
+          s._pendingUpload = false;
+          s._uploadProgress = 0;
+        }
+        try { URL.revokeObjectURL(previewUrl); } catch (_) {}
+        return s;
+      }
+
+      function commit(href) {
+        var s = release();
+        if (!s) return;                       // deleted while uploading
+        s.geometry = Object.assign({}, s.geometry, { href: href });
+        self._renderShape(s);
+        self._emitChanged();
+      }
+
       function embed(why) {
-        if (settled) return;
-        settled = true;
         if (window.console && console.warn) {
           console.warn("[Etcher] image upload failed; embedding instead:", why);
         }
-        self._embedImageFile(file, imagePt);
+        var reader = new FileReader();
+        reader.onload = function() {
+          if (typeof reader.result === "string") commit(reader.result);
+          else release();
+        };
+        reader.onerror = function() { release(); };
+        reader.readAsDataURL(file);
       }
+
+      var ctx = {
+        frescoId: self.frescoId,
+        // Optional: an uploader that can report progress calls this with
+        // 0..100 and the bar follows. One that can't still shows the
+        // half-transparent placeholder, just without the bar filling.
+        onProgress: function(pct) { self._setUploadProgress(uuid, pct); }
+      };
 
       var pending;
       try {
-        pending = upload(file, { frescoId: self.frescoId });
+        pending = upload(file, ctx);
       } catch (e) {
         return embed(e);
       }
@@ -4959,13 +5019,86 @@
         return embed("uploader did not return a promise");
       }
       pending.then(function(href) {
-        if (settled) return;
         if (typeof href !== "string" || !href) {
           return embed("uploader resolved without a URL");
         }
-        settled = true;
-        self._insertImageHref(href, { at: imagePt });
+        commit(href);
       }, embed);
+    },
+
+    // Dim + progress bar for an image mid-upload. Driven from `_renderShape`
+    // so it tracks pan and zoom for free rather than being pinned to wherever
+    // the viewport happened to be when the paste landed.
+    _renderUploadState: function(shape, box) {
+      if (!shape || !shape.el) return;
+      if (!shape._pendingUpload) {
+        // Cheap guard: this runs for every image on every pan and zoom
+        // frame, and the overwhelming majority aren't uploading.
+        if (shape._uploadBar || shape.el.style.opacity) {
+          this._clearUploadProgress(shape);
+        }
+        return;
+      }
+      shape.el.style.opacity = "0.5";
+
+      var bar = shape._uploadBar;
+      if (!bar) {
+        bar = svgEl("g");
+        bar.setAttribute("class", "etcher-upload-progress");
+        // The bar is chrome, not canvas: never a pointer target, and never
+        // a hit-test candidate for the shapes underneath it.
+        bar.setAttribute("pointer-events", "none");
+        bar.appendChild(svgEl("rect", { rx: 3, fill: "rgba(0, 0, 0, 0.55)" }));
+        bar.appendChild(svgEl("rect", { rx: 3, fill: "#ffffff" }));
+        this.svg.appendChild(bar);
+        shape._uploadBar = bar;
+      } else if (bar.parentNode !== this.svg) {
+        this.svg.appendChild(bar);
+      }
+
+      // Width spans the image so the bar reads as belonging to it; height and
+      // inset are on-screen px, not canvas units, so the bar stays the same
+      // thickness at any zoom instead of thinning to nothing when zoomed out.
+      var h = 6;
+      var inset = 10;
+      var w = Math.max(24, box.w - inset * 2);
+      var x = box.x + (box.w - w) / 2;
+      var y = box.y + box.h - inset - h;
+      var pct = Math.max(0, Math.min(100, shape._uploadProgress || 0));
+
+      var track = bar.childNodes[0];
+      var fill = bar.childNodes[1];
+      track.setAttribute("x", x);
+      track.setAttribute("y", y);
+      track.setAttribute("width", w);
+      track.setAttribute("height", h);
+      fill.setAttribute("x", x);
+      fill.setAttribute("y", y);
+      fill.setAttribute("width", Math.max(0, w * pct / 100));
+      fill.setAttribute("height", h);
+    },
+
+    _clearUploadProgress: function(shape) {
+      if (!shape) return;
+      if (shape.el) shape.el.style.opacity = "";
+      if (shape._uploadBar && shape._uploadBar.parentNode) {
+        shape._uploadBar.parentNode.removeChild(shape._uploadBar);
+      }
+      shape._uploadBar = null;
+    },
+
+    _shapeByUuid: function(uuid) {
+      if (!uuid) return null;
+      return (this.shapes || []).find(function(s) { return s.uuid === uuid; }) || null;
+    },
+
+    _setUploadProgress: function(uuid, pct) {
+      var shape = this._shapeByUuid(uuid);
+      if (!shape || !shape._pendingUpload) return;
+      var n = Number(pct);
+      if (!isFinite(n)) return;
+      shape._uploadProgress = Math.max(0, Math.min(100, n));
+      this._renderShape(shape);
     },
 
     _embedImageFile: function(file, imagePt) {
@@ -5017,7 +5150,7 @@
             y: self.imageSize ? self.imageSize.y / 2 : 0
           };
         }
-        return self._addShape({
+        var uuid = self._addShape({
           kind: "image",
           geometry: {
             x: Math.round(center.x - w / 2),
@@ -5025,6 +5158,10 @@
             w: w, h: h, href: href
           }
         });
+        // Internal: lets the upload path get hold of the shape even on the
+        // async measure branch, where the uuid isn't returned to the caller.
+        if (uuid && typeof opts.onPlaced === "function") opts.onPlaced(uuid);
+        return uuid;
       }
 
       if (typeof opts.width === "number" && typeof opts.height === "number") {
@@ -5082,7 +5219,13 @@
     _emitChanged: function() {
       if (!this.pushEventTo) return;
       var stripMode = this.handleKind === "strip";
-      var payload = (this.shapes || []).map(function(s) {
+      // A shape still uploading carries a blob: URL, which means nothing
+      // outside this document — persisting or broadcasting it would give
+      // peers a broken image and the store a dead reference. It joins the
+      // list on completion, when its href is real.
+      var payload = (this.shapes || []).filter(function(s) {
+        return !s._pendingUpload;
+      }).map(function(s) {
         var entry = { uuid: s.uuid, kind: s.kind, geometry: s.geometry };
         // Strip annotations carry per-image index (which page of N).
         // Canvas multi-image annotations carry `image_id` (which
@@ -5631,6 +5774,15 @@
             el.setAttribute("href", imgHref);
             el.setAttributeNS("http://www.w3.org/1999/xlink", "xlink:href", imgHref);
           }
+          // Still uploading: dim it and float a progress bar over it, so an
+          // image that is visibly there but not yet saved doesn't look like
+          // one that is.
+          self._renderUploadState(shape, {
+            x: Math.min(itl.x, ibr.x),
+            y: Math.min(itl.y, ibr.y),
+            w: Math.abs(ibr.x - itl.x),
+            h: Math.abs(ibr.y - itl.y)
+          });
           bboxTopImage = { x: g.x + g.w / 2, y: g.y };
           break;
         }

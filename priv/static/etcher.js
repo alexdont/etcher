@@ -409,7 +409,7 @@
       // The dash choices are a row of equal cells rather than a wrapping
       // strip, so they can't push past the panel edge.
       ".etcher-stylepanel .etcher-marker-dash {",
-      "  display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px;",
+      "  display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px;",
       "}",
       ".etcher-stylepanel .etcher-marker-dash > * { width: 100%; min-width: 0; }",
       ".etcher-stylepanel-divider {",
@@ -999,6 +999,24 @@
   // Gap between the dots of a "dotted" stroke, as a multiple of its width.
   // Shared by shapes and markers so the two read as the same dot pattern.
   var DOT_GAP_RATIO = 2.4;
+
+  // Stroke and fill styles, in the order they appear in the panel. Kept as
+  // lists so the buttons, the persisted-value validation and the emitted
+  // payload can't drift apart.
+  var DASH_MODES = ["solid", "dashed", "dotted", "none"];
+  var FILL_MODES = ["none", "semi", "solid", "pattern"];
+
+  // Hatch geometry for "pattern" fill, in screen px (like stroke width —
+  // shapes re-render on zoom, so a userSpaceOnUse pattern holds its size
+  // on screen instead of growing with the image).
+  // Tile is square so a single corner-to-corner diagonal tiles seamlessly;
+  // the lines end up SIZE/sqrt(2) apart, about 5.7px.
+  var HATCH_SIZE = 8;
+  var HATCH_WIDTH = 1.4;
+
+  // Bumped per Etcher instance that ends up needing a hatch, to keep the
+  // `<pattern>` ids of two overlays on one page apart.
+  var HATCH_SEQ = 0;
 
   var TOOL_DEFS = {
     rectangle: { icon: ICONS.rectangle, title: "Rectangle" },
@@ -3615,7 +3633,8 @@
         color: this.activeColor || null,
         width: lp.width || 2,
         opacity: lp.opacity == null ? 1 : lp.opacity,
-        dash: lp.dash || "solid"
+        dash: lp.dash || "solid",
+        fill: lp.fill || "semi"
       };
     },
 
@@ -3629,7 +3648,12 @@
       el.style.strokeWidth = w + "px";
       el.removeAttribute("stroke-width");
       el.style.strokeOpacity = String(s.opacity == null ? 1 : s.opacity);
-      if (s.dash === "dashed") {
+      if (s.dash === "none") {
+        // Whether this actually hides anything is `_applyStrokeVisibility`'s
+        // call; either way there's no dash pattern to draw.
+        el.removeAttribute("stroke-dasharray");
+        el.style.strokeLinecap = "";
+      } else if (s.dash === "dashed") {
         el.setAttribute("stroke-dasharray", (w * 2.2) + " " + (w * 1.6));
         el.style.strokeLinecap = "";
       } else if (s.dash === "dotted") {
@@ -3648,8 +3672,10 @@
         el.removeAttribute("stroke-dasharray");
         el.style.strokeLinecap = "";
       }
-      // Opacity applies to the body as well as the outline.
+      // Opacity applies to the body as well as the outline. Fill first —
+      // whether the outline may be dropped depends on the fill being there.
       this._applyFill(el, s);
+      this._applyStrokeVisibility(el, s);
     },
 
     // Params popup: weight + opacity sliders and a dash picker, opened by the
@@ -3707,17 +3733,27 @@
       var dashRow = document.createElement("div");
       dashRow.className = "etcher-marker-dash";
       function dashIcon(dash) {
+        // "No line" reads as a line struck through rather than an empty
+        // button, which would look like a rendering failure next to three
+        // drawn ones.
+        if (dash === "none") {
+          return '<svg width="28" height="8.4" viewBox="0 0 40 12">' +
+                 '<line x1="3" y1="6" x2="37" y2="6" stroke="#fff" stroke-width="3" ' +
+                 'stroke-linecap="round" stroke-opacity="0.3"/>' +
+                 '<line x1="12" y1="11" x2="28" y2="1" stroke="#fff" stroke-width="1.6" ' +
+                 'stroke-linecap="round"/></svg>';
+        }
         var da = dash === "dashed" ? ' stroke-dasharray="7 5"'
                : dash === "dotted" ? ' stroke-dasharray="0.01 6"' : '';
-        return '<svg width="40" height="8" viewBox="0 0 40 8"><line x1="3" y1="4" x2="37" y2="4" ' +
+        return '<svg width="28" height="5.6" viewBox="0 0 40 8"><line x1="3" y1="4" x2="37" y2="4" ' +
                'stroke="#fff" stroke-width="3" stroke-linecap="round"' + da + '/></svg>';
       }
-      self._paramsDashBtns = ["solid", "dashed", "dotted"].map(function(dash) {
+      self._paramsDashBtns = DASH_MODES.map(function(dash) {
         var b = document.createElement("button");
         b.type = "button";
         b.dataset.dash = dash;
-        b.title = dash;
-        b.setAttribute("aria-label", "Dash: " + dash);
+        b.title = dash === "none" ? "No line" : dash;
+        b.setAttribute("aria-label", "Line: " + dash);
         b.innerHTML = dashIcon(dash);
         b.addEventListener("click", function(e) {
           e.preventDefault();
@@ -3738,16 +3774,29 @@
       // full width, so an SVG sized only by `viewBox` scales up to fill the
       // whole button. The dash icons pin theirs for the same reason.
       function fillIcon(mode) {
-        var body = mode === "none" ? ""
-          : '<rect x="4.5" y="4.5" width="15" height="15" rx="2.5" fill="currentColor" fill-opacity="' +
-            (mode === "solid" ? "1" : "0.28") + '" stroke="none"/>';
+        var body;
+        if (mode === "none") {
+          body = "";
+        } else if (mode === "pattern") {
+          // Drawn as plain diagonals clipped to the square rather than a
+          // nested `<pattern>`: an icon this small needs three visible
+          // lines, not a faithful miniature of the hatch.
+          body = '<g clip-path="url(#pk-fill-hatch-clip)" stroke-width="1.4">' +
+                 '<path d="M5 14 L14 5 M5 19 L19 5 M10 19 L19 10"/></g>' +
+                 '<defs><clipPath id="pk-fill-hatch-clip">' +
+                 '<rect x="4.5" y="4.5" width="15" height="15" rx="2.5"/>' +
+                 '</clipPath></defs>';
+        } else {
+          body = '<rect x="4.5" y="4.5" width="15" height="15" rx="2.5" fill="currentColor" ' +
+                 'fill-opacity="' + (mode === "solid" ? "1" : "0.28") + '" stroke="none"/>';
+        }
         return '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" ' +
                'viewBox="0 0 24 24" fill="none" ' +
                'stroke="currentColor" stroke-width="1.6" aria-hidden="true">' + body +
                '<rect x="4.5" y="4.5" width="15" height="15" rx="2.5"/></svg>';
       }
 
-      self._paramsFillBtns = ["none", "semi", "solid"].map(function(mode) {
+      self._paramsFillBtns = FILL_MODES.map(function(mode) {
         var b = document.createElement("button");
         b.type = "button";
         b.dataset.fill = mode;
@@ -3892,8 +3941,11 @@
       if (typeof map.opacity === "number" && isFinite(map.opacity)) {
         this.lineParams.opacity = Math.max(0, Math.min(1, map.opacity));
       }
-      if (map.dash === "solid" || map.dash === "dashed" || map.dash === "dotted") {
+      if (DASH_MODES.indexOf(map.dash) !== -1) {
         this.lineParams.dash = map.dash;
+      }
+      if (FILL_MODES.indexOf(map.fill) !== -1) {
+        this.lineParams.fill = map.fill;
       }
       // Reflect into an open popup if it's showing the global default.
       if (this.paramsPopup && this.paramsPopup.classList.contains("is-open")) {
@@ -3908,7 +3960,9 @@
     // the resolved values (built-in fallback per missing key).
     _emitLineParamsChanged: function() {
       var lp = this._currentLineParams();
-      var payload = { width: lp.width, opacity: lp.opacity, dash: lp.dash };
+      var payload = {
+        width: lp.width, opacity: lp.opacity, dash: lp.dash, fill: lp.fill
+      };
       if (this.pushEventTo) {
         this.pushEventTo(this.el, "etcher:line-params-changed", {
           fresco_id: this.frescoId || null,
@@ -5038,14 +5092,29 @@
         el.style.color = color || "";
         return;
       }
+      // The resolved colour is stashed on the element because both the fill
+      // and the stroke can be switched off ("none" fill / "none" line), and
+      // whichever one comes back needs a colour to come back to. Reading it
+      // off the other property only worked while at most one could be off.
       if (color) {
         el.style.stroke = color;
         el.style.fill = color;
+        el.dataset.etcherColor = color;
       } else {
         el.style.stroke = "";
         el.style.fill = "";
+        delete el.dataset.etcherColor;
       }
       this._applyFill(el, style);
+      this._applyStrokeVisibility(el, style);
+    },
+
+    // The colour a shape's paint should return to. `style.color` is
+    // authoritative when the caller has it; several draft-shape call sites
+    // pass no style at all, hence the stashed fallback.
+    _shapeColor: function(el, style) {
+      if (style && style.color) return style.color;
+      return (el && el.dataset && el.dataset.etcherColor) || "";
     },
 
     // Which kinds can hold a fill at all. Decided from the SVG tag rather
@@ -5080,14 +5149,98 @@
         el.style.fillOpacity = "";
         return;
       }
-      // Restore the body colour rather than assume it survived. Switching to
-      // "none" writes `fill: none` onto the element, and the params path —
-      // which is where the mode gets flipped — never touches the colour, so
-      // without this a shape could never come back from "none". Stroke and
-      // fill are always painted the same colour on a fillable shape, so the
-      // stroke is the reliable source for what the body should be.
-      el.style.fill = el.style.stroke || s.color || "";
+
+      var color = this._shapeColor(el, s);
+
+      // Hatch lines are already mostly gaps, so they take the shape's
+      // opacity straight — damping them the way "semi" damps a flat fill
+      // would wash them out to nothing.
+      if (mode === "pattern") {
+        var hatch = this._hatchPattern(color);
+        if (hatch) {
+          el.style.fill = "url(#" + hatch + ")";
+          el.style.fillOpacity = String(opacity);
+          return;
+        }
+        // No SVG to hang the def on yet (a draft painted before init
+        // finished) — fall through to a flat body rather than no body.
+      }
+
+      // Restore the body colour rather than assume it survived: "none" and
+      // "pattern" both overwrite it, and the params path — which is where
+      // the mode gets flipped — never touches the colour otherwise.
+      el.style.fill = color;
       el.style.fillOpacity = String((mode === "solid" ? 1 : 0.18) * opacity);
+    },
+
+    // Whether "no line" actually takes effect for this element. A shape
+    // needs at least one of stroke or fill painted or it can't be seen —
+    // and an invisible shape can't be clicked back into existence either,
+    // since selection starts from a hit-test the user has to aim. So the
+    // outline is only dropped when the body is there to carry the shape,
+    // and turning the fill off later brings the outline back.
+    _strokeHidden: function(el, style) {
+      var s = style || {};
+      if (s.dash !== "none") return false;
+      return this._isFillableEl(el) && (s.fill || "semi") !== "none";
+    },
+
+    _applyStrokeVisibility: function(el, style) {
+      if (!el || (el.tagName && el.tagName.toLowerCase() === "g")) return;
+      if (this._strokeHidden(el, style)) {
+        el.style.stroke = "none";
+        return;
+      }
+      // Coming back from hidden — `stroke: none` is inline, so it outlives
+      // any later colour change unless something puts the colour back.
+      if (el.style.stroke === "none") {
+        el.style.stroke = this._shapeColor(el, style);
+      }
+    },
+
+    // A `<pattern>` of 45° hatch lines in `color`, created once per colour
+    // and returned by id. Lives in the overlay SVG's own `<defs>` under an
+    // instance-scoped prefix, so two Etchers on one page can't resolve each
+    // other's ids — `url(#…)` is document-wide and matches the first
+    // definition in tree order, which would otherwise be a neighbour's.
+    _hatchPattern: function(color) {
+      if (!this.svg) return null;
+      var key = String(color || "").replace(/[^a-z0-9]/gi, "");
+      if (!this._hatchPrefix) {
+        HATCH_SEQ += 1;
+        this._hatchPrefix = "etcher-hatch-" + HATCH_SEQ + "-";
+      }
+      var id = this._hatchPrefix + (key || "default");
+      this._hatchIds = this._hatchIds || {};
+      if (this._hatchIds[id]) return id;
+
+      if (!this._defs) {
+        this._defs = svgEl("defs");
+        this.svg.insertBefore(this._defs, this.svg.firstChild);
+      }
+      var pat = svgEl("pattern", {
+        id: id,
+        patternUnits: "userSpaceOnUse",
+        width: HATCH_SIZE,
+        height: HATCH_SIZE
+      });
+      // The main corner-to-corner diagonal, plus a stub at each of the two
+      // corners it passes through. A stroke has width, so the half that
+      // overflows the tile at a corner is clipped away — the stubs redraw
+      // that half on the opposite side, which is what makes the diagonals
+      // run unbroken instead of nicking at every tile boundary. (Doubling
+      // the strokes to hide the nicks just doubles the density.)
+      var s = HATCH_SIZE;
+      pat.appendChild(svgEl("path", {
+        d: "M-1,1 l2,-2 M0," + s + " l" + s + ",-" + s +
+           " M" + (s - 1) + "," + (s + 1) + " l2,-2",
+        stroke: color || "currentColor",
+        "stroke-width": HATCH_WIDTH,
+        fill: "none"
+      }));
+      this._defs.appendChild(pat);
+      this._hatchIds[id] = true;
+      return id;
     },
 
     // -------------------------------------------------------------------------

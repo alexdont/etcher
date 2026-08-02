@@ -412,6 +412,17 @@
       "  display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px;",
       "}",
       ".etcher-stylepanel .etcher-marker-dash > * { width: 100%; min-width: 0; }",
+      // Horizontal label alignment is three choices, not four.
+      ".etcher-stylepanel .etcher-align-row {",
+      "  grid-template-columns: repeat(3, 1fr);",
+      "}",
+      ".etcher-label-section {",
+      "  display: flex; flex-direction: column; gap: 4px;",
+      "  border-top: 1px solid rgba(255, 255, 255, 0.18); padding-top: 8px;",
+      "}",
+      ".etcher-params-label {",
+      "  color: #fff; font-size: 11px; opacity: 0.85;",
+      "}",
       ".etcher-stylepanel-divider {",
       "  height: 1px; background: rgba(255, 255, 255, 0.18);",
       "}",
@@ -1005,6 +1016,35 @@
   // payload can't drift apart.
   var DASH_MODES = ["solid", "dashed", "dotted", "none"];
   var FILL_MODES = ["none", "semi", "solid", "pattern"];
+
+  // Where a shape's label sits, as `metadata.title_align = {h, v}`. Absent
+  // means the label floats above the shape with a leader line — the default,
+  // and where dragging or resizing the label puts it back.
+  var TITLE_H_ALIGNS = ["left", "center", "right"];
+  var TITLE_V_ALIGNS = ["top", "middle", "bottom"];
+
+  function normalizeTitleAlign(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    if (TITLE_H_ALIGNS.indexOf(raw.h) === -1) return null;
+    if (TITLE_V_ALIGNS.indexOf(raw.v) === -1) return null;
+    return { h: raw.h, v: raw.v };
+  }
+
+  // Place a `size`-sized label inside `bbox` at the `align` anchor. The
+  // inset keeps an edge-anchored label off the outline it would otherwise
+  // sit on. It's a fraction of the shape rather than a pixel count because
+  // these are image px: a fixed inset renders proportionally to the zoom,
+  // and on a large canvas shown small it collapses to nothing.
+  function alignedBox(bbox, size, align) {
+    var inset = Math.min(bbox.w, bbox.h) * 0.05;
+    var x = align.h === "left"  ? bbox.x + inset
+          : align.h === "right" ? bbox.x + bbox.w - size.w - inset
+          :                       bbox.x + (bbox.w - size.w) / 2;
+    var y = align.v === "top"    ? bbox.y + inset
+          : align.v === "bottom" ? bbox.y + bbox.h - size.h - inset
+          :                        bbox.y + (bbox.h - size.h) / 2;
+    return { x: x, y: y, w: size.w, h: size.h };
+  }
 
   // Hatch geometry for "pattern" fill, in screen px (like stroke width —
   // shapes re-render on zoom, so a userSpaceOnUse pattern holds its size
@@ -3021,6 +3061,9 @@
       if (this.actionBar) {
         this.actionBar.classList.toggle("is-active", !!this.annotationMode);
       }
+      // Whether a label is in the selection changes with the selection, and
+      // this is the one sync already wired to every selection change.
+      this._syncLabelSection();
     },
 
     _computeToolbarOverflow: function() {
@@ -3813,8 +3856,130 @@
       });
       popup.appendChild(fillRow);
 
+      // Label placement. Hidden unless something in the selection actually
+      // carries a label — an alignment control with nothing to align is
+      // just noise in a panel this narrow.
+      var labelSection = document.createElement("div");
+      labelSection.className = "etcher-label-section";
+
+      var labelHead = document.createElement("div");
+      labelHead.className = "etcher-params-label";
+      labelHead.textContent = "Label";
+      labelSection.appendChild(labelHead);
+
+      // A label box with its text pushed to one side, so the icon shows
+      // the result rather than the usual abstract three-bars glyph.
+      function alignIcon(axis, value) {
+        var bars = axis === "h"
+          ? { left: [[5, 9, 8], [5, 13, 12]], center: [[8, 9, 8], [6, 13, 12]],
+              right:  [[11, 9, 8], [7, 13, 12]] }[value]
+          : { top: [[6, 8, 12], [6, 12, 8]], middle: [[6, 11, 12], [6, 15, 8]],
+              bottom: [[6, 14, 12], [6, 18, 8]] }[value];
+        var lines = bars.map(function(b) {
+          return '<rect x="' + b[0] + '" y="' + b[1] + '" width="' + b[2] +
+                 '" height="1.8" rx="0.9" fill="currentColor" stroke="none"/>';
+        }).join("");
+        return '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" ' +
+               'viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+               'stroke-width="1.4" aria-hidden="true">' +
+               '<rect x="3" y="4" width="18" height="16" rx="2.5" stroke-opacity="0.35"/>' +
+               lines + '</svg>';
+      }
+
+      // A label floating above a shape on a leader line — the default, and
+      // where dragging the label puts it back.
+      function floatIcon() {
+        return '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" ' +
+               'viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+               'stroke-width="1.5" aria-hidden="true">' +
+               '<rect x="4" y="3" width="16" height="6" rx="1.5"/>' +
+               '<path d="M12 9 L12 13" stroke-dasharray="2 2"/>' +
+               '<rect x="7" y="13" width="10" height="8" rx="1.5" stroke-opacity="0.4"/>' +
+               '</svg>';
+      }
+
+      function alignBtn(row, axis, value, icon, label) {
+        var b = document.createElement("button");
+        b.type = "button";
+        b.dataset.titleAlign = axis + ":" + value;
+        b.title = label;
+        b.setAttribute("aria-label", label);
+        b.innerHTML = icon;
+        b.addEventListener("click", function(e) {
+          e.preventDefault();
+          self._setTitleAlign(axis, value);
+        });
+        row.appendChild(b);
+        return b;
+      }
+
+      var hRow = document.createElement("div");
+      hRow.className = "etcher-marker-dash etcher-align-row";
+      var vRow = document.createElement("div");
+      vRow.className = "etcher-marker-dash";
+
+      self._titleAlignBtns = TITLE_H_ALIGNS.map(function(v) {
+        return alignBtn(hRow, "h", v, alignIcon("h", v), "Align " + v);
+      }).concat(TITLE_V_ALIGNS.map(function(v) {
+        return alignBtn(vRow, "v", v, alignIcon("v", v), "Align " + v);
+      }));
+      // `free` is the absence of an alignment, so it belongs with the
+      // buttons that set one — otherwise there's no way back to a floating
+      // label except dragging it.
+      self._titleFreeBtn = alignBtn(vRow, "free", "free", floatIcon(), "Float above shape");
+
+      labelSection.appendChild(hRow);
+      labelSection.appendChild(vRow);
+      popup.appendChild(labelSection);
+      self._labelSection = labelSection;
+
       self.handle.container.appendChild(popup);
       self.paramsPopup = popup;
+    },
+
+    // Shapes in the current selection that carry a label. Distinct from
+    // `_paramsTargetShapes` — that one filters to the stroke kinds the
+    // thickness / dash / fill controls apply to, and an image or a text
+    // shape can be labelled without being one of those.
+    _titleTargetShapes: function() {
+      var shapes = [];
+      if (this.selectedShapes && this.selectedShapes.length) {
+        shapes = this.selectedShapes.slice();
+      } else if (this.editingShape) {
+        shapes = [this.editingShape];
+      } else if (this.editingTitleShape) {
+        shapes = [this.editingTitleShape];
+      }
+      return shapes.filter(function(s) {
+        return s && s.metadata && String(s.metadata.title || "").trim() !== "";
+      });
+    },
+
+    // Anchor every labelled shape in the selection. `axis` is "h" or "v"
+    // (the other half is kept, defaulting to center/middle so one click
+    // gives a sensible placement), or "free" to drop the alignment and
+    // return the label to floating above the shape.
+    _setTitleAlign: function(axis, value) {
+      var self = this;
+      var shapes = this._titleTargetShapes();
+      if (!shapes.length) return;
+
+      shapes.forEach(function(shape) {
+        var before = self._snapshotShape(shape);
+        var next;
+        if (axis === "free") {
+          next = null;
+        } else {
+          var cur = normalizeTitleAlign(shape.metadata && shape.metadata.title_align) ||
+                    { h: "center", v: "middle" };
+          next = { h: axis === "h" ? value : cur.h, v: axis === "v" ? value : cur.v };
+        }
+        shape.metadata = Object.assign({}, shape.metadata || {}, { title_align: next });
+        self._renderShape(shape);
+        if (shape.uuid) self._pushUndo(shape.uuid, before, self._snapshotShape(shape));
+      });
+      this._emitChanged();
+      this._syncParamsPopup();
     },
 
     // The shapes the params popup edits: the multi-selection if there is one,
@@ -3867,6 +4032,35 @@
       (this._paramsFillBtns || []).forEach(function(b) {
         b.classList.toggle("is-selected", b.dataset.fill === fill);
       });
+      this._syncLabelSection();
+    },
+
+    // Show the label controls only when there's a label to place, and mark
+    // the anchor the selection is currently using. A mixed selection marks
+    // nothing rather than picking a winner — the buttons still apply to all
+    // of it, so a stale highlight would misreport what's about to change.
+    _syncLabelSection: function() {
+      if (!this._labelSection) return;
+      var shapes = this._titleTargetShapes();
+      this._labelSection.style.display = shapes.length ? "" : "none";
+      if (!shapes.length) return;
+
+      var first = normalizeTitleAlign(shapes[0].metadata.title_align);
+      var mixed = shapes.some(function(s) {
+        var a = normalizeTitleAlign(s.metadata.title_align);
+        if (!a || !first) return !!a !== !!first;
+        return a.h !== first.h || a.v !== first.v;
+      });
+      (this._titleAlignBtns || []).forEach(function(b) {
+        var parts = b.dataset.titleAlign.split(":");
+        b.classList.toggle(
+          "is-selected",
+          !mixed && !!first && first[parts[0]] === parts[1]
+        );
+      });
+      if (this._titleFreeBtn) {
+        this._titleFreeBtn.classList.toggle("is-selected", !mixed && !first);
+      }
     },
 
     // Set one line param. When shapes are selected (single edit-mode shape OR
@@ -5883,7 +6077,14 @@
           // Floor of 10 keeps the title legible in pathologically
           // narrow boxes — at that point we let the rect grow past
           // `tw` to fit the text rather than render unreadable glyphs.
-          fontSize = Math.max(10, fontSizeByHeight * availWidth / widthAtHeightFont);
+          //
+          // The 0.99 is a safety margin, not a fudge: this scales the font
+          // as if text width were linear in font-size, and hinting and
+          // kerning make it very slightly not. Landing a hair over
+          // `availWidth` makes the wrap helper break the line — so a
+          // dragged one-line label came back as two lines, at a size that
+          // would have fit on one.
+          fontSize = Math.max(10, fontSizeByHeight * availWidth / widthAtHeightFont * 0.99);
         }
 
         textEl.setAttribute("x", tx + pad);
@@ -5922,7 +6123,13 @@
         // ≈ `0.78 * th`, every resize persisted a box ~22% shorter and
         // collapsed to the text width — so each grab visibly "scaled
         // the title down again." Honoring the box fixes that.)
-        var hasExplicitBox = !!(shape.metadata && shape.metadata.title_box);
+        // An aligned label auto-sizes even though a stored box exists: the
+        // box is a leftover from before it was aligned, and an anchored
+        // label reads wrong at any size but its own — a right-anchored box
+        // wider than its text puts the shape's right edge next to empty
+        // space, not next to the words.
+        var titleAlign = normalizeTitleAlign(shape.metadata && shape.metadata.title_align);
+        var hasExplicitBox = !titleAlign && !!(shape.metadata && shape.metadata.title_box);
         if (hasExplicitBox) {
           // Honor the dragged box. The rect is already at tx/ty/tw/th
           // from above; just vertically center the text line in it and
@@ -5951,12 +6158,37 @@
           // input bbox if the scale degenerates.
           var sx = tw > 0 ? tw / titleBox.w : 1;
           var sy = th > 0 ? th / titleBox.h : sx;
-          shape._renderedTitleImage = {
+          var shrunk = {
             x: titleBox.x,
             y: titleBox.y,
             w: sx > 0 ? actualW / sx : titleBox.w,
             h: sy > 0 ? actualH / sy : titleBox.h
           };
+
+          // Re-anchor now that the label's real size is known. The pass in
+          // `_shapeTitleBoxImage` could only guess at the size, so an
+          // aligned label would otherwise sit a guess-width off its anchor.
+          if (titleAlign) {
+            var parentBox = this._shapeBBoxImagePx(shape);
+            if (parentBox) {
+              shrunk = alignedBox(parentBox, { w: shrunk.w, h: shrunk.h }, titleAlign);
+              var atl = this._imageToContainer({ x: shrunk.x, y: shrunk.y });
+              var abr = this._imageToContainer({
+                x: shrunk.x + shrunk.w, y: shrunk.y + shrunk.h
+              });
+              tx = Math.min(atl.x, abr.x);
+              ty = Math.min(atl.y, abr.y);
+              if (rectEl) {
+                rectEl.setAttribute("x", tx);
+                rectEl.setAttribute("y", ty);
+              }
+              textEl.setAttribute("x", tx + pad);
+              textEl.setAttribute("y", ty + pad);
+              this._shiftTspans(textEl, tx + pad);
+            }
+          }
+
+          shape._renderedTitleImage = shrunk;
           tw = actualW;
           th = actualH;
         }
@@ -6038,22 +6270,36 @@
       }
     },
 
-    // Resolve the title's image-px bbox. Persisted user position lives
-    // in `metadata.title_box`; otherwise default above the parent
-    // bbox's top-center with a comfortable single-line size.
+    // Resolve the title's image-px bbox, in precedence order:
+    //   1. `metadata.title_align` — anchored inside the parent's bbox.
+    //   2. `metadata.title_box`   — wherever the user dragged it.
+    //   3. default                 — above the parent's top-center.
+    //
+    // Alignment wins over the stored box because the box is a leftover from
+    // whatever the label's position was before, and an aligned label has to
+    // follow the shape as it moves and resizes. The size here is only a
+    // first approximation for an aligned label — it auto-sizes to its text,
+    // and `_renderTitleSibling` re-anchors it once the text is measured.
     _shapeTitleBoxImage: function(shape, bboxTopImage) {
-      if (shape && shape.metadata && shape.metadata.title_box) {
-        return shape.metadata.title_box;
-      }
-      if (!bboxTopImage) return null;
+      var meta = (shape && shape.metadata) || {};
       var basePx = this._textDefaultBoxImagePx();
-      var w = basePx * 6;
-      var h = basePx * 1.4;
+      var stored = meta.title_box;
+      var size = stored
+        ? { w: stored.w, h: stored.h }
+        : { w: basePx * 6, h: basePx * 1.4 };
+
+      var align = normalizeTitleAlign(meta.title_align);
+      if (align) {
+        var bbox = this._shapeBBoxImagePx(shape);
+        if (bbox) return alignedBox(bbox, size, align);
+      }
+      if (stored) return stored;
+      if (!bboxTopImage) return null;
       return {
-        x: bboxTopImage.x - w / 2,
-        y: bboxTopImage.y - h - basePx,
-        w: w,
-        h: h
+        x: bboxTopImage.x - size.w / 2,
+        y: bboxTopImage.y - size.h - basePx,
+        w: size.w,
+        h: size.h
       };
     },
 
@@ -6313,8 +6559,11 @@
         }
         if (nw < 0) { nx += nw; nw = -nw; }
         if (nh < 0) { ny += nh; nh = -nh; }
+        // Resizing sets an explicit size, which an aligned label ignores in
+        // favour of auto-sizing — so like dragging, it returns the label to
+        // free positioning rather than silently doing nothing.
         shape.metadata = Object.assign({}, shape.metadata || {}, {
-          title_box: { x: nx, y: ny, w: nw, h: nh }
+          title_box: { x: nx, y: ny, w: nw, h: nh }, title_align: null
         });
         self._renderShape(shape);
         self._positionAllTitleHandles(shape);
@@ -6346,6 +6595,8 @@
           self._emitChanged();
           self._pushUndo(shape.uuid, historyBefore, self._snapshotShape(shape));
         }
+        // Resizing dropped the alignment too — resync the highlight.
+        self._syncLabelSection();
       }
       handleEl.addEventListener("pointermove", onMove);
       handleEl.addEventListener("pointerup", onUp);
@@ -6395,7 +6646,12 @@
           w: startBox.w,
           h: startBox.h
         };
-        shape.metadata = Object.assign({}, shape.metadata || {}, { title_box: newBox });
+        // Dragging is the free-positioning gesture, so it drops any
+        // alignment — otherwise the label would snap straight back to its
+        // anchor and the drag would look broken.
+        shape.metadata = Object.assign({}, shape.metadata || {}, {
+          title_box: newBox, title_align: null
+        });
         self._renderShape(shape);
         // Title handles (if in title-edit-mode) sit on the bbox
         // corners, so they need to track the moving bbox in lockstep.
@@ -6428,6 +6684,10 @@
             self._emitChanged();
             self._pushUndo(shape.uuid, historyBefore, self._snapshotShape(shape));
           }
+          // The drag dropped the alignment, so the panel's highlight is now
+          // wrong — and nothing else will notice, since the selection
+          // didn't change.
+          self._syncLabelSection();
         }
       }
       tg.addEventListener("pointermove", onMove);
@@ -6441,6 +6701,15 @@
     // without re-running the geometry math.
     _lastBboxTopImageFor: function(shape) {
       return shape && shape.bboxTopImage ? shape.bboxTopImage : null;
+    },
+
+    // Move an already-wrapped <text> horizontally. Each line is a <tspan>
+    // carrying its own `x`, so setting `x` on the parent alone moves
+    // nothing — the tspans keep the position they were laid out at.
+    _shiftTspans: function(textEl, x) {
+      if (!textEl) return;
+      var spans = textEl.querySelectorAll("tspan");
+      for (var i = 0; i < spans.length; i++) spans[i].setAttribute("x", x);
     },
 
     // Fill a <text> node with word-wrapped <tspan> lines that fit a
@@ -7070,9 +7339,10 @@
         try { pt = self._toImage(e); } catch (_) { return; }
         var hit = self._shapeAt(pt);
         if (!hit) return;
-        if (hit.kind !== "text" && hit.kind !== "callout" && hit.kind !== "dimension") {
-          return;
-        }
+        // Every shape that can carry a label opens its editor here, not
+        // just the text-ish kinds — double-click is how a label gets
+        // created in the first place. `_startTextEdit` no-ops for kinds
+        // that have nowhere to put one.
         self._enterEditMode(hit);
         self._startTextEdit(hit);
       };
@@ -9593,19 +9863,19 @@
     // drawn text shape with no content is just noise).
     // -------------------------------------------------------------------------
 
+    // Kinds whose text IS the shape — deleting the text deletes them.
+    // Every other kind merely carries a label in `metadata.title`.
+    _isTextKind: function(kind) {
+      return kind === "text" || kind === "callout" || kind === "dimension";
+    },
+
     _startTextEdit: function(shape) {
       if (!shape) return;
       // text + callout + dimension edit their own bbox; rect/circle/
       // poly/freehand edit a title that lives in `metadata.title_box`
-      // on the parent.
-      var alwaysEditable =
-        shape.kind === "text" ||
-        shape.kind === "callout" ||
-        shape.kind === "dimension";
-      var hasTitle =
-        !alwaysEditable &&
-        shape.metadata && shape.metadata.title != null;
-      if (!alwaysEditable && !hasTitle) return;
+      // on the parent. A shape with no title yet is editable too — that
+      // is how one gets added; the `if (!g) return` below drops the kinds
+      // that have nowhere to place a title box.
       this._endTextEdit();
 
       var self = this;
@@ -9717,12 +9987,21 @@
       shape.metadata = Object.assign({}, shape.metadata || {}, { title: newTitle });
       this._endTextEdit();
       this._renderShape(shape);
+      // Whether the label controls apply turns on `metadata.title`, which
+      // just changed without the selection changing — the selection-driven
+      // syncs won't fire, so the section would stay as it was.
+      this._syncLabelSection();
 
       if (newTitle === "" && !prevTitle) {
         // Brand-new text shape with no content typed — clean up. UUIDs
         // are local in 0.3.x so the delete is immediate, no tmp_id
         // round-trip / pending-title bookkeeping needed.
-        this._discardEmptyTextShape(shape);
+        //
+        // Only for the kinds that ARE their text. Now that double-click
+        // labels any shape, this path is also reached by opening a
+        // rectangle's label editor and typing nothing — deleting the
+        // rectangle for that would be catastrophic.
+        if (this._isTextKind(shape.kind)) this._discardEmptyTextShape(shape);
         return;
       }
 
@@ -9738,8 +10017,11 @@
       var shape = ed.shape;
       this._endTextEdit();
 
+      // Same rule as the commit path: an untitled shape is only discarded
+      // when the text WAS the shape. Escaping out of a rectangle's label
+      // editor must leave the rectangle alone.
       var hasContent = shape.metadata && shape.metadata.title;
-      if (!hasContent) {
+      if (!hasContent && this._isTextKind(shape.kind)) {
         this._discardEmptyTextShape(shape);
         return;
       }

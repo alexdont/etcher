@@ -9984,7 +9984,18 @@
 
       // Mirror the new title locally so the <text> renders with it
       // immediately, before the server round-trip.
-      shape.metadata = Object.assign({}, shape.metadata || {}, { title: newTitle });
+      var patch = { title: newTitle };
+      // A label typed onto a shape starts centered inside it. The floating-
+      // above-with-a-leader default belongs to labels the HOST supplies —
+      // those annotate something already on the canvas and shouldn't cover
+      // it — but someone double-clicking a rectangle to name it expects the
+      // name to land in the rectangle. Only on creation, so re-editing the
+      // text never moves a label the user has since placed.
+      if (newTitle && !prevTitle && !this._isTextKind(shape.kind) &&
+          !normalizeTitleAlign(shape.metadata && shape.metadata.title_align)) {
+        patch.title_align = { h: "center", v: "middle" };
+      }
+      shape.metadata = Object.assign({}, shape.metadata || {}, patch);
       this._endTextEdit();
       this._renderShape(shape);
       // Whether the label controls apply turns on `metadata.title`, which

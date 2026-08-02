@@ -4936,20 +4936,24 @@
       var upload = this._imageUploader();
       if (!upload) return this._embedImageFile(file, imagePt);
 
-      // Place the image *now*, against a local object URL, and upload behind
-      // it. Waiting for the upload first meant a paste did nothing visible
-      // for however long the transfer took — on a big screenshot the canvas
-      // just sat there and the paste looked lost. The placeholder renders
-      // half-transparent with a progress bar so it reads as "arriving", and
-      // `_pendingUpload` keeps it out of `_emitChanged`: a blob: URL belongs
-      // to this document alone, so persisting or broadcasting one would hand
-      // peers a broken image and leave the board holding a dead reference.
-      var previewUrl = URL.createObjectURL(file);
-
+      // Place the image *now* and upload behind it, so a paste is instant
+      // however long the transfer takes. The shape is real from the first
+      // frame — it persists, it has a position, it can be moved, resized and
+      // layered while its bytes are still going up.
+      //
+      // What it is NOT is `href`-bearing: it's drawn from a local object URL
+      // held off to one side in `_previewHref`, and `geometry.href` stays
+      // empty until the upload resolves. A blob: URL belongs to the document
+      // that made it, so persisting or broadcasting one would hand peers a
+      // broken image and leave the board holding a dead reference.
+      //
       // Placing before uploading also removes a race — the upload can't
       // finish before there's a shape to put the URL on.
-      this._insertImageHref(previewUrl, {
+      var previewUrl = URL.createObjectURL(file);
+
+      this._insertImageHref("", {
         at: imagePt,
+        previewHref: previewUrl,
         onPlaced: function(uuid) { self._startTrackedUpload(uuid, file, previewUrl, upload); }
       });
     },
@@ -4963,19 +4967,15 @@
       var shape = self._shapeByUuid(uuid);
       if (!shape) return;
       shape._pendingUpload = true;
-      shape._uploadProgress = 0;
-      self._renderShape(shape);
 
       function release() {
         var s = self._shapeByUuid(uuid);
-        // Clear against the captured reference, not the lookup: if the user
-        // deleted the image mid-upload it is gone from `this.shapes` but its
-        // progress bar is a child of the overlay and would outlive it.
-        self._clearUploadProgress(shape);
         if (s) {
           s._pendingUpload = false;
-          s._uploadProgress = 0;
+          s._previewHref = null;
         }
+        // Revoking is what frees the file's memory; skip it and every paste
+        // in the session leaks its bytes for as long as the tab is open.
         try { URL.revokeObjectURL(previewUrl); } catch (_) {}
         return s;
       }
@@ -4985,6 +4985,8 @@
         if (!s) return;                       // deleted while uploading
         s.geometry = Object.assign({}, s.geometry, { href: href });
         self._renderShape(s);
+        // The second emit, carrying the href the first one couldn't. The
+        // shape's geometry has been persisted since it was placed.
         self._emitChanged();
       }
 
@@ -5001,13 +5003,7 @@
         reader.readAsDataURL(file);
       }
 
-      var ctx = {
-        frescoId: self.frescoId,
-        // Optional: an uploader that can report progress calls this with
-        // 0..100 and the bar follows. One that can't still shows the
-        // half-transparent placeholder, just without the bar filling.
-        onProgress: function(pct) { self._setUploadProgress(uuid, pct); }
-      };
+      var ctx = { frescoId: self.frescoId };
 
       var pending;
       try {
@@ -5026,80 +5022,11 @@
       }, embed);
     },
 
-    // Dim + progress bar for an image mid-upload. Driven from `_renderShape`
-    // so it tracks pan and zoom for free rather than being pinned to wherever
-    // the viewport happened to be when the paste landed.
-    _renderUploadState: function(shape, box) {
-      if (!shape || !shape.el) return;
-      if (!shape._pendingUpload) {
-        // Cheap guard: this runs for every image on every pan and zoom
-        // frame, and the overwhelming majority aren't uploading.
-        if (shape._uploadBar || shape.el.style.opacity) {
-          this._clearUploadProgress(shape);
-        }
-        return;
-      }
-      shape.el.style.opacity = "0.5";
-
-      var bar = shape._uploadBar;
-      if (!bar) {
-        bar = svgEl("g");
-        bar.setAttribute("class", "etcher-upload-progress");
-        // The bar is chrome, not canvas: never a pointer target, and never
-        // a hit-test candidate for the shapes underneath it.
-        bar.setAttribute("pointer-events", "none");
-        bar.appendChild(svgEl("rect", { rx: 3, fill: "rgba(0, 0, 0, 0.55)" }));
-        bar.appendChild(svgEl("rect", { rx: 3, fill: "#ffffff" }));
-        this.svg.appendChild(bar);
-        shape._uploadBar = bar;
-      } else if (bar.parentNode !== this.svg) {
-        this.svg.appendChild(bar);
-      }
-
-      // Width spans the image so the bar reads as belonging to it; height and
-      // inset are on-screen px, not canvas units, so the bar stays the same
-      // thickness at any zoom instead of thinning to nothing when zoomed out.
-      var h = 6;
-      var inset = 10;
-      var w = Math.max(24, box.w - inset * 2);
-      var x = box.x + (box.w - w) / 2;
-      var y = box.y + box.h - inset - h;
-      var pct = Math.max(0, Math.min(100, shape._uploadProgress || 0));
-
-      var track = bar.childNodes[0];
-      var fill = bar.childNodes[1];
-      track.setAttribute("x", x);
-      track.setAttribute("y", y);
-      track.setAttribute("width", w);
-      track.setAttribute("height", h);
-      fill.setAttribute("x", x);
-      fill.setAttribute("y", y);
-      fill.setAttribute("width", Math.max(0, w * pct / 100));
-      fill.setAttribute("height", h);
-    },
-
-    _clearUploadProgress: function(shape) {
-      if (!shape) return;
-      if (shape.el) shape.el.style.opacity = "";
-      if (shape._uploadBar && shape._uploadBar.parentNode) {
-        shape._uploadBar.parentNode.removeChild(shape._uploadBar);
-      }
-      shape._uploadBar = null;
-    },
-
     _shapeByUuid: function(uuid) {
       if (!uuid) return null;
       return (this.shapes || []).find(function(s) { return s.uuid === uuid; }) || null;
     },
 
-    _setUploadProgress: function(uuid, pct) {
-      var shape = this._shapeByUuid(uuid);
-      if (!shape || !shape._pendingUpload) return;
-      var n = Number(pct);
-      if (!isFinite(n)) return;
-      shape._uploadProgress = Math.max(0, Math.min(100, n));
-      this._renderShape(shape);
-    },
 
     _embedImageFile: function(file, imagePt) {
       var self = this;
@@ -5131,8 +5058,13 @@
     // the uuid synchronously).
     _insertImageHref: function(href, opts) {
       var self = this;
-      if (typeof href !== "string" || !href) return null;
       opts = opts || {};
+      // `previewHref` is the internal upload path: the shape is placed with an
+      // empty `href` (nothing persistable exists yet) and drawn from a local
+      // preview until the real URL lands. Measuring uses the preview, since
+      // that's the only copy of the image there is at this point.
+      var measureHref = opts.previewHref || href;
+      if (typeof measureHref !== "string" || !measureHref) return null;
       var maxSide = typeof opts.maxSide === "number" ? opts.maxSide : 800;
 
       function place(natW, natH) {
@@ -5155,9 +5087,18 @@
           geometry: {
             x: Math.round(center.x - w / 2),
             y: Math.round(center.y - h / 2),
-            w: w, h: h, href: href
+            w: w, h: h, href: typeof href === "string" ? href : ""
           }
         });
+        if (uuid && opts.previewHref) {
+          var placed = self._shapeByUuid(uuid);
+          // Set before the queued emit runs, and off `geometry` — this is
+          // what the element draws from while `geometry.href` is still empty.
+          if (placed) {
+            placed._previewHref = opts.previewHref;
+            self._renderShape(placed);
+          }
+        }
         // Internal: lets the upload path get hold of the shape even on the
         // async measure branch, where the uuid isn't returned to the caller.
         if (uuid && typeof opts.onPlaced === "function") opts.onPlaced(uuid);
@@ -5170,7 +5111,7 @@
       var probe = new Image();
       probe.onload = function() { place(probe.naturalWidth, probe.naturalHeight); };
       probe.onerror = function() { place(0, 0); };
-      probe.src = href;
+      probe.src = measureHref;
       return null;
     },
 
@@ -5219,13 +5160,12 @@
     _emitChanged: function() {
       if (!this.pushEventTo) return;
       var stripMode = this.handleKind === "strip";
-      // A shape still uploading carries a blob: URL, which means nothing
-      // outside this document — persisting or broadcasting it would give
-      // peers a broken image and the store a dead reference. It joins the
-      // list on completion, when its href is real.
-      var payload = (this.shapes || []).filter(function(s) {
-        return !s._pendingUpload;
-      }).map(function(s) {
+      // An image still uploading IS included: its position, size and layering
+      // are real and worth persisting from the first frame. Only its `href`
+      // is missing, and it stays missing rather than carrying the local
+      // preview — a blob: URL means nothing outside this document. The href
+      // lands in a second emit when the upload resolves.
+      var payload = (this.shapes || []).map(function(s) {
         var entry = { uuid: s.uuid, kind: s.kind, geometry: s.geometry };
         // Strip annotations carry per-image index (which page of N).
         // Canvas multi-image annotations carry `image_id` (which
@@ -5769,20 +5709,15 @@
           // the collab delta). Only rewrite when it changes — swapping href
           // every pan/zoom frame would restart image decode. `href` + the
           // legacy `xlink:href` for older Safari.
-          var imgHref = g.href || "";
+          // `_previewHref` wins while an upload is in flight: it's a local
+          // object URL for the exact bytes being sent, so the image looks
+          // finished from the first frame even though `geometry.href` — the
+          // only part that gets persisted — is still empty.
+          var imgHref = shape._previewHref || g.href || "";
           if (el.getAttribute("href") !== imgHref) {
             el.setAttribute("href", imgHref);
             el.setAttributeNS("http://www.w3.org/1999/xlink", "xlink:href", imgHref);
           }
-          // Still uploading: dim it and float a progress bar over it, so an
-          // image that is visibly there but not yet saved doesn't look like
-          // one that is.
-          self._renderUploadState(shape, {
-            x: Math.min(itl.x, ibr.x),
-            y: Math.min(itl.y, ibr.y),
-            w: Math.abs(ibr.x - itl.x),
-            h: Math.abs(ibr.y - itl.y)
-          });
           bboxTopImage = { x: g.x + g.w / 2, y: g.y };
           break;
         }

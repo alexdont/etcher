@@ -1017,6 +1017,17 @@
   var DASH_MODES = ["solid", "dashed", "dotted", "none"];
   var FILL_MODES = ["none", "semi", "solid", "pattern"];
 
+  // A pasted image is persisted immediately as a thumbnail this big, so the
+  // shape has something to draw before its upload finishes — on a reload
+  // mid-upload, on a peer's screen, and permanently if the upload never
+  // lands. Small enough that carrying it in the annotation list costs
+  // nothing next to the full-resolution image (tens of KB against several
+  // MB), and it is replaced by the stored URL the moment the upload
+  // resolves. The local canvas keeps drawing the full-quality original
+  // throughout — the thumbnail is what gets *saved*, not what is shown here.
+  var PREVIEW_MAX_SIDE = 256;
+  var PREVIEW_QUALITY = 0.6;
+
   // Where a shape's label sits, as `metadata.title_align = {h, v}`. Absent
   // means the label floats above the shape with a leader line — the default,
   // and where dragging or resizing the label puts it back.
@@ -4941,21 +4952,77 @@
       // frame — it persists, it has a position, it can be moved, resized and
       // layered while its bytes are still going up.
       //
-      // What it is NOT is `href`-bearing: it's drawn from a local object URL
-      // held off to one side in `_previewHref`, and `geometry.href` stays
-      // empty until the upload resolves. A blob: URL belongs to the document
-      // that made it, so persisting or broadcasting one would hand peers a
-      // broken image and leave the board holding a dead reference.
+      // Two different images are in play until the upload resolves:
       //
-      // Placing before uploading also removes a race — the upload can't
-      // finish before there's a shape to put the URL on.
-      var previewUrl = URL.createObjectURL(file);
-
-      this._insertImageHref("", {
-        at: imagePt,
-        previewHref: previewUrl,
-        onPlaced: function(uuid) { self._startTrackedUpload(uuid, file, previewUrl, upload); }
+      //   geometry.href   a thumbnail, and therefore what gets persisted and
+      //                   sent to peers. Something small but *real*, so the
+      //                   shape survives a reload mid-upload instead of
+      //                   coming back as an empty frame.
+      //   _previewHref    a local object URL for the full-resolution bytes,
+      //                   drawn on this canvas only. A blob: URL belongs to
+      //                   the document that made it, so it must never reach
+      //                   the store or another viewer — which is exactly why
+      //                   the persisted copy has to be the thumbnail.
+      //
+      // Both are replaced by the stored URL on completion. Placing before
+      // uploading also removes a race: the upload can't finish before there
+      // is a shape to put the URL on.
+      this._makeImagePreview(file, function(objectUrl, thumbnail, natW, natH) {
+        // Size from the ORIGINAL, not the thumbnail — otherwise a 256px
+        // preview would place a 256px shape. Same 800-canvas-px cap
+        // `_insertImageHref` applies when it measures for itself; passed
+        // explicitly here because we hand it the thumbnail to display.
+        var scale = Math.min(1, 800 / Math.max(natW || 1, natH || 1));
+        var uuid = self._insertImageHref(thumbnail || "", {
+          at: imagePt,
+          previewHref: objectUrl,
+          width: Math.max(1, Math.round((natW || 400) * scale)),
+          height: Math.max(1, Math.round((natH || 300) * scale))
+        });
+        if (!uuid) {
+          try { URL.revokeObjectURL(objectUrl); } catch (_) {}
+          return;
+        }
+        self._startTrackedUpload(uuid, file, objectUrl, upload);
       });
+    },
+
+    // Decode `file` once and produce both things the insert path needs: an
+    // object URL for the full-resolution bytes, and a small data-URL
+    // thumbnail cheap enough to persist. Also returns the natural size, so
+    // the caller doesn't decode a second time to measure.
+    //
+    // `cb(objectUrl, thumbnailDataUrl|null, naturalW, naturalH)`.
+    _makeImagePreview: function(file, cb) {
+      var objectUrl = URL.createObjectURL(file);
+      var img = new Image();
+
+      img.onload = function() {
+        var natW = img.naturalWidth || 0;
+        var natH = img.naturalHeight || 0;
+        var thumb = null;
+        try {
+          var s = Math.min(1, PREVIEW_MAX_SIDE / Math.max(natW || 1, natH || 1));
+          var c = document.createElement("canvas");
+          c.width = Math.max(1, Math.round(natW * s));
+          c.height = Math.max(1, Math.round(natH * s));
+          c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+          // PNG sources keep PNG so transparency doesn't composite to black;
+          // everything else takes JPEG, which is far smaller for photos.
+          thumb = file.type === "image/png"
+            ? c.toDataURL("image/png")
+            : c.toDataURL("image/jpeg", PREVIEW_QUALITY);
+        } catch (_) {
+          // Canvas export can throw (tainted canvas, out of memory). The
+          // shape still works, it just has nothing to show after a reload
+          // until the upload lands.
+          thumb = null;
+        }
+        cb(objectUrl, thumb, natW, natH);
+      };
+
+      img.onerror = function() { cb(objectUrl, null, 0, 0); };
+      img.src = objectUrl;
     },
 
     // Run `upload` for an already-placed pending shape, then swap the local
@@ -4983,10 +5050,12 @@
       function commit(href) {
         var s = release();
         if (!s) return;                       // deleted while uploading
+        // Replaces the thumbnail that has been standing in since the paste.
         s.geometry = Object.assign({}, s.geometry, { href: href });
         self._renderShape(s);
-        // The second emit, carrying the href the first one couldn't. The
-        // shape's geometry has been persisted since it was placed.
+        // The second emit. The shape itself — position, size, layering, and
+        // a thumbnail to draw — has been persisted since it was placed; this
+        // swaps in the real image for every viewer.
         self._emitChanged();
       }
 
@@ -5160,11 +5229,12 @@
     _emitChanged: function() {
       if (!this.pushEventTo) return;
       var stripMode = this.handleKind === "strip";
-      // An image still uploading IS included: its position, size and layering
-      // are real and worth persisting from the first frame. Only its `href`
-      // is missing, and it stays missing rather than carrying the local
-      // preview — a blob: URL means nothing outside this document. The href
-      // lands in a second emit when the upload resolves.
+      // An image still uploading IS included: its position, size, layering
+      // and a thumbnail are all real from the first frame, so it survives a
+      // reload and shows up for peers. What it never carries is the local
+      // object URL it is being *drawn* from — a blob: URL means nothing
+      // outside this document. The stored URL replaces the thumbnail in a
+      // second emit when the upload resolves.
       var payload = (this.shapes || []).map(function(s) {
         var entry = { uuid: s.uuid, kind: s.kind, geometry: s.geometry };
         // Strip annotations carry per-image index (which page of N).

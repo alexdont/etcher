@@ -685,15 +685,11 @@
       "}",
       // Callout: the <g> container picks up `color` (default blue,
       // overridden by the picker via `style.color`); children resolve
-      // `currentColor` against it. Text gets a subtle white halo so
-      // it stays readable over busy image regions.
+      // `currentColor` against it. No halo behind the glyphs — it read as
+      // an outline on the type. (The dimension label keeps its one: there
+      // it masks the shaft line running behind the number.)
       ".etcher-callout { color: #3b82f6; }",
-      ".etcher-callout text {",
-      "  paint-order: stroke fill;",
-      "  stroke: rgba(255, 255, 255, 0.9);",
-      "  stroke-width: 3;",
-      "  stroke-linejoin: round;",
-      "}",
+      ".etcher-callout text { stroke: none; }",
       // Text shape — bordered box (visible only when hovered/selected/
       // editing) wrapping a content <text> that fills the box. Border
       // inherits the shape's color via currentColor. Default state is
@@ -711,13 +707,14 @@
       "  stroke: currentColor;",
       "  stroke-dasharray: 5 4;",
       "}",
+      // No halo behind the glyphs. A 2px white stroke under every letter was
+      // there to hold contrast over a photograph, but it reads as an outline
+      // on the type itself and thickens small text into mush. Colour alone
+      // carries it on the canvases these are actually used on.
       ".etcher-text .etcher-text-content,",
       ".etcher-text .etcher-text-content tspan {",
       "  fill: currentColor;",
-      "  stroke: rgba(255, 255, 255, 0.95);",
-      "  stroke-width: 2;",
-      "  stroke-linejoin: round;",
-      "  paint-order: stroke fill;",
+      "  stroke: none;",
       "  pointer-events: none;",
       "  user-select: none;",
       "}",
@@ -747,17 +744,14 @@
       // Inline title text for non-callout shapes. Rendered as a sibling
       // `<text>` of the shape (not a child) so it doesn't inherit the
       // shape's fill/stroke. Uses currentColor so `_applyShapeColor` can
-      // recolor by setting style.color on the title element. White halo
-      // matches the callout text for readability over busy media.
+      // recolor by setting style.color on the title element. No halo, same
+      // as callout text.
       ".etcher-title {",
       "  font-size: 12px;",
       "  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;",
       "  font-weight: 500;",
       "  fill: currentColor;",
-      "  stroke: rgba(255, 255, 255, 0.9);",
-      "  stroke-width: 3;",
-      "  paint-order: stroke fill;",
-      "  stroke-linejoin: round;",
+      "  stroke: none;",
       "  pointer-events: none;",
       "  color: #3b82f6;",
       "  user-select: none;",

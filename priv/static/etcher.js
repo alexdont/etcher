@@ -5497,6 +5497,9 @@
         if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable === true)) return;
         if (document.activeElement && document.activeElement.isContentEditable) return;
         var items = (e.clipboardData && e.clipboardData.items) || [];
+        // Images win over text. Copying from a page often puts both on the
+        // clipboard — an <img> carries its markup as text/html and its alt
+        // as text/plain — and the picture is what the user meant.
         for (var i = 0; i < items.length; i++) {
           var it = items[i];
           if (it.kind === "file" && it.type && it.type.indexOf("image/") === 0) {
@@ -5504,8 +5507,60 @@
             if (file) { e.preventDefault(); self._insertImageFile(file); return; }
           }
         }
+
+        var text = e.clipboardData && e.clipboardData.getData("text/plain");
+        if (text && String(text).trim()) {
+          e.preventDefault();
+          self._insertTextShape(String(text));
+        }
       };
       document.addEventListener("paste", self._pasteHandler);
+    },
+
+    // Pasted text lands as an ordinary text shape — double-click to edit,
+    // drag to move, resize by its corners, same as one drawn with the text
+    // tool. It is not a special "pasted" kind: the whole point is that it
+    // stops being a paste the moment it is on the canvas.
+    _insertTextShape: function(text, opts) {
+      opts = opts || {};
+      var trimmed = String(text).trim();
+      if (!trimmed) return null;
+
+      // Long pastes are clipped rather than allowed to become a wall of
+      // text on the canvas. The full string is still what got copied — the
+      // user can paste the rest deliberately if they want it.
+      if (trimmed.length > 500) trimmed = trimmed.slice(0, 500) + "…";
+
+      var basePx = this._textDefaultBoxImagePx();
+      // Roughly half an em per character at the default size, wrapped at a
+      // comfortable measure, so a short paste gets a short box and a long
+      // one gets a taller one instead of a single unreadable line.
+      var perLine = 42;
+      var lines = Math.max(1, Math.ceil(trimmed.length / perLine));
+      var w = basePx * Math.min(perLine, Math.max(8, trimmed.length)) * 0.5;
+      var h = basePx * 1.3 * lines;
+
+      var center = (opts.at && typeof opts.at.x === "number")
+        ? opts.at
+        : this._viewportCenterImage();
+      if (!center) {
+        center = {
+          x: this.imageSize ? this.imageSize.x / 2 : 0,
+          y: this.imageSize ? this.imageSize.y / 2 : 0
+        };
+      }
+
+      return this._addShape({
+        kind: "text",
+        geometry: {
+          x: Math.round(center.x - w / 2),
+          y: Math.round(center.y - h / 2),
+          w: Math.round(w),
+          h: Math.round(h)
+        },
+        metadata: { title: trimmed },
+        style: { color: this.activeColor || null }
+      });
     },
 
     _unwireImagePaste: function() {

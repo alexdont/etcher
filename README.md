@@ -172,6 +172,12 @@ def handle_event("etcher:image-insert-requested", %{"fresco_id" => _id}, socket)
 
 **Paste** — pasting an image onto the canvas (⌘/Ctrl-V) inserts it automatically at the viewport center, no tool required. On by default; pastes into a focused text field (including Etcher's own text editor) are left alone. Disable per-layer with `paste_images={false}`. (Multiple visible canvas layers on one page would each insert a paste — single-canvas is the assumed common case.)
 
+Pasting **text** inserts a text shape at the viewport center — an ordinary
+one, so double-click edits it, corners resize it, and it takes the active
+colour. Images win when the clipboard carries both, which is the usual case
+when copying from a web page. Pastes over ~500 characters are clipped, so a
+stray copy of a whole article doesn't become a wall of text on the canvas.
+
 Inserted images auto-size — the longest side is scaled to 800 canvas px — and center on the viewport (or on the point you pass to `insertImage`).
 
 **Resizing** an image keeps its proportions: a corner drag scales it by

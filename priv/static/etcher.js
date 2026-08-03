@@ -411,6 +411,22 @@
       // The stroke previews the active colour, so the button says what it
       // opens without needing a label next to a canvas.
       ".etcher-style-trigger svg { display: block; }",
+      // Status line. Top-centre: the tool bar, action bar and style panel
+      // own every other edge, and it must not cover the thing being worked
+      // on. Never a pointer target — it reports, it doesn't ask.
+      ".etcher-toast {",
+      "  position: absolute; top: 16px; left: 50%; z-index: 14;",
+      "  transform: translateX(-50%) translateY(-6px);",
+      "  padding: 8px 14px; border-radius: 999px;",
+      "  background: rgba(0, 0, 0, 0.78); color: #fff;",
+      "  font: 500 13px ui-sans-serif, system-ui, -apple-system, sans-serif;",
+      "  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);",
+      "  pointer-events: none; opacity: 0;",
+      "  transition: opacity 140ms ease, transform 140ms ease;",
+      "}",
+      ".etcher-toast.is-open {",
+      "  opacity: 1; transform: translateX(-50%) translateY(0);",
+      "}",
       // Link card chrome: the `⋯` in the card's top-right and its menu.
       ".etcher-link-menu {",
       "  position: absolute; z-index: 12; width: 30px; height: 30px;",
@@ -5804,40 +5820,90 @@
     // as text and nothing was lost.
     _insertPastedText: function(text) {
       var self = this;
-      var uuid = self._insertTextShape(text);
-      if (!uuid) return null;
-      self._activatePasted(uuid);
-
       var unfurl = self._linkUnfurler();
-      if (!unfurl || !/^https?:\/\/\S+$/i.test(text)) return uuid;
+      var isUrl = /^https?:\/\/\S+$/i.test(text);
+
+      // Ordinary text is on the canvas before the key is up. Nothing to
+      // decide, nothing to wait for.
+      if (!unfurl || !isUrl) return self._placePastedText(text);
+
+      // A URL is settled BEFORE anything is drawn. Placing the text first
+      // and swapping it for a card a moment later meant every pasted link
+      // flashed as raw text and then jumped — the canvas showing its working
+      // out. So the canvas stays as it was and the status line says what is
+      // happening, which is the honest place for "this is taking a moment".
+      self._showToast("Link detected — building preview…", { sticky: true });
+
+      function fallBackToText(why) {
+        if (window.console && console.warn) {
+          console.warn("[Etcher] link unfurl failed; pasting as text:", why);
+        }
+        self._showToast("No preview available — pasted as text", { ms: 2600 });
+        self._placePastedText(text);
+      }
 
       var pending;
       try {
         pending = unfurl(text, { frescoId: self.frescoId });
-      } catch (_) {
-        return uuid;
+      } catch (e) {
+        fallBackToText(e);
+        return null;
       }
-      if (!pending || typeof pending.then !== "function") return uuid;
-
-      function giveUp(why) {
-        if (window.console && console.warn) {
-          console.warn("[Etcher] link unfurl failed; leaving it as text:", why);
-        }
+      if (!pending || typeof pending.then !== "function") {
+        fallBackToText("uploader did not return a promise");
+        return null;
       }
 
       pending.then(function(card) {
-        if (!card || typeof card.svg !== "string" || !card.svg) return giveUp("no svg");
+        if (!card || typeof card.svg !== "string" || !card.svg) {
+          return fallBackToText("no svg");
+        }
         // Rasterise here rather than server-side: the browser has a correct
         // SVG renderer with the right fonts already, which spares the host a
         // native rasterizer dependency. The PNG then goes through the very
         // same path as a pasted image, so it uploads to storage and gets a
         // preview while it does.
         self._svgToPngFile(card.svg, card.width, card.height, function(file) {
-          if (!file) return giveUp("could not rasterise the card");
-          self._replaceWithLinkCard(uuid, text, file);
+          if (!file) return fallBackToText("could not rasterise the card");
+          self._hideToast();
+          self._insertImageFile(file, null, { metadata: { link: text } });
         });
-      }, giveUp);
+      }, fallBackToText);
+      return null;
+    },
+
+    _placePastedText: function(text) {
+      var uuid = this._insertTextShape(text);
+      if (uuid) this._activatePasted(uuid);
       return uuid;
+    },
+
+    // A one-line status over the canvas. Used for the things that happen
+    // between a gesture and its result — currently only the link unfurl,
+    // which is a round trip to someone else's server and the one paste that
+    // can't be instant.
+    _showToast: function(message, opts) {
+      opts = opts || {};
+      var self = this;
+      if (!self.toastEl) {
+        var el = document.createElement("div");
+        el.className = "etcher-toast";
+        el.setAttribute("role", "status");
+        self.handle.container.appendChild(el);
+        self.toastEl = el;
+      }
+      self.toastEl.textContent = message;
+      self.toastEl.classList.add("is-open");
+      clearTimeout(self._toastTimer);
+      if (!opts.sticky) {
+        self._toastTimer = setTimeout(function() { self._hideToast(); },
+          opts.ms || 2000);
+      }
+    },
+
+    _hideToast: function() {
+      clearTimeout(this._toastTimer);
+      if (this.toastEl) this.toastEl.classList.remove("is-open");
     },
 
     // SVG string → PNG File, via the browser's own renderer.

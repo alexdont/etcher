@@ -176,6 +176,11 @@ Anything pasted — image, text, or link card — arrives **selected with the
 cursor tool active**, ready to move or scale without another click and
 without putting down whatever tool you were holding.
 
+A pasted URL is settled *before* anything is drawn: nothing goes on the
+canvas while the unfurl runs, and a status line reads "Link detected —
+building preview…" until the card is ready. If no preview can be built the
+URL is pasted as text and the line says so. Ordinary text never waits.
+
 Pasting **text** inserts a text shape at the viewport center — an ordinary
 one, so double-click edits it, corners resize it, and it takes the active
 colour. Images win when the clipboard carries both, which is the usual case

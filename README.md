@@ -172,6 +172,10 @@ def handle_event("etcher:image-insert-requested", %{"fresco_id" => _id}, socket)
 
 **Paste** — pasting an image onto the canvas (⌘/Ctrl-V) inserts it automatically at the viewport center, no tool required. On by default; pastes into a focused text field (including Etcher's own text editor) are left alone. Disable per-layer with `paste_images={false}`. (Multiple visible canvas layers on one page would each insert a paste — single-canvas is the assumed common case.)
 
+Anything pasted — image, text, or link card — arrives **selected with the
+cursor tool active**, ready to move or scale without another click and
+without putting down whatever tool you were holding.
+
 Pasting **text** inserts a text shape at the viewport center — an ordinary
 one, so double-click edits it, corners resize it, and it takes the active
 colour. Images win when the clipboard carries both, which is the usual case
@@ -205,11 +209,11 @@ instead and keep a URL in the shape:
 A pasted URL becomes a preview card when the host can build one. `fn(url, ctx)`
 returns a Promise of `{ svg, width, height }` — an SVG of the page, which
 Etcher rasterises and places as an image shape with the URL in
-`metadata.link`. Clicking the card opens that URL — a press that never moves. Dragging it
-moves it, and with the grabber tool a drag pans the canvas as it does
-anywhere else, so the link never fires by accident. The grabber still opens
-a card on a tap, since following a link is a viewing action and the grabber
-is the viewing tool. Selecting it also shows a `⋯`
+`metadata.link`. Under the cursor tool a click selects the card — handles first, since you
+usually mean to move or scale it — and a **double-click** opens the URL.
+Under the grabber a single tap opens it: there is nothing to select with a
+viewing tool, and following a link is a viewing action. Dragging under
+either tool moves the card or pans the canvas and never opens anything. Selecting it also shows a `⋯`
 in its corner with **Open link** and **Edit link…**, the latter rebuilding
 the card in place so a mistyped address doesn't cost you the card's
 position.

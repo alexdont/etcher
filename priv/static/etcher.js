@@ -5256,6 +5256,7 @@
           try { URL.revokeObjectURL(objectUrl); } catch (_) {}
           return;
         }
+        self._activatePasted(uuid);
         self._startTrackedUpload(uuid, file, objectUrl, upload);
       });
     },
@@ -5448,6 +5449,18 @@
         linkOnly: true
       };
       return true;
+    },
+
+    // A paste is the start of placing something, so the thing lands
+    // selected and with the cursor tool active. Otherwise the first two
+    // actions after every paste are "click the thing I just pasted" and
+    // "switch off the tool I was holding" before it can be moved at all —
+    // and on a board the grabber is usually what's held.
+    _activatePasted: function(uuid) {
+      var shape = this._shapeByUuid(uuid);
+      if (!shape || !this.annotationMode || shape.readonly) return;
+      if (this.activeTool != null) this._selectTool(null);
+      this._enterEditMode(shape);
     },
 
     _maybeOpenLinkOnTap: function(shape) {
@@ -5650,9 +5663,9 @@
       var reader = new FileReader();
       reader.onload = function() {
         if (typeof reader.result === "string") {
-          self._insertImageHref(reader.result, {
+          self._activatePasted(self._insertImageHref(reader.result, {
             at: imagePt, metadata: opts.metadata
-          });
+          }));
         }
       };
       reader.readAsDataURL(file);
@@ -5793,6 +5806,7 @@
       var self = this;
       var uuid = self._insertTextShape(text);
       if (!uuid) return null;
+      self._activatePasted(uuid);
 
       var unfurl = self._linkUnfurler();
       if (!unfurl || !/^https?:\/\/\S+$/i.test(text)) return uuid;
@@ -8292,10 +8306,15 @@
         try { pt = self._toImage(e); } catch (_) { return; }
         var hit = self._shapeAt(pt);
         if (!hit) return;
-        // A link card already opened on the click that started this
-        // double-click, and it has no label to edit — so there is nothing
-        // left for a double-click to do.
-        if (self._linkOf(hit)) return;
+        // A link card opens on double-click: the single click that started
+        // it selected the card, which is what you need before moving or
+        // scaling it. (Under the grabber there is nothing to select, so a
+        // single tap opens instead — see `_docPointerDown`.)
+        if (self._linkOf(hit)) {
+          self._enterEditMode(hit);
+          self._openLink(hit);
+          return;
+        }
         // Every shape that can carry a label opens its editor here, not
         // just the text-ish kinds — double-click is how a label gets
         // created in the first place. `_startTextEdit` no-ops for kinds
@@ -12718,11 +12737,10 @@
         // fired at the top of _startShapeMove, so the shape is already
         // selected / pinned by the time we hit pointerup.
         //
-        // Opening a link card, though, can only be decided HERE. A click and
-        // the start of a drag are the same pointerdown; only the release
-        // says which it was. So the card opens on a press that never moved,
-        // and dragging it (or panning past it) just moves the canvas.
-        if (!dragged) self._maybeOpenLinkOnTap(shape);
+        // A link card is NOT opened here. Under the cursor tool a click
+        // selects — you want handles before you move or scale something —
+        // so opening is the double-click, handled in `_docDblClick`. The
+        // grabber has no selection to make, so there a single tap opens.
       }
       el.addEventListener("pointermove", onMove);
       el.addEventListener("pointerup", onUp);

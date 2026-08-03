@@ -1052,9 +1052,11 @@
   // `_encodePreview` steps down through cheaper encodings until it fits.
   // The local canvas draws the full-quality original throughout; this is
   // what gets *saved*, not what you are looking at.
-  // Width the tool bar must leave free on a compact layout: the style
-  // trigger's square (it matches the bar's height) plus the gap between them.
-  var COMPACT_TRIGGER_RESERVE = 60;
+  // Shared by the compact layout's two halves — the width `_computeToolbar-
+  // Overflow` leaves free and the offsets `_positionStyleChrome` measures.
+  // They have to agree or the trigger lands on top of the bar.
+  var CHROME_MARGIN = 12;
+  var CHROME_GAP = 8;
 
   var PREVIEW_MAX_SIDE = 1600;
   var PREVIEW_QUALITY = 0.85;
@@ -3065,6 +3067,27 @@
       return c.getBoundingClientRect().width < 720;
     },
 
+    // The trigger is a square matching the tool bar's height, so the two read
+    // as one row. Falls back to the button size the bar is built from when
+    // the bar hasn't been laid out yet.
+    _styleTriggerSize: function() {
+      var h = this.toolbar ? Math.round(this.toolbar.getBoundingClientRect().height) : 0;
+      return h > 0 ? h : 48;
+    },
+
+    // How wide the bar actually renders.
+    //
+    // NOT `scrollWidth`: the bar is a flex row sized by its own content, so
+    // it never overflows itself and `scrollWidth` reports the client box —
+    // measured at 448 against an offsetWidth of 490, a whole button short.
+    // The desktop budget had slack enough to absorb that, so the bar just
+    // collapsed a little later than intended; the compact one has to leave
+    // an exact gap for the style trigger, and came up a button too wide.
+    _toolbarWidth: function() {
+      if (!this.toolbar) return 0;
+      return Math.max(this.toolbar.scrollWidth, this.toolbar.offsetWidth);
+    },
+
     _toggleStylePanel: function(force) {
       if (!this.stylePanel) return;
       var open = typeof force === "boolean"
@@ -3105,17 +3128,26 @@
       var t = self.toolbar.getBoundingClientRect();
       if (!t.width || !c.width) return;
 
-      var gap = 8;
-      var margin = 12;
-      var h = Math.round(t.height);
+      var gap = CHROME_GAP;
+      var margin = CHROME_MARGIN;
+      var h = self._styleTriggerSize();
       self.styleTrigger.style.height = h + "px";
       self.styleTrigger.style.width = h + "px";
 
-      // Beside the bar when there's room for it. On a narrow container there
-      // often isn't: the bar collapses tools into `[⋯]` but bottoms out at a
-      // width it can't go under, and squeezing the trigger in anyway would
-      // just park it on top of the bar. So it stacks above the bar's right
-      // end instead — the action bar already occupies the left of that row.
+      // The bar centres itself on the container. Left alone it would centre
+      // as if it were the only thing on the row, pushing its right edge into
+      // the space the trigger needs — so shift it half the trigger's
+      // footprint left and the pair ends up centred as one group.
+      self.toolbar.style.transform =
+        "translateX(calc(-50% - " + Math.round((gap + h) / 2) + "px))";
+
+      // Re-measure: the shift just moved it.
+      t = self.toolbar.getBoundingClientRect();
+
+      // Beside the bar, which is what the group centring is for. The stacked
+      // fallback is for a container too small even for the collapsed bar —
+      // the bar bottoms out at a width it can't go under, and putting the
+      // trigger on top of it would be worse than a second row.
       var right = Math.round(t.right - c.left);
       var top;
       var left;
@@ -3156,10 +3188,12 @@
       } else {
         this.stylePanel.removeAttribute("data-compact");
         // Leaving the popup's measured offsets behind would drag the docked
-        // panel down to wherever the tool bar was.
+        // panel down to wherever the tool bar was, and the bar would stay
+        // shifted off-centre with nothing beside it to justify the gap.
         this.stylePanel.style.left = "";
         this.stylePanel.style.right = "";
         this.stylePanel.style.bottom = "";
+        if (this.toolbar) this.toolbar.style.transform = "";
         this._toggleStylePanel(false);
       }
 
@@ -3299,7 +3333,13 @@
       );
       toolBtns.forEach(function(b) { b.classList.remove("etcher-overflow-hidden"); });
       swatchBtns.forEach(function(b) { b.classList.remove("etcher-overflow-hidden"); });
-      if (self.toolsMoreBtn) self.toolsMoreBtn.classList.remove("is-active");
+      // `[⋯]` is deliberately NOT reset. `_syncToolsPopup` owns it and turns
+      // it back on straight after this runs — the non-essential tools live
+      // only in that popup, so it is on in every real configuration. Hiding
+      // it here made every measurement below one button short of the width
+      // the bar actually renders at, which the desktop budget could absorb
+      // and the compact one could not.
+
       if (self.colorsMoreBtn) self.colorsMoreBtn.classList.remove("is-active");
       if (self._cursorToolsDivider) {
         self._cursorToolsDivider.classList.remove("etcher-overflow-hidden");
@@ -3313,12 +3353,17 @@
       // bar reaches the page sides). Buttons keep their natural size;
       // overflow HIDES the extras rather than shrinking anything.
       var available = container.clientWidth - 64;
-      // Compact layout parks the style trigger beside the bar, so that space
-      // isn't the bar's to use. Without reserving it the bar grows to the
-      // full width and the trigger has nowhere to go but on top of it.
-      if (self._isCompactLayout()) available -= COMPACT_TRIGGER_RESERVE;
+      // Compact layout: the bar and the style trigger are one centred group,
+      // so the bar's budget is the container minus the trigger, minus a
+      // gutter — 12px rather than the desktop 32, because on a phone that
+      // margin is the difference between the trigger fitting on the row and
+      // being bumped onto its own.
+      if (self._isCompactLayout()) {
+        available = container.clientWidth - CHROME_MARGIN * 2 -
+          (CHROME_GAP + self._styleTriggerSize());
+      }
       if (available <= 0) return;
-      if (self.toolbar.scrollWidth <= available) return;  // already fits
+      if (self._toolbarWidth() <= available) return;  // already fits
 
       // Undo / redo are treated as ONE unit: the moment the bar runs
       // short on room they collapse together (both at once) into the
@@ -3326,7 +3371,7 @@
       // So they're inline only while the whole bar fits; any overflow
       // folds the pair first (often enough on its own, leaving every
       // tool visible).
-      if (self.toolbar.scrollWidth <= available) return;
+      if (self._toolbarWidth() <= available) return;
 
       // Build the hideable queues — non-active items in right-to-left
       // order so the rightmost button collapses first.
@@ -3385,7 +3430,7 @@
         } else {
           swatchQueue[sIdx++].classList.add("etcher-overflow-hidden");
         }
-        if (self.toolbar.scrollWidth <= available) return;
+        if (self._toolbarWidth() <= available) return;
       }
     },
 

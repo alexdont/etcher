@@ -411,6 +411,35 @@
       // The stroke previews the active colour, so the button says what it
       // opens without needing a label next to a canvas.
       ".etcher-style-trigger svg { display: block; }",
+      // Link card chrome: the `⋯` in the card's top-right and its menu.
+      ".etcher-link-menu {",
+      "  position: absolute; z-index: 12; width: 30px; height: 30px;",
+      "  display: inline-flex; align-items: center; justify-content: center;",
+      "  padding: 0; border: 0; border-radius: 8px; cursor: pointer;",
+      "  background: rgba(0, 0, 0, 0.6); color: #fff; pointer-events: auto;",
+      "}",
+      ".etcher-link-menu:hover { background: rgba(0, 0, 0, 0.78); }",
+      ".etcher-link-popup {",
+      "  position: absolute; z-index: 12; width: 190px;",
+      "  display: flex; flex-direction: column; padding: 4px;",
+      "  border-radius: 10px; background: rgba(0, 0, 0, 0.82);",
+      "  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35); pointer-events: auto;",
+      "}",
+      ".etcher-link-popup button {",
+      "  border: 0; background: none; color: #fff; cursor: pointer;",
+      "  text-align: left; padding: 8px 10px; border-radius: 6px;",
+      "  font: 500 13px ui-sans-serif, system-ui, -apple-system, sans-serif;",
+      "}",
+      ".etcher-link-popup button:hover { background: rgba(255, 255, 255, 0.14); }",
+      ".etcher-link-editor {",
+      "  position: absolute; z-index: 13; pointer-events: auto;",
+      "}",
+      ".etcher-link-editor input {",
+      "  width: 100%; box-sizing: border-box; padding: 8px 10px;",
+      "  border-radius: 8px; border: 2px solid #3b82f6; outline: none;",
+      "  background: #fff; color: #111;",
+      "  font: 500 13px ui-sans-serif, system-ui, -apple-system, sans-serif;",
+      "}",
       ".etcher-stylepanel-swatches {",
       "  display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px;",
       "}",
@@ -1017,7 +1046,8 @@
   // Kept as one constant because it is only ever wrong by omission.
   var CHROME_SELECTOR =
     ".etcher-toolbar, .etcher-actionbar, .etcher-stylepanel, " +
-    ".etcher-style-trigger, " +
+    ".etcher-style-trigger, .etcher-link-menu, .etcher-link-popup, " +
+    ".etcher-link-editor, " +
     ".etcher-popup, .etcher-tooltip";
 
   var ESSENTIAL_TOOLS = [
@@ -5391,6 +5421,192 @@
       }, embed);
     },
 
+    // ---- Link cards --------------------------------------------------------
+    //
+    // A link card is an ordinary image shape that remembers the address it
+    // was made from. Everything else about it — move, resize, layer, delete —
+    // is image behaviour, and only opening and re-pointing it are special.
+
+    _linkOf: function(shape) {
+      var link = shape && shape.metadata && shape.metadata.link;
+      return typeof link === "string" && link ? link : null;
+    },
+
+    _openLink: function(shape) {
+      var url = this._linkOf(shape);
+      if (!url) return;
+      // `noopener` because the opened page gets a handle on this one
+      // otherwise, and it is a page we did not write.
+      window.open(url, "_blank", "noopener,noreferrer");
+    },
+
+    // The `⋯` on a selected card. Positioned in `_positionLinkMenu` off the
+    // shape's own box so it tracks pan, zoom and resize without extra
+    // bookkeeping, and torn down with the selection.
+    _showLinkMenuFor: function(shape) {
+      var self = this;
+      if (!self._linkOf(shape)) return self._hideLinkMenu();
+      if (self._linkMenuShape === shape) return self._positionLinkMenu();
+
+      self._hideLinkMenu();
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "etcher-link-menu";
+      btn.setAttribute("data-fresco-no-capture", "");
+      btn.title = "Link actions";
+      btn.setAttribute("aria-label", "Link actions");
+      btn.innerHTML =
+        '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" ' +
+        'aria-hidden="true"><circle cx="6" cy="12" r="1.6"/>' +
+        '<circle cx="12" cy="12" r="1.6"/><circle cx="18" cy="12" r="1.6"/></svg>';
+      btn.addEventListener("pointerdown", function(e) { e.stopPropagation(); });
+      btn.addEventListener("click", function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        self._toggleLinkMenuPopup();
+      });
+
+      self.handle.container.appendChild(btn);
+      self._linkMenuBtn = btn;
+      self._linkMenuShape = shape;
+      self._positionLinkMenu();
+    },
+
+    _hideLinkMenu: function() {
+      this._closeLinkMenuPopup();
+      if (this._linkMenuBtn && this._linkMenuBtn.parentNode) {
+        this._linkMenuBtn.parentNode.removeChild(this._linkMenuBtn);
+      }
+      this._linkMenuBtn = null;
+      this._linkMenuShape = null;
+    },
+
+    _positionLinkMenu: function() {
+      var shape = this._linkMenuShape;
+      if (!this._linkMenuBtn || !shape || !shape.geometry) return;
+      var g = shape.geometry;
+      // `_imageToContainer` is already container-relative — the same space
+      // these absolutely-positioned buttons live in. Subtracting the
+      // container's own rect again would offset them by its position on the
+      // page.
+      var tr = this._imageToContainer({ x: g.x + g.w, y: g.y });
+      var size = 30;
+      var inset = 8;
+      this._linkMenuBtn.style.left = Math.round(tr.x - size - inset) + "px";
+      this._linkMenuBtn.style.top = Math.round(tr.y + inset) + "px";
+      if (this._linkMenuPopup) {
+        this._linkMenuPopup.style.left = Math.round(tr.x - 190) + "px";
+        this._linkMenuPopup.style.top = Math.round(tr.y + inset + size + 4) + "px";
+      }
+    },
+
+    _toggleLinkMenuPopup: function() {
+      if (this._linkMenuPopup) return this._closeLinkMenuPopup();
+      var self = this;
+      var shape = self._linkMenuShape;
+      if (!shape) return;
+
+      var pop = document.createElement("div");
+      pop.className = "etcher-popup etcher-link-popup is-open";
+      pop.setAttribute("data-fresco-no-capture", "");
+
+      function item(label, onClick) {
+        var b = document.createElement("button");
+        b.type = "button";
+        b.textContent = label;
+        b.addEventListener("click", function(e) {
+          e.preventDefault();
+          e.stopPropagation();
+          self._closeLinkMenuPopup();
+          onClick();
+        });
+        pop.appendChild(b);
+      }
+
+      item("Open link", function() { self._openLink(shape); });
+      item("Edit link…", function() { self._startLinkEdit(shape); });
+
+      self.handle.container.appendChild(pop);
+      self._linkMenuPopup = pop;
+      self._positionLinkMenu();
+
+      self._linkPopupOutside = function(e) {
+        if (e.target.closest && e.target.closest(".etcher-link-popup, .etcher-link-menu")) return;
+        self._closeLinkMenuPopup();
+      };
+      document.addEventListener("pointerdown", self._linkPopupOutside, true);
+    },
+
+    _closeLinkMenuPopup: function() {
+      if (this._linkMenuPopup && this._linkMenuPopup.parentNode) {
+        this._linkMenuPopup.parentNode.removeChild(this._linkMenuPopup);
+      }
+      this._linkMenuPopup = null;
+      if (this._linkPopupOutside) {
+        document.removeEventListener("pointerdown", this._linkPopupOutside, true);
+        this._linkPopupOutside = null;
+      }
+    },
+
+    // Re-point a card. Without this the only way to correct a mistyped or
+    // stale link is to delete the card and paste again, losing its position
+    // and its place in the stack.
+    _startLinkEdit: function(shape) {
+      var self = this;
+      var current = self._linkOf(shape) || "";
+      var g = shape.geometry;
+      var tl = self._imageToContainer({ x: g.x, y: g.y });
+      var br = self._imageToContainer({ x: g.x + g.w, y: g.y });
+
+      var wrap = document.createElement("div");
+      wrap.className = "etcher-link-editor";
+      wrap.setAttribute("data-fresco-no-capture", "");
+      wrap.style.left = Math.round(tl.x) + "px";
+      wrap.style.top = Math.round(tl.y) + "px";
+      wrap.style.width = Math.max(220, Math.round(br.x - tl.x)) + "px";
+
+      var input = document.createElement("input");
+      input.type = "url";
+      input.value = current;
+      input.placeholder = "https://…";
+      wrap.appendChild(input);
+      self.handle.container.appendChild(wrap);
+
+      function close() {
+        if (wrap.parentNode) wrap.parentNode.removeChild(wrap);
+      }
+
+      function commit() {
+        var next = input.value.trim();
+        close();
+        if (!next || next === current) return;
+        // Rebuild the card from the new address, in place. The old one is
+        // only replaced once a new one exists, so a bad edit costs nothing.
+        var unfurl = self._linkUnfurler();
+        if (!unfurl) return;
+        var pending;
+        try { pending = unfurl(next, { frescoId: self.frescoId }); } catch (_) { return; }
+        if (!pending || typeof pending.then !== "function") return;
+        pending.then(function(card) {
+          if (!card || typeof card.svg !== "string" || !card.svg) return;
+          self._svgToPngFile(card.svg, card.width, card.height, function(file) {
+            if (file) self._replaceWithLinkCard(shape.uuid, next, file);
+          });
+        }, function(why) {
+          if (window.console && console.warn) {
+            console.warn("[Etcher] could not rebuild the card:", why);
+          }
+        });
+      }
+
+      input.addEventListener("keydown", function(e) {
+        if (e.key === "Enter") { e.preventDefault(); commit(); }
+        else if (e.key === "Escape") { e.preventDefault(); close(); }
+      });
+      input.addEventListener("blur", function() { setTimeout(commit, 0); });
+      setTimeout(function() { try { input.focus(); input.select(); } catch (_) {} }, 0);
+    },
+
     _shapeByUuid: function(uuid) {
       if (!uuid) return null;
       return (this.shapes || []).find(function(s) { return s.uuid === uuid; }) || null;
@@ -8035,6 +8251,14 @@
         try { pt = self._toImage(e); } catch (_) { return; }
         var hit = self._shapeAt(pt);
         if (!hit) return;
+        // A link card opens its link. Single click still selects it, which
+        // is what makes it movable — so opening needs its own gesture, and
+        // double-click is the one people already try on a preview card.
+        if (self._linkOf(hit)) {
+          self._enterEditMode(hit);
+          self._openLink(hit);
+          return;
+        }
         // Every shape that can carry a label opens its editor here, not
         // just the text-ish kinds — double-click is how a label gets
         // created in the first place. `_startTextEdit` no-ops for kinds
@@ -11271,6 +11495,7 @@
       this.editingShape = shape;
       shape.el.classList.add("is-editing");
       this._syncArrangeButtons();
+      this._showLinkMenuFor(shape);
       this._hideTooltip();
       // Pick up the shape's color into the toolbar (active swatch + the color
       // new shapes draw with), so selecting a shape "switches" to its color.
@@ -11331,6 +11556,7 @@
     _exitEditMode: function() {
       if (!this.editingShape) return;
       this.editingShape.el.classList.remove("is-editing");
+      this._hideLinkMenu();
       this._clearVertexSelection();
       this._removeHandles();
       this._removeFreehandEditor();
@@ -11835,6 +12061,9 @@
     },
 
     _positionAllHandles: function(shape) {
+      // The card's `⋯` rides its top-right corner, so it moves with every
+      // pan, zoom and resize the handles do.
+      this._positionLinkMenu();
       if (this.handles && this.handles.length) {
         var positions = this._handlePositions(shape);
         var self = this;

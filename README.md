@@ -200,6 +200,28 @@ If you persist annotations over a socket, hand the bytes to your storage
 instead and keep a URL in the shape:
 
 ```javascript
+**Link previews — `setLinkUnfurler`:**
+
+A pasted URL becomes a preview card when the host can build one. `fn(url, ctx)`
+returns a Promise of `{ svg, width, height }` — an SVG of the page, which
+Etcher rasterises and places as an image shape with the URL in
+`metadata.link`. Double-clicking the card opens that URL; selecting it shows
+a `⋯` in its corner with **Open link** and **Edit link…**, the latter
+rebuilding the card in place so a mistyped address doesn't cost you the
+card's position.
+
+```javascript
+window.Etcher.layerFor("board").setLinkUnfurler(async (url, ctx) => {
+  const res = await fetch("/unfurl?url=" + encodeURIComponent(url));
+  return await res.json();     // { svg, width, height }
+});
+```
+
+Etcher can't do this alone: reading a page's OpenGraph tags means fetching
+it, which the browser blocks cross-origin and which needs answering for
+anyway — SSRF, size caps, timeouts — somewhere with a server. Without an
+unfurler, or if it rejects, a pasted URL stays a text shape.
+
 window.Etcher.layerFor("board").setImageUploader(async (file, ctx) => {
   const body = new FormData();
   body.append("file", file);

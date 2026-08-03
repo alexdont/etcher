@@ -220,6 +220,7 @@
     close:    '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>',
     // Three horizontal dots — overflow / "more" trigger in the
     // compact mobile toolbar. Heroicons solid `EllipsisHorizontal`.
+    paste: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.6" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1.5"/></svg>',
     duplicate: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.6" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M15 5.5A1.5 1.5 0 0 0 13.5 4h-8A1.5 1.5 0 0 0 4 5.5v8A1.5 1.5 0 0 0 5.5 15"/></svg>',
     more:     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 12a2 2 0 1 1-4 0 2 2 0 0 1 4 0Zm8 0a2 2 0 1 1-4 0 2 2 0 0 1 4 0Zm6 2a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"/></svg>',
     // Artist's palette — the colors `[⋯]` trigger (opens the picker).
@@ -2944,6 +2945,13 @@
       });
       self.actionDuplicateBtn = mk(ICONS.duplicate, "Duplicate (\u2318D)", function() {
         self._duplicateSelection();
+      });
+      // ⌘V has no equivalent on a touch device — there is no keyboard to
+      // press it on, and the OS paste callout only appears over a text
+      // field. Without a button, a phone can't put anything on a board that
+      // it didn't draw by hand.
+      self.actionPasteBtn = mk(ICONS.paste, "Paste (\u2318V)", function() {
+        self._pasteFromClipboard();
       });
 
       var div2 = document.createElement("div");
@@ -5870,6 +5878,68 @@
         });
       }, fallBackToText);
       return null;
+    },
+
+    // Read the clipboard on demand, for the toolbar's paste button.
+    //
+    // Deliberately NOT the same route as ⌘V: a paste event hands us its own
+    // data, whereas this has to ASK, which needs a secure context, a user
+    // gesture (the click is one) and permission the user can refuse. All
+    // three fail in ways worth reporting rather than swallowing — a button
+    // that silently does nothing is worse than one that says why.
+    //
+    // Images win over text, matching the paste-event path: a copy from a web
+    // page usually carries both.
+    _pasteFromClipboard: function() {
+      var self = this;
+      var clip = navigator.clipboard;
+
+      if (!clip || (!clip.read && !clip.readText)) {
+        return self._showToast("This browser won't share the clipboard", { ms: 3000 });
+      }
+
+      function pasteText() {
+        if (!clip.readText) {
+          return self._showToast("Nothing to paste", { ms: 2000 });
+        }
+        return clip.readText().then(function(text) {
+          if (text && text.trim()) self._insertPastedText(text.trim());
+          else self._showToast("Clipboard is empty", { ms: 2000 });
+        });
+      }
+
+      function refused(err) {
+        // Firefox has no `read()` for pages at all, and every browser lets
+        // the user decline. Either way the clipboard stayed private, which
+        // is a choice to respect and report, not an error to log.
+        self._showToast("Clipboard permission denied", { ms: 3000 });
+        if (window.console && console.warn) {
+          console.warn("[Etcher] clipboard read refused:", err);
+        }
+      }
+
+      if (!clip.read) return pasteText().catch(refused);
+
+      clip.read().then(function(items) {
+        for (var i = 0; i < items.length; i++) {
+          var types = items[i].types || [];
+          for (var t = 0; t < types.length; t++) {
+            if (types[t].indexOf("image/") === 0) {
+              var type = types[t];
+              return items[i].getType(type).then(function(blob) {
+                self._insertImageFile(
+                  new File([blob], "pasted." + type.split("/")[1], { type: type })
+                );
+              });
+            }
+          }
+        }
+        return pasteText();
+      }).catch(function(err) {
+        // `read()` also rejects when the clipboard holds only text in some
+        // browsers, so fall back before deciding it was a refusal.
+        pasteText().catch(function() { refused(err); });
+      });
     },
 
     _placePastedText: function(text) {

@@ -176,6 +176,10 @@ Anything pasted — image, text, or link card — arrives **selected with the
 cursor tool active**, ready to move or scale without another click and
 without putting down whatever tool you were holding.
 
+The action bar's **paste** button reads the clipboard on demand, for touch
+devices with no ⌘V to press. It needs a secure context and the user's
+permission; refused or unsupported, it says so rather than doing nothing.
+
 A pasted URL is settled *before* anything is drawn: nothing goes on the
 canvas while the unfurl runs, and a status line reads "Link detected —
 building preview…" until the card is ready. If no preview can be built the

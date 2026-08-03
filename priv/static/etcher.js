@@ -5432,6 +5432,24 @@
       return typeof link === "string" && link ? link : null;
     },
 
+    // Record a grabber press over a link card so its release can open it.
+    // Returns whether there was one — the caller returns either way, since
+    // the grabber must never take the gesture from the panner.
+    _linkUnfurlerTapCandidate: function(e) {
+      var pt;
+      try { pt = this._toImage(e); } catch (_) { return false; }
+      var hit = this._shapeAt(pt);
+      if (!hit || !this._linkOf(hit)) return false;
+      this._pendingTap = {
+        shape: hit,
+        startX: e.clientX,
+        startY: e.clientY,
+        startedAt: Date.now(),
+        linkOnly: true
+      };
+      return true;
+    },
+
     _maybeOpenLinkOnTap: function(shape) {
       if (this._linkOf(shape)) this._openLink(shape);
     },
@@ -8078,8 +8096,6 @@
       // actual pan since shapes are `pointer-events: none`.
       self._docPointerDown = function(e) {
         if (e.button !== 0) return;
-        // Grabber (hand) tool: the press is a pan, never a shape tap.
-        if (self.activeTool === "grabber") return;
         // Clicks on Etcher's own chrome (toolbar, popups, tooltip) aren't
         // canvas interactions — don't deselect, box-select, or tap. Without
         // this, clicking the Parameters/colors UI while shapes are selected
@@ -8092,6 +8108,17 @@
         // A handle/title/toolbar/modal element under the cursor
         // handles its own event; don't shadow it with a shape tap.
         if (isInputOwner(e.target, self.overlayWrapper)) return;
+
+        // Grabber (hand) tool: the press is a pan, never a shape tap — with
+        // one exception. The grabber is how someone looks around a board
+        // they aren't editing, and following a link is a viewing action, so
+        // a link card stays clickable under it. Nothing is intercepted: the
+        // press is only recorded, and `_docPointerMove` drops it the moment
+        // the pointer travels, so a pan still pans.
+        if (self.activeTool === "grabber") {
+          if (!self._linkUnfurlerTapCandidate(e)) return;
+          return;
+        }
         // Touch: `_hoveredShape` is unreliable. iOS synthesizes a
         // mousemove at the touchend point after every gesture, which
         // fires `_docMouseMove` and leaves the cache pinned to the
@@ -8235,7 +8262,7 @@
         var pt;
         try { pt = self._toImage(e); } catch (_) { return; }
         if (self._shapeAt(pt) !== tap.shape) return;
-        self._onShapeTap(tap.shape);
+        if (!tap.linkOnly) self._onShapeTap(tap.shape);
         self._maybeOpenLinkOnTap(tap.shape);
       };
 

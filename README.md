@@ -206,8 +206,10 @@ A pasted URL becomes a preview card when the host can build one. `fn(url, ctx)`
 returns a Promise of `{ svg, width, height }` — an SVG of the page, which
 Etcher rasterises and places as an image shape with the URL in
 `metadata.link`. Clicking the card opens that URL — a press that never moves. Dragging it
-moves it, and with the grabber tool it pans like any other part of the
-canvas, so the link never fires by accident. Selecting it also shows a `⋯`
+moves it, and with the grabber tool a drag pans the canvas as it does
+anywhere else, so the link never fires by accident. The grabber still opens
+a card on a tap, since following a link is a viewing action and the grabber
+is the viewing tool. Selecting it also shows a `⋯`
 in its corner with **Open link** and **Edit link…**, the latter rebuilding
 the card in place so a mistyped address doesn't cost you the card's
 position.

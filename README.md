@@ -174,6 +174,13 @@ def handle_event("etcher:image-insert-requested", %{"fresco_id" => _id}, socket)
 
 Inserted images auto-size — the longest side is scaled to 800 canvas px — and center on the viewport (or on the point you pass to `insertImage`).
 
+**Resizing** an image keeps its proportions: a corner drag scales it by
+whichever axis you pulled further, and the opposite corner stays put. Hold
+**Shift** to stretch it freely instead. The lock is against the aspect the
+shape had when the drag started, not the file's natural one, so an image you
+deliberately stretched keeps the shape you gave it. (Shift needs a keyboard —
+on touch, image resizing is always proportional.)
+
 **Uploading instead of embedding — `setImageUploader`:**
 
 By default an image file becomes a base64 data URL living in the shape's

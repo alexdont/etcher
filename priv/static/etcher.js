@@ -12115,7 +12115,9 @@
           if ((bC.x - aC.x) * (bC.x - aC.x) + (bC.y - aC.y) * (bC.y - aC.y) < 9) return;
           dragged = true;
         }
-        self._applyHandleDrag(shape, idx, pt, startGeom, startPt);
+        // Read live rather than from the pointerdown: the user can press or
+        // release Shift part-way through a drag and expect it to take.
+        self._applyHandleDrag(shape, idx, pt, startGeom, startPt, !!ev.shiftKey);
         self._renderShape(shape);
         self._positionAllHandles(shape);
       }
@@ -12329,7 +12331,7 @@
       }
     },
 
-    _applyHandleDrag: function(shape, idx, pt, startGeom, startPt) {
+    _applyHandleDrag: function(shape, idx, pt, startGeom, startPt, freeform) {
       switch (shape.kind) {
         case "image": {
           // Corner resize identical to a rectangle; only difference is href
@@ -12346,6 +12348,29 @@
           }
           if (inw < 0) { inx += inw; inw = -inw; }
           if (inh < 0) { iny += inh; inh = -inh; }
+
+          // A distorted photograph reads as a mistake in a way a distorted
+          // rectangle doesn't, so a corner drag keeps the proportions it
+          // started with. Shift releases that and stretches freely.
+          //
+          // The lock is against the shape's aspect at the START of this
+          // drag, not the image's natural one: a picture the user has
+          // deliberately stretched should keep the shape they gave it
+          // rather than snap back the first time they resize it.
+          if (!freeform && ig.w > 0 && ig.h > 0) {
+            // The larger of the two ratios, so the box follows whichever
+            // axis the pointer pulled further — dragging mostly sideways
+            // scales by width, mostly downward by height.
+            var scale = Math.max(inw / ig.w, inh / ig.h);
+            inw = Math.max(1, ig.w * scale);
+            inh = Math.max(1, ig.h * scale);
+            // Re-anchor: the corner opposite the handle has to stay where
+            // it was, or fitting the aspect drifts the whole image.
+            if (idx === 0)      { inx = iright - inw; iny = ibottom - inh; }
+            else if (idx === 1) { inx = ig.x;         iny = ibottom - inh; }
+            else if (idx === 2) { inx = ig.x;         iny = ig.y;          }
+            else                { inx = iright - inw; iny = ig.y;          }
+          }
           shape.geometry = { x: inx, y: iny, w: inw, h: inh, href: startGeom.href };
           break;
         }

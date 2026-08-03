@@ -1770,6 +1770,21 @@
             self._uploadImageFn = typeof fn === "function" ? fn : null;
           },
 
+          // Turn a pasted URL into a preview card. `fn(url, ctx)` returns a
+          // Promise of `{ href, width, height }` — an image of the page,
+          // which becomes an image shape carrying the URL in
+          // `metadata.link`. Etcher can't build one itself: reading a page's
+          // OpenGraph tags means fetching it, which the browser won't allow
+          // cross-origin and which needs answering for anyway (SSRF, size
+          // caps, timeouts) somewhere that has a server.
+          //
+          // Without it — or if it rejects — a pasted URL stays a text shape.
+          // `window.Etcher.linkUnfurler` sets the same thing for every
+          // layer; this one wins.
+          setLinkUnfurler: function(fn) {
+            self._unfurlLinkFn = typeof fn === "function" ? fn : null;
+          },
+
           // Z-order -----------------------------------------------------
           // Move the current selection (multi-selection, else the shape in
           // edit mode). Each returns true when something actually moved —
@@ -5166,12 +5181,13 @@
     // bytes go to the host's storage and the shape carries a URL; without
     // one they're embedded as a base64 data URL (see `setImageUploader` for
     // why that gets expensive).
-    _insertImageFile: function(file, imagePt) {
+    _insertImageFile: function(file, imagePt, opts) {
       var self = this;
+      opts = opts || {};
       if (!file || (file.type && file.type.indexOf("image/") !== 0)) return;
 
       var upload = this._imageUploader();
-      if (!upload) return this._embedImageFile(file, imagePt);
+      if (!upload) return this._embedImageFile(file, imagePt, opts);
 
       // Place the image *now* and upload behind it, so a paste is instant
       // however long the transfer takes. The shape is real from the first
@@ -5202,6 +5218,7 @@
         var uuid = self._insertImageHref(thumbnail || "", {
           at: imagePt,
           previewHref: objectUrl,
+          metadata: opts.metadata,
           width: Math.max(1, Math.round((natW || 400) * scale)),
           height: Math.max(1, Math.round((natH || 300) * scale))
         });
@@ -5380,12 +5397,15 @@
     },
 
 
-    _embedImageFile: function(file, imagePt) {
+    _embedImageFile: function(file, imagePt, opts) {
       var self = this;
+      opts = opts || {};
       var reader = new FileReader();
       reader.onload = function() {
         if (typeof reader.result === "string") {
-          self._insertImageHref(reader.result, { at: imagePt });
+          self._insertImageHref(reader.result, {
+            at: imagePt, metadata: opts.metadata
+          });
         }
       };
       reader.readAsDataURL(file);
@@ -5434,14 +5454,16 @@
             y: self.imageSize ? self.imageSize.y / 2 : 0
           };
         }
-        var uuid = self._addShape({
+        var payload = {
           kind: "image",
           geometry: {
             x: Math.round(center.x - w / 2),
             y: Math.round(center.y - h / 2),
             w: w, h: h, href: typeof href === "string" ? href : ""
           }
-        });
+        };
+        if (opts.metadata) payload.metadata = opts.metadata;
+        var uuid = self._addShape(payload);
         if (uuid && opts.previewHref) {
           var placed = self._shapeByUuid(uuid);
           // Set before the queued emit runs, and off `geometry` — this is
@@ -5505,10 +5527,112 @@
         var text = e.clipboardData && e.clipboardData.getData("text/plain");
         if (text && String(text).trim()) {
           e.preventDefault();
-          self._insertTextShape(String(text));
+          self._insertPastedText(String(text).trim());
         }
       };
       document.addEventListener("paste", self._pasteHandler);
+    },
+
+    // A pasted URL becomes a preview card when the host can build one, and
+    // a text shape when it can't.
+    //
+    // The text shape goes down FIRST either way. Unfurling is a network
+    // round trip on someone else's server, and putting nothing on the canvas
+    // until it answers would make a paste look like it did nothing — the
+    // same failure the image path was fixed for. If a card comes back it
+    // takes the text shape's place; if it doesn't, the URL is already there
+    // as text and nothing was lost.
+    _insertPastedText: function(text) {
+      var self = this;
+      var uuid = self._insertTextShape(text);
+      if (!uuid) return null;
+
+      var unfurl = self._linkUnfurler();
+      if (!unfurl || !/^https?:\/\/\S+$/i.test(text)) return uuid;
+
+      var pending;
+      try {
+        pending = unfurl(text, { frescoId: self.frescoId });
+      } catch (_) {
+        return uuid;
+      }
+      if (!pending || typeof pending.then !== "function") return uuid;
+
+      function giveUp(why) {
+        if (window.console && console.warn) {
+          console.warn("[Etcher] link unfurl failed; leaving it as text:", why);
+        }
+      }
+
+      pending.then(function(card) {
+        if (!card || typeof card.svg !== "string" || !card.svg) return giveUp("no svg");
+        // Rasterise here rather than server-side: the browser has a correct
+        // SVG renderer with the right fonts already, which spares the host a
+        // native rasterizer dependency. The PNG then goes through the very
+        // same path as a pasted image, so it uploads to storage and gets a
+        // preview while it does.
+        self._svgToPngFile(card.svg, card.width, card.height, function(file) {
+          if (!file) return giveUp("could not rasterise the card");
+          self._replaceWithLinkCard(uuid, text, file);
+        });
+      }, giveUp);
+      return uuid;
+    },
+
+    // SVG string → PNG File, via the browser's own renderer.
+    _svgToPngFile: function(svg, w, h, cb) {
+      var width = Number(w) > 0 ? Number(w) : 640;
+      var height = Number(h) > 0 ? Number(h) : 480;
+      var blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
+      var url = URL.createObjectURL(blob);
+      var img = new Image();
+
+      function done(file) {
+        try { URL.revokeObjectURL(url); } catch (_) {}
+        cb(file);
+      }
+
+      img.onload = function() {
+        try {
+          var c = document.createElement("canvas");
+          // 2x, so the card is still sharp when someone zooms into it.
+          c.width = width * 2;
+          c.height = height * 2;
+          c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+          c.toBlob(function(png) {
+            done(png ? new File([png], "link-card.png", { type: "image/png" }) : null);
+          }, "image/png");
+        } catch (_) {
+          done(null);
+        }
+      };
+      img.onerror = function() { done(null); };
+      img.src = url;
+    },
+
+    _linkUnfurler: function() {
+      if (typeof this._unfurlLinkFn === "function") return this._unfurlLinkFn;
+      if (window.Etcher && typeof window.Etcher.linkUnfurler === "function") {
+        return window.Etcher.linkUnfurler;
+      }
+      return null;
+    },
+
+    // Swap the placeholder text shape for the card, anchored where the text
+    // was so the card appears at the paste rather than jumping to the middle
+    // of the viewport.
+    _replaceWithLinkCard: function(uuid, url, file) {
+      var shape = this._shapeByUuid(uuid);
+      if (!shape) return;                       // deleted while unfurling
+      var at = {
+        x: shape.geometry.x + shape.geometry.w / 2,
+        y: shape.geometry.y + shape.geometry.h / 2
+      };
+      this._removeShape(uuid);
+      // Straight down the pasted-image path: preview, upload, storage URL.
+      // The address the card was made from rides along in metadata — it's
+      // the only part of a picture-of-a-page a consumer can act on.
+      this._insertImageFile(file, at, { metadata: { link: url } });
     },
 
     // Pasted text lands as an ordinary text shape — double-click to edit,

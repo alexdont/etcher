@@ -4,6 +4,115 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.10.0] — 2026-08-04
+
+### Added
+
+- **`setImageUploader(fn)` — hand image files to the host instead of
+  embedding them.** `fn(file, ctx)` returns a Promise of a URL, which becomes
+  the shape's `href`. Covers every path that yields a file: paste,
+  drag-drop, and the built-in picker. `window.Etcher.imageUploader` sets the
+  same thing for every layer; the per-layer one wins.
+
+  Worth setting whenever the annotation list is persisted over a socket.
+  Without it a pasted screenshot lives in the shape as a base64 data URL,
+  and since the whole list is re-emitted on every edit, that image is re-sent
+  in full each time anything changes — two or three of them push ordinary
+  edits past a socket frame limit, where they fail silently.
+
+  A pasted image is now placed **immediately** and uploads behind it: the
+  shape persists from the first frame with position, size and layering
+  intact, drawing a local full-resolution preview while a reduced copy (up
+  to 1600px, ~400KB budget) stands in as the saved `href`. So it survives a
+  reload mid-upload, shows up for peers, and stays usable if the upload never
+  completes. If the uploader rejects, throws, or resolves to a non-string,
+  Etcher falls back to embedding: a failed upload should cost bytes, not the
+  user's paste.
+- **`setLinkUnfurler(fn)` — pasted URLs become preview cards.** `fn(url, ctx)`
+  returns a Promise of `{svg, width, height}`; Etcher rasterises it and
+  places it as an image shape carrying the URL in `metadata.link`. Etcher
+  can't build one itself — reading a page's OpenGraph tags means fetching
+  it, which the browser blocks cross-origin and which needs answering for
+  anyway (SSRF, size caps, timeouts) somewhere with a server.
+
+  A URL is settled *before* anything is drawn — nothing goes on the canvas
+  while the unfurl runs, and a status line reads "Link detected — building
+  preview…" until the card is ready. No unfurler, or a rejection, and the
+  URL is pasted as text instead.
+
+  Under the cursor tool a click selects the card and a **double-click**
+  opens the link; under the grabber a single tap opens it. Dragging under
+  either moves the card or pans the canvas and never opens anything.
+  Selecting a card shows a `⋯` in its corner with **Open link** and **Edit
+  link…**, the latter rebuilding the card in place so a mistyped address
+  doesn't cost its position.
+- **Text paste.** Pasting text inserts an ordinary text shape — double-click
+  to edit, corners to resize, takes the active colour. Images win when the
+  clipboard carries both, which is the usual case copying from a web page.
+- **Shape labels.** Double-click any shape to add or edit a label
+  (`metadata.title`); it starts centred inside the shape. The style panel
+  gains alignment presets (`metadata.title_align`) giving the nine anchors
+  inside the shape's box, plus a *float* control for the original
+  above-with-a-leader placement. Dragging or resizing a label returns it to
+  free positioning.
+- **`"none"` line style and `"pattern"` fill.** Fill modes are now
+  none / semi / solid / pattern (45° hatch) and line styles solid / dashed /
+  dotted / none. "No line" only takes effect where the body is painted — a
+  shape with neither stroke nor fill can't be seen, and an invisible shape
+  can't be clicked back into existence.
+- **Z-order actions** — bring to front / forward / backward / send to back,
+  in the action bar's `⋮`, with tap-cycling to reach a shape underneath
+  another.
+- **Paste button** in the action bar, for touch devices with no ⌘V to press.
+  Reading the clipboard on demand needs a secure context and permission;
+  refused or unsupported, it says so rather than doing nothing.
+
+### Changed
+
+- **The toolbar is three surfaces instead of one.** A bottom bar of
+  essentials (cursor, grabber, freehand, eraser, line, text, callout, image)
+  plus a "last used" slot and a `[⋯]` grid for everything else; a floating
+  **action bar** above it (undo / redo / delete / duplicate / paste, with
+  arrange behind `⋮`); and a **style panel** docked right, which is where
+  the colour swatches now live.
+
+  On a narrow container the style panel collapses into a button beside the
+  tool bar and opens as a popup — decided on the container's width, not the
+  viewport's, since a layer can be embedded in a column on a wide page.
+- **Resizing an image keeps its proportions.** A corner drag scales by
+  whichever axis you pulled further and leaves the opposite corner fixed;
+  hold **Shift** to stretch freely. The lock is against the aspect the shape
+  had when the drag started, not the file's natural one, so a deliberately
+  stretched image keeps the shape you gave it.
+- **Text, callout and label glyphs no longer carry a white halo.** A 2–3px
+  stroke under every letter was holding contrast over photographs; on a
+  canvas it read as an outline on the type and thickened small text into
+  mush. The dimension label keeps its halo, where it masks the shaft line
+  running behind the number.
+- **Anything pasted arrives selected with the cursor tool active**, ready to
+  move or scale without another click and without putting down whatever tool
+  was being held.
+
+### Fixed
+
+- **Dotted strokes were invisible on shapes.** A zero-length dash paints
+  nothing under the default `butt` linecap; markers only looked right
+  because their own CSS already rounded caps.
+- **The toolbar collapsed a button late.** It measured itself with
+  `scrollWidth`, which reports the client box for a flex row sized by its own
+  content — 448 against a rendered 490 — and reset the `[⋯]` trigger to
+  hidden just before measuring, though `_syncToolsPopup` turns it straight
+  back on.
+- **A shape whose fill was set to "none" could never get its colour back**:
+  switching to none wrote `fill: none` onto the element and the params path
+  never touched colour again.
+- **A dragged label came back as two lines.** The width-fit font size is
+  computed as if text width were linear in font size, and hinting makes it
+  slightly not, so fitted text could land a hair over the available width and
+  wrap.
+- **Label resize handles didn't follow an alignment change**, leaving them
+  behind until title-edit mode was toggled off and back on.
+
 ## [0.9.0] — 2026-07-21
 
 ### Added

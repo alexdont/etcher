@@ -205,10 +205,12 @@ instead and keep a URL in the shape:
 A pasted URL becomes a preview card when the host can build one. `fn(url, ctx)`
 returns a Promise of `{ svg, width, height }` — an SVG of the page, which
 Etcher rasterises and places as an image shape with the URL in
-`metadata.link`. Double-clicking the card opens that URL; selecting it shows
-a `⋯` in its corner with **Open link** and **Edit link…**, the latter
-rebuilding the card in place so a mistyped address doesn't cost you the
-card's position.
+`metadata.link`. Clicking the card opens that URL — a press that never moves. Dragging it
+moves it, and with the grabber tool it pans like any other part of the
+canvas, so the link never fires by accident. Selecting it also shows a `⋯`
+in its corner with **Open link** and **Edit link…**, the latter rebuilding
+the card in place so a mistyped address doesn't cost you the card's
+position.
 
 ```javascript
 window.Etcher.layerFor("board").setLinkUnfurler(async (url, ctx) => {

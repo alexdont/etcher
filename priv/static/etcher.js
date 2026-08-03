@@ -5432,9 +5432,22 @@
       return typeof link === "string" && link ? link : null;
     },
 
+    _maybeOpenLinkOnTap: function(shape) {
+      if (this._linkOf(shape)) this._openLink(shape);
+    },
+
     _openLink: function(shape) {
       var url = this._linkOf(shape);
       if (!url) return;
+      // A double-click is two taps, and an impatient user makes more. Only
+      // the first within the window opens anything.
+      var now = Date.now();
+      if (this._lastLinkOpen &&
+          this._lastLinkOpen.uuid === shape.uuid &&
+          now - this._lastLinkOpen.at < 700) {
+        return;
+      }
+      this._lastLinkOpen = { uuid: shape.uuid, at: now };
       // `noopener` because the opened page gets a handle on this one
       // otherwise, and it is a page we did not write.
       window.open(url, "_blank", "noopener,noreferrer");
@@ -8223,6 +8236,7 @@
         try { pt = self._toImage(e); } catch (_) { return; }
         if (self._shapeAt(pt) !== tap.shape) return;
         self._onShapeTap(tap.shape);
+        self._maybeOpenLinkOnTap(tap.shape);
       };
 
       // Double-click on text/callout in annotation mode → inline edit.
@@ -8251,14 +8265,10 @@
         try { pt = self._toImage(e); } catch (_) { return; }
         var hit = self._shapeAt(pt);
         if (!hit) return;
-        // A link card opens its link. Single click still selects it, which
-        // is what makes it movable — so opening needs its own gesture, and
-        // double-click is the one people already try on a preview card.
-        if (self._linkOf(hit)) {
-          self._enterEditMode(hit);
-          self._openLink(hit);
-          return;
-        }
+        // A link card already opened on the click that started this
+        // double-click, and it has no label to edit — so there is nothing
+        // left for a double-click to do.
+        if (self._linkOf(hit)) return;
         // Every shape that can carry a label opens its editor here, not
         // just the text-ish kinds — double-click is how a label gets
         // created in the first place. `_startTextEdit` no-ops for kinds
@@ -12677,9 +12687,15 @@
           // so the user expects the tooltip to come back.
           self._showTooltipFor(shape);
         }
-        // No-drag case is a no-op here — `_onShapeTap` already fired
-        // at the top of _startShapeMove, so the shape is already
+        // No-drag case is otherwise a no-op here — `_onShapeTap` already
+        // fired at the top of _startShapeMove, so the shape is already
         // selected / pinned by the time we hit pointerup.
+        //
+        // Opening a link card, though, can only be decided HERE. A click and
+        // the start of a drag are the same pointerdown; only the release
+        // says which it was. So the card opens on a press that never moved,
+        // and dragging it (or panning past it) just moves the canvas.
+        if (!dragged) self._maybeOpenLinkOnTap(shape);
       }
       el.addEventListener("pointermove", onMove);
       el.addEventListener("pointerup", onUp);

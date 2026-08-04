@@ -250,6 +250,15 @@
       ".etcher-toolbar[data-strip] {",
       "  position: fixed; bottom: 16px;",
       "}",
+      // Same reasoning for the rest of the chrome. 0.4.1 fixed the tool bar;
+      // the action bar, style panel and style trigger arrived later, were
+      // stamped `data-strip`, and never got the rule — so they stayed
+      // `absolute` and scrolled off the top of the chapter.
+      ".etcher-actionbar[data-strip],",
+      ".etcher-stylepanel[data-strip],",
+      ".etcher-style-trigger[data-strip] {",
+      "  position: fixed;",
+      "}",
       // Strip mode + drawing tool active: suppress native scroll on
       // the strip container so iOS Safari hands every touchmove to
       // the app instead of claiming the gesture for the scroller.
@@ -3094,6 +3103,7 @@
       btn.type = "button";
       btn.className = "etcher-style-trigger";
       btn.setAttribute("data-fresco-no-capture", "");
+      if (self.handleKind === "strip") btn.setAttribute("data-strip", "");
       btn.title = "Style";
       btn.setAttribute("aria-label", "Style");
       btn.setAttribute("aria-expanded", "false");
@@ -3149,6 +3159,18 @@
     _toolbarWidth: function() {
       if (!this.toolbar) return 0;
       return Math.max(this.toolbar.scrollWidth, this.toolbar.offsetWidth);
+    },
+
+    // The docked panel's 12px top/right are CSS, which resolves against the
+    // container while it is absolute — but against the VIEWPORT once strip
+    // mode makes it fixed, which would float it in the window's corner
+    // rather than the strip's. Measure it there instead.
+    _positionDockedPanel: function() {
+      if (!this.stylePanel || this.handleKind !== "strip" || !this.handle) return;
+      var c = this.handle.container.getBoundingClientRect();
+      this.stylePanel.style.top = Math.round(c.top + CHROME_MARGIN) + "px";
+      this.stylePanel.style.right =
+        Math.round(window.innerWidth - c.right + CHROME_MARGIN) + "px";
     },
 
     _toggleStylePanel: function(force) {
@@ -3211,25 +3233,37 @@
       // fallback is for a container too small even for the collapsed bar —
       // the bar bottoms out at a width it can't go under, and putting the
       // trigger on top of it would be worse than a second row.
-      var right = Math.round(t.right - c.left);
+      // Offsets are measured from whichever origin this surface is
+      // positioned against — the container when absolute, the viewport when
+      // fixed (strip mode). `c` still supplies the WIDTH the bar has to fit
+      // in, which is the container's either way.
+      var o = self._chromeOrigin();
+      var right = Math.round(t.right - o.left);
+      var minLeft = Math.round(c.left - o.left) + margin;
+      var maxRight = Math.round(c.right - o.left) - margin;
       var top;
       var left;
-      if (right + gap + h <= c.width - margin) {
+      if (right + gap + h <= maxRight) {
         left = right + gap;
-        top = Math.round(t.top - c.top);
+        top = Math.round(t.top - o.top);
       } else {
-        left = Math.round(c.width - h - margin);
-        top = Math.round(t.top - c.top) - h - gap;
+        left = maxRight - h;
+        top = Math.round(t.top - o.top) - h - gap;
       }
-      self.styleTrigger.style.left = Math.max(margin, left) + "px";
+      self.styleTrigger.style.left = Math.max(minLeft, left) + "px";
       self.styleTrigger.style.top = Math.max(margin, top) + "px";
 
       if (self.stylePanel && self.stylePanel.hasAttribute("data-compact")) {
         // Opens upward off the trigger, right-aligned to the container so it
-        // covers canvas rather than hanging off the side.
+        // covers canvas rather than hanging off the side. `bottom` is
+        // measured from the viewport when fixed and the container when not,
+        // matching the space `top` was just computed in.
         self.stylePanel.style.left = "auto";
-        self.stylePanel.style.right = margin + "px";
-        self.stylePanel.style.bottom = Math.round(c.height - top + gap) + "px";
+        self.stylePanel.style.top = "auto";
+        self.stylePanel.style.right =
+          Math.round(self._chromeRightInset(c)) + "px";
+        self.stylePanel.style.bottom =
+          Math.round(self._chromeHeight() - top + gap) + "px";
       }
     },
 
@@ -3255,9 +3289,11 @@
         // shifted off-centre with nothing beside it to justify the gap.
         this.stylePanel.style.left = "";
         this.stylePanel.style.right = "";
+        this.stylePanel.style.top = "";
         this.stylePanel.style.bottom = "";
         if (this.toolbar) this.toolbar.style.transform = "";
         this._toggleStylePanel(false);
+        this._positionDockedPanel();
       }
 
       if (this.styleTrigger) {
@@ -3270,6 +3306,35 @@
       if (compact) this._positionStyleChrome();
     },
 
+    // The origin the floating chrome is positioned against.
+    //
+    // Canvas mode: the surfaces are `absolute` inside the container, so
+    // offsets are container-relative. Strip mode: the container IS the
+    // scrolling element, so the chrome is `fixed` and its offsets are
+    // viewport coordinates — subtracting the container's rect there would
+    // be wrong by however far the strip sits from the viewport origin, and
+    // right only by accident when it sits at 0,0.
+    _chromeOrigin: function() {
+      if (this.handleKind === "strip") return { left: 0, top: 0 };
+      var c = this.handle.container.getBoundingClientRect();
+      return { left: c.left, top: c.top };
+    },
+
+    // Distance from the positioning origin's RIGHT edge to the container's,
+    // plus the margin — so a fixed surface pins to the strip's right edge
+    // rather than the window's when the strip doesn't fill the screen.
+    _chromeRightInset: function(c) {
+      if (this.handleKind !== "strip") return CHROME_MARGIN;
+      return window.innerWidth - c.right + CHROME_MARGIN;
+    },
+
+    // Height of whatever the chrome's `bottom` offsets are measured from —
+    // the viewport when fixed, the container when absolute.
+    _chromeHeight: function() {
+      if (this.handleKind === "strip") return window.innerHeight;
+      return this.handle.container.getBoundingClientRect().height;
+    },
+
     // Parked just above the tool bar and flush with its left edge, the way
     // tldraw's sits. Recomputed rather than expressed in CSS because the
     // tool bar's width changes as tools overflow.
@@ -3277,11 +3342,11 @@
       var self = this;
       if (!self.actionBar || !self.toolbar) return;
       var t = self.toolbar.getBoundingClientRect();
-      var c = self.handle.container.getBoundingClientRect();
       if (!t.width) return;
-      self.actionBar.style.left = Math.round(t.left - c.left) + "px";
+      var o = self._chromeOrigin();
+      self.actionBar.style.left = Math.round(t.left - o.left) + "px";
       self.actionBar.style.top =
-        Math.round(t.top - c.top - self.actionBar.offsetHeight - 4) + "px";
+        Math.round(t.top - o.top - self.actionBar.offsetHeight - 4) + "px";
     },
 
     // Delete whatever is selected, matching the Backspace/Delete key path so

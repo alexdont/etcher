@@ -4,6 +4,35 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.10.1] — 2026-08-04
+
+### Fixed
+
+- **Strip-mode chrome was invisible once the reader scrolled.** In strip mode
+  the layer's container *is* the scrolling element, so absolutely positioned
+  chrome scrolls away with the content. 0.4.1 solved that for the tool bar
+  with `.etcher-toolbar[data-strip] { position: fixed }`; 0.10.0 added the
+  action bar, style panel and style trigger, stamped two of them `data-strip`
+  and gave none of them the rule. They stayed `absolute`, so the action bar
+  and panel drifted off the top of the viewport by exactly `scrollTop`, and
+  the panel's `top: 12px` parked it at the top of the entire chapter.
+
+  All four surfaces now carry both the marker and the rule. Positioning was
+  the subtler half: `_positionActionBar` and `_positionStyleChrome` computed
+  container-relative offsets, which are correct for `absolute` chrome but
+  wrong for `fixed` chrome by however far the strip sits from the viewport
+  origin — and right *by accident* when it sits at 0,0. Both now ask
+  `_chromeOrigin/0` which space to emit, so canvas mode keeps its
+  container-relative maths and strip mode gets viewport coordinates. The
+  compact popup's `bottom` follows the viewport rather than the container
+  height, and the docked panel's inset is measured from the container's rect
+  so it pins to the strip's corner rather than the window's when the strip
+  doesn't fill the screen.
+
+  Covered by `test/js/strip_chrome_test.js`, in which every case places the
+  strip away from the viewport origin — the arrangement that tells the right
+  answer from the wrong one, and the one container-relative maths hides.
+
 ## [0.10.0] — 2026-08-04
 
 ### Added

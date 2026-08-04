@@ -34,6 +34,11 @@ defmodule Etcher.Raster do
   @default_color "#ef4444"
   @default_stroke 2
 
+  # Arrow head, in image px. Clamped to half the arrow's length at draw time
+  # so a very short connector still reads as an arrow rather than a blob.
+  @arrow_head_len 14
+  @arrow_head_ratio 0.55
+
   @type annotation :: map()
   @type opts :: keyword()
 
@@ -145,6 +150,12 @@ defmodule Etcher.Raster do
 
   defp shape_primitives(k, g) when k in ["line", "dimension"], do: ab_line(g)
 
+  # A connector is an `a`/`b` line plus the V at its head. The endpoints are
+  # written into the geometry every time the canvas draws it, so baking one
+  # needs no knowledge of what it's bound to — the coordinates are already
+  # where the bound shapes put them.
+  defp shape_primitives("arrow", g), do: ab_line(g) ++ arrow_head(g)
+
   defp shape_primitives("callout", g) do
     box = rect(get(g, "text_box") || %{})
 
@@ -174,6 +185,37 @@ defmodule Etcher.Raster do
 
       _ ->
         []
+    end
+  end
+
+  # The V at an arrow's head: tip at `b`, wings opening back toward `a`.
+  # Sized in image px here rather than the canvas's screen px — there is no
+  # zoom to correct for in a baked image — so it stays proportional to the
+  # arrow instead of vanishing on a long one.
+  defp arrow_head(g) do
+    with {a, b} when not is_nil(a) and not is_nil(b) <- {get(g, "a"), get(g, "b")},
+         {ax, ay} <- pt(a),
+         {bx, by} <- pt(b),
+         dx = num(ax) - num(bx),
+         dy = num(ay) - num(by),
+         len when len > 0 <- :math.sqrt(dx * dx + dy * dy) do
+      ux = dx / len
+      uy = dy / len
+      head = min(@arrow_head_len, len / 2)
+      half = head * @arrow_head_ratio
+      basex = num(bx) + ux * head
+      basey = num(by) + uy * head
+
+      [
+        {:polyline,
+         [
+           {basex - uy * half, basey + ux * half},
+           {num(bx), num(by)},
+           {basex + uy * half, basey - ux * half}
+         ]}
+      ]
+    else
+      _ -> []
     end
   end
 

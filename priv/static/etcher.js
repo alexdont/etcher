@@ -911,6 +911,31 @@
       ".etcher-bezier-handle:hover { transform: scale(1.5); }",
       ".etcher-bezier-handle.is-dragging { cursor: grabbing; transform: scale(1.7); }",
       ".etcher-anchor-handle.is-corner { fill: currentColor; fill-opacity: 0.5; }",
+      // Connector dots — the eight bindable points that appear on a shape's
+      // box when the cursor tool hovers it. Drag one to pull an arrow out.
+      // Named apart from `.etcher-anchor-handle` above, which is the bezier
+      // editor's node anchor and unrelated.
+      //
+      // Deliberately quieter than `.etcher-handle`: these show on mere hover,
+      // so eight loud dots on every shape the cursor crosses would make the
+      // canvas twitch. They read as a hint until you approach one.
+      ".etcher-connector-dot {",
+      "  fill: #fff; stroke: currentColor; stroke-width: 2; stroke-opacity: 0.75;",
+      "  pointer-events: all; cursor: crosshair;",
+      "  transform-box: fill-box; transform-origin: center;",
+      "  transition: transform 80ms ease, fill 80ms ease, stroke-opacity 80ms ease;",
+      "}",
+      ".etcher-connector-dot:hover {",
+      "  transform: scale(1.5); fill: currentColor; stroke-opacity: 1;",
+      "}",
+      // Anchors of a candidate target, shown while an arrow is mid-drag.
+      // `pointer-events: none` because the pointer is captured by the dot
+      // the drag started from — these are a readout, not a hit target.
+      ".etcher-connector-dot.is-target { pointer-events: none; }",
+      // The one the end will land on if released now.
+      ".etcher-connector-dot.is-snap {",
+      "  transform: scale(1.9); fill: currentColor; stroke-opacity: 1;",
+      "}",
       // Midpoint "ghost" dot for polygon edges — faintly visible
       // whenever the polygon is in edit mode, so the user can see at
       // a glance where a new vertex would land. Fades to full
@@ -1090,6 +1115,42 @@
   var IMAGE_RADIUS_RATIO = 0.045;
   var IMAGE_RADIUS_MIN = 2;
   var IMAGE_RADIUS_MAX = 16;
+
+  // Connector anchors — the eight points on a shape an arrow can bind to:
+  // the four corners and four side midpoints of its bounding box, held as
+  // fractions of that box. Expressing them against the bbox rather than the
+  // outline is what lets every kind be bindable through one code path; the
+  // cost is that a circle binds at its box's corners rather than on its
+  // curve, which is the same trade tldraw and Figma make.
+  //
+  // Listed clockwise from the top-left, which is the order the hover dots
+  // are created in and therefore their DOM order.
+  var ARROW_ANCHORS = [
+    { id: "nw", fx: 0,   fy: 0   },
+    { id: "n",  fx: 0.5, fy: 0   },
+    { id: "ne", fx: 1,   fy: 0   },
+    { id: "e",  fx: 1,   fy: 0.5 },
+    { id: "se", fx: 1,   fy: 1   },
+    { id: "s",  fx: 0.5, fy: 1   },
+    { id: "sw", fx: 0,   fy: 1   },
+    { id: "w",  fx: 0,   fy: 0.5 }
+  ];
+  var ARROW_ANCHOR_IDS = ARROW_ANCHORS.map(function(a) { return a.id; });
+
+  // How near (screen px) the pointer has to bring a dragging arrow end
+  // before it snaps onto an anchor. Generous, because the snap is the
+  // point of the gesture — you aim at a shape, not at a 5px dot.
+  var ARROW_SNAP_PX = 26;
+
+  // How far outside a shape's box (screen px) the pointer can wander while
+  // that shape still counts as a snap candidate and shows its anchors. Wider
+  // than the snap radius so the dots appear *before* the end jumps to one,
+  // which is what makes the magnetism feel announced rather than abrupt.
+  var ARROW_TARGET_PAD_PX = 48;
+
+  // Screen-px geometry of the V at an arrow's head.
+  var ARROW_HEAD_LEN = 11;
+  var ARROW_HEAD_HALF_WIDTH = 6;
 
   // Gap between the dots of a "dotted" stroke, as a multiple of its width.
   // Shared by shapes and markers so the two read as the same dot pattern.
@@ -6268,6 +6329,10 @@
         self._clearEraserHover();
       }
       self.activeTool = toolKey;
+      // Connector dots are a cursor-tool affordance. Any other tool means
+      // the user is drawing, and eight hit-targets sitting on the shape
+      // would swallow the first click of that stroke.
+      if (toolKey != null) self._removeConnectorDots();
       // Drawing and editing are mutually exclusive — picking a tool
       // means we're done admiring the current edit. Same goes for
       // multi-selection: entering draw mode clears the group so a
@@ -7051,43 +7116,22 @@
             shaftEl.setAttribute("y2", bC.y);
           }
 
-          // V-arrowheads at each endpoint, opening backward toward
-          // the other end. Skip when the line is degenerate (length
-          // 0) — draft state during the very first pointermove tick.
-          var ddx = bC.x - aC.x;
-          var ddy = bC.y - aC.y;
-          var dlen = Math.sqrt(ddx * ddx + ddy * ddy);
-          if (dlen > 0.001) {
-            var ux = ddx / dlen, uy = ddy / dlen;
-            var arrowLen = 10;
-            var arrowHalfWidth = 5;
-            // Arrow at A: tip at A, wings extending toward B
-            // (`+ u * arrowLen`) ± perpendicular.
-            var aWxA = aC.x + ux * arrowLen + -uy * arrowHalfWidth;
-            var aWyA = aC.y + uy * arrowLen + ux * arrowHalfWidth;
-            var aWxB = aC.x + ux * arrowLen - -uy * arrowHalfWidth;
-            var aWyB = aC.y + uy * arrowLen - ux * arrowHalfWidth;
-            if (arrowEls[0]) {
-              arrowEls[0].setAttribute(
-                "points",
-                aWxA + "," + aWyA + " " + aC.x + "," + aC.y + " " + aWxB + "," + aWyB
-              );
-            }
-            // Arrow at B: tip at B, wings extending toward A
-            // (`- u * arrowLen`) ± perpendicular.
-            var bWxA = bC.x - ux * arrowLen + -uy * arrowHalfWidth;
-            var bWyA = bC.y - uy * arrowLen + ux * arrowHalfWidth;
-            var bWxB = bC.x - ux * arrowLen - -uy * arrowHalfWidth;
-            var bWyB = bC.y - uy * arrowLen - ux * arrowHalfWidth;
-            if (arrowEls[1]) {
-              arrowEls[1].setAttribute(
-                "points",
-                bWxA + "," + bWyA + " " + bC.x + "," + bC.y + " " + bWxB + "," + bWyB
-              );
-            }
-          } else {
-            if (arrowEls[0]) arrowEls[0].setAttribute("points", "");
-            if (arrowEls[1]) arrowEls[1].setAttribute("points", "");
+          // V-arrowheads at each endpoint, opening backward toward the
+          // other end. `_vArrowPoints` returns "" for a degenerate line
+          // (length 0) — draft state during the very first pointermove
+          // tick — which blanks the heads rather than drawing a spike in
+          // an arbitrary direction.
+          var dimHeadLen = 10;
+          var dimHeadHalf = 5;
+          if (arrowEls[0]) {
+            arrowEls[0].setAttribute(
+              "points", self._vArrowPoints(aC, bC, dimHeadLen, dimHeadHalf)
+            );
+          }
+          if (arrowEls[1]) {
+            arrowEls[1].setAttribute(
+              "points", self._vArrowPoints(bC, aC, dimHeadLen, dimHeadHalf)
+            );
           }
 
           // Label at lerp(A, B, title_offset). Always horizontal
@@ -7145,6 +7189,38 @@
           };
           break;
         }
+        case "arrow": {
+          // Connector: a shaft with one V-arrowhead at B, the end that
+          // points at the target. Resolve the bindings first so the arrow
+          // is drawn against where its shapes are *now* — this is the step
+          // that makes it follow them, and it runs on every render, so a
+          // pan/zoom frame re-resolves too (harmless: same image-px answer,
+          // and it costs one bbox per bound end).
+          self._resolveArrowEnds(shape);
+          var arShaft = el.querySelector(".etcher-arrow-shaft");
+          var arHead = el.querySelector(".etcher-arrow-head");
+          var arAImg = { x: g.a[0], y: g.a[1] };
+          var arBImg = { x: g.b[0], y: g.b[1] };
+          var arAC = self._imageToContainer(arAImg);
+          var arBC = self._imageToContainer(arBImg);
+          if (arShaft) {
+            arShaft.setAttribute("x1", arAC.x);
+            arShaft.setAttribute("y1", arAC.y);
+            arShaft.setAttribute("x2", arBC.x);
+            arShaft.setAttribute("y2", arBC.y);
+          }
+          if (arHead) {
+            arHead.setAttribute(
+              "points",
+              self._vArrowPoints(arBC, arAC, ARROW_HEAD_LEN, ARROW_HEAD_HALF_WIDTH)
+            );
+          }
+          bboxTopImage = {
+            x: (arAImg.x + arBImg.x) / 2,
+            y: Math.min(arAImg.y, arBImg.y)
+          };
+          break;
+        }
       }
 
       // Inline title sibling for non-callout shapes (rect/circle/poly/
@@ -7156,6 +7232,30 @@
         // anchor without recomputing the parent's bbox.
         shape.bboxTopImage = bboxTopImage;
         self._renderTitleSibling(shape, bboxTopImage);
+      }
+
+      // Connector dots are positioned in container px, so they have to be
+      // re-placed whenever their shape is redrawn — a body drag renders the
+      // shape without ever touching hover state, which used to leave the
+      // dots stranded over the spot the shape had left.
+      if (shape === self._connectorDotShape) self._positionConnectorDots();
+
+      // Connectors bound to this shape have to be redrawn whenever it moves,
+      // resizes, or is restored — and every one of those paths ends here, so
+      // this is the single place that catches them all instead of a call
+      // bolted onto each gesture (body drag, handle drag, undo, collab
+      // apply, arrange). The guard stops the recursion at one level: the
+      // arrow's own render would otherwise come straight back here.
+      if (shape.kind !== "arrow" && shape.uuid && !self._renderingConnectors) {
+        var connectors = self._arrowsBoundTo(shape.uuid);
+        if (connectors.length) {
+          self._renderingConnectors = true;
+          try {
+            connectors.forEach(function(c) { self._renderShape(c); });
+          } finally {
+            self._renderingConnectors = false;
+          }
+        }
       }
     },
 
@@ -7979,6 +8079,16 @@
       if (this.editingTitleShape) {
         this._positionAllTitleHandles(this.editingTitleShape);
       }
+      // Connector dots are positioned in container px like handles are, so
+      // they need re-placing on every pan/zoom frame or they'd stay where
+      // the shape used to be.
+      this._positionConnectorDots();
+      if (this._targetDotShape) {
+        this._paintTargetDots({
+          candidate: this._targetDotShape,
+          snap: this._lastArrowSnap || null
+        });
+      }
       // Keep an open tooltip glued to its anchor shape. `_renderAll`
       // runs on every pan/zoom animation frame (after the shapes above
       // have moved), so re-anchoring here makes the tooltip track the
@@ -8615,6 +8725,11 @@
       if (this.overlayWrapper) {
         this.overlayWrapper.classList.toggle("is-shape-hovered", !!next);
       }
+      // Connector dots follow hover: eight bindable points on whatever the
+      // cursor is over, gone the moment it leaves. Suppressed on the title
+      // satellite — the user is reaching for the label there, and dots
+      // under the pointer would take the grab.
+      this._syncConnectorDots(onTitle ? null : next);
     },
 
     // True iff `pt` (image-px) lies inside `shape`'s title satellite
@@ -8991,6 +9106,7 @@
           return { x: aMinX, y: aMinY, w: aMaxX - aMinX, h: aMaxY - aMinY };
         }
         case "line":
+        case "arrow":
         case "dimension": {
           var ax = g.a[0], ay = g.a[1], bx = g.b[0], by = g.b[1];
           return {
@@ -9013,6 +9129,375 @@
         }
       }
       return null;
+    },
+
+    // -------------------------------------------------------------------------
+    // Connectors — arrows that bind to a shape's anchor points and follow it.
+    //
+    // The binding is the source of truth; an arrow's stored `a`/`b` are a
+    // cache of where those bindings last resolved to. Resolving at render
+    // time (rather than rewriting arrows from each gesture that moves a
+    // shape) is what makes a connector follow its endpoints through moves,
+    // resizes, undo, and collab updates without any of those paths needing
+    // to know connectors exist.
+    // -------------------------------------------------------------------------
+
+    // The eight bindable points on a shape, in image px.
+    _anchorPointsFor: function(shape) {
+      var box = shape && this._shapeBBoxImagePx(shape);
+      if (!box) return [];
+      return ARROW_ANCHORS.map(function(a) {
+        return { id: a.id, x: box.x + box.w * a.fx, y: box.y + box.h * a.fy };
+      });
+    },
+
+    _anchorPointImage: function(shape, anchorId) {
+      var box = shape && this._shapeBBoxImagePx(shape);
+      if (!box) return null;
+      for (var i = 0; i < ARROW_ANCHORS.length; i++) {
+        var a = ARROW_ANCHORS[i];
+        if (a.id === anchorId) {
+          return { x: box.x + box.w * a.fx, y: box.y + box.h * a.fy };
+        }
+      }
+      return null;
+    },
+
+    // Where a single binding currently resolves to, or null if it can't be
+    // resolved — no binding, the target has been deleted, or it points at
+    // another arrow (never offered, but a hand-authored payload could).
+    _resolveBinding: function(binding) {
+      if (!binding || !binding.uuid) return null;
+      var target = this._shapeByUuid(binding.uuid);
+      if (!target || target.kind === "arrow") return null;
+      return this._anchorPointImage(target, binding.anchor);
+    },
+
+    // Refresh a connector's cached endpoints from its bindings. Unresolvable
+    // ends keep their last coordinates, so an arrow whose target was deleted
+    // stays exactly where it was drawn instead of collapsing to the origin.
+    _resolveArrowEnds: function(shape) {
+      if (!shape || shape.kind !== "arrow" || !shape.geometry) return;
+      var g = shape.geometry;
+      var from = this._resolveBinding(g.from);
+      if (from) g.a = [from.x, from.y];
+      var to = this._resolveBinding(g.to);
+      if (to) g.b = [to.x, to.y];
+    },
+
+    _arrowsBoundTo: function(uuid) {
+      if (!uuid) return [];
+      return (this.shapes || []).filter(function(s) {
+        if (s.kind !== "arrow" || !s.geometry) return false;
+        var g = s.geometry;
+        return (g.from && g.from.uuid === uuid) ||
+               (g.to && g.to.uuid === uuid);
+      });
+    },
+
+    // Points for a V-arrowhead: the tip sits at `tip` and the two wings open
+    // back toward `toward`. Returns a `points` string for a <polyline>, or
+    // "" when the two coincide and there's no direction to open along — a
+    // draft's first pointermove tick, before the drag has any length.
+    _vArrowPoints: function(tip, toward, len, halfWidth) {
+      var dx = toward.x - tip.x;
+      var dy = toward.y - tip.y;
+      var d = Math.sqrt(dx * dx + dy * dy);
+      if (!(d > 0.001)) return "";
+      var ux = dx / d, uy = dy / d;
+      var bx = tip.x + ux * len, by = tip.y + uy * len;
+      var px = -uy * halfWidth, py = ux * halfWidth;
+      return (bx + px) + "," + (by + py) + " " +
+             tip.x + "," + tip.y + " " +
+             (bx - px) + "," + (by - py);
+    },
+
+    // The <g> a connector is drawn into: shaft + one head, both in
+    // currentColor so `_applyShapeColor` recolors the pair in one stroke.
+    // Shared by the drag preview and the hydrate path so a freshly drawn
+    // arrow and a reloaded one are the same DOM.
+    _makeArrowEl: function() {
+      var g = svgEl("g");
+      g.classList.add("etcher-arrow");
+      var shaft = svgEl("line", {
+        "stroke-width": "2",
+        stroke: "currentColor",
+        fill: "none",
+        "stroke-linecap": "round"
+      });
+      shaft.classList.add("etcher-arrow-shaft");
+      var head = svgEl("polyline", {
+        "stroke-width": "2",
+        stroke: "currentColor",
+        fill: "none",
+        "stroke-linejoin": "round",
+        "stroke-linecap": "round"
+      });
+      head.classList.add("etcher-arrow-head");
+      g.appendChild(shaft);
+      g.appendChild(head);
+      return g;
+    },
+
+    // Can the user pull connectors out of this shape? Cursor tool only —
+    // any other tool means they're drawing, and eight hit-targets sitting
+    // on top of the shape would eat the first click of that stroke.
+    //
+    // Excluded in edit mode as well, because the resize handles occupy the
+    // same eight points: the four corners exactly, and (for a rectangle)
+    // the four side midpoints too. Two stacked hit-targets per position is
+    // a coin toss between resizing and connecting. Connectors are the
+    // hover affordance, handles are the selected one.
+    _connectorsAvailableFor: function(shape) {
+      return !!shape &&
+        this.annotationMode === true &&
+        this.activeTool == null &&
+        shape.kind !== "arrow" &&
+        shape.readonly !== true &&
+        this.editingShape !== shape &&
+        !this._arrowDrag;
+    },
+
+    // Show the eight connector dots on `shape` (or clear them for null).
+    // Driven from hover, so this is called on every shape the cursor
+    // crosses — it early-outs when the target hasn't changed.
+    _syncConnectorDots: function(shape) {
+      var target = this._connectorsAvailableFor(shape) ? shape : null;
+      if (target === this._connectorDotShape) {
+        if (target) this._positionConnectorDots();
+        return;
+      }
+      this._removeConnectorDots();
+      if (!target) return;
+      var self = this;
+      this._activateOverlayForShape(target);
+      this._connectorDotShape = target;
+      this._connectorDots = this._anchorPointsFor(target).map(function(pt) {
+        var dot = svgEl("circle", { r: 4.5 });
+        dot.classList.add("etcher-connector-dot");
+        dot.style.color = self._handleColor(target);
+        dot.dataset.anchor = pt.id;
+        self.svg.appendChild(dot);
+        self._positionHandle(dot, pt);
+        dot.addEventListener("pointerdown", function(e) {
+          self._startArrowDrag(target, pt.id, e);
+        });
+        return dot;
+      });
+    },
+
+    _positionConnectorDots: function() {
+      var shape = this._connectorDotShape;
+      if (!shape || !this._connectorDots || !this._connectorDots.length) return;
+      var pts = this._anchorPointsFor(shape);
+      var self = this;
+      this._connectorDots.forEach(function(dot, i) {
+        if (pts[i]) self._positionHandle(dot, pts[i]);
+      });
+    },
+
+    _removeConnectorDots: function() {
+      (this._connectorDots || []).forEach(function(d) {
+        if (d.parentNode) d.parentNode.removeChild(d);
+      });
+      this._connectorDots = [];
+      this._connectorDotShape = null;
+    },
+
+    // What a dragging arrow end would attach to at `pt`.
+    //
+    // `candidate` is the shape whose anchors should be on screen — the
+    // topmost one whose box the pointer is inside or near. `snap` is set
+    // only once the pointer is actually within snapping distance of one of
+    // that shape's anchors. Keeping them separate is what makes the
+    // magnetism legible: the dots appear first as an offer, and the end
+    // jumps only when you close in on one.
+    //
+    // Distances are measured in container px so the feel is the same at
+    // every zoom — an image-px threshold would be unusably tight zoomed out
+    // and sloppy zoomed in.
+    _arrowSnapState: function(pt, excludeUuid) {
+      var none = { candidate: null, snap: null };
+      var shapes = this.shapes || [];
+      var cursor;
+      try { cursor = this._imageToContainer(pt); } catch (_) { return none; }
+      var stripMode = this.handleKind === "strip";
+      var ptImageIdx =
+        stripMode && typeof pt.imageIdx === "number" ? pt.imageIdx : null;
+
+      for (var i = shapes.length - 1; i >= 0; i--) {
+        var s = shapes[i];
+        if (!s.uuid || s.uuid === excludeUuid || s.kind === "arrow") continue;
+        if (stripMode && s.image_idx !== ptImageIdx) continue;
+        var box = this._shapeBBoxImagePx(s);
+        if (!box) continue;
+        var tl = this._imageToContainer({ x: box.x, y: box.y });
+        var br = this._imageToContainer({ x: box.x + box.w, y: box.y + box.h });
+        var x1 = Math.min(tl.x, br.x) - ARROW_TARGET_PAD_PX;
+        var x2 = Math.max(tl.x, br.x) + ARROW_TARGET_PAD_PX;
+        var y1 = Math.min(tl.y, br.y) - ARROW_TARGET_PAD_PX;
+        var y2 = Math.max(tl.y, br.y) + ARROW_TARGET_PAD_PX;
+        if (cursor.x < x1 || cursor.x > x2 || cursor.y < y1 || cursor.y > y2) {
+          continue;
+        }
+        // Topmost shape in range wins the offer, matching `_shapeAt`'s
+        // reverse walk — the one drawn on top is the one you meant.
+        var anchors = this._anchorPointsFor(s);
+        var best = null;
+        var bestDist = ARROW_SNAP_PX * ARROW_SNAP_PX;
+        for (var j = 0; j < anchors.length; j++) {
+          var ac = this._imageToContainer(anchors[j]);
+          var dx = ac.x - cursor.x, dy = ac.y - cursor.y;
+          var d2 = dx * dx + dy * dy;
+          if (d2 <= bestDist) { bestDist = d2; best = anchors[j]; }
+        }
+        return {
+          candidate: s,
+          snap: best
+            ? { shape: s, anchor: best.id, x: best.x, y: best.y }
+            : null
+        };
+      }
+      return none;
+    },
+
+    // Paint the candidate's anchors while a connector is being dragged,
+    // highlighting the one that would take the end. Separate from the hover
+    // dots so the source shape can keep showing its own set underneath.
+    _paintTargetDots: function(state) {
+      var candidate = state && state.candidate;
+      var snapId = state && state.snap ? state.snap.anchor : null;
+      // Remembered so a pan/zoom frame can re-place the dots without
+      // re-running the search — `_renderAll` has no pointer to search from.
+      this._lastArrowSnap = (state && state.snap) || null;
+      if (candidate !== this._targetDotShape) {
+        this._removeTargetDots();
+        if (candidate) {
+          var self = this;
+          this._targetDotShape = candidate;
+          this._targetDots = this._anchorPointsFor(candidate).map(function(pt) {
+            var dot = svgEl("circle", { r: 4.5 });
+            dot.classList.add("etcher-connector-dot", "is-target");
+            dot.style.color = self._handleColor(candidate);
+            dot.dataset.anchor = pt.id;
+            self.svg.appendChild(dot);
+            self._positionHandle(dot, pt);
+            return dot;
+          });
+        }
+      } else if (candidate) {
+        // Same shape, but it may have moved under a pan — keep them glued.
+        var pts = this._anchorPointsFor(candidate);
+        var self2 = this;
+        this._targetDots.forEach(function(dot, i) {
+          if (pts[i]) self2._positionHandle(dot, pts[i]);
+        });
+      }
+      (this._targetDots || []).forEach(function(dot) {
+        dot.classList.toggle("is-snap", dot.dataset.anchor === snapId);
+      });
+    },
+
+    _removeTargetDots: function() {
+      (this._targetDots || []).forEach(function(d) {
+        if (d.parentNode) d.parentNode.removeChild(d);
+      });
+      this._targetDots = [];
+      this._targetDotShape = null;
+    },
+
+    // Pull a connector out of one of `source`'s anchor dots. The arrow's
+    // tail is bound to that anchor from the first frame; the head follows
+    // the pointer and binds to whatever it's released on.
+    _startArrowDrag: function(source, anchorId, e) {
+      if (e.button != null && e.button !== 0) return;
+      // The dot sits over the shape — without this the press would also
+      // start a body move, and the shape would travel with the arrow.
+      e.preventDefault();
+      e.stopPropagation();
+      var self = this;
+      var startPt;
+      try { startPt = self._toImage(e); } catch (_) { return; }
+      var tail = self._anchorPointImage(source, anchorId) || startPt;
+
+      var el = self._makeArrowEl();
+      el.classList.add("etcher-shape", "is-draft");
+      self._applyShapeColor(el, self.activeColor);
+      self.svg.appendChild(el);
+
+      var draft = {
+        kind: "arrow",
+        geometry: {
+          a: [tail.x, tail.y],
+          b: [startPt.x, startPt.y],
+          from: { uuid: source.uuid, anchor: anchorId },
+          to: null
+        },
+        el: el
+      };
+      self._arrowDrag = draft;
+      // The source's own hover dots would sit under the pointer for the
+      // whole drag and re-render on every frame; the target dots are the
+      // ones that matter now.
+      self._removeConnectorDots();
+      self._hideTooltip();
+      self._renderShape(draft);
+
+      // Tracked on `document` rather than on the dot the gesture started
+      // from: `_removeConnectorDots` above just took that dot out of the
+      // DOM, which drops both its listeners and any pointer capture it
+      // held. The draft `<g>` is no good either — shapes are
+      // `pointer-events: none` so pan/zoom can pass through them, and a
+      // capture there would never deliver a move.
+      var moved = false;
+
+      function onMove(ev) {
+        var pt;
+        try { pt = self._toImage(ev); } catch (_) { return; }
+        if (!moved) {
+          var a = self._imageToContainer(startPt);
+          var b = self._imageToContainer(pt);
+          var sdx = b.x - a.x, sdy = b.y - a.y;
+          // Same 3px screen dead zone the body/title drags use, so a
+          // stray click on a dot doesn't leave a stub arrow behind.
+          if (sdx * sdx + sdy * sdy < 9) return;
+          moved = true;
+        }
+        var state = self._arrowSnapState(pt, null);
+        self._paintTargetDots(state);
+        if (state.snap) {
+          draft.geometry.b = [state.snap.x, state.snap.y];
+          draft.geometry.to = {
+            uuid: state.snap.shape.uuid, anchor: state.snap.anchor
+          };
+        } else {
+          draft.geometry.b = [pt.x, pt.y];
+          draft.geometry.to = null;
+        }
+        self._renderShape(draft);
+      }
+
+      function onUp() {
+        document.removeEventListener("pointermove", onMove, true);
+        document.removeEventListener("pointerup", onUp, true);
+        document.removeEventListener("pointercancel", onUp, true);
+        self._arrowDrag = null;
+        self._removeTargetDots();
+        if (!moved) {
+          // A click that never left the dot: no arrow, and no undo entry
+          // for one either.
+          if (el.parentNode) el.parentNode.removeChild(el);
+          return;
+        }
+        el.classList.remove("is-draft");
+        self._finalizeShape("arrow", draft.geometry, el);
+      }
+
+      // Capture phase so the drag wins over the doc-level hover/tap
+      // handlers for its duration.
+      document.addEventListener("pointermove", onMove, true);
+      document.addEventListener("pointerup", onUp, true);
+      document.addEventListener("pointercancel", onUp, true);
     },
 
     // Bring a shape into the viewport. Strip mode scrolls the strip
@@ -9706,6 +10191,18 @@
           shape.titleGroup.parentNode.removeChild(shape.titleGroup);
         }
         this.shapes.splice(idx, 1);
+      }
+      // Dots belonging to the shape that just went away would be left
+      // floating over empty canvas, still draggable into a connector
+      // bound to a uuid that no longer exists.
+      if (this._connectorDotShape === shape) this._removeConnectorDots();
+      // Connectors that pointed at it keep their last coordinates (see
+      // `_resolveArrowEnds`) but must be redrawn, since until now they
+      // were being positioned by a shape that's no longer in the list.
+      var orphans = this._arrowsBoundTo(uuid);
+      if (orphans.length) {
+        var self = this;
+        orphans.forEach(function(a) { self._renderShape(a); });
       }
       this._hideTooltip();
       this._emitChanged();
@@ -10976,11 +11473,12 @@
           return dax * dax + day * day <= r * r;
         }
         case "line":
+        case "arrow":
         case "dimension": {
           // Hit if the point is within ~tolerance image px of the
           // line segment from a to b. Tolerance scales with viewport
           // so the hit target stays comfortable at any zoom. Shared
-          // between dimension + line since both store
+          // between dimension + line + arrow since all three store
           // `geometry = { a: [x,y], b: [x,y] }`.
           var dax2 = g.b[0] - g.a[0];
           var day2 = g.b[1] - g.a[1];
@@ -11667,14 +12165,19 @@
           el.appendChild(lnShaft);
           break;
         }
+        // Connector — shaft + one head. Same builder the drag preview
+        // uses, so a reloaded arrow is the same DOM as a fresh one.
+        case "arrow": el = this._makeArrowEl(); break;
         default: return;
       }
 
       // Non-group shapes get a uniform stroke-width on the root.
-      // Callout / text / dimension / line are <g> wrappers — their
+      // Callout / text / dimension / line / arrow are <g> wrappers — their
       // visible strokes live on the inner children, so leaving the
       // group unstroked avoids painting a bogus border on the wrapper.
-      if (ann.kind !== "callout" && ann.kind !== "text" && ann.kind !== "dimension" && ann.kind !== "line") {
+      if (ann.kind !== "callout" && ann.kind !== "text" &&
+          ann.kind !== "dimension" && ann.kind !== "line" &&
+          ann.kind !== "arrow") {
         el.setAttribute("stroke-width", "2");
       }
       el.classList.add("etcher-shape");
@@ -11774,6 +12277,9 @@
 
       this.editingShape = shape;
       shape.el.classList.add("is-editing");
+      // Hand the eight points over to the resize handles about to be drawn
+      // there — see `_connectorsAvailableFor`.
+      if (this._connectorDotShape === shape) this._removeConnectorDots();
       this._syncArrangeButtons();
       this._showLinkMenuFor(shape);
       this._hideTooltip();
@@ -12729,6 +13235,7 @@
         }
         case "dimension":
         case "line":
+        case "arrow":
           return [
             { x: g.a[0], y: g.a[1] },  // 0: endpoint A
             { x: g.b[0], y: g.b[1] }   // 1: endpoint B
@@ -12809,6 +13316,9 @@
         handleEl.removeEventListener("pointerup", onUp);
         handleEl.removeEventListener("pointercancel", onUp);
         try { handleEl.releasePointerCapture(ev.pointerId); } catch (_) {}
+        // An arrow endpoint drag paints the target's anchors as it goes;
+        // they're a drag-time readout and shouldn't outlive the release.
+        self._removeTargetDots();
         if (!dragged) {
           // Pure click on a vertex — select it so Backspace / Delete
           // can remove just that point instead of the whole shape.
@@ -13013,6 +13523,18 @@
             a: [geom.a[0] + dx, geom.a[1] + dy],
             b: [geom.b[0] + dx, geom.b[1] + dy]
           };
+        case "arrow":
+          // Bindings must survive the translation — dropping them here
+          // would silently unglue a connector the moment anything moved
+          // it. A bound end snaps back on the next render anyway, so
+          // dragging a fully bound arrow's body is a no-op by
+          // construction; only free ends actually travel.
+          return {
+            a: [geom.a[0] + dx, geom.a[1] + dy],
+            b: [geom.b[0] + dx, geom.b[1] + dy],
+            from: geom.from || null,
+            to: geom.to || null
+          };
         default:
           return geom;
       }
@@ -13106,6 +13628,34 @@
             shape.geometry = { a: [pt.x, pt.y], b: [dimGeom.b[0], dimGeom.b[1]] };
           } else if (idx === 1) {
             shape.geometry = { a: [dimGeom.a[0], dimGeom.a[1]], b: [pt.x, pt.y] };
+          }
+          break;
+        }
+        case "arrow": {
+          // Same two-endpoint drag as line/dimension, plus re-binding:
+          // the end being dragged detaches from whatever it was on and
+          // re-attaches to whatever anchor it's released near. Without
+          // this an endpoint handle would fight the binding — the drag
+          // would move `a`/`b`, and the next render would snap it
+          // straight back to the old anchor.
+          var arGeom = startGeom;
+          var arState = this._arrowSnapState(pt, shape.uuid);
+          this._paintTargetDots(arState);
+          var arSnap = arState.snap;
+          var arEnd = arSnap ? { x: arSnap.x, y: arSnap.y } : pt;
+          var arBind = arSnap
+            ? { uuid: arSnap.shape.uuid, anchor: arSnap.anchor }
+            : null;
+          if (idx === 0) {
+            shape.geometry = {
+              a: [arEnd.x, arEnd.y], b: [arGeom.b[0], arGeom.b[1]],
+              from: arBind, to: arGeom.to || null
+            };
+          } else if (idx === 1) {
+            shape.geometry = {
+              a: [arGeom.a[0], arGeom.a[1]], b: [arEnd.x, arEnd.y],
+              from: arGeom.from || null, to: arBind
+            };
           }
           break;
         }

@@ -323,8 +323,41 @@ Two optional hooks for persisting per-user toolbar defaults (Etcher stores nothi
 | `dimension` | `%{"a" => [x, y], "b" => [x, y]}` (label lives in `metadata.title` / `metadata.title_offset`) |
 | `line`      | `%{"a" => [x, y], "b" => [x, y]}` (title lives in `metadata.title`, rendered as a sibling label) |
 | `image`     | `%{"x" => x, "y" => y, "w" => w, "h" => h, "href" => href}` (see [Images](#images)) |
+| `arrow`     | `%{"a" => [x, y], "b" => [x, y], "from" => binding, "to" => binding}` (see [Connectors](#connectors)) |
 
 All coordinates are in canvas pixels — Fresco's pan/zoom rescales them automatically.
+
+## Connectors
+
+Hover any shape with the cursor tool and eight dots appear on its bounding box
+— the four corners and the four side midpoints. Drag one out and you're
+drawing an arrow. Bring it near another shape and that shape's own dots
+appear; close in on one and the arrow's head snaps onto it. Release, and the
+two are connected: move or resize either shape and the arrow stays attached
+at the points you chose.
+
+An arrow that's released away from any shape simply keeps that free end where
+you dropped it. Either end can be re-aimed later — select the arrow and drag
+its endpoint handle onto a different anchor, or off the shape entirely to
+detach it.
+
+A `binding` is `%{"uuid" => shape_uuid, "anchor" => anchor_id}`, or `null` for
+a free end. Anchor ids are `"nw"`, `"n"`, `"ne"`, `"e"`, `"se"`, `"s"`,
+`"sw"`, `"w"`.
+
+The bindings are the source of truth; `a` and `b` are a cache of wherever
+those bindings last resolved to, rewritten every time the arrow is drawn.
+Two consequences worth knowing:
+
+- **Anything that reads `a`/`b` works without understanding bindings** —
+  including `Etcher.Raster`, which bakes connectors into a flattened image
+  with no idea what they're attached to.
+- **Deleting a bound shape doesn't destroy the arrow.** The binding stops
+  resolving and the endpoint stays at its last position, so the arrow keeps
+  the shape it had rather than collapsing.
+
+Connector dots are a hover affordance and are suppressed while a shape is
+selected, because the resize handles occupy the same eight points.
 
 ## Read-only annotations
 

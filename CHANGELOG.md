@@ -4,6 +4,39 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.11.0] — 2026-08-04
+
+### Added
+
+- **Connectors — arrows that bind to shapes and follow them.** Hover a shape
+  with the cursor tool and eight dots appear on its bounding box (four
+  corners, four side midpoints). Drag one out to draw an arrow; bring it near
+  another shape and that shape's dots appear, with the nearest one
+  highlighting as the arrow's head snaps onto it. Release and the two are
+  connected — move or resize either shape and the arrow stays attached at the
+  chosen points. Released away from a shape, the end simply stays put; either
+  end can be re-aimed afterwards by dragging its endpoint handle.
+
+  New `arrow` shape kind: `%{"a" => [x, y], "b" => [x, y], "from" => binding,
+  "to" => binding}`, where a binding is `%{"uuid" => …, "anchor" => …}` or
+  `null`. The bindings are the source of truth and `a`/`b` are a cache
+  rewritten on every render, which is what makes an arrow follow its
+  endpoints through moves, resizes, undo and collab updates without any of
+  those paths knowing connectors exist — and what lets `Etcher.Raster` bake
+  one into a flattened image with no notion of what it's attached to.
+  Deleting a bound shape leaves the arrow where it was rather than
+  collapsing it.
+
+  Connector dots are suppressed while a shape is selected, since the resize
+  handles occupy the same eight points.
+
+### Changed
+
+- `Etcher.Raster` renders the new `arrow` kind (shaft plus a head at `b`,
+  clamped so a very short connector still reads as an arrow).
+- The V-arrowhead maths behind `dimension` moved into a shared helper now
+  that connectors draw one too. No visual change to dimensions.
+
 ## [0.10.2] — 2026-08-04
 
 ### Changed

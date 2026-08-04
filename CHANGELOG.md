@@ -4,6 +4,24 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.10.2] — 2026-08-04
+
+### Changed
+
+- **Image shapes render with rounded corners**, matching the link preview
+  cards a pasted URL turns into — a photo and a card sitting side by side on
+  a board now round the same amount instead of one being square.
+
+  The radius is a fraction of the image's shorter *rendered* side (4.5%,
+  clamped to 2–16px) rather than a fixed number of pixels, because the
+  overlay draws in container pixels and re-renders on every pan and zoom: a
+  constant 8px reads as a rounded button on a board zoomed out far enough
+  that an image is 56px across, and disappears entirely once you zoom in.
+  Applied as a `clip-path: inset(… round …)` on the `<image>` element, so
+  there's no per-shape `<clipPath>` rect to keep in step with the geometry.
+  Covers every image on the layer — pasted, uploaded, and the local preview
+  shown while an upload is still in flight.
+
 ## [0.10.1] — 2026-08-04
 
 ### Fixed

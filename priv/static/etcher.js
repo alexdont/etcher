@@ -1080,6 +1080,17 @@
     "grabber", "freehand", "eraser", "line", "text", "callout", "image"
   ];
 
+  // Corner radius on image shapes, as a fraction of the shorter rendered
+  // side, clamped. Proportional rather than a fixed px because a constant
+  // radius is a different look at every zoom — 8px on a board zoomed out far
+  // enough that an image is 56px across turns it into a button, and the same
+  // 8px vanishes once you zoom in. This ratio is roughly the link card's own
+  // (20 units on a 480-tall card), so a photo and a preview card sitting side
+  // by side round the same amount.
+  var IMAGE_RADIUS_RATIO = 0.045;
+  var IMAGE_RADIUS_MIN = 2;
+  var IMAGE_RADIUS_MAX = 16;
+
   // Gap between the dots of a "dotted" stroke, as a multiple of its width.
   // Shared by shapes and markers so the two read as the same dot pattern.
   var DOT_GAP_RATIO = 2.4;
@@ -5740,6 +5751,11 @@
       setTimeout(function() { try { input.focus(); input.select(); } catch (_) {} }, 0);
     },
 
+    _imageRadius: function(w, h) {
+      var r = Math.min(w, h) * IMAGE_RADIUS_RATIO;
+      return Math.round(Math.max(IMAGE_RADIUS_MIN, Math.min(IMAGE_RADIUS_MAX, r)) * 10) / 10;
+    },
+
     _shapeByUuid: function(uuid) {
       if (!uuid) return null;
       return (this.shapes || []).find(function(s) { return s.uuid === uuid; }) || null;
@@ -6695,14 +6711,21 @@
         case "image": {
           var itl = self._imageToContainer({ x: g.x,         y: g.y });
           var ibr = self._imageToContainer({ x: g.x + g.w,   y: g.y + g.h });
+          var iw = Math.abs(ibr.x - itl.x);
+          var ih = Math.abs(ibr.y - itl.y);
           el.setAttribute("x", Math.min(itl.x, ibr.x));
           el.setAttribute("y", Math.min(itl.y, ibr.y));
-          el.setAttribute("width",  Math.abs(ibr.x - itl.x));
-          el.setAttribute("height", Math.abs(ibr.y - itl.y));
+          el.setAttribute("width",  iw);
+          el.setAttribute("height", ih);
+          // Rounded corners, sized from the box just computed. `inset()`
+          // rather than an SVG <clipPath>, which would need a per-shape
+          // <rect> kept in step with this box on every pan and zoom.
+          el.style.clipPath = "inset(0 round " + self._imageRadius(iw, ih) + "px)";
           // Source lives in geometry so it travels with the shape (and through
           // the collab delta). Only rewrite when it changes — swapping href
           // every pan/zoom frame would restart image decode. `href` + the
           // legacy `xlink:href` for older Safari.
+          //
           // `_previewHref` wins while an upload is in flight: it's a local
           // object URL for the exact bytes being sent, so the image looks
           // finished from the first frame even though `geometry.href` — the

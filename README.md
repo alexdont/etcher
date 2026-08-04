@@ -193,6 +193,11 @@ stray copy of a whole article doesn't become a wall of text on the canvas.
 
 Inserted images auto-size — the longest side is scaled to 800 canvas px — and center on the viewport (or on the point you pass to `insertImage`).
 
+Images draw with **rounded corners**, matching the link preview cards a pasted
+URL turns into. The radius is a fraction of the shorter rendered side rather
+than a fixed pixel count, so the corners look the same at every zoom level
+instead of turning a small image into a button.
+
 **Resizing** an image keeps its proportions: a corner drag scales it by
 whichever axis you pulled further, and the opposite corner stays put. Hold
 **Shift** to stretch it freely instead. The lock is against the aspect the

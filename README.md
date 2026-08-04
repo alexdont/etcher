@@ -359,6 +359,13 @@ Two consequences worth knowing:
 Connector dots are a hover affordance and are suppressed while a shape is
 selected, because the resize handles occupy the same eight points.
 
+Aim doesn't have to be precise: each dot is drawn small but sits under a much
+larger invisible grab zone, which reaches past the shape's edge so you can
+approach an anchor from outside. However sloppily you press, the arrow
+attaches to the exact anchor point. The zone shrinks on small or zoomed-out
+shapes so eight of them can't carpet the shape and leave nowhere to press for
+selecting or moving it.
+
 ## Read-only annotations
 
 Add `readonly: true` to any annotation to lock it — for layers that mix shapes from multiple authors (public manga annotations, multiplayer whiteboards, comment-on-image flows) where the current user shouldn't be able to touch shapes they don't own. A locked shape still renders and responds to hover and tooltip-pin, but the viewer can't enter edit mode, move/resize it, delete it (tooltip trash **or** eraser), box-select it, open its pen editor, or pick up its color. Clicking it in annotation mode pins its tooltip, the same as browse mode.

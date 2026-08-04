@@ -30,6 +30,14 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   Connector dots are suppressed while a shape is selected, since the resize
   handles occupy the same eight points.
 
+  Grabbing one doesn't take precision: the visible dot is small, but the
+  press is accepted by a much larger invisible zone under it, which reaches
+  past the shape's edge so an anchor can be approached from outside. However
+  roughly you press, the arrow attaches to the exact anchor. The zone is
+  clamped to a fraction of the shape's rendered size, so eight of them can't
+  carpet a small or zoomed-out shape and leave nowhere to press for selecting
+  or moving it.
+
 ### Changed
 
 - `Etcher.Raster` renders the new `arrow` kind (shaft plus a head at `b`,

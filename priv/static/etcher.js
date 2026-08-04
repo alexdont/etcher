@@ -921,17 +921,27 @@
       // canvas twitch. They read as a hint until you approach one.
       ".etcher-connector-dot {",
       "  fill: #fff; stroke: currentColor; stroke-width: 2; stroke-opacity: 0.75;",
-      "  pointer-events: all; cursor: crosshair;",
+      "  pointer-events: none; cursor: crosshair;",
       "  transform-box: fill-box; transform-origin: center;",
       "  transition: transform 80ms ease, fill 80ms ease, stroke-opacity 80ms ease;",
       "}",
-      ".etcher-connector-dot:hover {",
+      // The grab zone. Invisible and much larger than the dot it sits under,
+      // so the press doesn't have to be pixel-perfect. It owns
+      // `pointer-events` for the pair — the dot itself is purely visual.
+      ".etcher-connector-hit {",
+      "  fill: transparent; stroke: none;",
+      "  pointer-events: all; cursor: crosshair;",
+      "}",
+      // Adjacent-sibling selector: each hit disc is inserted immediately
+      // before its own dot, so hovering the zone lights the right dot.
+      ".etcher-connector-hit:hover + .etcher-connector-dot {",
       "  transform: scale(1.5); fill: currentColor; stroke-opacity: 1;",
       "}",
       // Anchors of a candidate target, shown while an arrow is mid-drag.
-      // `pointer-events: none` because the pointer is captured by the dot
-      // the drag started from — these are a readout, not a hit target.
-      ".etcher-connector-dot.is-target { pointer-events: none; }",
+      // Rendered without a hit disc of their own — they're a readout, and
+      // the drop is decided by proximity in `_arrowSnapState`, not by
+      // hitting them.
+      //
       // The one the end will land on if released now.
       ".etcher-connector-dot.is-snap {",
       "  transform: scale(1.9); fill: currentColor; stroke-opacity: 1;",
@@ -1140,7 +1150,18 @@
   // How near (screen px) the pointer has to bring a dragging arrow end
   // before it snaps onto an anchor. Generous, because the snap is the
   // point of the gesture — you aim at a shape, not at a 5px dot.
-  var ARROW_SNAP_PX = 26;
+  var ARROW_SNAP_PX = 34;
+
+  // Radius of the invisible disc that accepts the press on a connector dot,
+  // in container px. The visible dot is 4.5px — a pixel-perfect target — so
+  // the grab zone is a separate, much larger element underneath it.
+  //
+  // Clamped to a fraction of the shape's rendered size: eight discs at the
+  // full radius would swallow a small shape whole, leaving no part of it
+  // clickable for selecting or moving.
+  var CONNECTOR_HIT_RADIUS = 15;
+  var CONNECTOR_HIT_RADIUS_MIN = 6;
+  var CONNECTOR_HIT_SHAPE_RATIO = 0.26;
 
   // How far outside a shape's box (screen px) the pointer can wander while
   // that shape still counts as a snap candidate and shows its anchors. Wider
@@ -6333,6 +6354,15 @@
       // the user is drawing, and eight hit-targets sitting on the shape
       // would swallow the first click of that stroke.
       if (toolKey != null) self._removeConnectorDots();
+      // Switching tools also abandons any arrow being dragged. Belt and
+      // braces for the flag rather than the gesture: `_arrowDrag` suppresses
+      // the dots, so a drag that somehow never saw its pointerup would turn
+      // connectors off for the rest of the session with no way back. Picking
+      // a tool is the one reset a user can always reach.
+      if (self._arrowDrag) {
+        self._arrowDrag = null;
+        self._removeTargetDots();
+      }
       // Drawing and editing are mutually exclusive — picking a tool
       // means we're done admiring the current edit. Same goes for
       // multi-selection: entering draw mode clears the group so a
@@ -8394,6 +8424,15 @@
       }
 
       self._docMouseMove = function(e) {
+        // Sitting on a connector's grab zone doesn't count as leaving the
+        // shape. The zones deliberately reach past its edge — that's the
+        // half of them you aim at when pulling an arrow outward — and the
+        // hit-test below would call that "off the shape" and delete the
+        // very dot being reached for. Keep the current hover instead.
+        if (e.target && e.target.classList &&
+            e.target.classList.contains("etcher-connector-hit")) {
+          return;
+        }
         // Grabber (hand) tool: pan only — never hover or highlight shapes.
         if (self.activeTool === "grabber") {
           if (self._hoveredShape) self._setHoveredShape(null, false);
@@ -9272,33 +9311,77 @@
       var self = this;
       this._activateOverlayForShape(target);
       this._connectorDotShape = target;
+      var hitR = this._connectorHitRadius(target);
       this._connectorDots = this._anchorPointsFor(target).map(function(pt) {
+        // Two elements per anchor: an invisible disc that accepts the press,
+        // and the small dot the user actually sees. Grabbing a 4.5px target
+        // is a pixel-perfect ask, and the visible dot can't simply be grown
+        // to match — at that size eight of them read as a ring of blobs
+        // rather than a hint.
+        //
+        // The pair is adjacent in the DOM so the hit disc can light its own
+        // dot on hover through a CSS sibling selector, keeping the feedback
+        // on the element the pointer is really over.
+        var hit = svgEl("circle", { r: hitR });
+        hit.classList.add("etcher-connector-hit");
+        hit.dataset.anchor = pt.id;
         var dot = svgEl("circle", { r: 4.5 });
         dot.classList.add("etcher-connector-dot");
         dot.style.color = self._handleColor(target);
         dot.dataset.anchor = pt.id;
+        self.svg.appendChild(hit);
         self.svg.appendChild(dot);
+        self._positionHandle(hit, pt);
         self._positionHandle(dot, pt);
-        dot.addEventListener("pointerdown", function(e) {
+        hit.addEventListener("pointerdown", function(e) {
           self._startArrowDrag(target, pt.id, e);
         });
-        return dot;
+        return { hit: hit, dot: dot };
       });
+    },
+
+    // Radius of a connector's grab zone, in container px.
+    //
+    // Clamped against the shape's rendered size, because eight zones of a
+    // fixed radius would swallow a small shape whole — every press anywhere
+    // near it would start an arrow, and the shape itself could never be
+    // clicked to select or move. Recomputed as the shape is drawn, so
+    // zooming out tightens the zones rather than letting them merge.
+    _connectorHitRadius: function(shape) {
+      var box = this._shapeBBoxImagePx(shape);
+      if (!box) return CONNECTOR_HIT_RADIUS;
+      var tl, br;
+      try {
+        tl = this._imageToContainer({ x: box.x, y: box.y });
+        br = this._imageToContainer({ x: box.x + box.w, y: box.y + box.h });
+      } catch (_) {
+        return CONNECTOR_HIT_RADIUS;
+      }
+      var shorter = Math.min(Math.abs(br.x - tl.x), Math.abs(br.y - tl.y));
+      return Math.max(
+        CONNECTOR_HIT_RADIUS_MIN,
+        Math.min(CONNECTOR_HIT_RADIUS, shorter * CONNECTOR_HIT_SHAPE_RATIO)
+      );
     },
 
     _positionConnectorDots: function() {
       var shape = this._connectorDotShape;
       if (!shape || !this._connectorDots || !this._connectorDots.length) return;
       var pts = this._anchorPointsFor(shape);
+      var hitR = this._connectorHitRadius(shape);
       var self = this;
-      this._connectorDots.forEach(function(dot, i) {
-        if (pts[i]) self._positionHandle(dot, pts[i]);
+      this._connectorDots.forEach(function(pair, i) {
+        if (!pts[i]) return;
+        self._positionHandle(pair.hit, pts[i]);
+        self._positionHandle(pair.dot, pts[i]);
+        pair.hit.setAttribute("r", hitR);
       });
     },
 
     _removeConnectorDots: function() {
-      (this._connectorDots || []).forEach(function(d) {
-        if (d.parentNode) d.parentNode.removeChild(d);
+      (this._connectorDots || []).forEach(function(pair) {
+        if (pair.hit.parentNode) pair.hit.parentNode.removeChild(pair.hit);
+        if (pair.dot.parentNode) pair.dot.parentNode.removeChild(pair.dot);
       });
       this._connectorDots = [];
       this._connectorDotShape = null;

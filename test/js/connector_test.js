@@ -46,6 +46,20 @@ global.ARROW_ANCHORS = eval(tableSrc.replace("var ARROW_ANCHORS = ", ""));
 const anchorPointsFor = lift("_anchorPointsFor", "shape");
 const anchorPointImage = lift("_anchorPointImage", "shape, anchorId");
 const vArrowPoints = lift("_vArrowPoints", "tip, toward, len, halfWidth");
+const connectorHitRadius = lift("_connectorHitRadius", "shape");
+
+function constant(name) {
+  const found = (src.match(new RegExp(`var ${name} = ([\\d.]+);`)) || [])[1];
+  assert.ok(found !== undefined, `could not read ${name} from etcher.js`);
+  return Number(found);
+}
+
+const HIT_MAX = constant("CONNECTOR_HIT_RADIUS");
+const HIT_MIN = constant("CONNECTOR_HIT_RADIUS_MIN");
+const HIT_RATIO = constant("CONNECTOR_HIT_SHAPE_RATIO");
+global.CONNECTOR_HIT_RADIUS = HIT_MAX;
+global.CONNECTOR_HIT_RADIUS_MIN = HIT_MIN;
+global.CONNECTOR_HIT_SHAPE_RATIO = HIT_RATIO;
 
 // ── the anchor table ────────────────────────────────────────────────────────
 
@@ -135,6 +149,67 @@ for (const p of anchorPointsFor.call(flat, shape)) {
   assert.strictEqual(p.x, 7, `${p.id}: no NaN on a zero-width box`);
   assert.strictEqual(p.y, 9, `${p.id}: no NaN on a zero-height box`);
 }
+
+// ── the grab zone ───────────────────────────────────────────────────────────
+
+// The visible dot is a 4.5px target; the zone that accepts the press is a
+// separate, larger disc underneath it. Its radius is clamped against the
+// shape's *rendered* size, and both ends of that clamp matter:
+//
+//   - too small and the user is back to aiming at a dot;
+//   - too large and eight discs carpet a small shape, leaving nowhere to
+//     press to select or move the shape itself.
+//
+// `_connectorHitRadius` reads the bbox and projects it to container px, so
+// the stand-in supplies both. A 1:1 projection keeps the arithmetic legible.
+function layerAtScale(box, scale) {
+  return {
+    _shapeBBoxImagePx: () => box,
+    _imageToContainer: (p) => ({ x: p.x * scale, y: p.y * scale })
+  };
+}
+
+const big = layerAtScale({ x: 0, y: 0, w: 400, h: 300 }, 1);
+assert.strictEqual(connectorHitRadius.call(big, shape), HIT_MAX,
+  "a comfortably large shape gets the full zone");
+
+// 24px tall rendered: the ratio wants 6.24, which is what it gets — the
+// point at which the clamp starts protecting the shape's own hit area.
+const small = layerAtScale({ x: 0, y: 0, w: 32, h: 24 }, 1);
+const smallR = connectorHitRadius.call(small, shape);
+assert.ok(smallR < HIT_MAX, "a small shape must not get the full zone");
+assert.ok(Math.abs(smallR - 24 * HIT_RATIO) < 1e-9, "the ratio drives it");
+
+// Whatever the ratio, the zones can never swallow the shape: eight discs of
+// this radius still leave the middle pressable. Half the shorter side is the
+// bar — at exactly half, the discs from opposite edges would meet.
+assert.ok(smallR < 24 / 2,
+  "grab zones must leave the shape itself clickable");
+
+// Tiny: the ratio wants under a pixel, so the floor takes over rather than
+// letting the zone collapse back to a pixel-perfect target.
+const tiny = layerAtScale({ x: 0, y: 0, w: 6, h: 4 }, 1);
+assert.strictEqual(connectorHitRadius.call(tiny, shape), HIT_MIN,
+  "the floor keeps a grabbable zone on even a tiny shape");
+
+// Zoom is what the clamp actually tracks — the same shape zoomed out is a
+// smaller target and must tighten, or the zones merge as you zoom away.
+const zoomedOut = layerAtScale({ x: 0, y: 0, w: 400, h: 300 }, 0.05);
+assert.ok(connectorHitRadius.call(zoomedOut, shape) < HIT_MAX,
+  "zooming out tightens the zones; the clamp is on rendered size, not image size");
+assert.strictEqual(
+  connectorHitRadius.call(layerAtScale({ x: 0, y: 0, w: 400, h: 300 }, 4), shape),
+  HIT_MAX, "zooming in caps rather than growing without bound");
+
+// The shorter side governs — a wide letterbox is constrained by its height.
+assert.strictEqual(
+  connectorHitRadius.call(layerAtScale({ x: 0, y: 0, w: 9000, h: 24 }, 1), shape),
+  smallR, "a wide, short shape is clamped by its height");
+
+// No bbox to measure: fall back to the full radius rather than NaN, which
+// would make the zone vanish entirely.
+assert.strictEqual(
+  connectorHitRadius.call(layerAtScale(null, 1), shape), HIT_MAX);
 
 // ── the arrowhead ───────────────────────────────────────────────────────────
 

@@ -948,6 +948,24 @@
       ".etcher-bezier-handle:hover { transform: scale(1.5); }",
       ".etcher-bezier-handle.is-dragging { cursor: grabbing; transform: scale(1.7); }",
       ".etcher-anchor-handle.is-corner { fill: currentColor; fill-opacity: 0.5; }",
+      // Audio card. Painted from `currentColor` like every other shape, so
+      // it picks up the colour picker and the selected/hover states without
+      // any special casing.
+      ".etcher-audio-bg {",
+      "  fill: rgba(17, 17, 20, 0.92); stroke: currentColor; stroke-width: 1.5;",
+      "}",
+      ".etcher-audio-btn { fill: currentColor; stroke: none; pointer-events: all; cursor: pointer; }",
+      // The glyph must not eat the press — the disc under it owns that, and
+      // a triangle's own hit area is a poor target.
+      ".etcher-audio-glyph { fill: #111114; stroke: none; pointer-events: none; }",
+      ".etcher-audio-title, .etcher-audio-time {",
+      "  fill: #f5f5f7; stroke: none; pointer-events: none;",
+      "  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;",
+      "}",
+      ".etcher-audio-time { fill: rgba(245, 245, 247, 0.6); }",
+      ".etcher-audio-track { fill: rgba(245, 245, 247, 0.22); stroke: none; pointer-events: none; }",
+      ".etcher-audio-fill { fill: currentColor; stroke: none; pointer-events: none; }",
+      ".etcher-audio-scrub { fill: transparent; stroke: none; pointer-events: all; cursor: pointer; }",
       // Connector dots — the eight bindable points that appear on a shape's
       // box when the cursor tool hovers it. Drag one to pull an arrow out.
       // Named apart from `.etcher-anchor-handle` above, which is the bezier
@@ -1245,6 +1263,14 @@
   // zoomed-out stroke far more finely than it could ever be drawn, and a
   // zoomed-in one too coarsely to look smooth.
   var MARKER_SAMPLE_PX = 1.5;
+
+  // Default size of an audio card, in image px. Resizable afterwards like
+  // any box — this is just what a freshly dropped file lands at.
+  var AUDIO_CARD_W = 360;
+  var AUDIO_CARD_H = 88;
+  // Below this rendered height the card drops its title and timecode and
+  // keeps only the transport, rather than overlapping its own text.
+  var AUDIO_COMPACT_H = 54;
 
   // Gap between the dots of a "dotted" stroke, as a multiple of its width.
   // Shared by shapes and markers so the two read as the same dot pattern.
@@ -1972,6 +1998,21 @@
           // This is the entry point a `image_source: "custom"` host calls
           // after its own uploader/modal resolves to a URL.
           insertImage: function(href, opts) { return self._insertImageHref(href, opts || {}); },
+
+          // ── Audio ────────────────────────────────────────────────────
+          // `insertAudio` places a card for an already-stored file.
+          insertAudio: function(href, opts) { return self._insertAudioHref(href, opts || {}); },
+          // Local controls. Each emits `etcher:media-command` so the host can
+          // share the action with the room.
+          playAudio:   function(uuid, position) { return self._applyAudio(uuid, "play", position, true); },
+          pauseAudio:  function(uuid, position) { return self._applyAudio(uuid, "pause", position, true); },
+          toggleAudio: function(uuid) { return self.toggleAudio(uuid); },
+          seekAudio:   function(uuid, frac) { return self.seekAudio(uuid, frac); },
+          // The inbound half: apply what the room decided, WITHOUT emitting.
+          // `{playing, position}`; correction strategy is the host's call —
+          // see `applyMediaState`.
+          applyMediaState: function(uuid, state) { return self._applyMediaState(uuid, state || {}); },
+          audioState: function(uuid) { return self._audioState(uuid); },
 
           // Hand image FILES (pasted, dropped, or picked) to the host instead
           // of embedding them. `fn(file, ctx)` returns a Promise of a URL,
@@ -5489,12 +5530,12 @@
       var self = this;
       var input = document.createElement("input");
       input.type = "file";
-      input.accept = "image/*";
+      input.accept = "image/*,audio/*";
       input.style.display = "none";
       document.body.appendChild(input);
       input.addEventListener("change", function() {
         var file = input.files && input.files[0];
-        if (file) self._insertImageFile(file);
+        if (file) self._insertMediaFile(file);
         if (input.parentNode) input.parentNode.removeChild(input);
       });
       input.click();
@@ -6018,6 +6059,445 @@
       else ring.removeAttribute("data-state");
     },
 
+    // ── Audio cards ─────────────────────────────────────────────────────────
+    //
+    // An audio annotation is a transport drawn in SVG — background, play
+    // button, title, timecode, scrub bar — plus an <audio> element that does
+    // the playing. The two are deliberately separate: the card has to pan,
+    // zoom and layer with every other shape, which an <audio> inside a
+    // <foreignObject> does badly (and does differently in each engine).
+    // Nothing about the element is on screen, so it lives outside the
+    // overlay and is addressed by uuid.
+
+    _makeAudioEl: function() {
+      var g = svgEl("g");
+      g.classList.add("etcher-audio");
+
+      var bg = svgEl("rect");
+      bg.classList.add("etcher-audio-bg");
+      g.appendChild(bg);
+
+      // The button is a disc plus a glyph. The disc carries the pointer
+      // events for both — a triangle is a small target and its bounding box
+      // lies mostly outside the visible shape.
+      var btn = svgEl("circle");
+      btn.classList.add("etcher-audio-btn");
+      g.appendChild(btn);
+      var glyph = svgEl("path");
+      glyph.classList.add("etcher-audio-glyph");
+      g.appendChild(glyph);
+
+      var title = svgEl("text", { "dominant-baseline": "middle" });
+      title.classList.add("etcher-audio-title");
+      g.appendChild(title);
+
+      var time = svgEl("text", { "dominant-baseline": "middle", "text-anchor": "end" });
+      time.classList.add("etcher-audio-time");
+      g.appendChild(time);
+
+      var track = svgEl("rect");
+      track.classList.add("etcher-audio-track");
+      g.appendChild(track);
+      var fill = svgEl("rect");
+      fill.classList.add("etcher-audio-fill");
+      g.appendChild(fill);
+      // Sits over the bar and is invisible; a 4px-tall track is not a
+      // scrubbable target, and making the visible bar itself taller would
+      // dominate the card.
+      var hit = svgEl("rect");
+      hit.classList.add("etcher-audio-scrub");
+      g.appendChild(hit);
+
+      return g;
+    },
+
+    // The <audio> element for a shape, created on first use. Appended to the
+    // container rather than the overlay: the overlay is rebuilt on a source
+    // swap, and a playing element torn out of the DOM stops dead.
+    _audioElFor: function(shape) {
+      if (!shape || shape.kind !== "audio") return null;
+      if (shape._audioEl) return shape._audioEl;
+      var href = (shape.geometry && shape.geometry.href) || "";
+      if (!href) return null;
+      var self = this;
+      var el = document.createElement("audio");
+      // Metadata only: enough for a duration and a scrub bar without pulling
+      // the whole file down for a card nobody has pressed play on.
+      el.preload = "metadata";
+      el.src = href;
+      el.style.display = "none";
+      el.addEventListener("loadedmetadata", function() {
+        if (isFinite(el.duration) && el.duration > 0) {
+          shape.geometry = Object.assign({}, shape.geometry, { duration: el.duration });
+        }
+        self._renderShape(shape);
+      });
+      el.addEventListener("timeupdate", function() { self._renderShape(shape); });
+      el.addEventListener("play", function() { self._renderShape(shape); });
+      el.addEventListener("pause", function() { self._renderShape(shape); });
+      el.addEventListener("ended", function() { self._renderShape(shape); });
+      (this.handle && this.handle.container ? this.handle.container : document.body)
+        .appendChild(el);
+      shape._audioEl = el;
+      return el;
+    },
+
+    // One door for every file that arrives — paste, drop, picker. Images and
+    // audio diverge completely after this (one embeds, the other must
+    // upload), so the split belongs here rather than in each caller.
+    _insertMediaFile: function(file, imagePt, opts) {
+      if (this._isAudioFile(file)) return this._insertAudioFile(file, imagePt, opts);
+      return this._insertImageFile(file, imagePt, opts);
+    },
+
+    // Place a card for an already-stored file. `opts.at` (image px) or the
+    // viewport centre; `opts.title` labels it, `opts.duration` seeds the
+    // timecode before metadata loads.
+    _insertAudioHref: function(href, opts) {
+      if (!href) return null;
+      opts = opts || {};
+      var at = (opts.at && typeof opts.at.x === "number")
+        ? opts.at
+        : (this._viewportCenterImage() || { x: 0, y: 0 });
+      // Sized in image px so the card zooms with the content like an image,
+      // but scaled by the current zoom so a drop is the same size on screen
+      // whatever the canvas happens to be at.
+      var per = 1;
+      try { per = this._markerScale() || 1; } catch (_) {}
+      var w = AUDIO_CARD_W / (per > 0 ? per : 1);
+      var h = AUDIO_CARD_H / (per > 0 ? per : 1);
+      var geom = {
+        x: at.x - w / 2, y: at.y - h / 2, w: w, h: h,
+        href: href,
+        title: opts.title || "Audio",
+        duration: typeof opts.duration === "number" ? opts.duration : null
+      };
+      var el = this._makeAudioEl();
+      el.classList.add("etcher-shape");
+      this._applyShapeColor(el, this.activeColor);
+      this.svg.appendChild(el);
+      // `_finalizeShape` reports the new shape through its afterCreate hook
+      // rather than a return value — that's the documented way to get hold of
+      // it without re-finding it by uuid.
+      var self = this;
+      var made = null;
+      this._finalizeShape("audio", geom, el, function(shape) {
+        made = shape;
+        // Created now so the duration lands, and the card redraws with it,
+        // without waiting for someone to press play.
+        self._audioElFor(shape);
+      });
+      return made ? made.uuid : null;
+    },
+
+    // Every path that produces an audio FILE funnels through here, mirroring
+    // `_insertImageFile`. There is no embed fallback the way images have one:
+    // an audio file base64'd into the annotation payload would be megabytes
+    // of JSON on every save and every peer broadcast. Without a host uploader
+    // the insert is refused loudly rather than half-working.
+    _insertAudioFile: function(file, imagePt, opts) {
+      var self = this;
+      opts = opts || {};
+      if (!file) return;
+      var upload = this._imageUploader();
+      if (!upload) {
+        this._dispatch("etcher:media-upload-unavailable", {
+          name: file.name || null, reason: "no_uploader"
+        });
+        return;
+      }
+      var placedAt = imagePt || this._viewportCenterImage() || { x: 0, y: 0 };
+      // Nothing is placed up front, unlike an image: there is no local
+      // preview of a sound, and a card with no source to stream would just
+      // be a dead control. It appears when the upload resolves.
+      upload(file, function(href) {
+        if (!href) {
+          self._dispatch("etcher:media-upload-failed", { name: file.name || null });
+          return;
+        }
+        self._insertAudioHref(href, {
+          at: placedAt, title: opts.title || file.name || "Audio"
+        });
+      });
+    },
+
+    _isAudioFile: function(file) {
+      if (!file) return false;
+      if (file.type && file.type.indexOf("audio/") === 0) return true;
+      // Some sources hand over a blank type; fall back to the extension.
+      return /\.(mp3|m4a|aac|wav|ogg|oga|flac|opus)$/i.test(file.name || "");
+    },
+
+    toggleAudio: function(uuid) {
+      var st = this._audioState(uuid);
+      if (!st) return false;
+      return this._applyAudio(uuid, st.playing ? "pause" : "play", null, true);
+    },
+
+    seekAudio: function(uuid, frac) {
+      var st = this._audioState(uuid);
+      if (!st || !st.duration) return false;
+      var pos = Math.max(0, Math.min(1, frac)) * st.duration;
+      return this._applyAudio(uuid, st.playing ? "play" : "seek", pos, true);
+    },
+
+    _audioState: function(uuid) {
+      var shape = this._shapeByUuid(uuid);
+      if (!shape || shape.kind !== "audio") return null;
+      var el = this._audioElFor(shape);
+      if (!el) return null;
+      var dur = isFinite(el.duration) && el.duration > 0
+        ? el.duration
+        : ((shape.geometry && shape.geometry.duration) || null);
+      return {
+        playing: !el.paused && !el.ended,
+        position: el.currentTime || 0,
+        duration: dur
+      };
+    },
+
+    // Bring this client in line with the room. Only corrects when it's
+    // actually out — a seek on every broadcast would stutter audibly, and
+    // these arrive continuously while playing.
+    _applyMediaState: function(uuid, state) {
+      var st = this._audioState(uuid);
+      if (!st) return false;
+      var wantPos = typeof state.position === "number" ? state.position : null;
+      var drift = wantPos == null ? 0 : Math.abs(wantPos - st.position);
+      // A quarter second is under what a listener notices in speech or
+      // music, and above the jitter of a round trip — correcting inside it
+      // would mean seeking constantly for no audible gain.
+      var pos = drift > 0.25 ? wantPos : null;
+      if (state.playing && !st.playing) return this._applyAudio(uuid, "play", pos, false);
+      if (!state.playing && st.playing) return this._applyAudio(uuid, "pause", pos, false);
+      if (pos != null) return this._applyAudio(uuid, st.playing ? "play" : "seek", pos, false);
+      return true;
+    },
+
+    // ── Audio transport ─────────────────────────────────────────────────────
+    //
+    // Etcher owns the element and the card; it does NOT own who is listening
+    // to what. Every local control emits `etcher:media-command`, and the host
+    // decides what that means for the room before handing state back through
+    // `applyMediaState`. That keeps the shared-playback policy — who may
+    // control, how drift is corrected, what happens on join — out of a
+    // drawing library, and it is the same split as `setImageUploader`.
+
+    // Apply a transport action to the element. `emit` false when the action
+    // came FROM the host, so a peer's broadcast can't echo back out.
+    _applyAudio: function(uuid, action, position, emit) {
+      var shape = this._shapeByUuid(uuid);
+      if (!shape || shape.kind !== "audio") return false;
+      var el = this._audioElFor(shape);
+      if (!el) return false;
+      var self = this;
+
+      if (typeof position === "number" && isFinite(position)) {
+        try { el.currentTime = Math.max(0, position); } catch (_) {}
+      }
+      if (action === "play") {
+        var p = null;
+        try { p = el.play(); } catch (_) {}
+        // Autoplay policy: a browser refuses `play()` until the user has
+        // interacted with the page. Someone who joins a room where audio is
+        // already running hears nothing, and nothing in the DOM says why —
+        // so surface it rather than failing silently.
+        if (p && typeof p.catch === "function") {
+          p.catch(function(err) {
+            self._dispatch("etcher:media-blocked", {
+              uuid: uuid,
+              reason: (err && err.name) || "NotAllowedError"
+            });
+          });
+        }
+      } else if (action === "pause") {
+        try { el.pause(); } catch (_) {}
+      }
+      this._renderShape(shape);
+
+      if (emit !== false) {
+        this._dispatch("etcher:media-command", {
+          uuid: uuid,
+          action: action,
+          position: el.currentTime || 0
+        });
+        if (this.pushEventTo) {
+          this.pushEventTo(this.el, "etcher:media-command", {
+            fresco_id: this.frescoId || null,
+            uuid: uuid,
+            action: action,
+            position: el.currentTime || 0
+          });
+        }
+      }
+      return true;
+    },
+
+    // Play/pause and scrub. Both stop propagation: without it the press
+    // would fall through to the shape-move gesture and the card would follow
+    // the pointer instead of responding to the control.
+    _attachAudioControls: function(shape) {
+      var self = this;
+      var el = shape.el;
+      if (!el || el._etcherAudioWired) return;
+      el._etcherAudioWired = true;
+
+      var btn = el.querySelector(".etcher-audio-btn");
+      if (btn) {
+        btn.addEventListener("pointerdown", function(e) {
+          if (e.button != null && e.button !== 0) return;
+          e.preventDefault();
+          e.stopPropagation();
+          self.toggleAudio(shape.uuid);
+        });
+      }
+
+      var scrub = el.querySelector(".etcher-audio-scrub");
+      if (scrub) {
+        scrub.addEventListener("pointerdown", function(e) {
+          if (e.button != null && e.button !== 0) return;
+          e.preventDefault();
+          e.stopPropagation();
+          var bar = shape._audioBar;
+          if (!bar || !bar.w) return;
+          var frac = Math.max(0, Math.min(1, (e.clientX - self._containerX(bar.x)) / bar.w));
+          self.seekAudio(shape.uuid, frac);
+        });
+      }
+    },
+
+    // A container-space x back into viewport space, for turning a pointer
+    // position into a position along the scrub bar.
+    _containerX: function(containerPx) {
+      var r = this.handle && this.handle.container
+        ? this.handle.container.getBoundingClientRect()
+        : { left: 0 };
+      return r.left + containerPx;
+    },
+
+    // Lay the card's parts out inside `box` (container px) and sync them to
+    // wherever playback currently is. Runs on every render — so on every pan
+    // and zoom frame, and on every `timeupdate` while playing.
+    _layoutAudioCard: function(shape, box) {
+      var el = shape.el;
+      if (!el) return;
+      var g = shape.geometry || {};
+      var audio = shape._audioEl || null;
+
+      var bg = el.querySelector(".etcher-audio-bg");
+      var btn = el.querySelector(".etcher-audio-btn");
+      var glyph = el.querySelector(".etcher-audio-glyph");
+      var titleEl = el.querySelector(".etcher-audio-title");
+      var timeEl = el.querySelector(".etcher-audio-time");
+      var track = el.querySelector(".etcher-audio-track");
+      var fill = el.querySelector(".etcher-audio-fill");
+      var scrub = el.querySelector(".etcher-audio-scrub");
+
+      var pad = Math.max(6, Math.min(14, box.h * 0.16));
+      var compact = box.h < AUDIO_COMPACT_H;
+      // The disc is sized off the card's height so the whole thing scales as
+      // one object under zoom, instead of a fixed-size button on a card that
+      // grows around it.
+      var r = Math.max(7, Math.min((box.h - pad * 2) / 2, box.h * 0.28));
+      var cx = box.x + pad + r;
+      var cy = box.y + box.h / 2;
+
+      bg.setAttribute("x", box.x);
+      bg.setAttribute("y", box.y);
+      bg.setAttribute("width", box.w);
+      bg.setAttribute("height", box.h);
+      var radius = Math.max(4, Math.min(14, box.h * 0.18));
+      bg.setAttribute("rx", radius);
+      bg.setAttribute("ry", radius);
+
+      btn.setAttribute("cx", cx);
+      btn.setAttribute("cy", cy);
+      btn.setAttribute("r", r);
+
+      // Play triangle or pause bars, drawn to the disc's radius.
+      var playing = !!(audio && !audio.paused && !audio.ended);
+      var k = r * 0.46;
+      if (playing) {
+        var bw = k * 0.62, gap = k * 0.5;
+        glyph.setAttribute("d",
+          "M " + (cx - gap - bw) + " " + (cy - k) + " h " + bw + " v " + (k * 2) + " h " + (-bw) + " Z " +
+          "M " + (cx + gap) + " " + (cy - k) + " h " + bw + " v " + (k * 2) + " h " + (-bw) + " Z");
+      } else {
+        glyph.setAttribute("d",
+          "M " + (cx - k * 0.55) + " " + (cy - k) +
+          " L " + (cx + k * 0.95) + " " + cy +
+          " L " + (cx - k * 0.55) + " " + (cy + k) + " Z");
+      }
+
+      var textLeft = cx + r + pad * 0.9;
+      var textRight = box.x + box.w - pad;
+      var pos = audio ? audio.currentTime : 0;
+      var dur = (audio && isFinite(audio.duration) && audio.duration > 0)
+        ? audio.duration
+        : (typeof g.duration === "number" ? g.duration : null);
+
+      if (compact) {
+        // Transport only — a title and a timecode would collide with the bar
+        // and each other once the card is this short.
+        titleEl.setAttribute("visibility", "hidden");
+        timeEl.setAttribute("visibility", "hidden");
+      } else {
+        titleEl.removeAttribute("visibility");
+        timeEl.removeAttribute("visibility");
+        var fs = Math.max(9, Math.min(15, box.h * 0.19));
+        var rowY = box.y + box.h * 0.36;
+        titleEl.setAttribute("x", textLeft);
+        titleEl.setAttribute("y", rowY);
+        titleEl.setAttribute("font-size", fs);
+        // Truncated by character count against the space available: SVG has
+        // no ellipsis, and `textLength` would squash the glyphs instead.
+        var avail = Math.max(0, textRight - textLeft - fs * 3.2);
+        var maxChars = Math.max(3, Math.floor(avail / (fs * 0.55)));
+        var label = String(g.title || "Audio");
+        titleEl.textContent =
+          label.length > maxChars ? label.slice(0, maxChars - 1) + "\u2026" : label;
+
+        timeEl.setAttribute("x", textRight);
+        timeEl.setAttribute("y", rowY);
+        timeEl.setAttribute("font-size", fs);
+        timeEl.textContent = this._formatTime(pos) + " / " + this._formatTime(dur);
+      }
+
+      var barY = compact ? cy - 2 : box.y + box.h * 0.68;
+      var barH = Math.max(3, Math.min(6, box.h * 0.07));
+      var barX = textLeft;
+      var barW = Math.max(0, textRight - barX);
+      track.setAttribute("x", barX);
+      track.setAttribute("y", barY);
+      track.setAttribute("width", barW);
+      track.setAttribute("height", barH);
+      track.setAttribute("rx", barH / 2);
+
+      var frac = (dur && dur > 0) ? Math.max(0, Math.min(1, pos / dur)) : 0;
+      fill.setAttribute("x", barX);
+      fill.setAttribute("y", barY);
+      fill.setAttribute("width", barW * frac);
+      fill.setAttribute("height", barH);
+      fill.setAttribute("rx", barH / 2);
+
+      // Generous invisible scrub target over the bar — see `_makeAudioEl`.
+      var scrubH = Math.max(barH, Math.min(22, box.h * 0.34));
+      scrub.setAttribute("x", barX);
+      scrub.setAttribute("y", barY + barH / 2 - scrubH / 2);
+      scrub.setAttribute("width", barW);
+      scrub.setAttribute("height", scrubH);
+
+      shape._audioBar = { x: barX, y: barY, w: barW, h: barH };
+    },
+
+    // mm:ss, or --:-- until the duration is known.
+    _formatTime: function(secs) {
+      if (secs == null || !isFinite(secs) || secs < 0) return "--:--";
+      var t = Math.floor(secs);
+      var m = Math.floor(t / 60), sec = t % 60;
+      return m + ":" + (sec < 10 ? "0" : "") + sec;
+    },
+
     _imageRadius: function(w, h) {
       var r = Math.min(w, h) * IMAGE_RADIUS_RATIO;
       return Math.round(Math.max(IMAGE_RADIUS_MIN, Math.min(IMAGE_RADIUS_MAX, r)) * 10) / 10;
@@ -6152,7 +6632,7 @@
           var it = items[i];
           if (it.kind === "file" && it.type && it.type.indexOf("image/") === 0) {
             var file = it.getAsFile();
-            if (file) { e.preventDefault(); self._insertImageFile(file); return; }
+            if (file) { e.preventDefault(); self._insertMediaFile(file); return; }
           }
         }
 
@@ -6222,7 +6702,7 @@
         self._svgToPngFile(card.svg, card.width, card.height, function(file) {
           if (!file) return fallBackToText("could not rasterise the card");
           self._hideToast();
-          self._insertImageFile(file, null, { metadata: { link: text } });
+          self._insertMediaFile(file, null, { metadata: { link: text } });
         });
       }, fallBackToText);
       return null;
@@ -7049,6 +7529,16 @@
           bboxTopImage = { x: g.x + g.w / 2, y: g.y };
           break;
         }
+        case "audio": {
+          var auTL = self._imageToContainer({ x: g.x, y: g.y });
+          var auBR = self._imageToContainer({ x: g.x + g.w, y: g.y + g.h });
+          self._layoutAudioCard(shape, {
+            x: Math.min(auTL.x, auBR.x), y: Math.min(auTL.y, auBR.y),
+            w: Math.abs(auBR.x - auTL.x), h: Math.abs(auBR.y - auTL.y)
+          });
+          bboxTopImage = { x: g.x + g.w / 2, y: g.y };
+          break;
+        }
         case "circle": {
           var c  = self._imageToContainer({ x: g.cx, y: g.cy });
           var rp = self._imageToContainer({ x: g.cx + g.r, y: g.cy });
@@ -7759,6 +8249,7 @@
       switch (shape.kind) {
         case "image":
         case "rectangle":
+        case "audio":
           return (
             pt.x >= g.x && pt.x <= g.x + g.w &&
             pt.y >= g.y && pt.y <= g.y + g.h
@@ -7844,7 +8335,8 @@
       var g = shape.geometry;
       switch (shape.kind) {
         case "image":
-        case "rectangle": {
+        case "rectangle":
+        case "audio": {
           var tl = self._imageToContainer({ x: g.x,         y: g.y });
           var br = self._imageToContainer({ x: g.x + g.w,   y: g.y + g.h });
           var rx1 = Math.min(tl.x, br.x), ry1 = Math.min(tl.y, br.y);
@@ -8563,6 +9055,12 @@
         }
         self._startShapeMove(shape, e);
       });
+
+      // Audio transport. Wired here rather than through the doc-level
+      // hit-test because these are real controls, not shape body: pressing
+      // play must not also start a move, and the press has to land on the
+      // exact sub-element to tell "play" from "scrub".
+      if (shape.kind === "audio") self._attachAudioControls(shape);
 
       // Dimension label is independently draggable along the shaft
       // (writes `metadata.title_offset`). Wires its own pointerdown
@@ -9389,6 +9887,7 @@
         case "image":
         case "rectangle":
         case "text":
+        case "audio":
           return { x: g.x, y: g.y, w: g.w, h: g.h };
         case "circle":
           return { x: g.cx - g.r, y: g.cy - g.r, w: 2 * g.r, h: 2 * g.r };
@@ -12038,6 +12537,7 @@
       switch (shape.kind) {
         case "image":
         case "rectangle":
+        case "audio":
           return inRect(g);
         case "text":
           return inRect(shape._renderedBox || g);
@@ -12642,6 +13142,11 @@
           el = svgEl("image", { preserveAspectRatio: "none" });
           el.classList.add("etcher-image");
           break;
+        // Audio: a player card rather than a picture of one. Everything is
+        // SVG — no <foreignObject> — so it pans, zooms, layers and exports
+        // like every other shape; the <audio> element that actually plays is
+        // kept out of the overlay entirely (see `_audioElFor`).
+        case "audio": el = this._makeAudioEl(); break;
         case "circle":    el = svgEl("circle");                     break;
         case "polygon":   el = svgEl("polygon");                    break;
         case "marker":
@@ -12796,7 +13301,7 @@
       // group unstroked avoids painting a bogus border on the wrapper.
       if (ann.kind !== "callout" && ann.kind !== "text" &&
           ann.kind !== "dimension" && ann.kind !== "line" &&
-          ann.kind !== "arrow") {
+          ann.kind !== "arrow" && ann.kind !== "audio") {
         el.setAttribute("stroke-width", "2");
       }
       el.classList.add("etcher-shape");
@@ -13946,6 +14451,7 @@
       switch (shape.kind) {
         case "image":
         case "rectangle":
+        case "audio":
           return [
             { x: g.x,         y: g.y },          // 0: top-left
             { x: g.x + g.w,   y: g.y },          // 1: top-right
@@ -14262,6 +14768,14 @@
           // Same box move as a rectangle, but href rides along in geometry —
           // rebuild explicitly or the source is dropped on every drag.
           return { x: geom.x + dx, y: geom.y + dy, w: geom.w, h: geom.h, href: geom.href };
+        case "audio":
+          // Same trap as image: everything the card needs to render lives in
+          // geometry, so a move that rebuilds only the box silently strips
+          // the file, its name and its duration.
+          return {
+            x: geom.x + dx, y: geom.y + dy, w: geom.w, h: geom.h,
+            href: geom.href, title: geom.title, duration: geom.duration
+          };
         case "rectangle":
         case "text":
           return { x: geom.x + dx, y: geom.y + dy, w: geom.w, h: geom.h };

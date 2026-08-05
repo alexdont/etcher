@@ -323,9 +323,59 @@ Two optional hooks for persisting per-user toolbar defaults (Etcher stores nothi
 | `dimension` | `%{"a" => [x, y], "b" => [x, y]}` (label lives in `metadata.title` / `metadata.title_offset`) |
 | `line`      | `%{"a" => [x, y], "b" => [x, y]}` (title lives in `metadata.title`, rendered as a sibling label) |
 | `image`     | `%{"x" => x, "y" => y, "w" => w, "h" => h, "href" => href}` (see [Images](#images)) |
+| `audio`     | `%{"x" => x, "y" => y, "w" => w, "h" => h, "href" => href, "title" => title, "duration" => secs}` (see [Audio](#audio)) |
 | `arrow`     | `%{"a" => [x, y], "points" => [[x, y], ...], "b" => [x, y], "from" => binding, "to" => binding}` (see [Connectors](#connectors)) |
 
 All coordinates are in canvas pixels — Fresco's pan/zoom rescales them automatically.
+
+## Audio
+
+Drop or paste an audio file and it lands as a player card: play/pause, a
+title, a timecode and a scrub bar, drawn entirely in SVG so it pans, zooms,
+moves, resizes and layers like every other shape. The `<audio>` element that
+does the playing is kept outside the overlay and addressed by uuid — an
+`<audio>` inside a `<foreignObject>` behaves differently in every engine.
+
+```javascript
+const layer = window.Etcher.layerFor("my-fresco-id");
+layer.insertAudio("/files/lesson.mp3", { title: "Lesson 4", duration: 212 });
+```
+
+Audio files need a host uploader (`setImageUploader`, which handles both
+kinds). Unlike images there is no embed fallback: base64'd audio would put
+megabytes of JSON in the annotation payload on every save and every peer
+broadcast, so without an uploader the insert is refused and
+`etcher:media-upload-unavailable` fires.
+
+### Shared playback
+
+Etcher owns the card and the element. It does **not** decide who is listening
+to what — that stays with the host, so the policy (who may control, what
+happens on join) isn't buried in a drawing library.
+
+Every local control emits `etcher:media-command` with `{uuid, action,
+position}`. The host broadcasts however it likes and hands the result to each
+client:
+
+```javascript
+layer.applyMediaState(uuid, { playing: true, position: 41.2 });
+```
+
+`applyMediaState` corrects only when this client is more than 250ms out.
+Transport state arrives continuously while something is playing, and seeking
+on every message stutters audibly; a quarter second is under what a listener
+notices and above the jitter of a round trip. Corrections are never
+re-broadcast — two clients correcting each other would never settle.
+
+**Autoplay is the thing to design for.** Browsers refuse `play()` until the
+user has interacted with the page, so someone who joins a room where audio is
+already running hears nothing. Etcher fires `etcher:media-blocked` with the
+uuid when that happens; show an affordance and call `playAudio` from the
+click.
+
+Other methods: `playAudio(uuid, position)`, `pauseAudio(uuid, position)`,
+`toggleAudio(uuid)`, `seekAudio(uuid, fraction)`, `audioState(uuid)` →
+`{playing, position, duration}`.
 
 ## Connectors
 

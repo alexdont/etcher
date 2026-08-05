@@ -140,6 +140,12 @@ defmodule Etcher.Raster do
   defp shape_primitives("rectangle", %{} = g), do: rect(g)
   defp shape_primitives("text", %{} = g), do: rect(g)
 
+  # An audio card bakes as its outline. The transport inside it is live
+  # interface — a play button and a scrub position in a flattened image would
+  # be a picture of a control nobody can press, and the position it froze at
+  # would be whoever exported it.
+  defp shape_primitives("audio", %{} = g), do: rect(g)
+
   defp shape_primitives("circle", g),
     do: with_keys(g, ["cx", "cy", "r"], &[{:circle, &1, &2, &3}])
 

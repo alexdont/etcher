@@ -140,11 +140,13 @@ defmodule Etcher.Raster do
   defp shape_primitives("rectangle", %{} = g), do: rect(g)
   defp shape_primitives("text", %{} = g), do: rect(g)
 
-  # An audio card bakes as its outline. The transport inside it is live
-  # interface — a play button and a scrub position in a flattened image would
-  # be a picture of a control nobody can press, and the position it froze at
-  # would be whoever exported it.
-  defp shape_primitives("audio", %{} = g), do: rect(g)
+  # Media bakes as its outline. The transport is live interface — a play
+  # button and a scrub position in a flattened image would be a picture of a
+  # control nobody can press, at whatever moment the exporter happened to be
+  # at. Video frames aren't drawn either: they're in a DOM layer the server
+  # has no access to, and picking one to stand for the whole clip would be an
+  # invention.
+  defp shape_primitives(k, %{} = g) when k in ["audio", "video"], do: rect(g)
 
   defp shape_primitives("circle", g),
     do: with_keys(g, ["cx", "cy", "r"], &[{:circle, &1, &2, &3}])

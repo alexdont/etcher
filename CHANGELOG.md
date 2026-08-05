@@ -8,13 +8,21 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- **Audio annotations.** Drop or paste an audio file and it lands as a player
+- **Audio and video annotations.** Drop or paste an audio file and it lands as a player
   card — play/pause, title, timecode, scrub bar — drawn entirely in SVG, so it
   pans, zooms, moves, resizes and layers like any other shape. The `<audio>`
   element that plays it lives outside the overlay and is addressed by uuid;
   an `<audio>` inside a `<foreignObject>` behaves differently in every engine.
 
-  New `audio` kind: `%{"x", "y", "w", "h", "href", "title", "duration"}`.
+  Video shares the whole transport; only the picture differs. `<video>` can't
+  be drawn into SVG except through a `<foreignObject>`, which is
+  transform-buggy across engines, so frames render in a plain DOM layer
+  positioned by the same transform the shapes use, under the SVG so
+  annotations draw on top. Layering between the two is therefore
+  all-or-nothing — no arrow can sit behind one video and in front of another.
+
+  New `audio` and `video` kinds: `%{"x", "y", "w", "h", "href", "title",
+  "duration"}`.
   Requires a host uploader — unlike images there is no embed fallback, because
   base64'd audio would put megabytes of JSON in the annotation payload on
   every save and every peer broadcast.
@@ -25,6 +33,16 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   corrects only past 250ms of drift and never re-broadcasts a correction.
   `etcher:media-blocked` fires when a browser's autoplay policy refuses
   `play()`, so the host can prompt for the interaction it needs.
+  `mediaStates()` reports every shape's transport at once, so a host can
+  answer a peer who joins mid-playback instead of leaving them silent until
+  the next command.
+
+  Files the browser can't play are refused *before* upload —
+  `etcher:media-unsupported` — rather than transferring a large unplayable
+  file in full and landing a card that never does anything. Volume and mute
+  (`setMediaVolume`, `setMediaMuted`) are per-listener and emit nothing: in a
+  room, turning it down for yourself is normal and turning it down for
+  everyone is not.
 
 - **Connectors — arrows that bind to shapes and follow them.** Hover a shape
   with the cursor tool and eight green dots appear on its bounding box (four

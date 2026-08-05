@@ -34,6 +34,9 @@ function lift(name, signature) {
 const formatTime = lift("_formatTime", "secs");
 const applyMediaState = lift("_applyMediaState", "uuid, state");
 const isAudioFile = lift("_isAudioFile", "file");
+const isVideoFile = lift("_isVideoFile", "file");
+const canPlayFile = lift("_canPlayFile", "kind, file");
+const isMediaKind = lift("_isMediaKind", "kind");
 
 // ── timecode ────────────────────────────────────────────────────────────────
 
@@ -144,5 +147,70 @@ assert.ok(!isAudioFile({ type: "image/png", name: "a.png" }));
 assert.ok(!isAudioFile({ type: "", name: "notes.pdf" }));
 assert.ok(!isAudioFile({ type: "", name: "mp3" }), "an extension, not a substring");
 assert.ok(!isAudioFile(null));
+
+// ── video, and the audio/video split ────────────────────────────────────────
+
+for (const type of ["video/mp4", "video/webm", "video/quicktime"]) {
+  assert.ok(isVideoFile({ type, name: "x" }), type);
+}
+for (const name of ["lesson.mp4", "CLIP.MOV", "a.webm", "b.m4v", "c.ogv"]) {
+  assert.ok(isVideoFile({ type: "", name }), name);
+}
+assert.ok(!isVideoFile({ type: "audio/mpeg", name: "a.mp3" }));
+assert.ok(!isVideoFile({ type: "image/png", name: "a.png" }));
+assert.ok(!isVideoFile(null));
+
+// The two must not overlap: a file matching both would be routed by whichever
+// check the router happens to run first.
+const samples = [
+  { type: "audio/mpeg", name: "a.mp3" },
+  { type: "video/mp4", name: "a.mp4" },
+  { type: "", name: "a.wav" },
+  { type: "", name: "a.webm" }
+];
+for (const f of samples) {
+  assert.ok(!(isAudioFile(f) && isVideoFile(f)),
+    `${f.name} must be one kind or the other, not both`);
+}
+
+// Both kinds share the transport; nothing else does.
+assert.ok(isMediaKind("audio"));
+assert.ok(isMediaKind("video"));
+for (const k of ["image", "rectangle", "text", "arrow", "marker", undefined]) {
+  assert.ok(!isMediaKind(k), `${k} has no media element`);
+}
+
+// ── refusing what can't be played ───────────────────────────────────────────
+
+// The point of this check is to refuse BEFORE uploading — otherwise a large
+// unplayable file transfers in full and lands as a card that does nothing.
+function withDoc(answer, fn) {
+  const real = global.document;
+  global.document = { createElement: () => ({ canPlayType: () => answer }) };
+  try { return fn(); } finally { global.document = real; }
+}
+
+assert.ok(withDoc("probably", () => canPlayFile("video", { type: "video/mp4" })));
+assert.ok(withDoc("maybe", () => canPlayFile("video", { type: "video/mp4" })),
+  '"maybe" is not a refusal — most codecs answer this');
+assert.ok(!withDoc("", () => canPlayFile("video", { type: "video/x-matroska" })),
+  'only "" is a definite no');
+
+// A blank MIME type must NOT be refused: plenty of sources omit it, and
+// rejecting on that basis would turn away files that play perfectly.
+assert.ok(withDoc("", () => canPlayFile("audio", { type: "" })),
+  "no type given is not evidence of being unplayable");
+assert.ok(withDoc("", () => canPlayFile("audio", {})));
+
+// An environment without `canPlayType` must let the file through rather than
+// refusing everything.
+{
+  const real = global.document;
+  global.document = { createElement: () => ({}) };
+  try {
+    assert.ok(canPlayFile("audio", { type: "audio/mpeg" }),
+      "no canPlayType — allow, don't block every insert");
+  } finally { global.document = real; }
+}
 
 console.log("audio: all checks passed");

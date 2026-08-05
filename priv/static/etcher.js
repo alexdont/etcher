@@ -951,6 +951,16 @@
       // Audio card. Painted from `currentColor` like every other shape, so
       // it picks up the colour picker and the selected/hover states without
       // any special casing.
+      // The DOM layer that holds video frames. Transparent to the pointer
+      // throughout: pan, zoom, drawing and the SVG transport drawn over the
+      // top all have to reach through it.
+      ".etcher-media {",
+      "  position: absolute; inset: 0; overflow: hidden; pointer-events: none;",
+      "}",
+      ".etcher-media video {",
+      "  position: absolute; object-fit: fill; pointer-events: none;",
+      "  background: #000;",
+      "}",
       ".etcher-audio-bg {",
       "  fill: rgba(17, 17, 20, 0.92); stroke: currentColor; stroke-width: 1.5;",
       "}",
@@ -966,6 +976,13 @@
       ".etcher-audio-track { fill: rgba(245, 245, 247, 0.22); stroke: none; pointer-events: none; }",
       ".etcher-audio-fill { fill: currentColor; stroke: none; pointer-events: none; }",
       ".etcher-audio-scrub { fill: transparent; stroke: none; pointer-events: all; cursor: pointer; }",
+      // On a video the same transport becomes a scrim over the picture
+      // rather than a card of its own: no outline (the video's edge is the
+      // edge) and darker, so white text and a coloured bar stay readable
+      // over whatever frame is underneath.
+      ".etcher-video .etcher-audio-bg {",
+      "  fill: rgba(0, 0, 0, 0.55); stroke: none;",
+      "}",
       // Connector dots — the eight bindable points that appear on a shape's
       // box when the cursor tool hovers it. Drag one to pull an arrow out.
       // Named apart from `.etcher-anchor-handle` above, which is the bezier
@@ -1268,6 +1285,10 @@
   // any box — this is just what a freshly dropped file lands at.
   var AUDIO_CARD_W = 360;
   var AUDIO_CARD_H = 88;
+  // Default size of a video box, in image px — 16:9, big enough to watch.
+  var VIDEO_BOX_W = 640;
+  var VIDEO_BOX_H = 360;
+
   // Below this rendered height the card drops its title and timecode and
   // keeps only the transport, rather than overlapping its own text.
   var AUDIO_COMPACT_H = 54;
@@ -2002,6 +2023,7 @@
           // ── Audio ────────────────────────────────────────────────────
           // `insertAudio` places a card for an already-stored file.
           insertAudio: function(href, opts) { return self._insertAudioHref(href, opts || {}); },
+          insertVideo: function(href, opts) { return self._insertVideoHref(href, opts || {}); },
           // Local controls. Each emits `etcher:media-command` so the host can
           // share the action with the room.
           playAudio:   function(uuid, position) { return self._applyAudio(uuid, "play", position, true); },
@@ -2013,6 +2035,12 @@
           // see `applyMediaState`.
           applyMediaState: function(uuid, state) { return self._applyMediaState(uuid, state || {}); },
           audioState: function(uuid) { return self._audioState(uuid); },
+          // Every media shape's transport state, for answering "what is the
+          // room playing right now?" — see `mediaStates`.
+          mediaStates: function() { return self._mediaStates(); },
+          // Local to this listener — never shared with the room.
+          setMediaVolume: function(uuid, v) { return self._setMediaVolume(uuid, v); },
+          setMediaMuted: function(uuid, m) { return self._setMediaMuted(uuid, m); },
 
           // Hand image FILES (pasted, dropped, or picked) to the host instead
           // of embedding them. `fn(file, ctx)` returns a Promise of a URL,
@@ -2820,6 +2848,21 @@
       wrapper.style.right = "0";
       wrapper.style.bottom = "0";
 
+      // Video frames can't be drawn into SVG — <video> is an HTML element,
+      // and the only way to nest one is a <foreignObject>, which is
+      // transform-buggy across engines. So they live in a plain div layer,
+      // positioned by the same image→container transform the shapes use.
+      //
+      // Inserted BEFORE the svg, and so painted under it: annotations are
+      // for marking things up, and a mark you can't see over the thing it
+      // marks is useless. The consequence is that layering between the two
+      // is all-or-nothing — no arrow can sit behind one video and in front
+      // of another. Every canvas app that renders video as DOM has the same
+      // limitation.
+      var media = document.createElement("div");
+      media.className = "etcher-media";
+      wrapper.appendChild(media);
+
       var svg = svgEl("svg", { width: "100%", height: "100%" });
       svg.style.position = "absolute";
       svg.style.inset = "0";
@@ -2827,6 +2870,7 @@
       wrapper.appendChild(svg);
 
       self.overlayWrapper = wrapper;
+      self.mediaLayer = media;
       self.svg = svg;
 
       container.appendChild(wrapper);
@@ -5530,7 +5574,7 @@
       var self = this;
       var input = document.createElement("input");
       input.type = "file";
-      input.accept = "image/*,audio/*";
+      input.accept = "image/*,audio/*,video/*";
       input.style.display = "none";
       document.body.appendChild(input);
       input.addEventListener("change", function() {
@@ -6069,9 +6113,10 @@
     // Nothing about the element is on screen, so it lives outside the
     // overlay and is addressed by uuid.
 
-    _makeAudioEl: function() {
+    _makeAudioEl: function(kind) {
       var g = svgEl("g");
       g.classList.add("etcher-audio");
+      if (kind === "video") g.classList.add("etcher-video");
 
       var bg = svgEl("rect");
       bg.classList.add("etcher-audio-bg");
@@ -6115,12 +6160,19 @@
     // container rather than the overlay: the overlay is rebuilt on a source
     // swap, and a playing element torn out of the DOM stops dead.
     _audioElFor: function(shape) {
-      if (!shape || shape.kind !== "audio") return null;
+      if (!shape || !this._isMediaKind(shape.kind)) return null;
       if (shape._audioEl) return shape._audioEl;
       var href = (shape.geometry && shape.geometry.href) || "";
       if (!href) return null;
       var self = this;
-      var el = document.createElement("audio");
+      var isVideo = shape.kind === "video";
+      var el = document.createElement(isVideo ? "video" : "audio");
+      if (isVideo) {
+        // Inline, and muted-capable, because a phone would otherwise take the
+        // video fullscreen the moment it plays and drop the board.
+        el.setAttribute("playsinline", "");
+        el.playsInline = true;
+      }
       // Metadata only: enough for a duration and a scrub bar without pulling
       // the whole file down for a card nobody has pressed play on.
       el.preload = "metadata";
@@ -6136,8 +6188,19 @@
       el.addEventListener("play", function() { self._renderShape(shape); });
       el.addEventListener("pause", function() { self._renderShape(shape); });
       el.addEventListener("ended", function() { self._renderShape(shape); });
-      (this.handle && this.handle.container ? this.handle.container : document.body)
-        .appendChild(el);
+      if (isVideo) {
+        // Frames go in the media layer, where the render pass positions them.
+        el.style.display = "";
+        (this.mediaLayer || document.body).appendChild(el);
+        el.addEventListener("loadedmetadata", function() { self._renderShape(shape); });
+      } else {
+        // Nothing to show for audio — the card is the whole interface — so
+        // the element goes on the container, out of the overlay. An overlay
+        // rebuild would otherwise tear a playing element out of the DOM and
+        // stop it dead.
+        (this.handle && this.handle.container ? this.handle.container : document.body)
+          .appendChild(el);
+      }
       shape._audioEl = el;
       return el;
     },
@@ -6146,7 +6209,9 @@
     // audio diverge completely after this (one embeds, the other must
     // upload), so the split belongs here rather than in each caller.
     _insertMediaFile: function(file, imagePt, opts) {
-      if (this._isAudioFile(file)) return this._insertAudioFile(file, imagePt, opts);
+      if (this._isAudioFile(file) || this._isVideoFile(file)) {
+        return this._insertAudioFile(file, imagePt, opts);
+      }
       return this._insertImageFile(file, imagePt, opts);
     },
 
@@ -6154,6 +6219,14 @@
     // viewport centre; `opts.title` labels it, `opts.duration` seeds the
     // timecode before metadata loads.
     _insertAudioHref: function(href, opts) {
+      return this._insertMediaHref("audio", href, opts);
+    },
+
+    _insertVideoHref: function(href, opts) {
+      return this._insertMediaHref("video", href, opts);
+    },
+
+    _insertMediaHref: function(kind, href, opts) {
       if (!href) return null;
       opts = opts || {};
       var at = (opts.at && typeof opts.at.x === "number")
@@ -6164,15 +6237,19 @@
       // whatever the canvas happens to be at.
       var per = 1;
       try { per = this._markerScale() || 1; } catch (_) {}
-      var w = AUDIO_CARD_W / (per > 0 ? per : 1);
-      var h = AUDIO_CARD_H / (per > 0 ? per : 1);
+      // A video needs a picture-sized box; an audio card only needs room for
+      // its transport.
+      var baseW = kind === "video" ? VIDEO_BOX_W : AUDIO_CARD_W;
+      var baseH = kind === "video" ? VIDEO_BOX_H : AUDIO_CARD_H;
+      var w = baseW / (per > 0 ? per : 1);
+      var h = baseH / (per > 0 ? per : 1);
       var geom = {
         x: at.x - w / 2, y: at.y - h / 2, w: w, h: h,
         href: href,
-        title: opts.title || "Audio",
+        title: opts.title || (kind === "video" ? "Video" : "Audio"),
         duration: typeof opts.duration === "number" ? opts.duration : null
       };
-      var el = this._makeAudioEl();
+      var el = this._makeAudioEl(kind);
       el.classList.add("etcher-shape");
       this._applyShapeColor(el, this.activeColor);
       this.svg.appendChild(el);
@@ -6181,7 +6258,7 @@
       // it without re-finding it by uuid.
       var self = this;
       var made = null;
-      this._finalizeShape("audio", geom, el, function(shape) {
+      this._finalizeShape(kind, geom, el, function(shape) {
         made = shape;
         // Created now so the duration lands, and the card redraws with it,
         // without waiting for someone to press play.
@@ -6199,6 +6276,22 @@
       var self = this;
       opts = opts || {};
       if (!file) return;
+      var kind = this._isVideoFile(file) ? "video" : "audio";
+
+      // Refuse what this browser can't play, BEFORE uploading it. Otherwise a
+      // 300MB .mkv transfers in full, stores, and lands as a card that will
+      // never do anything — and the person who dropped it has no way to tell
+      // that from a slow network. Checked here rather than by extension
+      // because support genuinely differs by browser.
+      var playable = this._canPlayFile(kind, file);
+      if (!playable) {
+        this._dispatch("etcher:media-unsupported", {
+          name: file.name || null,
+          type: file.type || null,
+          kind: kind
+        });
+        return;
+      }
       var upload = this._imageUploader();
       if (!upload) {
         this._dispatch("etcher:media-upload-unavailable", {
@@ -6215,10 +6308,33 @@
           self._dispatch("etcher:media-upload-failed", { name: file.name || null });
           return;
         }
-        self._insertAudioHref(href, {
-          at: placedAt, title: opts.title || file.name || "Audio"
+        self._insertMediaHref(kind, href, {
+          at: placedAt,
+          title: opts.title || file.name || (kind === "video" ? "Video" : "Audio")
         });
       });
+    },
+
+    // Can this browser play the file at all? `canPlayType` answers "", "maybe"
+    // or "probably"; only "" is a definite no. A blank MIME type is treated as
+    // playable — plenty of sources omit it, and refusing on that basis would
+    // reject files that work perfectly.
+    _canPlayFile: function(kind, file) {
+      var type = file && file.type;
+      if (!type) return true;
+      try {
+        var probe = document.createElement(kind === "video" ? "video" : "audio");
+        if (typeof probe.canPlayType !== "function") return true;
+        return probe.canPlayType(type) !== "";
+      } catch (_) {
+        return true;
+      }
+    },
+
+    _isVideoFile: function(file) {
+      if (!file) return false;
+      if (file.type && file.type.indexOf("video/") === 0) return true;
+      return /\.(mp4|m4v|webm|mov|ogv)$/i.test(file.name || "");
     },
 
     _isAudioFile: function(file) {
@@ -6241,9 +6357,48 @@
       return this._applyAudio(uuid, st.playing ? "play" : "seek", pos, true);
     },
 
+    // Transport state for every media shape that has one. Used to answer a
+    // newcomer: playback is shared as commands, so someone who arrives
+    // between them has no idea what is playing or where. Only shapes whose
+    // element exists are reported — one that has never been touched is at
+    // zero and paused, which is also what the newcomer already has.
+    _mediaStates: function() {
+      var self = this;
+      var out = [];
+      (this.shapes || []).forEach(function(s) {
+        if (!self._isMediaKind(s.kind) || !s.uuid || !s._audioEl) return;
+        var st = self._audioState(s.uuid);
+        if (st) out.push({ uuid: s.uuid, playing: st.playing, position: st.position });
+      });
+      return out;
+    },
+
+    // Volume and mute are per-listener and deliberately outside the shared
+    // transport: in a room, one person turning it down for themselves is
+    // normal, and one person turning it down for everyone is not. Neither
+    // emits a command.
+    _setMediaVolume: function(uuid, volume) {
+      var shape = this._shapeByUuid(uuid);
+      if (!shape || !this._isMediaKind(shape.kind)) return false;
+      var el = this._audioElFor(shape);
+      if (!el) return false;
+      el.volume = Math.max(0, Math.min(1, volume));
+      return true;
+    },
+
+    _setMediaMuted: function(uuid, muted) {
+      var shape = this._shapeByUuid(uuid);
+      if (!shape || !this._isMediaKind(shape.kind)) return false;
+      var el = this._audioElFor(shape);
+      if (!el) return false;
+      el.muted = !!muted;
+      this._renderShape(shape);
+      return true;
+    },
+
     _audioState: function(uuid) {
       var shape = this._shapeByUuid(uuid);
-      if (!shape || shape.kind !== "audio") return null;
+      if (!shape || !this._isMediaKind(shape.kind)) return null;
       var el = this._audioElFor(shape);
       if (!el) return null;
       var dur = isFinite(el.duration) && el.duration > 0
@@ -6252,7 +6407,9 @@
       return {
         playing: !el.paused && !el.ended,
         position: el.currentTime || 0,
-        duration: dur
+        duration: dur,
+        volume: typeof el.volume === "number" ? el.volume : 1,
+        muted: !!el.muted
       };
     },
 
@@ -6287,7 +6444,7 @@
     // came FROM the host, so a peer's broadcast can't echo back out.
     _applyAudio: function(uuid, action, position, emit) {
       var shape = this._shapeByUuid(uuid);
-      if (!shape || shape.kind !== "audio") return false;
+      if (!shape || !this._isMediaKind(shape.kind)) return false;
       var el = this._audioElFor(shape);
       if (!el) return false;
       var self = this;
@@ -6488,6 +6645,49 @@
       scrub.setAttribute("height", scrubH);
 
       shape._audioBar = { x: barX, y: barY, w: barW, h: barH };
+    },
+
+    // Height of the transport strip laid over a video, from the video's own
+    // height. Proportional so it scales with the picture under zoom, clamped
+    // so it stays usable on a small one and doesn't dominate a large one.
+    _videoBarH: function(videoH) {
+      return Math.max(26, Math.min(48, videoH * 0.22));
+    },
+
+    // Stop and discard a shape's media element.
+    _releaseMediaEl: function(shape) {
+      var el = shape && shape._audioEl;
+      if (!el) return;
+      try { el.pause(); } catch (_) {}
+      // Emptying the source releases the buffered data; removing the node
+      // alone can leave a decoder holding it.
+      try { el.removeAttribute("src"); el.load(); } catch (_) {}
+      if (el.parentNode) el.parentNode.removeChild(el);
+      shape._audioEl = null;
+    },
+
+    // Media elements sit outside the SVG, so a shape list rebuilt from
+    // scratch leaves them orphaned — and, for audio, audible. Same sweep as
+    // the image rings, for the same reason.
+    _sweepMediaEls: function() {
+      if (!this.mediaLayer) return;
+      var vids = this.mediaLayer.querySelectorAll("video");
+      if (!vids.length) return;
+      var owned = [];
+      (this.shapes || []).forEach(function(s) {
+        if (s && s._audioEl) owned.push(s._audioEl);
+      });
+      for (var i = 0; i < vids.length; i++) {
+        if (owned.indexOf(vids[i]) === -1 && vids[i].parentNode) {
+          try { vids[i].pause(); } catch (_) {}
+          vids[i].parentNode.removeChild(vids[i]);
+        }
+      }
+    },
+
+    // Kinds backed by a media element and the shared transport.
+    _isMediaKind: function(kind) {
+      return kind === "audio" || kind === "video";
     },
 
     // mm:ss, or --:-- until the duration is known.
@@ -7529,6 +7729,31 @@
           bboxTopImage = { x: g.x + g.w / 2, y: g.y };
           break;
         }
+        case "video": {
+          var viTL = self._imageToContainer({ x: g.x, y: g.y });
+          var viBR = self._imageToContainer({ x: g.x + g.w, y: g.y + g.h });
+          var vx = Math.min(viTL.x, viBR.x), vy = Math.min(viTL.y, viBR.y);
+          var vw = Math.abs(viBR.x - viTL.x), vh = Math.abs(viBR.y - viTL.y);
+          var vEl = self._audioElFor(shape);
+          if (vEl) {
+            vEl.style.left = vx + "px";
+            vEl.style.top = vy + "px";
+            vEl.style.width = vw + "px";
+            vEl.style.height = vh + "px";
+            vEl.style.borderRadius = self._imageRadius(vw, vh) + "px";
+          }
+          // The transport is drawn in SVG over the picture, not with the
+          // browser's own controls: native controls are a fixed pixel size
+          // that would swell as you zoom out, they can't be styled to match
+          // the board, and they'd drive playback locally without telling the
+          // room.
+          self._layoutAudioCard(shape, {
+            x: vx, y: vy + Math.max(0, vh - self._videoBarH(vh)),
+            w: vw, h: self._videoBarH(vh)
+          });
+          bboxTopImage = { x: g.x + g.w / 2, y: g.y };
+          break;
+        }
         case "audio": {
           var auTL = self._imageToContainer({ x: g.x, y: g.y });
           var auBR = self._imageToContainer({ x: g.x + g.w, y: g.y + g.h });
@@ -8250,6 +8475,7 @@
         case "image":
         case "rectangle":
         case "audio":
+        case "video":
           return (
             pt.x >= g.x && pt.x <= g.x + g.w &&
             pt.y >= g.y && pt.y <= g.y + g.h
@@ -8336,7 +8562,8 @@
       switch (shape.kind) {
         case "image":
         case "rectangle":
-        case "audio": {
+        case "audio":
+        case "video": {
           var tl = self._imageToContainer({ x: g.x,         y: g.y });
           var br = self._imageToContainer({ x: g.x + g.w,   y: g.y + g.h });
           var rx1 = Math.min(tl.x, br.x), ry1 = Math.min(tl.y, br.y);
@@ -8807,6 +9034,7 @@
       var self = this;
       this.shapes.forEach(function(s) { self._renderShape(s); });
       this._sweepImageRings();
+      this._sweepMediaEls();
       if (this.draftState && this.draftState.kind !== "polygon") {
         this._renderShape(this.draftState);
       }
@@ -9060,7 +9288,7 @@
       // hit-test because these are real controls, not shape body: pressing
       // play must not also start a move, and the press has to land on the
       // exact sub-element to tell "play" from "scrub".
-      if (shape.kind === "audio") self._attachAudioControls(shape);
+      if (self._isMediaKind(shape.kind)) self._attachAudioControls(shape);
 
       // Dimension label is independently draggable along the shaft
       // (writes `metadata.title_offset`). Wires its own pointerdown
@@ -9888,6 +10116,7 @@
         case "rectangle":
         case "text":
         case "audio":
+        case "video":
           return { x: g.x, y: g.y, w: g.w, h: g.h };
         case "circle":
           return { x: g.cx - g.r, y: g.cy - g.r, w: 2 * g.r, h: 2 * g.r };
@@ -11208,7 +11437,12 @@
         }
         this.shapes.splice(idx, 1);
       }
+      // A media element lives outside the overlay, so nothing above removes
+      // it. Left behind, a deleted audio file goes on playing with no card to
+      // stop it — the sound of a shape that is not there.
+      this._releaseMediaEl(shape);
       this._sweepImageRings();
+      this._sweepMediaEls();
       // Dots belonging to the shape that just went away would be left
       // floating over empty canvas, still draggable into a connector
       // bound to a uuid that no longer exists.
@@ -12538,6 +12772,7 @@
         case "image":
         case "rectangle":
         case "audio":
+        case "video":
           return inRect(g);
         case "text":
           return inRect(shape._renderedBox || g);
@@ -13080,6 +13315,11 @@
     // save handlers. Per-shape `readonly` flows in naturally — it lives on
     // each annotation in the new array.
     _rehydrateFromExtension: function() {
+      // Media elements outlive their shapes unless stopped here — a source
+      // swap would otherwise leave the previous canvas's audio playing over
+      // the new one.
+      var selfRehydrate = this;
+      (this.shapes || []).forEach(function(s) { selfRehydrate._releaseMediaEl(s); });
       // Drop all interaction state tied to the outgoing shapes.
       this._exitEditMode();
       this._exitTitleEditMode();
@@ -13146,7 +13386,8 @@
         // SVG — no <foreignObject> — so it pans, zooms, layers and exports
         // like every other shape; the <audio> element that actually plays is
         // kept out of the overlay entirely (see `_audioElFor`).
-        case "audio": el = this._makeAudioEl(); break;
+        case "audio":
+        case "video": el = this._makeAudioEl(ann.kind); break;
         case "circle":    el = svgEl("circle");                     break;
         case "polygon":   el = svgEl("polygon");                    break;
         case "marker":
@@ -13301,7 +13542,7 @@
       // group unstroked avoids painting a bogus border on the wrapper.
       if (ann.kind !== "callout" && ann.kind !== "text" &&
           ann.kind !== "dimension" && ann.kind !== "line" &&
-          ann.kind !== "arrow" && ann.kind !== "audio") {
+          ann.kind !== "arrow" && !this._isMediaKind(ann.kind)) {
         el.setAttribute("stroke-width", "2");
       }
       el.classList.add("etcher-shape");
@@ -14452,6 +14693,7 @@
         case "image":
         case "rectangle":
         case "audio":
+        case "video":
           return [
             { x: g.x,         y: g.y },          // 0: top-left
             { x: g.x + g.w,   y: g.y },          // 1: top-right
@@ -14769,6 +15011,7 @@
           // rebuild explicitly or the source is dropped on every drag.
           return { x: geom.x + dx, y: geom.y + dy, w: geom.w, h: geom.h, href: geom.href };
         case "audio":
+        case "video":
           // Same trap as image: everything the card needs to render lives in
           // geometry, so a move that rebuilds only the box silently strips
           // the file, its name and its duration.

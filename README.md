@@ -323,12 +323,13 @@ Two optional hooks for persisting per-user toolbar defaults (Etcher stores nothi
 | `dimension` | `%{"a" => [x, y], "b" => [x, y]}` (label lives in `metadata.title` / `metadata.title_offset`) |
 | `line`      | `%{"a" => [x, y], "b" => [x, y]}` (title lives in `metadata.title`, rendered as a sibling label) |
 | `image`     | `%{"x" => x, "y" => y, "w" => w, "h" => h, "href" => href}` (see [Images](#images)) |
-| `audio`     | `%{"x" => x, "y" => y, "w" => w, "h" => h, "href" => href, "title" => title, "duration" => secs}` (see [Audio](#audio)) |
+| `audio`     | `%{"x" => x, "y" => y, "w" => w, "h" => h, "href" => href, "title" => title, "duration" => secs}` (see [Media](#media)) |
+| `video`     | same as `audio` (see [Media](#media)) |
 | `arrow`     | `%{"a" => [x, y], "points" => [[x, y], ...], "b" => [x, y], "from" => binding, "to" => binding}` (see [Connectors](#connectors)) |
 
 All coordinates are in canvas pixels — Fresco's pan/zoom rescales them automatically.
 
-## Audio
+## Media
 
 Drop or paste an audio file and it lands as a player card: play/pause, a
 title, a timecode and a scrub bar, drawn entirely in SVG so it pans, zooms,
@@ -336,10 +337,28 @@ moves, resizes and layers like every other shape. The `<audio>` element that
 does the playing is kept outside the overlay and addressed by uuid — an
 `<audio>` inside a `<foreignObject>` behaves differently in every engine.
 
+Video works the same way and shares the whole transport — the difference is
+where the picture goes. `<video>` is an HTML element and can only be nested in
+SVG through a `<foreignObject>`, which is transform-buggy across engines, so
+video frames render in a plain DOM layer positioned by the same
+image→container transform the shapes use. The transport is still drawn in SVG,
+as a scrim over the picture's lower edge.
+
+That layer sits **under** the SVG, so annotations draw on top of video. The
+consequence is that layering between the two is all-or-nothing: no arrow can
+sit behind one video and in front of another. Every canvas app that renders
+video as DOM has the same limitation.
+
 ```javascript
 const layer = window.Etcher.layerFor("my-fresco-id");
 layer.insertAudio("/files/lesson.mp3", { title: "Lesson 4", duration: 212 });
+layer.insertVideo("/files/lesson.mp4", { title: "Lesson 4" });
 ```
+
+Files a browser can't play are refused **before** upload rather than after —
+otherwise a large `.mkv` transfers in full, stores, and lands as a card that
+will never do anything. `etcher:media-unsupported` fires with the name and
+type.
 
 Audio files need a host uploader (`setImageUploader`, which handles both
 kinds). Unlike images there is no embed fallback: base64'd audio would put
@@ -373,9 +392,19 @@ already running hears nothing. Etcher fires `etcher:media-blocked` with the
 uuid when that happens; show an affordance and call `playAudio` from the
 click.
 
+A peer joining **while something is already playing** would otherwise sit
+silent until the next command, so `mediaStates()` reports every media shape's
+transport at once — have the host ask for it on join and broadcast the answer.
+Clients already in sync ignore it (it lands inside the drift tolerance).
+
 Other methods: `playAudio(uuid, position)`, `pauseAudio(uuid, position)`,
 `toggleAudio(uuid)`, `seekAudio(uuid, fraction)`, `audioState(uuid)` →
-`{playing, position, duration}`.
+`{playing, position, duration, volume, muted}`, `mediaStates()`.
+
+**Volume and mute are per-listener and deliberately outside the shared
+transport** — `setMediaVolume(uuid, 0..1)` and `setMediaMuted(uuid, bool)`
+emit nothing. In a room, one person turning it down for themselves is normal;
+one person turning it down for everyone is not.
 
 ## Connectors
 

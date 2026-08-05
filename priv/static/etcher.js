@@ -845,6 +845,29 @@
       "  fill: rgba(245, 158, 11, 0.16);",
       "  filter: drop-shadow(0 0 3px rgba(245, 158, 11, 0.7));",
       "}",
+      // Images opt out of every one of those. `stroke` and `fill` don't
+      // paint on an `<image>` at all, and the drop-shadow is drawn outside
+      // the element's box — which `clip-path` (the rounded corners) then
+      // clips straight back off, since clipping happens after filtering.
+      // So the whole rule was invisible on an image, and a filter fighting a
+      // clip-path on one element is a rendering path best not relied on.
+      // `_renderShape` draws them a real ring instead.
+      "image.etcher-shape.is-multi-selected,",
+      "image.etcher-shape.is-selected,",
+      "image.etcher-shape.is-editing,",
+      "image.etcher-shape.is-hovered {",
+      "  filter: none;",
+      "}",
+      // The ring image shapes get instead: a stroked rect tracking the
+      // image's box and corner radius, drawn as a sibling so nothing
+      // clips it.
+      ".etcher-image-ring {",
+      "  fill: none; stroke: #f59e0b; stroke-width: 3;",
+      "  pointer-events: none;",
+      "}",
+      ".etcher-image-ring[data-state=\"hovered\"] {",
+      "  stroke: #3b82f6; stroke-width: 2;",
+      "}",
       ".etcher-shape.is-multi-selected.is-moving { cursor: grabbing; }",
       // Marquee rectangle drawn while box-selecting on the cursor tool.
       ".etcher-marquee {",
@@ -5889,6 +5912,77 @@
       setTimeout(function() { try { input.focus(); input.select(); } catch (_) {} }, 0);
     },
 
+    // A ring is a sibling of its image, so removing the image's element
+    // doesn't take it — it would be left outlining empty canvas. Rather
+    // than chase every path that deletes a shape (single, bulk, eraser,
+    // undo of a create), sweep: a ring no live shape claims is orphaned.
+    _sweepImageRings: function() {
+      if (!this.svg) return;
+      var rings = this.svg.querySelectorAll(".etcher-image-ring");
+      if (!rings.length) return;
+      var owned = [];
+      (this.shapes || []).forEach(function(s) {
+        if (s && s._imageRing) owned.push(s._imageRing);
+      });
+      for (var i = 0; i < rings.length; i++) {
+        if (owned.indexOf(rings[i]) === -1 && rings[i].parentNode) {
+          rings[i].parentNode.removeChild(rings[i]);
+        }
+      }
+    },
+
+    // Selection and hover are class toggles that don't re-render anything,
+    // so an image's ring has to be asked for explicitly when they change.
+    // No-op for every other kind — they paint their own selected state.
+    _refreshImageRing: function(shape) {
+      if (shape && shape.kind === "image" && shape.el) this._renderShape(shape);
+    },
+
+    // Keep an image's selection ring in step with its box, or drop it when
+    // the image isn't selected.
+    //
+    // A separate element because none of the usual selected-state paint
+    // reaches an `<image>`: `stroke` and `fill` don't apply to one, and the
+    // drop-shadow lands outside the box where the rounded-corner `clip-path`
+    // removes it. The ring tracks the same radius so it reads as an outline
+    // of the image rather than a box around it.
+    _syncImageRing: function(shape, box) {
+      var selected =
+        shape.el.classList.contains("is-multi-selected") ||
+        shape.el.classList.contains("is-selected") ||
+        shape.el.classList.contains("is-editing");
+      var hovered = !selected && shape.el.classList.contains("is-hovered");
+      if (!selected && !hovered) {
+        if (shape._imageRing && shape._imageRing.parentNode) {
+          shape._imageRing.parentNode.removeChild(shape._imageRing);
+        }
+        shape._imageRing = null;
+        return;
+      }
+      var ring = shape._imageRing;
+      if (!ring) {
+        ring = svgEl("rect");
+        ring.classList.add("etcher-image-ring");
+        shape._imageRing = ring;
+      }
+      // Re-inserted after the image on every render: `_syncShapeOrder`
+      // rearranges shape elements for layering, and a ring left behind would
+      // end up decorating whatever moved into its place.
+      if (ring.previousSibling !== shape.el || !ring.parentNode) {
+        if (shape.el.parentNode) {
+          shape.el.parentNode.insertBefore(ring, shape.el.nextSibling);
+        }
+      }
+      ring.setAttribute("x", box.x);
+      ring.setAttribute("y", box.y);
+      ring.setAttribute("width", box.w);
+      ring.setAttribute("height", box.h);
+      ring.setAttribute("rx", box.r);
+      ring.setAttribute("ry", box.r);
+      if (hovered) ring.setAttribute("data-state", "hovered");
+      else ring.removeAttribute("data-state");
+    },
+
     _imageRadius: function(w, h) {
       var r = Math.min(w, h) * IMAGE_RADIUS_RATIO;
       return Math.round(Math.max(IMAGE_RADIUS_MIN, Math.min(IMAGE_RADIUS_MAX, r)) * 10) / 10;
@@ -6886,6 +6980,10 @@
             el.setAttribute("href", imgHref);
             el.setAttributeNS("http://www.w3.org/1999/xlink", "xlink:href", imgHref);
           }
+          self._syncImageRing(shape, {
+            x: Math.min(itl.x, ibr.x), y: Math.min(itl.y, ibr.y),
+            w: iw, h: ih, r: self._imageRadius(iw, ih)
+          });
           bboxTopImage = { x: g.x + g.w / 2, y: g.y };
           break;
         }
@@ -8154,6 +8252,7 @@
     _renderAll: function() {
       var self = this;
       this.shapes.forEach(function(s) { self._renderShape(s); });
+      this._sweepImageRings();
       if (this.draftState && this.draftState.kind !== "polygon") {
         this._renderShape(this.draftState);
       }
@@ -8815,9 +8914,11 @@
 
       if (prev !== next && prev && prev.el) {
         prev.el.classList.remove("is-hovered");
+        this._refreshImageRing(prev);
       }
       if (prev !== next && next && next.el) {
         next.el.classList.add("is-hovered");
+        this._refreshImageRing(next);
       }
       if (hideTooltip && !this.tooltipPinned) this._scheduleHideTooltip();
       if (showTooltip && !this.tooltipPinned) this._showTooltipFor(next);
@@ -10021,6 +10122,7 @@
       if (this.selectedShapes.indexOf(shape) !== -1) return;
       this.selectedShapes.push(shape);
       shape.el.classList.add("is-multi-selected");
+      this._refreshImageRing(shape);
       this._syncArrangeButtons();
     },
 
@@ -10030,6 +10132,7 @@
       if (idx === -1) return;
       list.splice(idx, 1);
       if (shape.el) shape.el.classList.remove("is-multi-selected");
+      this._refreshImageRing(shape);
       this._syncArrangeButtons();
     },
 
@@ -10041,8 +10144,10 @@
 
     _clearSelection: function() {
       var list = this.selectedShapes || [];
+      var self = this;
       list.forEach(function(s) {
         if (s && s.el) s.el.classList.remove("is-multi-selected");
+        self._refreshImageRing(s);
       });
       this.selectedShapes = [];
       this._syncArrangeButtons();
@@ -10490,6 +10595,7 @@
         }
         this.shapes.splice(idx, 1);
       }
+      this._sweepImageRings();
       // Dots belonging to the shape that just went away would be left
       // floating over empty canvas, still draggable into a connector
       // bound to a uuid that no longer exists.
@@ -12607,6 +12713,7 @@
 
       this.editingShape = shape;
       shape.el.classList.add("is-editing");
+      this._refreshImageRing(shape);
       // Hand the eight points over to the resize handles about to be drawn
       // there — see `_connectorsAvailableFor`.
       if (this._connectorDotShape === shape) this._removeConnectorDots();
@@ -12672,6 +12779,7 @@
     _exitEditMode: function() {
       if (!this.editingShape) return;
       this.editingShape.el.classList.remove("is-editing");
+      this._refreshImageRing(this.editingShape);
       this._hideLinkMenu();
       this._clearVertexSelection();
       this._removeHandles();

@@ -57,6 +57,19 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Selecting an image showed nothing — and could make it vanish.** The
+  selected/hovered styles paint a stroke, a fill and a drop-shadow. None of
+  the first two apply to an SVG `<image>`, and the shadow is drawn outside
+  the element's box, which the rounded-corner `clip-path` added in 0.10.2
+  then clipped straight off (clipping happens after filtering). So box-
+  selecting an image gave no feedback at all, and left a `filter` fighting a
+  `clip-path` on one element — a combination some engines fail to rasterize,
+  dropping the image entirely.
+
+  Images now opt out of those styles and get a stroked ring instead, drawn as
+  a sibling that follows the image's box and corner radius. Orange when
+  selected or being edited, blue on hover.
+
 - **The colour picker opened off the top of the canvas.** Toolbar popups were
   positioned above their trigger unconditionally, which is right for the
   toolbars at the bottom of the canvas but not for the colour swatches, which

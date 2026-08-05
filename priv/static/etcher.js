@@ -12766,6 +12766,12 @@
         this._midpointTracker = null;
       }
       this._clearClosestMidpoint();
+      // Backstop. The suspend/resume pairs are matched, but a drag whose
+      // release never arrives (a lost pointer, a shape deleted mid-gesture)
+      // would otherwise leave the dots switched off for the rest of the
+      // session. Leaving edit mode is the natural place to reset, since the
+      // dots only exist inside it.
+      this._resumeMidpointHighlight();
     },
 
     _renderHandles: function(shape, opts) {
@@ -12952,6 +12958,7 @@
     // stay clean. Hidden during a drag — the dragging handle already
     // has `.is-dragging` and tracks the pointer directly.
     _updateClosestMidpoint: function(pt) {
+      if (this._midpointHighlightSuspended) return;
       if (!this.midpointHandles || !this.midpointHandles.length) return;
       var shape = this.editingShape;
       var self = this;
@@ -13073,6 +13080,18 @@
       });
     },
 
+    // Stop the "add a point here" dots reacting to the pointer, and drop any
+    // that are already lit. Held for the length of a drag — see the call in
+    // `_startHandleDrag`. Paired with `_resumeMidpointHighlight`.
+    _suspendMidpointHighlight: function() {
+      this._midpointHighlightSuspended = true;
+      this._clearClosestMidpoint();
+    },
+
+    _resumeMidpointHighlight: function() {
+      this._midpointHighlightSuspended = false;
+    },
+
     _positionAllMidpointHandles: function(shape) {
       if (!this.midpointHandles || !this.midpointHandles.length) return;
       var positions = this._midpointPositionsForShape(shape);
@@ -13092,6 +13111,10 @@
       try { handleEl.setPointerCapture(e.pointerId); } catch (_) {}
       handleEl.classList.add("is-dragging");
       this._hideTooltip();
+      // The dot being dragged is becoming a real point; the others must stop
+      // offering themselves while that happens. `.is-dragging` keeps this one
+      // visible regardless of the highlight.
+      this._suspendMidpointHighlight();
 
       var self = this;
       var isArrow = shape.kind === "arrow";
@@ -13164,6 +13187,7 @@
           self._emitChanged();
           self._pushUndo(shape.uuid, historyBefore, self._snapshotShape(shape));
         }
+        self._resumeMidpointHighlight();
         // Refresh the full handle set so the new vertex picks up a
         // real vertex dot and the two new edges get their own
         // midpoint ghosts.
@@ -13632,6 +13656,13 @@
       // stale shape position, so hide it for the duration and bring it
       // back on release.
       this._hideTooltip();
+      // The midpoint tracker listens on `document`, so it keeps firing
+      // through this drag and lights up whichever segment the pointer
+      // sweeps past — a dot flashing on and off next to the point being
+      // dragged, offering to add a bend nobody asked for. The user is
+      // committed to moving this handle; nothing else should be on offer
+      // until they let go.
+      this._suspendMidpointHighlight();
 
       var shiftHeld = !!e.shiftKey;
       var self = this;
@@ -13691,6 +13722,7 @@
         handleEl.removeEventListener("pointerup", onUp);
         handleEl.removeEventListener("pointercancel", onUp);
         try { handleEl.releasePointerCapture(ev.pointerId); } catch (_) {}
+        self._resumeMidpointHighlight();
         // An arrow endpoint drag paints the target's anchors as it goes;
         // they're a drag-time readout and shouldn't outlive the release.
         self._removeTargetDots();
@@ -13799,6 +13831,9 @@
           // would float orphaned while the shape moves underneath.
           // Hide it for the duration; reshow on release.
           self._hideTooltip();
+          // Same reason as the handle drags: the doc-level tracker would
+          // otherwise light up midpoints under the travelling pointer.
+          self._suspendMidpointHighlight();
         }
         var dxI = pt.x - startPt.x;
         var dyI = pt.y - startPt.y;
@@ -13828,6 +13863,7 @@
         el.removeEventListener("pointerup", onUp);
         el.removeEventListener("pointercancel", onUp);
         try { el.releasePointerCapture(ev.pointerId); } catch (_) {}
+        self._resumeMidpointHighlight();
         if (dragged) {
           // Sync stored title_box to the shrunk-to-text bbox after
           // the body translation, matching the handle/drag paths and

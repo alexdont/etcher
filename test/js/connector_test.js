@@ -47,6 +47,8 @@ const anchorPointsFor = lift("_anchorPointsFor", "shape");
 const anchorPointImage = lift("_anchorPointImage", "shape, anchorId");
 const vArrowPoints = lift("_vArrowPoints", "tip, toward, len, halfWidth");
 const connectorHitRadius = lift("_connectorHitRadius", "shape");
+const arrowPath = lift("_arrowPath", "g");
+const nearSegment = lift("_nearSegment", "pt, p, q, tol");
 
 function constant(name) {
   const found = (src.match(new RegExp(`var ${name} = ([\\d.]+);`)) || [])[1];
@@ -149,6 +151,60 @@ for (const p of anchorPointsFor.call(flat, shape)) {
   assert.strictEqual(p.x, 7, `${p.id}: no NaN on a zero-width box`);
   assert.strictEqual(p.y, 9, `${p.id}: no NaN on a zero-height box`);
 }
+
+// ── the routed path ─────────────────────────────────────────────────────────
+
+// An arrow is drawn through tail → bends → head. Four separate consumers
+// read this list (render, bbox, hit test, handle list), so the ordering is
+// load-bearing: get it wrong and the handle you grab moves a different bend
+// than the one under the cursor.
+assert.deepStrictEqual(
+  arrowPath({ a: [0, 0], points: [[10, 10], [20, 5]], b: [30, 0] }),
+  [{ x: 0, y: 0 }, { x: 10, y: 10 }, { x: 20, y: 5 }, { x: 30, y: 0 }],
+  "tail first, bends in order, head last");
+
+// Arrows saved before waypoints existed have no `points` key at all, and
+// must keep reading as the plain two-point case rather than breaking.
+assert.deepStrictEqual(
+  arrowPath({ a: [1, 2], b: [3, 4] }),
+  [{ x: 1, y: 2 }, { x: 3, y: 4 }],
+  "a connector with no `points` key is a straight arrow");
+assert.deepStrictEqual(
+  arrowPath({ a: [1, 2], points: [], b: [3, 4] }),
+  [{ x: 1, y: 2 }, { x: 3, y: 4 }],
+  "an empty bend list is the same thing");
+
+// Half-built geometry yields nothing rather than a path with holes in it.
+assert.deepStrictEqual(arrowPath({ a: [1, 2] }), []);
+assert.deepStrictEqual(arrowPath({ b: [1, 2] }), []);
+assert.deepStrictEqual(arrowPath(null), []);
+
+// ── hit-testing a segment ───────────────────────────────────────────────────
+
+const P = { x: 0, y: 0 };
+const Q = { x: 100, y: 0 };
+
+assert.ok(nearSegment({ x: 50, y: 3 }, P, Q, 5), "just off the middle: a hit");
+assert.ok(!nearSegment({ x: 50, y: 9 }, P, Q, 5), "further than tol: a miss");
+assert.ok(nearSegment({ x: 0, y: 0 }, P, Q, 5), "on an endpoint: a hit");
+
+// The parameter is clamped, so the segment does not extend into an infinite
+// line — without the clamp, a click far off the end of one leg of a routed
+// arrow would select it.
+assert.ok(!nearSegment({ x: 400, y: 0 }, P, Q, 5),
+  "past the end of the segment: a miss, not a hit on its extension");
+assert.ok(!nearSegment({ x: -400, y: 0 }, P, Q, 5),
+  "before the start: likewise");
+
+// Just beyond an endpoint, within tolerance, still hits — the ends are round
+// caps, not hard stops.
+assert.ok(nearSegment({ x: 103, y: 0 }, P, Q, 5), "within tol past the end");
+
+// A degenerate segment (two bends dropped on the same spot) measures from
+// the point itself rather than dividing by a zero length.
+const Z = { x: 10, y: 10 };
+assert.ok(nearSegment({ x: 12, y: 10 }, Z, Z, 5), "degenerate: near");
+assert.ok(!nearSegment({ x: 40, y: 10 }, Z, Z, 5), "degenerate: far");
 
 // ── the grab zone ───────────────────────────────────────────────────────────
 

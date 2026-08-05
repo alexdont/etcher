@@ -9,17 +9,28 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 
 - **Connectors — arrows that bind to shapes and follow them.** Hover a shape
-  with the cursor tool and eight dots appear on its bounding box (four
-  corners, four side midpoints). Drag one out to draw an arrow; bring it near
+  with the cursor tool and eight green dots appear on its bounding box (four
+  corners, four side midpoints). Pull an arrow out of one; bring it near
   another shape and that shape's dots appear, with the nearest one
-  highlighting as the arrow's head snaps onto it. Release and the two are
+  highlighting as the arrow's head snaps onto it. Finish, and the two are
   connected — move or resize either shape and the arrow stays attached at the
-  chosen points. Released away from a shape, the end simply stays put; either
-  end can be re-aimed afterwards by dragging its endpoint handle.
+  chosen points. Finished away from a shape, the end simply stays put.
 
-  New `arrow` shape kind: `%{"a" => [x, y], "b" => [x, y], "from" => binding,
-  "to" => binding}`, where a binding is `%{"uuid" => …, "anchor" => …}` or
-  `null`. The bindings are the source of truth and `a`/`b` are a cache
+  Two gestures, distinguished by what follows the press on a dot. **Drag** —
+  press, move, release — commits where you let go, and is the quick way to
+  join two shapes. **Route** — press and release without moving — leaves the
+  arrow live and following the pointer, with each click dropping a bend so it
+  can be snaked around obstacles; a click on another shape finishes it,
+  double-click finishes with a free head, `Esc` or right-click abandons it.
+
+  Selecting an arrow turns its whole path into handles: the endpoints re-aim
+  onto a different anchor (or off a shape, to detach), and each bend can be
+  dragged to re-route.
+
+  New `arrow` shape kind: `%{"a" => [x, y], "points" => [[x, y], …],
+  "b" => [x, y], "from" => binding, "to" => binding}`, where a binding is
+  `%{"uuid" => …, "anchor" => …}` or `null` and `points` holds the bends in
+  order. The bindings are the source of truth and `a`/`b` are a cache
   rewritten on every render, which is what makes an arrow follow its
   endpoints through moves, resizes, undo and collab updates without any of
   those paths knowing connectors exist — and what lets `Etcher.Raster` bake
@@ -40,8 +51,9 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
-- `Etcher.Raster` renders the new `arrow` kind (shaft plus a head at `b`,
-  clamped so a very short connector still reads as an arrow).
+- `Etcher.Raster` renders the new `arrow` kind — the routed path as a
+  polyline plus a head at `b`, oriented along the final segment and clamped
+  so a very short connector still reads as an arrow.
 - The V-arrowhead maths behind `dimension` moved into a shared helper now
   that connectors draw one too. No visual change to dimensions.
 

@@ -150,11 +150,17 @@ defmodule Etcher.Raster do
 
   defp shape_primitives(k, g) when k in ["line", "dimension"], do: ab_line(g)
 
-  # A connector is an `a`/`b` line plus the V at its head. The endpoints are
-  # written into the geometry every time the canvas draws it, so baking one
-  # needs no knowledge of what it's bound to — the coordinates are already
-  # where the bound shapes put them.
-  defp shape_primitives("arrow", g), do: ab_line(g) ++ arrow_head(g)
+  # A connector is the routed path (`a`, any bends the user dropped in
+  # `points`, then `b`) plus the V at its head. Every coordinate is written
+  # into the geometry each time the canvas draws it, so baking one needs no
+  # knowledge of what it's bound to.
+  defp shape_primitives("arrow", g) do
+    case arrow_path(g) do
+      [] -> []
+      [_single] -> []
+      path -> [{:polyline, path}] ++ arrow_head(path)
+    end
+  end
 
   defp shape_primitives("callout", g) do
     box = rect(get(g, "text_box") || %{})
@@ -188,34 +194,54 @@ defmodule Etcher.Raster do
     end
   end
 
-  # The V at an arrow's head: tip at `b`, wings opening back toward `a`.
+  # Every point a connector is drawn through: tail, bends, head. Mirrors the
+  # canvas's `_arrowPath`; an arrow saved before waypoints existed has no
+  # `points` key and reads as the plain two-point case.
+  defp arrow_path(g) do
+    case {get(g, "a"), get(g, "b")} do
+      {a, b} when not is_nil(a) and not is_nil(b) ->
+        bends = get(g, "points") || []
+        Enum.map([a | bends] ++ [b], &pt/1) |> Enum.map(fn {x, y} -> {num(x), num(y)} end)
+
+      _ ->
+        []
+    end
+  end
+
+  # The V at an arrow's head: tip at the last point, wings opening back along
+  # the LAST segment — on a routed arrow that differs from the tail-to-head
+  # chord, and it's the final approach that has to line up with whatever the
+  # arrow points at.
+  #
   # Sized in image px here rather than the canvas's screen px — there is no
   # zoom to correct for in a baked image — so it stays proportional to the
   # arrow instead of vanishing on a long one.
-  defp arrow_head(g) do
-    with {a, b} when not is_nil(a) and not is_nil(b) <- {get(g, "a"), get(g, "b")},
-         {ax, ay} <- pt(a),
-         {bx, by} <- pt(b),
-         dx = num(ax) - num(bx),
-         dy = num(ay) - num(by),
-         len when len > 0 <- :math.sqrt(dx * dx + dy * dy) do
-      ux = dx / len
-      uy = dy / len
-      head = min(@arrow_head_len, len / 2)
-      half = head * @arrow_head_ratio
-      basex = num(bx) + ux * head
-      basey = num(by) + uy * head
+  defp arrow_head(path) do
+    {bx, by} = List.last(path)
+    {ax, ay} = Enum.at(path, length(path) - 2)
+    dx = ax - bx
+    dy = ay - by
 
-      [
-        {:polyline,
-         [
-           {basex - uy * half, basey + ux * half},
-           {num(bx), num(by)},
-           {basex + uy * half, basey - ux * half}
-         ]}
-      ]
-    else
-      _ -> []
+    case :math.sqrt(dx * dx + dy * dy) do
+      len when len > 0 ->
+        ux = dx / len
+        uy = dy / len
+        head = min(@arrow_head_len, len / 2)
+        half = head * @arrow_head_ratio
+        basex = bx + ux * head
+        basey = by + uy * head
+
+        [
+          {:polyline,
+           [
+             {basex - uy * half, basey + ux * half},
+             {bx, by},
+             {basex + uy * half, basey - ux * half}
+           ]}
+        ]
+
+      _ ->
+        []
     end
   end
 

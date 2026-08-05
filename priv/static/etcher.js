@@ -2297,6 +2297,7 @@
       self._wireUndoKeyboard();
       self._wireGlobalShapeListeners();
       self._wireImagePaste();
+      self._wireFileDrop();
 
       // Multi-image canvases (paged readers, lookbooks): subscribe
       // to Fresco's `image-visibility-change` and hide shapes whose
@@ -6285,6 +6286,9 @@
       // because support genuinely differs by browser.
       var playable = this._canPlayFile(kind, file);
       if (!playable) {
+        console.warn(
+          "[Etcher] this browser can't play " + (file.type || "that file") +
+          " — not uploading it:", file.name || "(unnamed)");
         this._dispatch("etcher:media-unsupported", {
           name: file.name || null,
           type: file.type || null,
@@ -6294,6 +6298,9 @@
       }
       var upload = this._imageUploader();
       if (!upload) {
+        console.warn(
+          "[Etcher] no image uploader registered, so " + kind +
+          " can't be inserted — see setImageUploader.");
         this._dispatch("etcher:media-upload-unavailable", {
           name: file.name || null, reason: "no_uploader"
         });
@@ -6303,16 +6310,40 @@
       // Nothing is placed up front, unlike an image: there is no local
       // preview of a sound, and a card with no source to stream would just
       // be a dead control. It appears when the upload resolves.
-      upload(file, function(href) {
-        if (!href) {
-          self._dispatch("etcher:media-upload-failed", { name: file.name || null });
-          return;
+      //
+      // The uploader's contract is `fn(file, ctx) -> Promise<url>` — the
+      // second argument is context, NOT a callback. Passing one there and
+      // waiting for it to fire is a card that never appears and no error
+      // anywhere, which is exactly what it did.
+      function failed(why) {
+        // Warned, not just dispatched. These events have no default
+        // listener, so without this a refused or failed upload is a file
+        // that silently doesn't arrive — indistinguishable from a bug in
+        // the shape code.
+        console.warn("[Etcher] media upload failed:", why);
+        self._dispatch("etcher:media-upload-failed", {
+          name: file.name || null, reason: String(why)
+        });
+      }
+
+      var pending;
+      try {
+        pending = upload(file, { frescoId: self.frescoId });
+      } catch (e) {
+        return failed(e);
+      }
+      if (!pending || typeof pending.then !== "function") {
+        return failed("uploader did not return a promise");
+      }
+      pending.then(function(href) {
+        if (typeof href !== "string" || !href) {
+          return failed("uploader resolved without a URL");
         }
         self._insertMediaHref(kind, href, {
           at: placedAt,
           title: opts.title || file.name || (kind === "video" ? "Video" : "Audio")
         });
-      });
+      }, failed);
     },
 
     // Can this browser play the file at all? `canPlayType` answers "", "maybe"
@@ -6816,6 +6847,65 @@
     // text field (so pasting into etcher's text editor still types). One
     // caveat: with multiple visible canvas layers on a page, each would
     // insert — single-canvas is the assumed common case.
+    // Drag a file from the desktop onto the canvas and it lands where it was
+    // dropped. Nothing handled `drop` before this — not for images either —
+    // so dragging a file onto a board did what a browser does with an
+    // unhandled drop: navigated away from the page to open the file.
+    //
+    // Attached to the container rather than the overlay: the overlay is
+    // `pointer-events: none` for most of its life so pan and zoom pass
+    // through it, and the container is the element that reliably sees the
+    // drag whatever is beneath the cursor.
+    _wireFileDrop: function() {
+      var self = this;
+      var container = self.handle && self.handle.container;
+      if (!container || self._dropWired) return;
+      self._dropWired = true;
+
+      function hasFiles(e) {
+        var dt = e.dataTransfer;
+        if (!dt) return false;
+        // `types` is the only thing readable during dragover — the files
+        // themselves are withheld until drop.
+        var types = dt.types;
+        if (!types) return false;
+        for (var i = 0; i < types.length; i++) {
+          if (types[i] === "Files") return true;
+        }
+        return false;
+      }
+
+      self._dragOverHandler = function(e) {
+        if (!self.annotationMode || self.annotationsVisible === false) return;
+        if (!hasFiles(e)) return;
+        // Both required: without preventDefault the browser refuses the drop
+        // and opens the file instead.
+        e.preventDefault();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+      };
+
+      self._dropHandler = function(e) {
+        if (!self.annotationMode || self.annotationsVisible === false) return;
+        var dt = e.dataTransfer;
+        var files = (dt && dt.files) || [];
+        if (!files.length) return;
+        e.preventDefault();
+        var at = null;
+        try { at = self._toImage(e); } catch (_) {}
+        for (var i = 0; i < files.length; i++) {
+          // Successive files are nudged apart, or a multi-file drop stacks
+          // them all on one spot and looks like a single one arrived.
+          var pt = at
+            ? { x: at.x + i * 24, y: at.y + i * 24, imageIdx: at.imageIdx }
+            : null;
+          self._insertMediaFile(files[i], pt);
+        }
+      };
+
+      container.addEventListener("dragover", self._dragOverHandler);
+      container.addEventListener("drop", self._dropHandler);
+    },
+
     _wireImagePaste: function() {
       var self = this;
       if (self.pasteImages === false) return;
@@ -9709,6 +9799,13 @@
       if (this._docDblClick)
         document.removeEventListener("dblclick", this._docDblClick);
       this._docMouseMove = this._docPointerDown = null;
+      var dropTarget = this.handle && this.handle.container;
+      if (dropTarget && this._dropHandler) {
+        dropTarget.removeEventListener("dragover", this._dragOverHandler);
+        dropTarget.removeEventListener("drop", this._dropHandler);
+        this._dragOverHandler = this._dropHandler = null;
+        this._dropWired = false;
+      }
       this._docPointerMove = this._docPointerUp = this._docDblClick = null;
       this._pendingTap = null;
       this._setHoveredShape(null, false);

@@ -37,6 +37,11 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   answer a peer who joins mid-playback instead of leaving them silent until
   the next command.
 
+  Files can also be **dragged onto the canvas** now, and land where they were
+  dropped. Nothing handled `drop` before — not for images either — so
+  dragging a file onto a board did what a browser does with an unhandled
+  drop: navigated away to open the file.
+
   Files the browser can't play are refused *before* upload —
   `etcher:media-unsupported` — rather than transferring a large unplayable
   file in full and landing a card that never does anything. Volume and mute

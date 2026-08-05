@@ -360,8 +360,11 @@ otherwise a large `.mkv` transfers in full, stores, and lands as a card that
 will never do anything. `etcher:media-unsupported` fires with the name and
 type.
 
-Audio files need a host uploader (`setImageUploader`, which handles both
-kinds). Unlike images there is no embed fallback: base64'd audio would put
+Files can be dragged onto the canvas as well as pasted or picked, and land
+where they were dropped.
+
+Audio and video need a host uploader (`setImageUploader`, which handles every
+kind). Unlike images there is no embed fallback: base64'd audio would put
 megabytes of JSON in the annotation payload on every save and every peer
 broadcast, so without an uploader the insert is refused and
 `etcher:media-upload-unavailable` fires.

@@ -8178,13 +8178,11 @@
           // Idle hover — preview the single shape under the cursor.
           this._eraserHover(this._toImage(e));
         }
-        // While editing a polygon or rectangle, only the midpoint
-        // closest to the cursor is shown. Polygons → "add vertex"
-        // dots; rectangles → "drag this edge" dots. Same machinery,
-        // different drag semantics.
+        // Only the midpoint closest to the cursor is shown. Polygons →
+        // "add vertex" dots; arrows → "add bend"; rectangles → "drag this
+        // edge". Same machinery, different drag semantics.
         if (this.editingShape &&
-            (this.editingShape.kind === "polygon" ||
-             this.editingShape.kind === "rectangle") &&
+            this._hasMidpointHandles(this.editingShape.kind) &&
             this.midpointHandles && this.midpointHandles.length) {
           this._updateClosestMidpoint(this._toImage(e));
         }
@@ -9253,6 +9251,33 @@
       (g.points || []).forEach(function(p) { pts.push({ x: p[0], y: p[1] }); });
       pts.push({ x: g.b[0], y: g.b[1] });
       return pts;
+    },
+
+    // Remove the bend at handle index `idx`. Indices run over the whole
+    // routed path (0 = tail, last = head), so only the interior ones are
+    // bends — clicking an endpoint must not silently delete something, and
+    // an endpoint is where a re-bind drag starts.
+    _deleteArrowBend: function(shape, idx) {
+      if (!shape || shape.kind !== "arrow") return;
+      var g = shape.geometry;
+      var bends = (g.points || []).map(function(p) { return [p[0], p[1]]; });
+      if (idx <= 0 || idx > bends.length) return;
+      var historyBefore = this._snapshotShape(shape);
+      bends.splice(idx - 1, 1);
+      shape.geometry = {
+        a: [g.a[0], g.a[1]], b: [g.b[0], g.b[1]],
+        points: bends,
+        from: g.from || null, to: g.to || null
+      };
+      this._renderShape(shape);
+      // Every index past the removed one has shifted, so the handle set has
+      // to be rebuilt rather than repositioned — otherwise the next click
+      // deletes the wrong bend.
+      if (this.editingShape === shape) this._renderHandles(shape);
+      if (shape.uuid) {
+        this._emitChanged();
+        this._pushUndo(shape.uuid, historyBefore, this._snapshotShape(shape));
+      }
     },
 
     _arrowsBoundTo: function(uuid) {
@@ -12721,8 +12746,7 @@
       if (self._midpointTracker) return;
       self._midpointTracker = function(e) {
         if (!self.editingShape) return;
-        var k = self.editingShape.kind;
-        if (k !== "polygon" && k !== "rectangle") return;
+        if (!self._hasMidpointHandles(self.editingShape.kind)) return;
         if (!self.midpointHandles || !self.midpointHandles.length) return;
         try { self._updateClosestMidpoint(self._toImage(e)); } catch (_) {}
       };
@@ -12766,11 +12790,11 @@
       // Per-kind edge midpoint helpers — rendered as a single shared
       // set of "midpoint" handles that follow the same closest-only
       // highlight behavior driven by `_updateClosestMidpoint`.
-      // Polygons get insert-new-vertex semantics; rectangles get
-      // resize-one-edge semantics. Drafts skip both (the shape is
+      // Polygons get insert-new-vertex semantics and arrows insert-new-bend;
+      // rectangles get resize-one-edge. Drafts skip all three (the shape is
       // still being built).
       if (opts.interactive) {
-        if (shape.kind === "polygon") {
+        if (shape.kind === "polygon" || shape.kind === "arrow") {
           self._renderMidpointHandles(shape);
         } else if (shape.kind === "rectangle") {
           self._renderRectEdgeHandles(shape);
@@ -12778,25 +12802,21 @@
       }
     },
 
-    // Render a ghost handle on each edge midpoint of a polygon. The
-    // dots are invisible until hovered (the user sees their shape's
-    // color "appear" along the edge), and pointer-events: all keeps
-    // them hit-targetable even while invisible. Drag one → it becomes
-    // a real vertex via `_startMidpointDrag`.
+    // Render a ghost handle at the midpoint of each edge (polygon) or
+    // segment (arrow). The dots are invisible until hovered — the user sees
+    // their shape's color "appear" along the edge — and pointer-events: all
+    // keeps them hit-targetable even while invisible. Drag one → it becomes
+    // a real vertex, or a real bend, via `_startMidpointDrag`.
     _renderMidpointHandles: function(shape) {
       this._removeMidpointHandles();
-      if (!shape || shape.kind !== "polygon") return;
-      var pts = (shape.geometry && shape.geometry.points) || [];
-      if (pts.length < 2) return;
+      if (!shape || (shape.kind !== "polygon" && shape.kind !== "arrow")) return;
+      var mids = this._midpointPositionsForShape(shape);
+      if (!mids.length) return;
       var self = this;
       var handleColor = self._handleColor(shape);
       this.midpointHandles = [];
-      for (var i = 0; i < pts.length; i++) {
-        var next = pts[(i + 1) % pts.length];
-        var midImage = {
-          x: (pts[i][0] + next[0]) / 2,
-          y: (pts[i][1] + next[1]) / 2
-        };
+      for (var i = 0; i < mids.length; i++) {
+        var midImage = mids[i];
         var h = svgEl("circle", { r: 6 });
         h.classList.add("etcher-handle", "etcher-handle-midpoint");
         h.style.color = handleColor;
@@ -12946,7 +12966,8 @@
 
     // Image-px positions of every midpoint a shape currently
     // exposes. Polygons → edge midpoints (one per edge). Rectangles
-    // → four edge midpoints (top/right/bottom/left). Other kinds
+    // → four edge midpoints (top/right/bottom/left). Arrows → the
+    // midpoint of each segment of the routed path. Other kinds
     // return [].
     _midpointPositionsForShape: function(shape) {
       if (!shape) return [];
@@ -12961,6 +12982,19 @@
       }
       if (shape.kind === "rectangle") {
         return this._rectEdgeMidpoints(shape.geometry);
+      }
+      // Open path, so segments rather than a closed ring — no wrap from the
+      // head back round to the tail.
+      if (shape.kind === "arrow") {
+        var path = this._arrowPath(shape.geometry);
+        var mids = [];
+        for (var j = 0; j < path.length - 1; j++) {
+          mids.push({
+            x: (path[j].x + path[j + 1].x) / 2,
+            y: (path[j].y + path[j + 1].y) / 2
+          });
+        }
+        return mids;
       }
       return [];
     },
@@ -12980,6 +13014,14 @@
       }
     },
 
+    // Kinds that expose midpoint ghosts while in edit mode. One list so the
+    // hover tracker, the draft-path highlight and the render can't disagree
+    // about which shapes have them — a mismatch shows dots nothing updates,
+    // or updates dots that were never drawn.
+    _hasMidpointHandles: function(kind) {
+      return kind === "polygon" || kind === "rectangle" || kind === "arrow";
+    },
+
     _clearClosestMidpoint: function() {
       (this.midpointHandles || []).forEach(function(h) {
         h.classList.remove("is-active");
@@ -12995,10 +13037,10 @@
       });
     },
 
-    // Insert a new vertex at the midpoint of the polygon edge under
-    // the ghost handle, then run a vertex-style drag so the user can
-    // immediately place it. Pre-insert state goes onto the undo
-    // stack so ⌘Z removes the inserted vertex entirely.
+    // Insert a new point at the midpoint under the ghost handle — a vertex
+    // on a polygon, a bend on an arrow — then run a drag so the user can
+    // place it immediately. Pre-insert state goes onto the undo stack so ⌘Z
+    // removes the inserted point entirely.
     _startMidpointDrag: function(shape, edgeIdx, handleEl, e) {
       e.preventDefault();
       e.stopPropagation();
@@ -13007,33 +13049,64 @@
       this._hideTooltip();
 
       var self = this;
-      // Inserting a new vertex shifts every index >= newIdx by one;
-      // drop any prior vertex selection to avoid the highlight
-      // landing on the wrong dot after the splice.
+      var isArrow = shape.kind === "arrow";
+      // Inserting shifts every index >= newIdx by one; drop any prior vertex
+      // selection to avoid the highlight landing on the wrong dot after the
+      // splice.
       self._clearVertexSelection();
       var historyBefore = self._snapshotShape(shape);
 
-      var pts = shape.geometry.points.slice();
-      var a = pts[edgeIdx];
-      var b = pts[(edgeIdx + 1) % pts.length];
-      var newIdx = edgeIdx + 1;
-      pts.splice(newIdx, 0, [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]);
-      shape.geometry = { points: pts };
+      // Where the new point lands in whichever list owns it, and how to
+      // write that list back. An arrow's bends live in `geometry.points`
+      // alongside `a`/`b`/`from`/`to`, which all have to survive; a polygon's
+      // geometry IS its point list. `edgeIdx` counts segments, and segment N
+      // runs from path point N to N+1 — so on an arrow, whose path is
+      // `[a, ...bends, b]`, a bend inserted into segment N becomes bend N.
+      var writePoints = isArrow
+        ? function(pts) {
+            var g = shape.geometry;
+            shape.geometry = {
+              a: [g.a[0], g.a[1]], b: [g.b[0], g.b[1]],
+              points: pts,
+              from: g.from || null, to: g.to || null
+            };
+          }
+        : function(pts) { shape.geometry = { points: pts }; };
+
+      var listPoints = function() {
+        return isArrow
+          ? (shape.geometry.points || []).map(function(p) { return [p[0], p[1]]; })
+          : shape.geometry.points.slice();
+      };
+
+      var mid = self._midpointPositionsForShape(shape)[edgeIdx];
+      var pts = listPoints();
+      var newIdx;
+      if (isArrow) {
+        newIdx = edgeIdx;
+      } else {
+        var pa = pts[edgeIdx];
+        var pb = pts[(edgeIdx + 1) % pts.length];
+        newIdx = edgeIdx + 1;
+        mid = { x: (pa[0] + pb[0]) / 2, y: (pa[1] + pb[1]) / 2 };
+      }
+      pts.splice(newIdx, 0, [mid.x, mid.y]);
+      writePoints(pts);
       self._renderShape(shape);
-      // Reposition existing vertex handles to account for the new
-      // index shift; midpoint handles stay where they are until the
-      // gesture ends, when we re-render the full set.
+      // Reposition existing handles to account for the new index shift;
+      // midpoint handles stay where they are until the gesture ends, when we
+      // re-render the full set.
       self._positionAllHandles(shape);
 
       function onMove(ev) {
         var pt = self._toImage(ev);
-        var newPts = shape.geometry.points.slice();
+        var newPts = listPoints();
         newPts[newIdx] = [pt.x, pt.y];
-        shape.geometry = { points: newPts };
+        writePoints(newPts);
         self._renderShape(shape);
         self._positionAllHandles(shape);
         // Position the dragging dot itself (it's the same DOM element
-        // the user grabbed, just tracking the new vertex now).
+        // the user grabbed, just tracking the new point now).
         self._positionHandle(handleEl, { x: pt.x, y: pt.y });
       }
       function onUp(ev) {
@@ -13585,6 +13658,14 @@
           // user can pick multiple points to delete in one keystroke.
           if (shape.kind === "polygon") {
             self._selectVertex(shape, idx, shiftHeld);
+          } else if (shape.kind === "arrow") {
+            // A click on a bend removes it — the inverse of dragging a
+            // midpoint ghost to add one, so a route can be corrected with
+            // the same two gestures that built it. No selection step: a
+            // bend carries no state worth selecting, and requiring a
+            // follow-up keystroke to undo a misplaced click would be a
+            // worse trade than ⌘Z.
+            self._deleteArrowBend(shape, idx);
           }
           self._showTooltipFor(shape);
           return;

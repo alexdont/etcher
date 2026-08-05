@@ -23,9 +23,12 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   can be snaked around obstacles; a click on another shape finishes it,
   double-click finishes with a free head, `Esc` or right-click abandons it.
 
-  Selecting an arrow turns its whole path into handles: the endpoints re-aim
-  onto a different anchor (or off a shape, to detach), and each bend can be
-  dragged to re-route.
+  Selecting an arrow makes its whole path editable. The endpoints re-aim onto
+  a different anchor (or off a shape, to detach). Bends can be added, moved
+  and removed without redrawing the arrow: hovering the middle of a segment
+  raises a ghost dot that drags out into a new bend, and clicking an existing
+  bend deletes it — the same pair of gestures polygons already use for
+  vertices. Both are undoable.
 
   New `arrow` shape kind: `%{"a" => [x, y], "points" => [[x, y], …],
   "b" => [x, y], "from" => binding, "to" => binding}`, where a binding is

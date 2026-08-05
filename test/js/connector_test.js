@@ -179,6 +179,41 @@ assert.deepStrictEqual(arrowPath({ a: [1, 2] }), []);
 assert.deepStrictEqual(arrowPath({ b: [1, 2] }), []);
 assert.deepStrictEqual(arrowPath(null), []);
 
+// ── segment midpoints (the "add a bend here" ghosts) ────────────────────────
+
+const midpointPositions = lift("_midpointPositionsForShape", "shape");
+
+// The layer method dispatches by kind and reaches back for `_arrowPath`, so
+// the stand-in has to carry it.
+const midLayer = { _arrowPath: arrowPath };
+
+// One ghost per segment — an arrow is an open path, so a straight one has a
+// single midpoint and there is no wrap from head back round to tail. (A
+// polygon, being closed, does wrap; that difference is why arrows don't just
+// borrow the polygon branch.)
+assert.deepStrictEqual(
+  midpointPositions.call(midLayer, {
+    kind: "arrow", geometry: { a: [0, 0], b: [100, 0] }
+  }),
+  [{ x: 50, y: 0 }],
+  "a straight arrow offers one bend point, at its middle");
+
+assert.deepStrictEqual(
+  midpointPositions.call(midLayer, {
+    kind: "arrow", geometry: { a: [0, 0], points: [[100, 0]], b: [100, 100] }
+  }),
+  [{ x: 50, y: 0 }, { x: 100, y: 50 }],
+  "each leg of a routed arrow gets its own");
+
+// The count is what ties the ghosts to `_startMidpointDrag`'s `edgeIdx`:
+// segment N runs from path point N to N+1, so inserting into segment N makes
+// bend N. An off-by-one here would add the bend to the wrong leg.
+const routed = { a: [0, 0], points: [[10, 0], [20, 0]], b: [30, 0] };
+assert.strictEqual(
+  midpointPositions.call(midLayer, { kind: "arrow", geometry: routed }).length,
+  arrowPath(routed).length - 1,
+  "segments, not points — one ghost between each adjacent pair");
+
 // ── hit-testing a segment ───────────────────────────────────────────────────
 
 const P = { x: 0, y: 0 };

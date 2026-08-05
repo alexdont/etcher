@@ -1225,6 +1225,27 @@
   var CONNECTOR_DOT_CORE = "#6cb04f";
   var CONNECTOR_DOT_RING = "#c3e6b0";
 
+  // Knot-spacing exponent for the marker's Catmull-Rom spline. 0 is uniform
+  // (loops on sharp corners), 1 is chordal (slack on tight ones), 0.5 is
+  // centripetal — the one that's provably cusp-free.
+  var CATMULL_ALPHA = 0.5;
+
+  // How much of a marker's incoming pointer position is carried over from the
+  // previous smoothed one: `smoothed += (raw - smoothed) * (1 - STREAMLINE)`.
+  // The same exponential filter perfect-freehand calls "streamline", at the
+  // same default. Raw pointer input carries hand tremor and, on a mouse,
+  // device quantization; a spline drawn straight through those samples
+  // reproduces every wobble faithfully. Higher = smoother but laggier and
+  // more prone to cutting corners.
+  var MARKER_STREAMLINE = 0.5;
+
+  // How far the pointer must travel, in SCREEN px, before the marker takes
+  // another sample. Screen rather than image px so a stroke has the same
+  // fidelity at every zoom — the old image-px threshold sampled a
+  // zoomed-out stroke far more finely than it could ever be drawn, and a
+  // zoomed-in one too coarsely to look smooth.
+  var MARKER_SAMPLE_PX = 1.5;
+
   // Gap between the dots of a "dotted" stroke, as a multiple of its width.
   // Shared by shapes and markers so the two read as the same dot pattern.
   var DOT_GAP_RATIO = 2.4;
@@ -6894,6 +6915,20 @@
     // canvases and travel verbatim through `.fresco` files.
     // -------------------------------------------------------------------------
 
+    // Every pointer reading the browser batched into this event, oldest
+    // first. Falls back to the event itself where `getCoalescedEvents` is
+    // missing or throws — Safari has shipped it returning an empty list in
+    // some contexts, and an empty list here would drop the stroke entirely.
+    _coalesced: function(e) {
+      if (e && typeof e.getCoalescedEvents === "function") {
+        try {
+          var evs = e.getCoalescedEvents();
+          if (evs && evs.length) return evs;
+        } catch (_) {}
+      }
+      return [e];
+    },
+
     _toImage: function(e) {
       // Both handle shapes expose `screenToImage({x, y})` but the
       // return is different: canvas returns `{x, y}` in canvas-pixel
@@ -8369,8 +8404,24 @@
       switch (this.draftState.kind) {
         case "rectangle": this._updateRectangle(pt); break;
         case "circle":    this._updateCircle(pt); break;
-        case "freehand":  this._appendFreehand(pt); break;
-        case "marker":    this._appendFreehand(pt); break;
+        case "freehand":
+        case "marker": {
+          // Strokes consume every sample the browser captured, not just the
+          // one position this event reports. A pointer is read far faster
+          // than frames are delivered (120Hz+ on a decent trackpad, more on
+          // a stylus), and the extra readings are batched into the single
+          // event that lands each frame. Taking only that one turns a fast
+          // stroke into a polygon of frame-length straight segments — the
+          // faster you draw, the more angular it gets, which is the opposite
+          // of what a marker should do.
+          var samples = this._coalesced(e);
+          for (var ci = 0; ci < samples.length; ci++) {
+            var cp;
+            try { cp = this._toImage(samples[ci]); } catch (_) { continue; }
+            this._appendFreehand(cp);
+          }
+          break;
+        }
         case "text":      this._updateText(pt); break;
         case "dimension": this._updateDimension(pt); break;
         case "line":      this._updateDimension(pt); break;
@@ -11200,7 +11251,15 @@
     // roughly 5–10× fewer, smaller points. Tune fidelity vs. size via
     // SIMPLIFY_PX (lower = more points, tighter to the stroke).
     _smoothStroke: function(points) {
-      function round(p) { return [Math.round(p[0]), Math.round(p[1])]; }
+      // One decimal, not whole numbers. Coordinates are in IMAGE px, so how
+      // much a whole number is worth on screen depends entirely on zoom:
+      // drawn zoomed in, one image px can span several screen px, and
+      // rounding there quantized the stroke into visible stair-steps. A
+      // tenth is far below anything that can be seen at any zoom the canvas
+      // allows, and still keeps the stored payload compact.
+      function round(p) {
+        return [Math.round(p[0] * 10) / 10, Math.round(p[1] * 10) / 10];
+      }
       if (!points || points.length < 3) return (points || []).map(round);
       var SIMPLIFY_PX = 2;  // RDP tolerance (on-screen px) → control-point spacing
       var pts = this._rdpSimplify(points, this._freehandFitTolerance(SIMPLIFY_PX));
@@ -11437,17 +11496,46 @@
       for (var i = 0; i < n; i++) { var c = mapPt(points[i]); p.push([c.x, c.y]); }
       var d = "M " + p[0][0] + " " + p[0][1];
       if (n === 1) return d;
+
+      // Knot spacing raised to CATMULL_ALPHA — the "centripetal"
+      // parameterization. Uniform spacing (alpha 0) is the textbook version
+      // and the one this used to use; its failure mode is that when two
+      // samples sit close together and the next is far away, the tangent it
+      // derives overshoots, and the curve loops back on itself. On a marker
+      // stroke that shows up as a little knot at every sharp corner, exactly
+      // where the hand slowed down and the samples bunched. Centripetal
+      // spacing is the standard fix and is provably free of cusps and
+      // self-intersections (Yuksel et al., "Parameterization and Applications
+      // of Catmull-Rom Curves").
+      function knot(a, b) {
+        var dx = b[0] - a[0], dy = b[1] - a[1];
+        // Guard the zero case: coincident samples would otherwise divide by
+        // zero below and blank the whole path with NaNs.
+        return Math.max(Math.pow(dx * dx + dy * dy, CATMULL_ALPHA / 2), 1e-6);
+      }
+
       for (var j = 0; j < n - 1; j++) {
         var p0 = p[j - 1] || p[j];
         var p1 = p[j];
         var p2 = p[j + 1];
         var p3 = p[j + 2] || p2;
-        // Catmull-Rom → bezier: control points are the anchors nudged by 1/6
-        // of the chord between their neighbours (tension 0.5).
-        var c1x = p1[0] + (p2[0] - p0[0]) / 6;
-        var c1y = p1[1] + (p2[1] - p0[1]) / 6;
-        var c2x = p2[0] - (p3[0] - p1[0]) / 6;
-        var c2y = p2[1] - (p3[1] - p1[1]) / 6;
+
+        var d1 = knot(p0, p1), d2 = knot(p1, p2), d3 = knot(p2, p3);
+        // Tangents at the two anchors, in non-uniform Catmull-Rom form.
+        var m1x = (p1[0] - p0[0]) / d1 - (p2[0] - p0[0]) / (d1 + d2) + (p2[0] - p1[0]) / d2;
+        var m1y = (p1[1] - p0[1]) / d1 - (p2[1] - p0[1]) / (d1 + d2) + (p2[1] - p1[1]) / d2;
+        var m2x = (p2[0] - p1[0]) / d2 - (p3[0] - p1[0]) / (d2 + d3) + (p3[0] - p2[0]) / d3;
+        var m2y = (p2[1] - p1[1]) / d2 - (p3[1] - p1[1]) / (d2 + d3) + (p3[1] - p2[1]) / d3;
+        // Ends are clamped (p0 === p1, or p3 === p2), where the formula above
+        // leaves a tangent pulling off the curve. Fall back to the chord so
+        // the first and last segments leave and arrive straight.
+        if (j === 0) { m1x = (p2[0] - p1[0]) / d2; m1y = (p2[1] - p1[1]) / d2; }
+        if (j === n - 2) { m2x = (p2[0] - p1[0]) / d2; m2y = (p2[1] - p1[1]) / d2; }
+
+        var c1x = p1[0] + m1x * d2 / 3;
+        var c1y = p1[1] + m1y * d2 / 3;
+        var c2x = p2[0] - m2x * d2 / 3;
+        var c2y = p2[1] - m2y * d2 / 3;
         d += " C " + c1x + " " + c1y + " " + c2x + " " + c2y + " " + p2[0] + " " + p2[1];
       }
       return d;
@@ -11595,12 +11683,34 @@
       } else {
         xy = [pt.x, pt.y];
       }
-      var pts = this.draftState.geometry.points;
+      var draft = this.draftState;
+      var pts = draft.geometry.points;
+
+      // Markers run their input through an exponential filter before it
+      // becomes a sample. The spline passes exactly through what it's given,
+      // so unfiltered pointer noise — tremor, and a mouse's integer-pixel
+      // steps — is drawn faithfully as wobble. Freehand skips it: that path
+      // fits beziers to the whole stroke on release, which does its own
+      // smoothing, and filtering first would smear the corners it's trying
+      // to find.
+      if (draft.kind === "marker") {
+        var sm = draft._smoothed || (draft._smoothed = [xy[0], xy[1]]);
+        sm[0] += (xy[0] - sm[0]) * (1 - MARKER_STREAMLINE);
+        sm[1] += (xy[1] - sm[1]) * (1 - MARKER_STREAMLINE);
+        // Where the pointer really is, so the stroke can be pinned to it on
+        // release rather than stopping short by the filter's lag.
+        draft._rawLast = [xy[0], xy[1]];
+        xy = [sm[0], sm[1]];
+      }
+
       var last = pts[pts.length - 1];
       var dx = xy[0] - last[0], dy = xy[1] - last[1];
-      if (dx * dx + dy * dy < 4) return; // throttle: skip sub-2px moves in image px
+      var minStep = draft.kind === "marker"
+        ? this._freehandFitTolerance(MARKER_SAMPLE_PX)
+        : 2;
+      if (dx * dx + dy * dy < minStep * minStep) return;
       pts.push(xy);
-      this._renderShape(this.draftState);
+      this._renderShape(draft);
     },
 
     _commitFreehand: function(_pt) {
@@ -11617,6 +11727,16 @@
       // as clean curves — close to what was drawn, just prettier. Still fully
       // styleable + selectable. Freehand simplifies + fits to nodes below.
       if (kind === "marker") {
+        // The filter lags the pointer, so the last sample sits short of where
+        // the stroke was actually released — by more the faster it ended.
+        // Land it on the real position, unless a sample is already there.
+        var rawEnd = this.draftState._rawLast;
+        if (rawEnd) {
+          var tail = pts[pts.length - 1];
+          var ex = rawEnd[0] - tail[0], ey = rawEnd[1] - tail[1];
+          var snap = this._freehandFitTolerance(MARKER_SAMPLE_PX);
+          if (ex * ex + ey * ey > snap * snap) pts.push([rawEnd[0], rawEnd[1]]);
+        }
         oldEl.classList.remove("is-draft");
         this._finalizeShape("marker", { points: this._smoothStroke(pts) }, oldEl);
         return;

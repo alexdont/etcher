@@ -99,6 +99,32 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **The marker draws a better line.** Three changes, none of which alter what
+  a stroke stores:
+
+  - **Every pointer reading is used, not one per frame.** A pointer is
+    sampled far faster than frames are delivered and the extra readings are
+    batched into the event that lands each frame; taking only that one turned
+    a fast stroke into a polygon of frame-length straight segments — the
+    faster you drew, the more angular it got. Coalesced events are now
+    consumed in full.
+  - **Input is filtered before it becomes a sample.** The spline passes
+    exactly through what it's given, so hand tremor and a mouse's
+    integer-pixel steps were drawn faithfully as wobble. An exponential
+    filter (perfect-freehand's "streamline", at the same default) smooths
+    them out, and the stroke is pinned to the real release position so the
+    filter's lag can't leave it short.
+  - **The spline no longer loops at sharp corners.** Catmull-Rom with uniform
+    knot spacing overshoots wherever consecutive samples are unevenly spaced
+    — which is what a hand decelerating into a turn produces — putting a
+    small knot at every corner. It now uses centripetal spacing, which is
+    provably free of cusps and self-intersections.
+
+  Sampling is also keyed to screen distance rather than image distance, so a
+  stroke has the same fidelity at every zoom, and stored coordinates keep one
+  decimal instead of rounding to whole image px, which visibly stair-stepped
+  strokes drawn while zoomed in.
+
 - **Middle-button presses pass through to Fresco**, so its middle-drag pan
   (new in Fresco 0.11) works over annotations and their handles rather than
   only over blank canvas. The overlay swallowed every press to stop a drawing

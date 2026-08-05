@@ -5044,6 +5044,35 @@
       if (open !== kind) this._openPopup(kind);
     },
 
+    // Where a popup's top edge goes: above the trigger when it fits there,
+    // below when it doesn't.
+    //
+    // Above is the preference because these popups hang off toolbars that
+    // sit at the bottom of the canvas. But the colour swatches live in the
+    // style panel, which is pinned near the TOP — opening upward from there
+    // put the picker off the top of the viewport entirely.
+    //
+    // All coordinates are in one space, and the caller picks which: container
+    // -relative for canvas mode, viewport for strip mode (where the chrome is
+    // `position: fixed`).
+    _popupTop: function(triggerTop, triggerBottom, popupHeight, bounds) {
+      var gap = 8;
+      var above = triggerTop - popupHeight - gap;
+      var below = triggerBottom + gap;
+      if (above >= bounds.top + gap) return above;
+      if (below + popupHeight <= bounds.bottom - gap) return below;
+      // Fits on neither side — a popup taller than the space it has. Take
+      // whichever side has more room and clamp into view, so it's partly
+      // reachable rather than entirely off-screen.
+      var roomAbove = triggerTop - bounds.top;
+      var roomBelow = bounds.bottom - triggerBottom;
+      var top = roomBelow >= roomAbove ? below : above;
+      return Math.max(
+        bounds.top + gap,
+        Math.min(top, bounds.bottom - popupHeight - gap)
+      );
+    },
+
     _openPopup: function(kind) {
       var popup = kind === "tools" ? this.toolsPopup
                 : kind === "colors" ? this.colorsPopup
@@ -5071,23 +5100,26 @@
       // set right before it's shown (in case a layout pass was missed).
       if (kind === "tools") this._syncToolsPopup();
 
-      // Position above the trigger. Both popup and trigger live in
-      // the same container so we work in its coordinate space.
-      // Display before measuring so getBoundingClientRect returns
-      // real dims (display:none → zero).
+      // Position relative to the trigger — above it by preference, below
+      // when there isn't room. Both popup and trigger live in the same
+      // container so we work in its coordinate space. Display before
+      // measuring so getBoundingClientRect returns real dims
+      // (display:none → zero).
       popup.classList.add("is-open");
       var container = this.handle.container;
       var cRect = container.getBoundingClientRect();
       var tRect = trigger.getBoundingClientRect();
       var pRect = popup.getBoundingClientRect();
-      var top = (tRect.top - cRect.top) - pRect.height - 8;
       // Strip mode's toolbar uses `position: fixed`, so the popup
       // should too — anchor it directly to the viewport instead of
       // to the container (which scrolls). `getBoundingClientRect` on
       // the trigger returns viewport coords either way.
       if (this.handleKind === "strip") {
         popup.style.position = "fixed";
-        popup.style.top = (tRect.top - pRect.height - 8) + "px";
+        popup.style.top = this._popupTop(
+          tRect.top, tRect.bottom, pRect.height,
+          { top: 0, bottom: window.innerHeight }
+        ) + "px";
         popup.style.left = "auto";
         // Center horizontally on the trigger button.
         var leftViewport = tRect.left + tRect.width / 2 - pRect.width / 2;
@@ -5097,7 +5129,10 @@
         popup.style.left = leftViewport + "px";
       } else {
         popup.style.position = "absolute";
-        popup.style.top = top + "px";
+        popup.style.top = this._popupTop(
+          tRect.top - cRect.top, tRect.bottom - cRect.top, pRect.height,
+          { top: 0, bottom: cRect.height }
+        ) + "px";
         // Center horizontally on the trigger button, clamped to the
         // container.
         var leftContainer = (tRect.left - cRect.left) + tRect.width / 2 - pRect.width / 2;

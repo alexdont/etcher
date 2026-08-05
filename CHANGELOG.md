@@ -55,6 +55,17 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   carpet a small or zoomed-out shape and leave nowhere to press for selecting
   or moving it.
 
+### Fixed
+
+- **The colour picker opened off the top of the canvas.** Toolbar popups were
+  positioned above their trigger unconditionally, which is right for the
+  toolbars at the bottom of the canvas but not for the colour swatches, which
+  live in the style panel pinned near the top — the picker was placed ~190px
+  above the viewport's top edge and was effectively unreachable. Popups now
+  open above when there's room and flip below when there isn't, clamping into
+  view if neither side fits. Applies to all four (tools, colours, params,
+  marker) in both canvas and strip mode.
+
 ### Changed
 
 - **Middle-button presses pass through to Fresco**, so its middle-drag pan

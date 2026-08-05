@@ -25,10 +25,12 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
   Selecting an arrow makes its whole path editable. The endpoints re-aim onto
   a different anchor (or off a shape, to detach). Bends can be added, moved
-  and removed without redrawing the arrow: hovering the middle of a segment
-  raises a ghost dot that drags out into a new bend, and clicking an existing
-  bend deletes it — the same pair of gestures polygons already use for
-  vertices. Both are undoable.
+  and removed without redrawing the arrow: bringing the pointer near a
+  segment raises a dot on the line that drags out into a new bend, and
+  clicking an existing bend deletes it — the same pair of gestures polygons
+  already use for vertices. Both are undoable. The dot follows the pointer
+  along the nearest segment, so an arrow bends where you aim rather than only
+  at the middle of a leg.
 
   New `arrow` shape kind: `%{"a" => [x, y], "points" => [[x, y], …],
   "b" => [x, y], "from" => binding, "to" => binding}`, where a binding is

@@ -48,7 +48,14 @@ const anchorPointImage = lift("_anchorPointImage", "shape, anchorId");
 const vArrowPoints = lift("_vArrowPoints", "tip, toward, len, halfWidth");
 const connectorHitRadius = lift("_connectorHitRadius", "shape");
 const arrowPath = lift("_arrowPath", "g");
-const nearSegment = lift("_nearSegment", "pt, p, q, tol");
+const nearestOnSegment = lift("_nearestOnSegment", "pt, p, q");
+const nearSegmentRaw = lift("_nearSegment", "pt, p, q, tol");
+
+// `_nearSegment` delegates to `_nearestOnSegment`, so drive it through a
+// stand-in that carries both — the same pairing the layer has.
+const segLayer = { _nearestOnSegment: nearestOnSegment };
+segLayer._nearSegment = nearSegmentRaw;
+const nearSegment = (pt, p, q, tol) => segLayer._nearSegment(pt, p, q, tol);
 
 function constant(name) {
   const found = (src.match(new RegExp(`var ${name} = ([\\d.]+);`)) || [])[1];
@@ -214,6 +221,39 @@ assert.strictEqual(
   arrowPath(routed).length - 1,
   "segments, not points — one ghost between each adjacent pair");
 
+// Which kinds slide their ghost along to meet the cursor, rather than
+// pinning it to a fixed midpoint. Only arrows: a polygon's ghost marks where
+// a new vertex would subdivide the edge, and `_startMidpointDrag` inserts at
+// exactly that spot — so listing polygon here would move the dot away from
+// the point its own drag code then uses.
+const segmentsFor = lift("_midpointSegmentsForShape", "shape");
+const segLayer2 = { _arrowPath: arrowPath };
+
+assert.strictEqual(
+  segmentsFor.call(segLayer2, { kind: "arrow", geometry: routed }).length,
+  3, "an arrow offers each of its legs");
+assert.deepStrictEqual(
+  segmentsFor.call(segLayer2, { kind: "arrow", geometry: { a: [0, 0], b: [8, 0] } }),
+  [{ p: { x: 0, y: 0 }, q: { x: 8, y: 0 } }],
+  "…as {p, q} pairs, in path order");
+
+for (const kind of ["polygon", "rectangle", "circle", "freehand", "text"]) {
+  assert.deepStrictEqual(
+    segmentsFor.call(segLayer2, { kind, geometry: { points: [[0, 0], [1, 1]] } }),
+    [], `${kind} keeps fixed midpoints`);
+}
+assert.deepStrictEqual(segmentsFor.call(segLayer2, null), []);
+
+// The gate has to be on the KIND, not on whether the geometry happens to
+// look path-shaped. `line` and `dimension` store the same `a`/`b` an arrow
+// does, so a check that only asked "can I build a path from this?" would
+// hand them sliding ghosts they have no drag code for.
+for (const kind of ["line", "dimension"]) {
+  assert.deepStrictEqual(
+    segmentsFor.call(segLayer2, { kind, geometry: { a: [0, 0], b: [10, 0] } }),
+    [], `${kind} has a/b too, but is not a connector`);
+}
+
 // ── hit-testing a segment ───────────────────────────────────────────────────
 
 const P = { x: 0, y: 0 };
@@ -240,6 +280,26 @@ assert.ok(nearSegment({ x: 103, y: 0 }, P, Q, 5), "within tol past the end");
 const Z = { x: 10, y: 10 };
 assert.ok(nearSegment({ x: 12, y: 10 }, Z, Z, 5), "degenerate: near");
 assert.ok(!nearSegment({ x: 40, y: 10 }, Z, Z, 5), "degenerate: far");
+
+// ── where the ghost lands ───────────────────────────────────────────────────
+
+// The bend ghost slides along its segment to meet the cursor, so the point
+// it reports is what the new bend's position becomes. Off the middle of a
+// segment it must project onto the line, not snap back to the midpoint.
+assert.deepStrictEqual(
+  nearestOnSegment({ x: 20, y: 40 }, P, Q), { x: 20, y: 0 },
+  "projects perpendicularly onto the segment");
+assert.deepStrictEqual(
+  nearestOnSegment({ x: 90, y: -30 }, P, Q), { x: 90, y: 0 },
+  "…anywhere along it, not just near the middle");
+
+// Clamped at both ends, so hovering past a segment offers its endpoint
+// rather than a point out on the line's extension.
+assert.deepStrictEqual(nearestOnSegment({ x: 500, y: 20 }, P, Q), { x: 100, y: 0 });
+assert.deepStrictEqual(nearestOnSegment({ x: -500, y: 20 }, P, Q), { x: 0, y: 0 });
+
+// Degenerate segment: the segment is the point.
+assert.deepStrictEqual(nearestOnSegment({ x: 99, y: 99 }, Z, Z), { x: 10, y: 10 });
 
 // ── the grab zone ───────────────────────────────────────────────────────────
 

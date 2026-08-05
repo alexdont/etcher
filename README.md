@@ -352,9 +352,12 @@ left it.
 
 Select an arrow and its path becomes editable. The two endpoints re-aim onto
 a different anchor, or off a shape entirely to detach. Bends can be added,
-moved and removed without redrawing: hover the middle of any segment and a
-ghost dot appears — drag it to bend the arrow there — and click an existing
-bend to delete it. Both are undoable.
+moved and removed without redrawing: bring the pointer anywhere near a
+segment and a dot appears on the line beside it — drag that to bend the arrow
+there — and click an existing bend to delete it. Both are undoable.
+
+The dot follows the pointer along whichever segment is nearest, so an arrow
+bends where you aim rather than only at the middle of a leg.
 
 A `binding` is `%{"uuid" => shape_uuid, "anchor" => anchor_id}`, or `null` for
 a free end. Anchor ids are `"nw"`, `"n"`, `"ne"`, `"e"`, `"se"`, `"s"`,

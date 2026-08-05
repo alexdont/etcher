@@ -960,8 +960,14 @@
       // `.is-active` is set on the closest midpoint to the cursor by
       // `_updateClosestMidpoint`. Only one shows at a time so the
       // polygon's edges don't get crowded with dots.
+      //
+      // Solid enough to notice from across the shape: this fires on
+      // proximity, not on being over the dot, so it has to announce itself
+      // before the pointer arrives — a wash at 0.2 alpha did not.
       ".etcher-handle-midpoint.is-active {",
-      "  fill-opacity: 0.2; stroke-opacity: 0.85;",
+      "  fill: #fff; fill-opacity: 1;",
+      "  stroke-opacity: 1; stroke-width: 2.5;",
+      "  transform: scale(1.15);",
       "}",
       ".etcher-handle-midpoint:hover {",
       "  stroke-opacity: 1;",
@@ -11756,23 +11762,24 @@
       }
     },
 
-    // Is `pt` within `tol` image px of the segment `p`→`q`? Standard
-    // point-to-segment distance with the parameter clamped to the segment,
-    // so the ends don't extend into infinite lines.
-    _nearSegment: function(pt, p, q, tol) {
+    // The point on segment `p`→`q` closest to `pt`. The parameter is clamped
+    // to the segment, so the ends stop rather than extending into infinite
+    // lines.
+    _nearestOnSegment: function(pt, p, q) {
       var dx = q.x - p.x, dy = q.y - p.y;
       var lenSq = dx * dx + dy * dy;
-      var nx, ny;
-      if (lenSq <= 0.0001) {
-        // Degenerate segment (a bend dropped on top of its neighbour):
-        // fall back to distance from the point itself.
-        nx = p.x; ny = p.y;
-      } else {
-        var t = ((pt.x - p.x) * dx + (pt.y - p.y) * dy) / lenSq;
-        t = Math.max(0, Math.min(1, t));
-        nx = p.x + t * dx; ny = p.y + t * dy;
-      }
-      var ex = pt.x - nx, ey = pt.y - ny;
+      // Degenerate segment (a bend dropped on top of its neighbour): the
+      // segment IS the point.
+      if (lenSq <= 0.0001) return { x: p.x, y: p.y };
+      var t = ((pt.x - p.x) * dx + (pt.y - p.y) * dy) / lenSq;
+      t = Math.max(0, Math.min(1, t));
+      return { x: p.x + t * dx, y: p.y + t * dy };
+    },
+
+    // Is `pt` within `tol` image px of the segment `p`→`q`?
+    _nearSegment: function(pt, p, q, tol) {
+      var n = this._nearestOnSegment(pt, p, q);
+      var ex = pt.x - n.x, ey = pt.y - n.y;
       return ex * ex + ey * ey <= tol * tol;
     },
 
@@ -12575,12 +12582,12 @@
         this._renderHandles(shape);
       }
 
-      // Polygons + rectangles use midpoint handles that follow the
-      // cursor's nearest edge. The wrapper has pointer-events: none
+      // Midpoint handles follow the cursor's nearest edge (polygon /
+      // rectangle) or segment (arrow). The wrapper has pointer-events: none
       // in cursor mode, so pointermove there doesn't fire when the
       // user is outside the shape's filled body — listen on document
       // instead so the highlight tracks the cursor everywhere.
-      if (shape.kind === "polygon" || shape.kind === "rectangle") {
+      if (this._hasMidpointHandles(shape.kind)) {
         this._wireMidpointTracker();
       }
 
@@ -12946,22 +12953,73 @@
     // has `.is-dragging` and tracks the pointer directly.
     _updateClosestMidpoint: function(pt) {
       if (!this.midpointHandles || !this.midpointHandles.length) return;
-      var positions = this._midpointPositionsForShape(this.editingShape);
-      if (!positions || !positions.length) return;
+      var shape = this.editingShape;
+      var self = this;
+      var threshold = this._midpointActivationRadiusImagePx();
       var closestIdx = -1;
       var closestDist = Infinity;
-      for (var i = 0; i < positions.length; i++) {
-        var dx = pt.x - positions[i].x;
-        var dy = pt.y - positions[i].y;
-        var d2 = dx * dx + dy * dy;
-        if (d2 < closestDist) { closestDist = d2; closestIdx = i; }
+      var closestPoint = null;
+
+      // Arrows measure to the whole segment and slide the ghost along it to
+      // meet the cursor. Measuring to the fixed midpoint instead — which is
+      // all a polygon needs, its edges being short — means that on a long
+      // leg you can be sitting exactly on the line and still see nothing,
+      // because the middle of that leg is far away. And once activation is
+      // by proximity to the line, the dot has to come to you: lighting one
+      // up hundreds of px away, at a spot you weren't pointing at, reads as
+      // a glitch rather than an offer.
+      var segments = this._midpointSegmentsForShape(shape);
+      if (segments.length) {
+        segments.forEach(function(seg, i) {
+          var near = self._nearestOnSegment(pt, seg.p, seg.q);
+          var ex = pt.x - near.x, ey = pt.y - near.y;
+          var d2 = ex * ex + ey * ey;
+          if (d2 < closestDist) {
+            closestDist = d2; closestIdx = i; closestPoint = near;
+          }
+        });
+      } else {
+        var positions = this._midpointPositionsForShape(shape);
+        if (!positions || !positions.length) return;
+        for (var i = 0; i < positions.length; i++) {
+          var dx = pt.x - positions[i].x;
+          var dy = pt.y - positions[i].y;
+          var pd2 = dx * dx + dy * dy;
+          if (pd2 < closestDist) { closestDist = pd2; closestIdx = i; }
+        }
       }
-      var threshold = this._midpointActivationRadiusImagePx();
-      if (closestDist > threshold * threshold) closestIdx = -1;
+      if (closestDist > threshold * threshold) {
+        closestIdx = -1;
+        closestPoint = null;
+      }
 
       this.midpointHandles.forEach(function(h, i) {
-        h.classList.toggle("is-active", i === closestIdx);
+        var active = i === closestIdx;
+        h.classList.toggle("is-active", active);
+        if (active && closestPoint) {
+          // Remembered on the element so the drag inserts the bend where the
+          // ghost actually is, not back at the segment's midpoint.
+          h._etcherMidPoint = { x: closestPoint.x, y: closestPoint.y };
+          self._positionHandle(h, closestPoint);
+        } else if (!active) {
+          h._etcherMidPoint = null;
+        }
       });
+    },
+
+    // Segments a shape offers bend-insertion along, as `{p, q}` pairs in
+    // image px — the ghost slides within one of these to follow the cursor.
+    // Only arrows: a polygon's ghost marks the fixed point where a new
+    // vertex would subdivide its edge, which is a different affordance and
+    // one its own drag code depends on.
+    _midpointSegmentsForShape: function(shape) {
+      if (!shape || shape.kind !== "arrow") return [];
+      var path = this._arrowPath(shape.geometry);
+      var segs = [];
+      for (var i = 0; i < path.length - 1; i++) {
+        segs.push({ p: path[i], q: path[i + 1] });
+      }
+      return segs;
     },
 
     // Image-px positions of every midpoint a shape currently
@@ -13084,6 +13142,13 @@
       var newIdx;
       if (isArrow) {
         newIdx = edgeIdx;
+        // The ghost slides along its segment to follow the cursor, so the
+        // bend belongs wherever it currently sits — using the segment's
+        // midpoint would make the arrow jump away from the dot the user
+        // just grabbed. Falls back to the midpoint if the handle was
+        // grabbed without the tracker having placed it (a tap with no
+        // preceding pointermove).
+        if (handleEl._etcherMidPoint) mid = handleEl._etcherMidPoint;
       } else {
         var pa = pts[edgeIdx];
         var pb = pts[(edgeIdx + 1) % pts.length];

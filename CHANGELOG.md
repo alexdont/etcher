@@ -57,6 +57,16 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **The style panel's fill icons were near-invisible.** Every chrome surface
+  (tool bar, action bar, style panel, popups) paints on its own near-black
+  background in both light and dark hosts, but none of them set a foreground
+  colour — so an icon drawn in `currentColor` inherited the *host page's*
+  text colour, which on a light page is near-black on near-black. Only the
+  fill icons showed it; the dash icons had been hiding the problem by
+  hardcoding `stroke="#fff"`. The chrome now pins `color: #fff` at the
+  container, so icons are white regardless of the host's theme and anything
+  added later inherits a sane colour.
+
 - **Freehand loops lost their fill.** Adding the fill modes narrowed the
   fillable-element list to rect/circle/polygon, which quietly dropped the
   body from freehand — a `<path>` or `<polyline>` — so lassoing a region

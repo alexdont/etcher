@@ -237,6 +237,20 @@
     stylesInjected = true;
 
     var css = [
+      // Every chrome surface paints on its own near-black background, in
+      // both light and dark hosts — none of them follow the page theme. So
+      // the foreground has to be pinned here rather than inherited: an icon
+      // drawn in `currentColor` was otherwise picking up the HOST page's
+      // text colour, which on a light page is near-black on near-black.
+      // The dash icons hid this by hardcoding `stroke="#fff"`; the fill
+      // icons, which do use `currentColor`, came out invisible.
+      //
+      // Pinned at the container rather than per-icon so anything added
+      // later inherits a sane colour instead of rediscovering this.
+      ".etcher-toolbar, .etcher-actionbar, .etcher-stylepanel,",
+      ".etcher-popup, .etcher-style-trigger {",
+      "  color: #fff;",
+      "}",
       ".etcher-toolbar {",
       "  position: absolute; left: 50%; bottom: 16px;",
       "  transform: translateX(-50%); z-index: 11;",

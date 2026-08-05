@@ -2769,6 +2769,12 @@
       // the Fresco host's event tree.
       wrapper.setAttribute("data-fresco-no-capture", "");
       wrapper.addEventListener("pointerdown", function(e) {
+        // Non-primary buttons are not ours. The `stopPropagation` below is
+        // there so a left-press that's drawing or grabbing a handle doesn't
+        // ALSO pan the canvas underneath — the overlay has no use for the
+        // middle button, and swallowing it would break Fresco's middle-drag
+        // pan everywhere except blank canvas.
+        if (e.button != null && e.button !== 0) return;
         e.stopPropagation();
         self._onPointerDown(e);
       });
@@ -7843,6 +7849,10 @@
     },
 
     _startTitleHandleDrag: function(shape, idx, handleEl, e) {
+      // Left button only. These handles sit above the canvas and swallow
+      // the event, so without this a middle-press on one would start a
+      // drag AND block the middle-drag pan from ever reaching Fresco.
+      if (e.button != null && e.button !== 0) return;
       e.preventDefault();
       e.stopPropagation();
       try { handleEl.setPointerCapture(e.pointerId); } catch (_) {}
@@ -12906,6 +12916,10 @@
     // axis. Normalizes negatives so a user dragging an edge past
     // its opposite still produces a sane rectangle.
     _startRectEdgeDrag: function(shape, edgeIdx, handleEl, e) {
+      // Left button only. These handles sit above the canvas and swallow
+      // the event, so without this a middle-press on one would start a
+      // drag AND block the middle-drag pan from ever reaching Fresco.
+      if (e.button != null && e.button !== 0) return;
       e.preventDefault();
       e.stopPropagation();
       try { handleEl.setPointerCapture(e.pointerId); } catch (_) {}
@@ -13106,6 +13120,10 @@
     // place it immediately. Pre-insert state goes onto the undo stack so ⌘Z
     // removes the inserted point entirely.
     _startMidpointDrag: function(shape, edgeIdx, handleEl, e) {
+      // Left button only. These handles sit above the canvas and swallow
+      // the event, so without this a middle-press on one would start a
+      // drag AND block the middle-drag pan from ever reaching Fresco.
+      if (e.button != null && e.button !== 0) return;
       e.preventDefault();
       e.stopPropagation();
       try { handleEl.setPointerCapture(e.pointerId); } catch (_) {}
@@ -13394,6 +13412,10 @@
     // Drag an anchor: translate the node by the pointer delta. Its handles
     // ride along automatically because they're stored relative to the anchor.
     _startAnchorDrag: function(shape, idx, handleEl, e) {
+      // Left button only. These handles sit above the canvas and swallow
+      // the event, so without this a middle-press on one would start a
+      // drag AND block the middle-drag pan from ever reaching Fresco.
+      if (e.button != null && e.button !== 0) return;
       e.preventDefault();
       e.stopPropagation();
       try { handleEl.setPointerCapture(e.pointerId); } catch (_) {}
@@ -13445,6 +13467,10 @@
     // the node is "smooth" and the opposite handle exists, swing it to stay
     // colinear while keeping its own length — the classic smooth-node feel.
     _startBezierHandleDrag: function(shape, idx, side, handleEl, e) {
+      // Left button only. These handles sit above the canvas and swallow
+      // the event, so without this a middle-press on one would start a
+      // drag AND block the middle-drag pan from ever reaching Fresco.
+      if (e.button != null && e.button !== 0) return;
       e.preventDefault();
       e.stopPropagation();
       try { handleEl.setPointerCapture(e.pointerId); } catch (_) {}
@@ -13648,6 +13674,10 @@
     },
 
     _startHandleDrag: function(shape, idx, handleEl, e) {
+      // Left button only. These handles sit above the canvas and swallow
+      // the event, so without this a middle-press on one would start a
+      // drag AND block the middle-drag pan from ever reaching Fresco.
+      if (e.button != null && e.button !== 0) return;
       e.preventDefault();
       e.stopPropagation();
       try { handleEl.setPointerCapture(e.pointerId); } catch (_) {}

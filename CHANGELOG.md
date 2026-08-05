@@ -57,6 +57,12 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **Middle-button presses pass through to Fresco**, so its middle-drag pan
+  (new in Fresco 0.11) works over annotations and their handles rather than
+  only over blank canvas. The overlay swallowed every press to stop a drawing
+  or handle drag from also panning the canvas underneath; that reasoning only
+  ever applied to the left button. Every handle drag now ignores non-primary
+  presses too.
 - `Etcher.Raster` renders the new `arrow` kind — the routed path as a
   polyline plus a head at `b`, oriented along the final segment and clamped
   so a very short connector still reads as an arrow.

@@ -57,6 +57,23 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Dragging a multi-selection moved one shape and broke the group.** A
+  selected shape has pointer events enabled, so a press on it lands on the
+  shape's own handler and stops there — the doc-level handler that owns the
+  group-move branch never saw it. The press fell through to a single-shape
+  move: the rest of the group stayed put and the one pressed entered edit
+  mode, which reads as the selection falling apart. That handler now runs the
+  same three cases the doc-level one does — shift extends the selection, a
+  press on a member drags the whole group, a press on a non-member abandons
+  it. Releasing after a group drag keeps the selection, so it can be dragged
+  again straight away.
+
+- **Connector dots appeared while a group was selected.** They invite a drag
+  that starts an arrow, but a press on those shapes means "move the group",
+  and the two gestures begin identically. The dots are now suppressed
+  whenever a multi-selection exists, and return on the next hover once it's
+  dropped.
+
 - **The style panel's fill icons were near-invisible.** Every chrome surface
   (tool bar, action bar, style panel, popups) paints on its own near-black
   background in both light and dark hosts, but none of them set a foreground

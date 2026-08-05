@@ -8535,6 +8535,32 @@
         if (!self.annotationMode) return;
         if (self.activeTool != null) return;
         e.stopPropagation();
+        // Shift extends the multi-selection; that lives on the doc-level
+        // handler, and swallowing it here would make shift-clicking a
+        // selected shape start a move instead.
+        if (e.shiftKey) {
+          if (shape.readonly) { e.preventDefault(); return; }
+          self._exitEditMode();
+          self._toggleInSelection(shape);
+          e.preventDefault();
+          return;
+        }
+        // A shape in a multi-selection drags the whole group. The doc-level
+        // handler has this branch too, but never sees the event: a selected
+        // shape has pointer events enabled, so a real press lands on the
+        // shape itself and is stopped right here. Without this the press
+        // fell through to a single-shape move, which quietly dropped the
+        // group — the other shapes stayed put and this one entered edit
+        // mode, reading as "the selection broke".
+        if (self._isInSelection(shape)) {
+          self._startMultiShapeMove(shape, e);
+          return;
+        }
+        // Pressing a shape that ISN'T in the selection abandons it, the
+        // same as pressing empty canvas would.
+        if (self.selectedShapes && self.selectedShapes.length) {
+          self._clearSelection();
+        }
         self._startShapeMove(shape, e);
       });
 
@@ -9584,6 +9610,11 @@
         shape.kind !== "arrow" &&
         shape.readonly !== true &&
         this.editingShape !== shape &&
+        // Nothing on offer while a group is selected. The dots invite a drag
+        // that starts an arrow, which is not what a press on these shapes
+        // means right now — it means move the group — and the two gestures
+        // begin identically. Connectors are for one shape at a time.
+        !(this.selectedShapes && this.selectedShapes.length) &&
         !this._arrowDrag;
     },
 
@@ -10201,6 +10232,11 @@
       this.selectedShapes.push(shape);
       shape.el.classList.add("is-multi-selected");
       this._refreshImageRing(shape);
+      // Dots raised by an earlier hover would otherwise hang around over a
+      // shape that has just become part of a group — see
+      // `_connectorsAvailableFor`. They come back on the next hover once the
+      // selection is dropped.
+      this._removeConnectorDots();
       this._syncArrangeButtons();
     },
 

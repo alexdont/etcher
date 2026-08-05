@@ -221,11 +221,13 @@ assert.strictEqual(
   arrowPath(routed).length - 1,
   "segments, not points — one ghost between each adjacent pair");
 
-// Which kinds slide their ghost along to meet the cursor, rather than
-// pinning it to a fixed midpoint. Only arrows: a polygon's ghost marks where
-// a new vertex would subdivide the edge, and `_startMidpointDrag` inserts at
-// exactly that spot — so listing polygon here would move the dot away from
-// the point its own drag code then uses.
+// Which kinds gate their dot on distance to the whole segment rather than to
+// its midpoint. Only arrows — a polygon's edges are short enough that the two
+// measurements amount to the same thing.
+//
+// Note this decides *when the dot shows*, not where it sits: it stays at the
+// segment's middle either way, so it can't wander onto the bend handles at
+// either end and cover the points the user is reaching for.
 const segmentsFor = lift("_midpointSegmentsForShape", "shape");
 const segLayer2 = { _arrowPath: arrowPath };
 
@@ -281,11 +283,12 @@ const Z = { x: 10, y: 10 };
 assert.ok(nearSegment({ x: 12, y: 10 }, Z, Z, 5), "degenerate: near");
 assert.ok(!nearSegment({ x: 40, y: 10 }, Z, Z, 5), "degenerate: far");
 
-// ── where the ghost lands ───────────────────────────────────────────────────
+// ── distance to a segment ───────────────────────────────────────────────────
 
-// The bend ghost slides along its segment to meet the cursor, so the point
-// it reports is what the new bend's position becomes. Off the middle of a
-// segment it must project onto the line, not snap back to the midpoint.
+// How near the pointer is to a segment — which is what raises the "add a
+// bend" dot. Measuring to the segment rather than to its midpoint is the
+// whole point: on a long leg you can be right on the line while its middle
+// is hundreds of px away.
 assert.deepStrictEqual(
   nearestOnSegment({ x: 20, y: 40 }, P, Q), { x: 20, y: 0 },
   "projects perpendicularly onto the segment");

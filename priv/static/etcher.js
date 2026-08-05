@@ -12958,25 +12958,25 @@
       var threshold = this._midpointActivationRadiusImagePx();
       var closestIdx = -1;
       var closestDist = Infinity;
-      var closestPoint = null;
 
-      // Arrows measure to the whole segment and slide the ghost along it to
-      // meet the cursor. Measuring to the fixed midpoint instead — which is
-      // all a polygon needs, its edges being short — means that on a long
-      // leg you can be sitting exactly on the line and still see nothing,
-      // because the middle of that leg is far away. And once activation is
-      // by proximity to the line, the dot has to come to you: lighting one
-      // up hundreds of px away, at a spot you weren't pointing at, reads as
-      // a glitch rather than an offer.
+      // Arrows measure to the whole segment, not to its midpoint: on a long
+      // leg the middle is far away, so midpoint-distance meant you could sit
+      // exactly on the line and still see nothing. (A polygon's edges are
+      // short enough that the distinction doesn't arise.)
+      //
+      // The dot still SITS at the midpoint. Sliding it along to meet the
+      // cursor was the obvious next step and is wrong: it then wanders over
+      // the bend handles at either end of the segment and covers the very
+      // points you were reaching for. Fixed at the middle, the two never
+      // collide — existing bends stay grabbable, and the middle is where a
+      // new one gets added.
       var segments = this._midpointSegmentsForShape(shape);
       if (segments.length) {
         segments.forEach(function(seg, i) {
           var near = self._nearestOnSegment(pt, seg.p, seg.q);
           var ex = pt.x - near.x, ey = pt.y - near.y;
           var d2 = ex * ex + ey * ey;
-          if (d2 < closestDist) {
-            closestDist = d2; closestIdx = i; closestPoint = near;
-          }
+          if (d2 < closestDist) { closestDist = d2; closestIdx = i; }
         });
       } else {
         var positions = this._midpointPositionsForShape(shape);
@@ -12988,30 +12988,17 @@
           if (pd2 < closestDist) { closestDist = pd2; closestIdx = i; }
         }
       }
-      if (closestDist > threshold * threshold) {
-        closestIdx = -1;
-        closestPoint = null;
-      }
+      if (closestDist > threshold * threshold) closestIdx = -1;
 
       this.midpointHandles.forEach(function(h, i) {
-        var active = i === closestIdx;
-        h.classList.toggle("is-active", active);
-        if (active && closestPoint) {
-          // Remembered on the element so the drag inserts the bend where the
-          // ghost actually is, not back at the segment's midpoint.
-          h._etcherMidPoint = { x: closestPoint.x, y: closestPoint.y };
-          self._positionHandle(h, closestPoint);
-        } else if (!active) {
-          h._etcherMidPoint = null;
-        }
+        h.classList.toggle("is-active", i === closestIdx);
       });
     },
 
-    // Segments a shape offers bend-insertion along, as `{p, q}` pairs in
-    // image px — the ghost slides within one of these to follow the cursor.
-    // Only arrows: a polygon's ghost marks the fixed point where a new
-    // vertex would subdivide its edge, which is a different affordance and
-    // one its own drag code depends on.
+    // Segments a shape measures cursor proximity against, as `{p, q}` pairs
+    // in image px. Only arrows: a polygon's edges are short enough that the
+    // distance to an edge and the distance to its midpoint amount to the
+    // same thing, and its own gate stays on the midpoint.
     _midpointSegmentsForShape: function(shape) {
       if (!shape || shape.kind !== "arrow") return [];
       var path = this._arrowPath(shape.geometry);
@@ -13142,13 +13129,6 @@
       var newIdx;
       if (isArrow) {
         newIdx = edgeIdx;
-        // The ghost slides along its segment to follow the cursor, so the
-        // bend belongs wherever it currently sits — using the segment's
-        // midpoint would make the arrow jump away from the dot the user
-        // just grabbed. Falls back to the midpoint if the handle was
-        // grabbed without the tracker having placed it (a tap with no
-        // preceding pointermove).
-        if (handleEl._etcherMidPoint) mid = handleEl._etcherMidPoint;
       } else {
         var pa = pts[edgeIdx];
         var pb = pts[(edgeIdx + 1) % pts.length];

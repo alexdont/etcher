@@ -351,13 +351,17 @@ An arrow finished away from any shape simply keeps that free end where you
 left it.
 
 Select an arrow and its path becomes editable. The two endpoints re-aim onto
-a different anchor, or off a shape entirely to detach. Bends can be added,
-moved and removed without redrawing: bring the pointer anywhere near a
-segment and a dot appears on the line beside it — drag that to bend the arrow
-there — and click an existing bend to delete it. Both are undoable.
+a different anchor, or off a shape entirely to detach.
 
-The dot follows the pointer along whichever segment is nearest, so an arrow
-bends where you aim rather than only at the middle of a leg.
+Bends can be added, moved and removed without redrawing. Every existing bend
+is a handle: drag it to re-route, click it to delete it. And bringing the
+pointer near any segment raises a dot at that segment's middle — drag it out
+and the arrow bends there. Both are undoable.
+
+The dot appears on proximity to the segment, so it's there before you reach
+the line, but it stays at the middle rather than following the pointer: a dot
+that tracked you would drift over the bend handles at either end and cover
+the points you were reaching for.
 
 A `binding` is `%{"uuid" => shape_uuid, "anchor" => anchor_id}`, or `null` for
 a free end. Anchor ids are `"nw"`, `"n"`, `"ne"`, `"e"`, `"se"`, `"s"`,

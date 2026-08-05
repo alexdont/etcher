@@ -6730,8 +6730,21 @@
     // than the shape kind so this needs no plumbing at the call sites: an
     // open path (line, freehand, marker) filling itself would be nonsense.
     _isFillableEl: function(el) {
-      var tag = el && el.tagName && el.tagName.toLowerCase();
-      return tag === "rect" || tag === "circle" || tag === "polygon";
+      if (!el) return false;
+      var tag = el.tagName && el.tagName.toLowerCase();
+      // A marker is a stroke and nothing else — filling one would turn a
+      // felt-tip scribble into a solid blob.
+      if (el.classList && el.classList.contains("etcher-marker")) return false;
+      // `path` / `polyline` are freehand, which is a body as much as an
+      // outline: lasso a region and the enclosed area is meant to be tinted.
+      // SVG closes an open subpath implicitly when filling, so this works on
+      // a curve whose ends don't quite meet — which is every hand-drawn loop.
+      //
+      // Shafts (line, dimension, arrow) are `<line>` / `<polyline>` too, but
+      // never arrive here: they live inside a `<g>`, and the colour path
+      // returns at the group without descending to its children.
+      return tag === "rect" || tag === "circle" || tag === "polygon" ||
+             tag === "path" || tag === "polyline";
     },
 
     // Fill mode + opacity in one place, so the colour path and the params

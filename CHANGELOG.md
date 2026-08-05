@@ -57,6 +57,14 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Freehand loops lost their fill.** Adding the fill modes narrowed the
+  fillable-element list to rect/circle/polygon, which quietly dropped the
+  body from freehand — a `<path>` or `<polyline>` — so lassoing a region
+  drew the outline and shaded nothing. Freehand is fillable again and honours
+  all four modes (none / semi / solid / pattern) like every other shape.
+  Markers stay hollow: a marker is a stroke, and filling one would blob a
+  felt-tip scribble into a solid shape.
+
 - **Selecting an image showed nothing — and could make it vanish.** The
   selected/hovered styles paint a stroke, a fill and a drop-shadow. None of
   the first two apply to an SVG `<image>`, and the shadow is drawn outside

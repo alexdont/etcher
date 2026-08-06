@@ -8617,7 +8617,6 @@
           // white halo for cross-color readability.
           var shaftEl = el.querySelector(".etcher-dim-shaft");
           var arrowEls = el.querySelectorAll(".etcher-dim-arrow");
-          var labelEl = el.querySelector(".etcher-dim-label");
 
           // Every fixed length below — the shaft's weight, the V-arrows, the
           // label and its halo — was chosen for a dimension drawn at the
@@ -8663,38 +8662,12 @@
             );
           }
 
-          // Label at lerp(A, B, title_offset). Always horizontal
-          // (text-anchor middle, alphabetic baseline) so the label
-          // stays readable at any line angle. The white halo created
-          // by stroke + paint-order visually breaks the shaft line
-          // behind the text.
-          if (labelEl) {
-            var labelText = (shape.metadata && shape.metadata.title) || "";
-            var tOff = 0.5;
-            if (shape.metadata && typeof shape.metadata.title_offset === "number") {
-              tOff = Math.max(0, Math.min(1, shape.metadata.title_offset));
-            }
-            var labelX = aC.x + (bC.x - aC.x) * tOff;
-            var labelYCenter = aC.y + (bC.y - aC.y) * tOff;
-            var dimFontSize = 14 * dimK;
-            labelEl.setAttribute("x", labelX);
-            // y here positions the alphabetic baseline; offset by
-            // ~0.35em so the visible text glyphs are vertically
-            // centered on the shaft line.
-            labelEl.setAttribute("y", labelYCenter + dimFontSize * 0.35);
-            labelEl.setAttribute("font-size", dimFontSize);
-            labelEl.setAttribute(
-              "font-family",
-              "ui-sans-serif, system-ui, -apple-system, sans-serif"
-            );
-            labelEl.setAttribute("font-weight", "500");
-            // The halo that breaks the shaft line behind the text has to
-            // scale with the text, or it swallows the glyphs on a small
-            // label and disappears on a large one.
-            labelEl.setAttribute("stroke-width", 3 * dimK);
-            labelEl.textContent = labelText;
-          }
-
+          // The label is the standard title sibling every other shape has —
+          // a box you can resize, recolour and edit — rather than a bespoke
+          // <text> welded to the shaft, which could only ever have its words
+          // changed. It stays magnetic to the line: `_shapeTitleBoxImage`
+          // centres it on the point at `title_offset`, and dragging it slides
+          // that offset rather than positioning it freely.
           bboxTopImage = {
             x: (aImg.x + bImg.x) / 2,
             y: Math.min(aImg.y, bImg.y)
@@ -8779,7 +8752,7 @@
       // freehand/line). Callout renders its title as a child <text>
       // inside its <g>; dimension paints the title inline along the
       // shaft. Text is its own free-floating-label shape kind.
-      if (shape.kind !== "callout" && shape.kind !== "text" && shape.kind !== "dimension") {
+      if (shape.kind !== "callout" && shape.kind !== "text") {
         // Cache so title-drag handlers can resolve the default
         // anchor without recomputing the parent's bbox.
         shape.bboxTopImage = bboxTopImage;
@@ -8871,6 +8844,13 @@
         this.svg.appendChild(tg);
         shape.titleGroup = tg;
         this._attachTitleInteractions(shape);
+      }
+
+      // Re-applied on every render, not just when the group is built. The
+      // colour was previously frozen at creation, so recolouring a shape
+      // left its label behind in the old colour with no way to catch it up.
+      if (shape.style && shape.style.color) {
+        shape.titleGroup.style.color = shape.style.color;
       }
 
       var titleBox = this._shapeTitleBoxImage(shape, bboxTopImage);
@@ -9034,6 +9014,29 @@
             }
           }
 
+          // Same re-anchor for a dimension, whose label is CENTRED on its
+          // shaft rather than anchored by a corner. Shrink-wrapping narrows
+          // the box from its left edge, so without this the drawn label sits
+          // half the shrink off the line — which reads as the label having
+          // come unstuck from the dimension it belongs to.
+          if (shape.kind === "dimension") {
+            var cShiftX = (tw - actualW) / 2;
+            var cShiftY = (th - actualH) / 2;
+            if (cShiftX || cShiftY) {
+              tx += cShiftX;
+              ty += cShiftY;
+              if (sx > 0) shrunk.x += cShiftX / sx;
+              if (sy > 0) shrunk.y += cShiftY / sy;
+              if (rectEl) {
+                rectEl.setAttribute("x", tx);
+                rectEl.setAttribute("y", ty);
+              }
+              textEl.setAttribute("x", tx + pad);
+              textEl.setAttribute("y", ty + pad);
+              this._shiftTspans(textEl, tx + pad);
+            }
+          }
+
           shape._renderedTitleImage = shrunk;
           tw = actualW;
           th = actualH;
@@ -9050,7 +9053,13 @@
           x: titleBox.x + titleBox.w / 2,
           y: titleBox.y + titleBox.h / 2
         };
-        if (this._shapeContainsImagePoint(shape, titleCenterImage)) {
+        // A dimension's label is centred ON its shaft, so a leader would be
+        // a stub pointing from the label at the line it is already sitting
+        // on. Same reasoning as the containment case below, but containment
+        // can't see it: a line has no interior to be inside of.
+        if (shape.kind === "dimension") {
+          lineEl.setAttribute("visibility", "hidden");
+        } else if (this._shapeContainsImagePoint(shape, titleCenterImage)) {
           lineEl.setAttribute("visibility", "hidden");
         } else {
           lineEl.removeAttribute("visibility");
@@ -9155,6 +9164,27 @@
       var size = stored
         ? { w: stored.w, h: stored.h }
         : { w: basePx * 6, h: basePx * 1.4 };
+
+      // A dimension's label rides its own line. The stored box supplies the
+      // SIZE — that is what makes it resizable like any other label — but
+      // never the position: that comes from `title_offset` along the shaft,
+      // which is what keeps it magnetic to the dimension instead of drifting
+      // off it. Checked before `title_align` and before the stored box, both
+      // of which would otherwise put it somewhere the line isn't.
+      if (shape && shape.kind === "dimension") {
+        var dg = shape.geometry;
+        if (dg && dg.a && dg.b) {
+          var dt = 0.5;
+          if (typeof meta.title_offset === "number") {
+            dt = Math.max(0, Math.min(1, meta.title_offset));
+          }
+          var dpx = dg.a[0] + (dg.b[0] - dg.a[0]) * dt;
+          var dpy = dg.a[1] + (dg.b[1] - dg.a[1]) * dt;
+          return {
+            x: dpx - size.w / 2, y: dpy - size.h / 2, w: size.w, h: size.h
+          };
+        }
+      }
 
       var align = normalizeTitleAlign(meta.title_align);
       if (align) {
@@ -9513,6 +9543,29 @@
           var bC = self._imageToContainer(pt);
           if ((bC.x - aC.x) * (bC.x - aC.x) + (bC.y - aC.y) * (bC.y - aC.y) < 9) return;
           dragged = true;
+        }
+        // A dimension's label slides ALONG its line rather than moving
+        // freely: the pointer is projected onto the shaft and the position
+        // stored as a 0–1 offset. Free positioning would let the label drift
+        // away from the thing it measures, and the label is the measurement.
+        if (shape.kind === "dimension") {
+          var dgg = shape.geometry;
+          var dxL = dgg.b[0] - dgg.a[0];
+          var dyL = dgg.b[1] - dgg.a[1];
+          var lenSqL = dxL * dxL + dyL * dyL;
+          // A zero-length dimension has no line to project onto — leave the
+          // offset alone rather than dividing by zero.
+          if (lenSqL > 0.0001) {
+            var tProj = ((pt.x - dgg.a[0]) * dxL + (pt.y - dgg.a[1]) * dyL) / lenSqL;
+            shape.metadata = Object.assign({}, shape.metadata || {}, {
+              title_offset: Math.max(0, Math.min(1, tProj))
+            });
+            self._renderShape(shape);
+            if (self.editingTitleShape === shape) {
+              self._positionAllTitleHandles(shape);
+            }
+          }
+          return;
         }
         var newBox = {
           x: startBox.x + dxI,
@@ -9909,76 +9962,10 @@
       // exact sub-element to tell "play" from "scrub".
       if (self._isMediaKind(shape.kind)) self._attachAudioControls(shape);
 
-      // Dimension label is independently draggable along the shaft
-      // (writes `metadata.title_offset`). Wires its own pointerdown
-      // so the slide gesture starts on label click rather than
-      // entering shape-move mode.
-      if (shape.kind === "dimension") {
-        this._attachDimensionLabelDrag(shape);
-      }
-    },
-
-    // Drag the dimension label along the shaft. Projects the pointer
-    // onto the line and persists the projection scalar (clamped to
-    // [0, 1]) as `metadata.title_offset`. Call once per shape — the
-    // label element is reused across re-renders so the listener
-    // doesn't need to re-bind.
-    _attachDimensionLabelDrag: function(shape) {
-      var self = this;
-      var labelEl = shape.el && shape.el.querySelector(".etcher-dim-label");
-      if (!labelEl || labelEl._etcherWired) return;
-      labelEl._etcherWired = true;
-      labelEl.style.cursor = "grab";
-
-      labelEl.addEventListener("pointerdown", function(e) {
-        if (e.button !== 0) return;
-        if (self.annotationMode && self.activeTool != null) return;
-        if (!self.annotationMode) return;
-        e.preventDefault();
-        e.stopPropagation();
-
-        try { labelEl.setPointerCapture(e.pointerId); } catch (_) {}
-        labelEl.style.cursor = "grabbing";
-        var historyBefore = self._snapshotShape(shape);
-        var startPt = self._toImage(e);
-        var dragged = false;
-
-        function onMove(ev) {
-          var pt = self._toImage(ev);
-          if (!dragged) {
-            var aC = self._imageToContainer(startPt);
-            var bC = self._imageToContainer(pt);
-            if ((bC.x - aC.x) * (bC.x - aC.x) + (bC.y - aC.y) * (bC.y - aC.y) < 9) return;
-            dragged = true;
-          }
-          var gg = shape.geometry;
-          var dxL = gg.b[0] - gg.a[0];
-          var dyL = gg.b[1] - gg.a[1];
-          var lenSqL = dxL * dxL + dyL * dyL;
-          if (lenSqL <= 0.0001) return;
-          var tProj = ((pt.x - gg.a[0]) * dxL + (pt.y - gg.a[1]) * dyL) / lenSqL;
-          tProj = Math.max(0, Math.min(1, tProj));
-          shape.metadata = Object.assign({}, shape.metadata || {}, { title_offset: tProj });
-          self._renderShape(shape);
-        }
-
-        function onUp(ev) {
-          labelEl.removeEventListener("pointermove", onMove);
-          labelEl.removeEventListener("pointerup", onUp);
-          labelEl.removeEventListener("pointercancel", onUp);
-          try { labelEl.releasePointerCapture(ev.pointerId); } catch (_) {}
-          labelEl.style.cursor = "grab";
-          if (!dragged) return;
-          if (shape.uuid) {
-            self._emitChanged();
-            self._pushUndo(shape.uuid, historyBefore, self._snapshotShape(shape));
-          }
-        }
-
-        labelEl.addEventListener("pointermove", onMove);
-        labelEl.addEventListener("pointerup", onUp);
-        labelEl.addEventListener("pointercancel", onUp);
-      });
+      // A dimension's label needs no wiring of its own any more: it is the
+      // standard title sibling, so it inherits click-to-resize,
+      // double-click-to-edit and drag from `_attachTitleInteractions`, and
+      // the drag knows to slide it along the shaft.
     },
 
     // Shape "tap" — fired either from a direct DOM click on the
@@ -12470,29 +12457,9 @@
       });
       arrowB.classList.add("etcher-dim-arrow");
 
-      // Black label with white halo — independent of the dimension's
-      // stroke color so it stays readable on any arrow color.
-      // `pointer-events: all` makes the label's bounding box hittable
-      // (instead of just the painted glyphs) so the slide-along-line
-      // gesture is forgiving even on short labels like "548".
-      var label = svgEl("text", {
-        "text-anchor": "middle",
-        "dominant-baseline": "alphabetic",
-        fill: "#000",
-        stroke: "rgba(255, 255, 255, 0.95)",
-        "stroke-width": "3",
-        "stroke-linejoin": "round",
-        "paint-order": "stroke fill",
-        "pointer-events": "all"
-      });
-      // `etcher-text-content` lets _endTextEdit's lookup hide the
-      // label while the inline editor is open, same as text + callout.
-      label.classList.add("etcher-dim-label", "etcher-text-content");
-
       g.appendChild(shaft);
       g.appendChild(arrowA);
       g.appendChild(arrowB);
-      g.appendChild(label);
 
       this._applyShapeColor(g, this.activeColor);
       this.svg.appendChild(g);
@@ -14232,11 +14199,10 @@
         }
         case "dimension": {
           // Same composition as `_startDimension` so persisted
-          // dimensions re-hydrate identically. Shaft + 2 V-arrows in
-          // currentColor; label is hard-pinned black with white halo
-          // and `pointer-events: all` so the slide-along-line gesture
-          // (wired in `_attachDimensionLabelDrag`) has a forgiving
-          // hit area on the bbox of even short labels.
+          // dimensions re-hydrate identically: shaft + 2 V-arrows in
+          // currentColor. The label is the standard title sibling, built
+          // by `_renderTitleSibling` alongside the shape rather than
+          // inside it.
           el = svgEl("g");
           el.classList.add("etcher-dimension");
           var dimShaft = svgEl("line", {
@@ -14264,18 +14230,6 @@
           });
           dimArrowB.classList.add("etcher-dim-arrow");
           el.appendChild(dimArrowB);
-          var dimLabel = svgEl("text", {
-            "text-anchor": "middle",
-            "dominant-baseline": "alphabetic",
-            fill: "#000",
-            stroke: "rgba(255, 255, 255, 0.95)",
-            "stroke-width": "3",
-            "stroke-linejoin": "round",
-            "paint-order": "stroke fill",
-            "pointer-events": "all"
-          });
-          dimLabel.classList.add("etcher-dim-label", "etcher-text-content");
-          el.appendChild(dimLabel);
           break;
         }
         case "line": {

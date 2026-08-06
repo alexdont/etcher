@@ -175,6 +175,18 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **A dimension's label is a normal label.** It was a bespoke line of text
+  welded to the shaft: the words could be edited and nothing else — no
+  resizing, and a colour hard-pinned to black whatever the dimension was. It
+  is now the same label every other shape has, so it resizes by its corner
+  handles, takes the shape's colour, and edits the same way. It stays
+  magnetic to the dimension: centred on the line, and dragging it slides it
+  along rather than pulling it off.
+
+- **A shape's label follows its colour.** The label's colour was fixed when
+  it was first drawn, so recolouring a shape left its label behind with no
+  way to catch it up.
+
 - **Shapes no longer light up under a drag.** Dragging a dimension's label
   along its line, or moving anything across the board, lit up every shape the
   pointer crossed on the way — a hover outline and connector dots on each,

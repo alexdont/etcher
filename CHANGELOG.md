@@ -187,6 +187,11 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   exists to keep a deliberately small card usable, and once the board is
   zoomed out it wins every comparison and the card stops shrinking.
 
+  Connectors anchor their weight to the zoom they were drawn at, the way
+  every other line already anchors its width — a board fitted to its contents
+  sits nowhere near 1:1, so reading "2px" literally would draw them far finer
+  than they have ever looked.
+
   Two things deliberately do NOT scale. An audio card still drops its title
   and timecode below a fixed on-screen height, because that is a question of
   whether there is room to read them. And a connector's stroke keeps the same

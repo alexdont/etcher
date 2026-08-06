@@ -48,6 +48,7 @@ const canvasRotation = lift("_canvasRotation", "");
 const setRotateTransform = lift("_setRotateTransform", "el, box");
 const rotatePoint = lift("_rotatePoint", "pt, cx, cy, deg");
 const zoomPx = lift("_zoomPx", "px");
+const arrowZoomFactor = lift("_arrowZoomFactor", "shape");
 
 // A stand-in for the real coordinate transform: the same composition fresco
 // applies — scale, then rotate, then translate by the container origin.
@@ -66,7 +67,8 @@ function layer(deg, scale) {
     _markerScale: markerScale,
     _canvasRotation: canvasRotation,
     _orientedBox: orientedBox,
-    _zoomPx: zoomPx
+    _zoomPx: zoomPx,
+    _arrowZoomFactor: arrowZoomFactor
   };
 }
 
@@ -133,6 +135,49 @@ assert.strictEqual(layer(0, 1)._zoomPx(7), 7);
 for (const deg of [0, 90, 180, 270]) {
   assert.ok(Math.abs(layer(deg, 0.5)._zoomPx(10) - 5) < 1e-9,
     `a screen length at ${deg}° is unaffected by rotation`);
+}
+
+// ── a connector's weight ────────────────────────────────────────────────────
+
+// A connector's stroke and head are on-screen constants too, but they must
+// NOT be read as px-at-1:1 the way `_zoomPx` reads the rest. A board fitted
+// to its contents sits around a tenth of 1:1, so that reading drew arrows
+// about twenty times too fine to see. They anchor to the zoom the arrow is
+// first drawn at, like every other line's width does.
+{
+  const l = layer(0, 0.1);
+  const arrow = {};
+  // Whatever the zoom, the first paint is the reference: factor 1, so the
+  // constants mean exactly what they say and the arrow looks as drawn.
+  assert.strictEqual(l._arrowZoomFactor(arrow), 1);
+  assert.ok(Math.abs(arrow._arrowScale - 0.1) < 1e-9, "the anchor is remembered");
+}
+// Zooming from there scales it in lockstep with the shapes it joins.
+{
+  const arrow = {};
+  layer(0, 0.1)._arrowZoomFactor(arrow);            // anchor at 0.1
+  assert.ok(Math.abs(layer(0, 0.4)._arrowZoomFactor(arrow) - 4) < 1e-9,
+    "4x zoom in -> 4x weight");
+  assert.ok(Math.abs(layer(0, 0.025)._arrowZoomFactor(arrow) - 0.25) < 1e-9,
+    "4x zoom out -> quarter weight");
+  assert.ok(Math.abs(arrow._arrowScale - 0.1) < 1e-9, "and the anchor never moves");
+}
+// Rotation is not a zoom — an arrow must not change weight when the board is
+// turned. This held only once the scale probe stopped collapsing at 90°.
+{
+  const arrow = {};
+  layer(0, 0.2)._arrowZoomFactor(arrow);
+  for (const deg of [90, 180, 270]) {
+    assert.ok(Math.abs(layer(deg, 0.2)._arrowZoomFactor(arrow) - 1) < 1e-9,
+      `turning to ${deg}° leaves the weight alone`);
+  }
+}
+// A nonsense anchor (0, negative, NaN, or a stale null) must be replaced
+// rather than propagated — dividing by it would blank the arrow entirely.
+for (const bad of [0, -1, NaN, null, undefined]) {
+  const arrow = { _arrowScale: bad };
+  assert.strictEqual(layer(0, 0.3)._arrowZoomFactor(arrow), 1, `bad anchor ${bad}`);
+  assert.ok(Math.abs(arrow._arrowScale - 0.3) < 1e-9);
 }
 
 // ── reading the canvas rotation ─────────────────────────────────────────────

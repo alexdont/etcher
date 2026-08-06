@@ -8687,6 +8687,7 @@
           var arHead = el.querySelector(".etcher-arrow-head");
           var arImg = self._arrowPath(g);
           var arC = arImg.map(function(p) { return self._imageToContainer(p); });
+          var arK = self._arrowZoomFactor(shape);
           if (arShaft) {
             arShaft.setAttribute("points", arC.map(function(p) {
               return p.x + "," + p.y;
@@ -8698,26 +8699,23 @@
             // and it's the final approach that has to line up with whatever
             // the arrow is pointing at.
             //
-            // Sized at the current zoom: a head fixed in screen px keeps its
-            // size while the shapes it connects shrink, so on a zoomed-out
-            // board the arrowheads end up bigger than the blocks.
+            // Sized off the arrow's own zoom anchor, so the head keeps its
+            // proportion to the shapes it connects instead of staying a fixed
+            // screen size and swamping them on a zoomed-out board.
             var tip = arC[arC.length - 1];
             var prev = arC[arC.length - 2] || tip;
             arHead.setAttribute(
               "points",
               self._vArrowPoints(
                 tip, prev,
-                self._zoomPx(ARROW_HEAD_LEN),
-                self._zoomPx(ARROW_HEAD_HALF_WIDTH)
+                ARROW_HEAD_LEN * arK,
+                ARROW_HEAD_HALF_WIDTH * arK
               )
             );
           }
-          // Connectors are drawn between shapes, so their weight has to
-          // track the drawing the same way every other line's now does —
-          // otherwise zooming out leaves a web of heavy strokes over
-          // whatever they were pointing at. Floored so an arrow on a very
-          // wide view stays visible rather than thinning to nothing.
-          var arW = Math.max(0.4, self._zoomPx(ARROW_STROKE_PX));
+          // Floored the same way every other stroke is, so an arrow on a very
+          // wide view stays visible rather than thinning away to nothing.
+          var arW = Math.max(0.4, ARROW_STROKE_PX * arK);
           if (arShaft) arShaft.style.strokeWidth = arW + "px";
           if (arHead) arHead.style.strokeWidth = arW + "px";
           var arMinY = arImg[0].y, arSumX = 0;
@@ -13005,6 +13003,24 @@
     // out, and only scales correctly if the 7 scales too.
     _zoomPx: function(px) {
       return px * this._markerScale();
+    },
+
+    // How much a connector has been zoomed since it was first drawn — the
+    // multiplier for its stroke weight and its arrowhead.
+    //
+    // Those are on-screen constants too, but the reading `_zoomPx` gives
+    // them — px at 1:1 zoom — is wrong here. A board is almost never viewed
+    // at 1:1: fitted to its contents it sits nearer a tenth of that, so
+    // taking the constants literally drew every arrow about twenty times too
+    // fine to see.
+    //
+    // Anchoring to the zoom the arrow is first drawn at is what every other
+    // line already does with its width. The arrow looks the weight it was
+    // designed to look, and thickens and thins from there with the board.
+    _arrowZoomFactor: function(shape) {
+      var scale = this._markerScale();
+      if (!(shape._arrowScale > 0)) shape._arrowScale = scale;
+      return scale / shape._arrowScale;
     },
 
     _applyMarkerStyle: function(el, style, scale) {

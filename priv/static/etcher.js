@@ -1279,8 +1279,8 @@
   // Screen-px geometry of the V at an arrow's head.
   var ARROW_HEAD_LEN = 11;
   var ARROW_HEAD_HALF_WIDTH = 6;
-  // A connector's stroke weight, as a fraction of the size of the shapes it
-  // joins (their bounding box's geometric mean). Calibrated so the shapes a
+  // A connector's stroke weight, as a fraction of the board's own scale (the
+  // median shape's bounding-box geometric mean). Calibrated so the shapes a
   // board is usually built from — a media card, a block a few hundred px
   // across — carry the 2px line connectors have always been drawn with.
   var ARROW_WEIGHT_RATIO = 0.011;
@@ -8717,7 +8717,7 @@
           // Weight from the shapes this joins, converted to screen px. An
           // arrow bound to nothing has no shapes to ask, and falls back to
           // the zoom it was drawn at.
-          var arWeightImg = self._arrowWeightImagePx(shape);
+          var arWeightImg = self._boardArrowWeightImagePx();
           var arK = arWeightImg != null
             ? (arWeightImg * self._markerScale()) / ARROW_STROKE_PX
             : self._arrowZoomFactor(shape);
@@ -13039,105 +13039,60 @@
       return px * this._markerScale();
     },
 
-    // The weight a connector should be drawn with, in IMAGE px, taken from
-    // the shapes it joins.
+    // The weight EVERY connector on this board is drawn with, in image px.
     //
-    // A connector belongs to the two things it connects, so its weight comes
-    // from their size and nothing else. Two arrows between the same pair of
-    // shapes match whether they run right across the board or between
-    // adjacent edges — length is not part of it — and an arrow drawn while
-    // zoomed right in matches one drawn while zoomed out, because the zoom is
-    // not part of it either. Wire up two thumbnails and you get a fine line;
-    // wire up two large panels and you get a heavy one.
+    // One weight per board, so no two arrows can disagree. Deriving it
+    // per-arrow kept producing arrows that looked mismatched to the person
+    // drawing them: length, the zoom it was drawn at, and the sizes of the
+    // shapes it happens to join can all differ between two arrows that read
+    // as "the same connection".
     //
-    // Size is the geometric mean of a shape's bounding box — the side of the
-    // square with the same area. It sits between width and height instead of
-    // following either, so a long thin banner isn't treated as though it were
-    // as big as it is wide.
+    // The size it is taken from is the board's own, not a fixed number of
+    // canvas units. Canvas units mean different things on different boards —
+    // media and images are inserted at a size divided by the zoom of the
+    // moment, so one board's shapes span a few hundred units and another's
+    // several thousand, and a constant would be invisible on one and
+    // enormous on the other. The median shape is the board's natural scale,
+    // and gives the 2px line connectors have always been drawn with for the
+    // content a board is usually built from.
     //
-    // Returns null when neither end is bound: a free-floating arrow has
-    // nothing to take its weight from, and the caller falls back.
-    _arrowWeightImagePx: function(shape) {
-      var g = (shape && shape.geometry) || {};
-      var self = this;
-      var refs = [];
-      ["from", "to"].forEach(function(which) {
-        var target = self._arrowEndShape(g, which);
-        if (!target) return;
-        var bbox = self._shapeBBoxImagePx(target);
-        if (!bbox) return;
-        var w = Math.abs(bbox.w), h = Math.abs(bbox.h);
-        if (!(w > 0) || !(h > 0)) return;
-        refs.push(Math.sqrt(w * h));
-      });
-      if (!refs.length) return null;
-      var sum = 0;
-      refs.forEach(function(r) { sum += r; });
-      // Averaged, so both ends have a say: an arrow from a large block to a
-      // small one lands between the two rather than overwhelming the small
-      // one or vanishing against the large one.
-      return (sum / refs.length) * ARROW_WEIGHT_RATIO;
-    },
-
-    // What an arrow's end is actually attached to — the binding if it has
-    // one, otherwise whatever shape the endpoint lands on.
+    // Median rather than mean: one outsized background image, or a stray
+    // scribble, should not set the weight for every arrow on the board.
     //
-    // The fallback is the important half. An arrow only records a binding
-    // when its head SNAPPED to an anchor, and two of the ways to finish one
-    // don't snap at all: releasing a drag anywhere that isn't near an anchor,
-    // and double-clicking to end with a free head. Both leave an arrow that
-    // plainly points at a shape while formally attached to nothing, and
-    // weighing those off the zoom instead meant two arrows drawn to the same
-    // target came out different thicknesses.
-    //
-    // What matters for weight is what the arrow visually connects, not
-    // whether a snap happened to register, so an unbound end is resolved by
-    // asking what is under it. Arrows are skipped: one crossing another must
-    // not take its weight from it.
-    _arrowEndShape: function(g, which) {
-      var binding = which === "from" ? g.from : g.to;
-      if (binding && binding.uuid) {
-        var bound = this._shapeByUuid(binding.uuid);
-        if (bound && bound.kind !== "arrow") return bound;
-      }
-      var pt = which === "from" ? g.a : g.b;
-      if (!pt || typeof pt[0] !== "number" || typeof pt[1] !== "number") return null;
-      return this._shapeUnderArrowEnd(pt[0], pt[1]);
-    },
-
-    // The topmost non-arrow shape whose box contains an arrow's endpoint.
-    //
-    // Deliberately NOT `_shapeAt`, which answers a different question. That
-    // returns the single topmost shape and stops, so an arrow lying over the
-    // very shape it points at shadows it — the answer comes back as the
-    // arrow, which is no use for a weight, and the shape underneath is never
-    // reached. This keeps looking past arrows.
-    //
-    // It also tests the bounding box rather than the shape's own hit region.
-    // "What is this arrow pointing at" is a coarser question than "did the
-    // user click this", and it should not turn on whether the target happens
-    // to be filled: an arrow ending in the middle of an unfilled rectangle is
-    // pointing at that rectangle.
-    _shapeUnderArrowEnd: function(x, y) {
+    // Returns null for a board with nothing measurable on it. That cannot
+    // happen once an arrow exists — an arrow is drawn out of a shape — but
+    // it leaves the caller a fallback rather than a division by zero.
+    _boardArrowWeightImagePx: function() {
       var shapes = this.shapes || [];
-      for (var i = shapes.length - 1; i >= 0; i--) {
+      var sizes = [];
+      for (var i = 0; i < shapes.length; i++) {
         var s = shapes[i];
-        if (!s || !s.uuid || s.kind === "arrow") continue;
+        if (!s || s.kind === "arrow") continue;
         var b = this._shapeBBoxImagePx(s);
         if (!b) continue;
-        if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return s;
+        var w = Math.abs(b.w), h = Math.abs(b.h);
+        if (!(w > 0) || !(h > 0)) continue;
+        // Geometric mean — the side of the square with the same area. It sits
+        // between width and height instead of following either, so a long
+        // thin banner is not read as though it were as big as it is wide.
+        sizes.push(Math.sqrt(w * h));
       }
-      return null;
+      if (!sizes.length) return null;
+      sizes.sort(function(a, b) { return a - b; });
+      var mid = Math.floor(sizes.length / 2);
+      var median = sizes.length % 2
+        ? sizes[mid]
+        : (sizes[mid - 1] + sizes[mid]) / 2;
+      return median * ARROW_WEIGHT_RATIO;
     },
 
     // How much a connector has been zoomed since it was first drawn — the
     // multiplier for its stroke weight and its arrowhead.
     //
-    // Only reached by an arrow bound to nothing at either end, which has no
-    // shapes to take a weight from. Everything else uses
-    // `_arrowWeightImagePx`; this is the fallback for a half-drawn or
-    // orphaned connector, and anchoring to the zoom it was drawn at keeps
-    // that case looking the way it always has.
+    // Only reached on a board with no measurable shapes on it at all, which
+    // cannot happen once an arrow exists — an arrow is drawn out of a shape.
+    // Kept so `_boardArrowWeightImagePx` returning null has somewhere to go
+    // rather than dividing by zero.
     _arrowZoomFactor: function(shape) {
       var scale = this._markerScale();
       if (!(shape._arrowScale > 0)) shape._arrowScale = scale;

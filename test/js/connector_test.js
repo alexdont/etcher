@@ -422,202 +422,125 @@ assert.strictEqual(short[1][0] - short[0][0], long[1][0] - long[0][0],
 
 // ── how heavy a connector is drawn ──────────────────────────────────────────
 
-// A connector's weight comes from the shapes it joins and from nothing else.
-// Three properties matter, and each replaced an earlier scheme that got one
-// of them wrong, so each is pinned:
+// Every connector on a board is drawn at the same weight. That is the whole
+// specification, and it is the third one tried: weight derived from an
+// arrow's length, from the zoom it was drawn at, and from the sizes of the
+// two shapes it joins each produced arrows that looked mismatched to the
+// person drawing them, because any of those can differ between two arrows
+// that read as "the same connection".
 //
-//   * length is not part of it — two arrows between the same pair match
-//     whether they cross the board or join adjacent edges;
-//   * zoom is not part of it — an arrow drawn while zoomed right in matches
-//     one drawn while zoomed out, which anchoring at first paint could not do;
-//   * size IS part of it, proportionally — twice the shape, twice the line.
+// The weight is taken from the board's own scale rather than a fixed number
+// of canvas units, because canvas units mean different things on different
+// boards — media is inserted at a size divided by the zoom of the moment, so
+// one board's shapes span a few hundred units and another's several
+// thousand.
 {
   const ratioSrc = (src.match(/var ARROW_WEIGHT_RATIO = [\d.]+;/) || [])[0];
   assert.ok(ratioSrc, "could not read ARROW_WEIGHT_RATIO from etcher.js");
   global.ARROW_WEIGHT_RATIO = eval(ratioSrc.replace("var ARROW_WEIGHT_RATIO = ", ""));
 
-  const arrowWeight = lift("_arrowWeightImagePx", "shape");
-  const arrowEndShape = lift("_arrowEndShape", "g, which");
-  const underArrowEnd = lift("_shapeUnderArrowEnd", "x, y");
+  const boardWeight = lift("_boardArrowWeightImagePx", "");
   const bboxImagePx = lift("_shapeBBoxImagePx", "shape");
 
-  // A board of rectangles, addressed by uuid the way the real lookup works,
-  // plus the point hit-test an unbound end falls back to.
-  const board = (shapes) => ({
-    shapes,
-    _shapeByUuid(uuid) { return shapes.find((s) => s.uuid === uuid) || null; },
-    _shapeBBoxImagePx: bboxImagePx,
-    _arrowEndShape: arrowEndShape,
-    _shapeUnderArrowEnd: underArrowEnd
-  });
+  const board = (shapes) => ({ shapes, _shapeBBoxImagePx: bboxImagePx });
+  const box = (w, h) => ({ uuid: "u" + w + "x" + h, kind: "rectangle",
+                           geometry: { x: 0, y: 0, w, h } });
+  const arrowShape = { uuid: "arrow", kind: "arrow",
+                       geometry: { a: [0, 0], b: [9, 9], points: [] } };
 
-  // Shapes live far from the origin so an arrow's default endpoints sit on
-  // empty canvas — otherwise every "unbound" case would silently be resolved
-  // by the hit-test and the fallbacks would go untested.
-  const AWAY = 100000;
-  const box = (uuid, w, h) =>
-    ({ uuid, kind: "rectangle", geometry: { x: AWAY, y: AWAY, w, h } });
-  const conn = (from, to, pts) => ({
-    kind: "arrow",
-    geometry: {
-      a: [0, 0], b: [100, 0], points: pts || [],
-      from: from ? { uuid: from, anchor: "e" } : null,
-      to: to ? { uuid: to, anchor: "w" } : null
-    }
-  });
-
-  const small = board([box("s1", 700, 500), box("s2", 700, 500)]);
-  const base = arrowWeight.call(small, conn("s1", "s2"));
+  const b = board([box(700, 500), box(700, 500)]);
+  const base = boardWeight.call(b);
   assert.ok(base > 0);
 
-  // Length: the arrow's own geometry must not enter into it. A long shaft,
-  // and one routed through bends, weigh exactly what a short one does.
-  const stretched = conn("s1", "s2");
-  stretched.geometry.b = [99999, 4321];
-  assert.strictEqual(arrowWeight.call(small, stretched), base,
-    "distance must not change the weight");
-  assert.strictEqual(
-    arrowWeight.call(small, conn("s1", "s2", [[10, 10], [40, 90], [80, 20]])),
-    base, "routing through bends must not change the weight");
+  // It takes no argument at all — there is no per-arrow input it could
+  // differ on. This is the property every earlier attempt failed.
+  assert.strictEqual(boardWeight.length, 0,
+    "the weight cannot depend on which arrow is asking");
 
-  // Zoom: there is no zoom term at all, which is the property the previous
-  // scheme lacked. Nothing in the call can observe the viewport.
-  assert.ok(!/_markerScale|_zoomPx|_arrowScale/.test(String(arrowWeight)),
-    "the weight must not consult the zoom in any form");
+  // Scale: proportional to the board's content, so a board drawn at twice
+  // the size gets twice the line and the arrows look the same on screen.
+  const twice = board([box(1400, 1000), box(1400, 1000)]);
+  assert.ok(Math.abs(boardWeight.call(twice) - base * 2) < 1e-9,
+    "twice the board, twice the line");
 
-  // Size: proportional, and measured as the geometric mean so it sits
-  // between the two dimensions rather than following one.
-  const twice = board([box("s1", 1400, 1000), box("s2", 1400, 1000)]);
-  assert.ok(Math.abs(arrowWeight.call(twice, conn("s1", "s2")) - base * 2) < 1e-9,
-    "twice the shape, twice the line");
-
-  // A square and a long thin banner of the SAME area weigh the same — this
-  // is what the geometric mean buys, and what width alone or the diagonal
-  // would each get wrong.
-  const sq = board([box("a", 1000, 1000), box("b", 1000, 1000)]);
-  const banner = board([box("a", 4000, 250), box("b", 4000, 250)]);
+  // Geometric mean: a square and a long thin banner of the same area are the
+  // same size for this purpose. Width alone or the diagonal would not be.
   assert.ok(
-    Math.abs(arrowWeight.call(sq, conn("a", "b")) -
-             arrowWeight.call(banner, conn("a", "b"))) < 1e-9,
-    "equal area weighs the same whatever the aspect ratio");
+    Math.abs(boardWeight.call(board([box(1000, 1000), box(1000, 1000)])) -
+             boardWeight.call(board([box(4000, 250), box(4000, 250)]))) < 1e-9,
+    "equal area counts the same whatever the aspect ratio");
 
-  // Both ends have a say: joining a large block to a small one lands between
-  // the two, not on either.
-  const mixed = board([box("big", 4000, 4000), box("wee", 400, 400)]);
-  const mid = arrowWeight.call(mixed, conn("big", "wee"));
-  const bigOnly = arrowWeight.call(board([box("big", 4000, 4000)]), conn("big", null));
-  const weeOnly = arrowWeight.call(board([box("wee", 400, 400)]), conn("wee", null));
-  assert.ok(mid > weeOnly && mid < bigOnly, "a mixed pair lands between its ends");
-  assert.ok(Math.abs(mid - (bigOnly + weeOnly) / 2) < 1e-9, "and lands on the mean");
+  // Median, not mean. One outsized background image must not set the weight
+  // for every arrow on the board — with a mean, this board's weight would be
+  // dominated by the single 40000px shape.
+  const typical = board([box(700, 500), box(700, 500), box(700, 500)]);
+  const withGiant = board([box(700, 500), box(700, 500), box(700, 500),
+                           box(40000, 40000)]);
+  assert.ok(Math.abs(boardWeight.call(withGiant) - boardWeight.call(typical)) < 1e-9,
+    "one outsized shape does not move the weight");
+  // With a mean it would, by a factor of about five — so this is a real
+  // distinction, not a restatement of the line above.
+  const meanOf = (bd) => {
+    const sizes = bd.shapes.map((sh) =>
+      Math.sqrt(sh.geometry.w * sh.geometry.h));
+    return sizes.reduce((a, c) => a + c, 0) / sizes.length * ARROW_WEIGHT_RATIO;
+  };
+  assert.ok(meanOf(withGiant) > boardWeight.call(withGiant) * 4,
+    "...and a mean really would have been dragged by it");
 
-  // One end bound is enough — a connector being dragged out of a shape has
-  // no target yet and still has to be drawn.
-  assert.ok(arrowWeight.call(small, conn("s1", null)) > 0);
-  assert.ok(arrowWeight.call(small, conn(null, "s2")) > 0);
-
-  // ── an end that points at a shape without being bound to it ───────────────
-  //
-  // An arrow only records a binding when its head SNAPPED to an anchor, and
-  // two of the ways to finish one never snap: releasing a drag away from an
-  // anchor, and double-clicking to end with a free head. Both leave an arrow
-  // plainly pointing at a shape while formally attached to nothing. Weighing
-  // those differently is what made two arrows drawn to the same target come
-  // out at different thicknesses.
-  {
-    const inside = (b, dx, dy) =>
-      [b.geometry.x + (dx == null ? b.geometry.w / 2 : dx),
-       b.geometry.y + (dy == null ? b.geometry.h / 2 : dy)];
-
-    const s1 = box("s1", 700, 500), s2 = box("s2", 700, 500);
-    const b = board([s1, s2]);
-
-    const bound = conn("s1", "s2");
-    const unbound = conn(null, null);
-    unbound.geometry.a = inside(s1);
-    unbound.geometry.b = inside(s2);
-
-    assert.strictEqual(arrowWeight.call(b, unbound), arrowWeight.call(b, bound),
-      "an arrow resting on both shapes weighs what a bound one does");
-
-    // Half-bound is the common case: the tail snapped, the head didn't.
-    const halfBound = conn("s1", null);
-    halfBound.geometry.b = inside(s2);
-    assert.strictEqual(arrowWeight.call(b, halfBound), arrowWeight.call(b, bound),
-      "a snapped tail and an unsnapped head still weigh the pair");
-
-    // A binding always wins over what happens to be under the endpoint —
-    // an arrow bound to a shape it has been dragged away from keeps that
-    // shape's weight.
-    const dragged = conn("s1", "s2");
-    dragged.geometry.b = [0, 0];
-    assert.strictEqual(arrowWeight.call(b, dragged), arrowWeight.call(b, bound),
-      "the binding is authoritative when there is one");
-
-    // An end bound to a shape since deleted falls through to the hit-test
-    // rather than being dropped, so the arrow keeps a sensible weight.
-    const orphan = conn("s1", "deleted");
-    orphan.geometry.b = inside(s2);
-    assert.strictEqual(arrowWeight.call(b, orphan), arrowWeight.call(b, bound),
-      "a stale binding falls through to what is actually under the end");
-
-    // Arrows are never weighed off other arrows — an end resting on top of
-    // one must not pick up its weight. The endpoint is placed INSIDE the
-    // crossing arrow's footprint, or the hit-test would miss it anyway and
-    // this would pass without proving anything.
-    const crossing = { uuid: "x", kind: "arrow",
-      geometry: { x: AWAY, y: AWAY, w: 700, h: 500 } };
-    const onArrow = conn(null, null);
-    onArrow.geometry.a = inside(crossing);
-    onArrow.geometry.b = inside(crossing);
-    assert.strictEqual(
-      arrowEndShape.call(board([crossing]), onArrow.geometry, "from"),
-      null, "an arrow is not something to take weight from");
-
-    // ...and crucially the search must look PAST an arrow rather than stop
-    // at it. An arrow drawn on top of the shape it points at is the normal
-    // case, not an edge case — stopping at the topmost shape is what made
-    // the endpoint resolve to nothing and the weight come out light.
-    const shadowed = board([s2, crossing]);   // the arrow sits over the shape
-    assert.strictEqual(underArrowEnd.call(shadowed, inside(s2)[0], inside(s2)[1]),
-      s2, "the shape beneath an overlapping arrow is still found");
-
-    // The box test is bounded on every side. An endpoint past a shape is not
-    // on it, however far past — an unbounded comparison would quietly claim
-    // every shape up and to the left of the arrow's head.
-    const only = board([s2]);
-    const gg = s2.geometry;
-    const off = [
-      ["past the right edge",  gg.x + gg.w + 1, gg.y + gg.h / 2],
-      ["past the bottom edge", gg.x + gg.w / 2, gg.y + gg.h + 1],
-      ["past both, diagonally",gg.x + gg.w + 500, gg.y + gg.h + 500],
-      ["above the top edge",   gg.x + gg.w / 2, gg.y - 1],
-      ["left of the left edge",gg.x - 1,        gg.y + gg.h / 2]
-    ];
-    for (const [why, x, y] of off) {
-      assert.strictEqual(underArrowEnd.call(only, x, y), null, why);
-    }
-    // ...but the edges themselves count: a head that stops exactly on the
-    // perimeter, which is where a snapped anchor puts it, is on the shape.
-    assert.strictEqual(underArrowEnd.call(only, gg.x, gg.y), s2, "top-left corner");
-    assert.strictEqual(underArrowEnd.call(only, gg.x + gg.w, gg.y + gg.h), s2,
-      "bottom-right corner");
-  }
-
-  // Bound to nothing, and resting on nothing, there is nothing to measure.
-  // Null tells the caller to fall back rather than handing back a
-  // zero-width invisible arrow.
-  assert.strictEqual(arrowWeight.call(small, conn(null, null)), null);
-  assert.strictEqual(arrowWeight.call(small, conn("gone", "alsogone")), null);
-  assert.strictEqual(arrowWeight.call(board([]), conn("s1", "s2")), null);
-
-  // A degenerate shape has no area to measure and must not drag the weight
-  // to zero or NaN — it is skipped, and the other end carries it.
-  const flatBoard = board([box("flat", 500, 0), box("s2", 700, 500)]);
-  assert.ok(Math.abs(arrowWeight.call(flatBoard, conn("flat", "s2")) -
-                     arrowWeight.call(flatBoard, conn(null, "s2"))) < 1e-9,
-    "a zero-area shape is skipped, not averaged in as zero");
+  // Shapes arrive in creation order, not size order, so the outlier can sit
+  // anywhere in the list. Taking the middle ELEMENT without sorting first
+  // reads whatever happens to be there — here, the giant.
   assert.strictEqual(
-    arrowWeight.call(board([box("flat", 500, 0)]), conn("flat", null)), null);
+    boardWeight.call(board([box(700, 500), box(40000, 40000), box(700, 500)])),
+    boardWeight.call(board([box(700, 500), box(700, 500), box(40000, 40000)])),
+    "the median does not depend on the order shapes were created in");
+
+  // ...and the sort is numeric. JavaScript's default sort compares as
+  // strings, which puts 1000 before 2 — the classic version of this bug, and
+  // one that gives a plausible-looking answer on most boards. These sizes
+  // (2, 9, 10, 100, 1000) are chosen so string order lands on 1000 where
+  // numeric order lands on 10.
+  assert.ok(Math.abs(
+    boardWeight.call(board([box(2, 2), box(9, 9), box(10, 10),
+                            box(100, 100), box(1000, 1000)]))
+    - 10 * ARROW_WEIGHT_RATIO) < 1e-9,
+    "sizes are ordered numerically, not as strings");
+
+  // A stray scribble at the other extreme, likewise.
+  const withSpeck = board([box(700, 500), box(700, 500), box(700, 500), box(2, 2)]);
+  assert.ok(Math.abs(boardWeight.call(withSpeck) - boardWeight.call(typical)) < 1e-9,
+    "and a speck does not drag it down either");
+
+  // Arrows are not part of the board's scale — a board full of long arrows
+  // must not talk itself into ever-heavier arrows.
+  assert.strictEqual(
+    boardWeight.call(board([box(700, 500), box(700, 500), arrowShape])), base,
+    "arrows are excluded from the measurement");
+
+  // Degenerate shapes have no area and are skipped rather than counted as
+  // zero, which would drag the median toward nothing.
+  assert.strictEqual(
+    boardWeight.call(board([box(700, 500), box(700, 500), box(500, 0)])), base,
+    "zero-area shapes are skipped");
+
+  // Nothing measurable: null, so the caller falls back instead of dividing
+  // by zero. Cannot arise once an arrow exists, since an arrow is drawn out
+  // of a shape.
+  assert.strictEqual(boardWeight.call(board([])), null);
+  assert.strictEqual(boardWeight.call(board([arrowShape])), null);
+  assert.strictEqual(boardWeight.call(board([box(0, 0)])), null);
+  assert.strictEqual(boardWeight.call({}), null);
+
+  // Calibration: the shapes a board is usually built from carry the 2px line
+  // connectors have always been drawn with. A media card at its design size
+  // is 360x88 on screen, so at 1:1 that is the board's median.
+  {
+    const card = board([box(360, 88), box(360, 88)]);
+    const px = boardWeight.call(card);          // image px == screen px at 1:1
+    assert.ok(px > 1.7 && px < 2.3,
+      `a board of media cards should give about 2px, got ${px.toFixed(2)}`);
+  }
 }
 
 console.log("connectors: all checks passed");

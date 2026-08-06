@@ -193,13 +193,13 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   with corners squared off and its scrub bar reduced to a hairline, because
   those clamps were held in screen pixels while the card around them grew.
 
-  A connector takes its weight from the two shapes it joins — from what it
-  points at, not from whether the head happened to snap to an anchor. Two arrows
-  between the same pair match whether they cross the board or join adjacent
-  edges, and an arrow drawn while zoomed right in matches one drawn while
-  zoomed out — neither distance nor zoom is part of it. Wire up two
-  thumbnails and you get a fine line; wire up two large panels and you get a
-  heavy one.
+  Every connector on a board is drawn at the same weight. Nothing about an
+  individual arrow — its length, how far apart its shapes are, which shapes
+  they are, the zoom it was drawn at, or whether its head snapped to an
+  anchor — can make two arrows look different from each other. The weight is
+  taken from the board's own scale rather than a fixed number of canvas
+  units, which would come out invisible on one board and enormous on another,
+  since a board's coordinates depend on the zoom its content was added at.
 
   Two things deliberately do NOT scale. An audio card still drops its title
   and timecode below a fixed on-screen height, because that is a question of

@@ -437,16 +437,26 @@ assert.strictEqual(short[1][0] - short[0][0], long[1][0] - long[0][0],
   global.ARROW_WEIGHT_RATIO = eval(ratioSrc.replace("var ARROW_WEIGHT_RATIO = ", ""));
 
   const arrowWeight = lift("_arrowWeightImagePx", "shape");
+  const arrowEndShape = lift("_arrowEndShape", "g, which");
+  const underArrowEnd = lift("_shapeUnderArrowEnd", "x, y");
   const bboxImagePx = lift("_shapeBBoxImagePx", "shape");
 
-  // A board of rectangles, addressed by uuid the way the real lookup works.
+  // A board of rectangles, addressed by uuid the way the real lookup works,
+  // plus the point hit-test an unbound end falls back to.
   const board = (shapes) => ({
     shapes,
     _shapeByUuid(uuid) { return shapes.find((s) => s.uuid === uuid) || null; },
-    _shapeBBoxImagePx: bboxImagePx
+    _shapeBBoxImagePx: bboxImagePx,
+    _arrowEndShape: arrowEndShape,
+    _shapeUnderArrowEnd: underArrowEnd
   });
+
+  // Shapes live far from the origin so an arrow's default endpoints sit on
+  // empty canvas — otherwise every "unbound" case would silently be resolved
+  // by the hit-test and the fallbacks would go untested.
+  const AWAY = 100000;
   const box = (uuid, w, h) =>
-    ({ uuid, kind: "rectangle", geometry: { x: 0, y: 0, w, h } });
+    ({ uuid, kind: "rectangle", geometry: { x: AWAY, y: AWAY, w, h } });
   const conn = (from, to, pts) => ({
     kind: "arrow",
     geometry: {
@@ -505,8 +515,96 @@ assert.strictEqual(short[1][0] - short[0][0], long[1][0] - long[0][0],
   assert.ok(arrowWeight.call(small, conn("s1", null)) > 0);
   assert.ok(arrowWeight.call(small, conn(null, "s2")) > 0);
 
-  // Bound to nothing, or to shapes since deleted, there is nothing to
-  // measure. Null tells the caller to fall back, rather than handing back a
+  // ── an end that points at a shape without being bound to it ───────────────
+  //
+  // An arrow only records a binding when its head SNAPPED to an anchor, and
+  // two of the ways to finish one never snap: releasing a drag away from an
+  // anchor, and double-clicking to end with a free head. Both leave an arrow
+  // plainly pointing at a shape while formally attached to nothing. Weighing
+  // those differently is what made two arrows drawn to the same target come
+  // out at different thicknesses.
+  {
+    const inside = (b, dx, dy) =>
+      [b.geometry.x + (dx == null ? b.geometry.w / 2 : dx),
+       b.geometry.y + (dy == null ? b.geometry.h / 2 : dy)];
+
+    const s1 = box("s1", 700, 500), s2 = box("s2", 700, 500);
+    const b = board([s1, s2]);
+
+    const bound = conn("s1", "s2");
+    const unbound = conn(null, null);
+    unbound.geometry.a = inside(s1);
+    unbound.geometry.b = inside(s2);
+
+    assert.strictEqual(arrowWeight.call(b, unbound), arrowWeight.call(b, bound),
+      "an arrow resting on both shapes weighs what a bound one does");
+
+    // Half-bound is the common case: the tail snapped, the head didn't.
+    const halfBound = conn("s1", null);
+    halfBound.geometry.b = inside(s2);
+    assert.strictEqual(arrowWeight.call(b, halfBound), arrowWeight.call(b, bound),
+      "a snapped tail and an unsnapped head still weigh the pair");
+
+    // A binding always wins over what happens to be under the endpoint —
+    // an arrow bound to a shape it has been dragged away from keeps that
+    // shape's weight.
+    const dragged = conn("s1", "s2");
+    dragged.geometry.b = [0, 0];
+    assert.strictEqual(arrowWeight.call(b, dragged), arrowWeight.call(b, bound),
+      "the binding is authoritative when there is one");
+
+    // An end bound to a shape since deleted falls through to the hit-test
+    // rather than being dropped, so the arrow keeps a sensible weight.
+    const orphan = conn("s1", "deleted");
+    orphan.geometry.b = inside(s2);
+    assert.strictEqual(arrowWeight.call(b, orphan), arrowWeight.call(b, bound),
+      "a stale binding falls through to what is actually under the end");
+
+    // Arrows are never weighed off other arrows — an end resting on top of
+    // one must not pick up its weight. The endpoint is placed INSIDE the
+    // crossing arrow's footprint, or the hit-test would miss it anyway and
+    // this would pass without proving anything.
+    const crossing = { uuid: "x", kind: "arrow",
+      geometry: { x: AWAY, y: AWAY, w: 700, h: 500 } };
+    const onArrow = conn(null, null);
+    onArrow.geometry.a = inside(crossing);
+    onArrow.geometry.b = inside(crossing);
+    assert.strictEqual(
+      arrowEndShape.call(board([crossing]), onArrow.geometry, "from"),
+      null, "an arrow is not something to take weight from");
+
+    // ...and crucially the search must look PAST an arrow rather than stop
+    // at it. An arrow drawn on top of the shape it points at is the normal
+    // case, not an edge case — stopping at the topmost shape is what made
+    // the endpoint resolve to nothing and the weight come out light.
+    const shadowed = board([s2, crossing]);   // the arrow sits over the shape
+    assert.strictEqual(underArrowEnd.call(shadowed, inside(s2)[0], inside(s2)[1]),
+      s2, "the shape beneath an overlapping arrow is still found");
+
+    // The box test is bounded on every side. An endpoint past a shape is not
+    // on it, however far past — an unbounded comparison would quietly claim
+    // every shape up and to the left of the arrow's head.
+    const only = board([s2]);
+    const gg = s2.geometry;
+    const off = [
+      ["past the right edge",  gg.x + gg.w + 1, gg.y + gg.h / 2],
+      ["past the bottom edge", gg.x + gg.w / 2, gg.y + gg.h + 1],
+      ["past both, diagonally",gg.x + gg.w + 500, gg.y + gg.h + 500],
+      ["above the top edge",   gg.x + gg.w / 2, gg.y - 1],
+      ["left of the left edge",gg.x - 1,        gg.y + gg.h / 2]
+    ];
+    for (const [why, x, y] of off) {
+      assert.strictEqual(underArrowEnd.call(only, x, y), null, why);
+    }
+    // ...but the edges themselves count: a head that stops exactly on the
+    // perimeter, which is where a snapped anchor puts it, is on the shape.
+    assert.strictEqual(underArrowEnd.call(only, gg.x, gg.y), s2, "top-left corner");
+    assert.strictEqual(underArrowEnd.call(only, gg.x + gg.w, gg.y + gg.h), s2,
+      "bottom-right corner");
+  }
+
+  // Bound to nothing, and resting on nothing, there is nothing to measure.
+  // Null tells the caller to fall back rather than handing back a
   // zero-width invisible arrow.
   assert.strictEqual(arrowWeight.call(small, conn(null, null)), null);
   assert.strictEqual(arrowWeight.call(small, conn("gone", "alsogone")), null);

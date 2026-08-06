@@ -13061,9 +13061,8 @@
       var g = (shape && shape.geometry) || {};
       var self = this;
       var refs = [];
-      [g.from, g.to].forEach(function(binding) {
-        if (!binding || !binding.uuid) return;
-        var target = self._shapeByUuid(binding.uuid);
+      ["from", "to"].forEach(function(which) {
+        var target = self._arrowEndShape(g, which);
         if (!target) return;
         var bbox = self._shapeBBoxImagePx(target);
         if (!bbox) return;
@@ -13078,6 +13077,57 @@
       // small one lands between the two rather than overwhelming the small
       // one or vanishing against the large one.
       return (sum / refs.length) * ARROW_WEIGHT_RATIO;
+    },
+
+    // What an arrow's end is actually attached to — the binding if it has
+    // one, otherwise whatever shape the endpoint lands on.
+    //
+    // The fallback is the important half. An arrow only records a binding
+    // when its head SNAPPED to an anchor, and two of the ways to finish one
+    // don't snap at all: releasing a drag anywhere that isn't near an anchor,
+    // and double-clicking to end with a free head. Both leave an arrow that
+    // plainly points at a shape while formally attached to nothing, and
+    // weighing those off the zoom instead meant two arrows drawn to the same
+    // target came out different thicknesses.
+    //
+    // What matters for weight is what the arrow visually connects, not
+    // whether a snap happened to register, so an unbound end is resolved by
+    // asking what is under it. Arrows are skipped: one crossing another must
+    // not take its weight from it.
+    _arrowEndShape: function(g, which) {
+      var binding = which === "from" ? g.from : g.to;
+      if (binding && binding.uuid) {
+        var bound = this._shapeByUuid(binding.uuid);
+        if (bound && bound.kind !== "arrow") return bound;
+      }
+      var pt = which === "from" ? g.a : g.b;
+      if (!pt || typeof pt[0] !== "number" || typeof pt[1] !== "number") return null;
+      return this._shapeUnderArrowEnd(pt[0], pt[1]);
+    },
+
+    // The topmost non-arrow shape whose box contains an arrow's endpoint.
+    //
+    // Deliberately NOT `_shapeAt`, which answers a different question. That
+    // returns the single topmost shape and stops, so an arrow lying over the
+    // very shape it points at shadows it — the answer comes back as the
+    // arrow, which is no use for a weight, and the shape underneath is never
+    // reached. This keeps looking past arrows.
+    //
+    // It also tests the bounding box rather than the shape's own hit region.
+    // "What is this arrow pointing at" is a coarser question than "did the
+    // user click this", and it should not turn on whether the target happens
+    // to be filled: an arrow ending in the middle of an unfilled rectangle is
+    // pointing at that rectangle.
+    _shapeUnderArrowEnd: function(x, y) {
+      var shapes = this.shapes || [];
+      for (var i = shapes.length - 1; i >= 0; i--) {
+        var s = shapes[i];
+        if (!s || !s.uuid || s.kind === "arrow") continue;
+        var b = this._shapeBBoxImagePx(s);
+        if (!b) continue;
+        if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return s;
+      }
+      return null;
     },
 
     // How much a connector has been zoomed since it was first drawn — the

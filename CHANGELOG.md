@@ -193,7 +193,8 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   with corners squared off and its scrub bar reduced to a hairline, because
   those clamps were held in screen pixels while the card around them grew.
 
-  A connector takes its weight from the two shapes it joins. Two arrows
+  A connector takes its weight from the two shapes it joins — from what it
+  points at, not from whether the head happened to snap to an anchor. Two arrows
   between the same pair match whether they cross the board or join adjacent
   edges, and an arrow drawn while zoomed right in matches one drawn while
   zoomed out — neither distance nor zoom is part of it. Wire up two

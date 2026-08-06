@@ -420,4 +420,106 @@ const long = parse(vArrowPoints({ x: 9000, y: 0 }, { x: 0, y: 0 }, 10, 5));
 assert.strictEqual(short[1][0] - short[0][0], long[1][0] - long[0][0],
   "head length is independent of shaft length");
 
+// ── how heavy a connector is drawn ──────────────────────────────────────────
+
+// A connector's weight comes from the shapes it joins and from nothing else.
+// Three properties matter, and each replaced an earlier scheme that got one
+// of them wrong, so each is pinned:
+//
+//   * length is not part of it — two arrows between the same pair match
+//     whether they cross the board or join adjacent edges;
+//   * zoom is not part of it — an arrow drawn while zoomed right in matches
+//     one drawn while zoomed out, which anchoring at first paint could not do;
+//   * size IS part of it, proportionally — twice the shape, twice the line.
+{
+  const ratioSrc = (src.match(/var ARROW_WEIGHT_RATIO = [\d.]+;/) || [])[0];
+  assert.ok(ratioSrc, "could not read ARROW_WEIGHT_RATIO from etcher.js");
+  global.ARROW_WEIGHT_RATIO = eval(ratioSrc.replace("var ARROW_WEIGHT_RATIO = ", ""));
+
+  const arrowWeight = lift("_arrowWeightImagePx", "shape");
+  const bboxImagePx = lift("_shapeBBoxImagePx", "shape");
+
+  // A board of rectangles, addressed by uuid the way the real lookup works.
+  const board = (shapes) => ({
+    shapes,
+    _shapeByUuid(uuid) { return shapes.find((s) => s.uuid === uuid) || null; },
+    _shapeBBoxImagePx: bboxImagePx
+  });
+  const box = (uuid, w, h) =>
+    ({ uuid, kind: "rectangle", geometry: { x: 0, y: 0, w, h } });
+  const conn = (from, to, pts) => ({
+    kind: "arrow",
+    geometry: {
+      a: [0, 0], b: [100, 0], points: pts || [],
+      from: from ? { uuid: from, anchor: "e" } : null,
+      to: to ? { uuid: to, anchor: "w" } : null
+    }
+  });
+
+  const small = board([box("s1", 700, 500), box("s2", 700, 500)]);
+  const base = arrowWeight.call(small, conn("s1", "s2"));
+  assert.ok(base > 0);
+
+  // Length: the arrow's own geometry must not enter into it. A long shaft,
+  // and one routed through bends, weigh exactly what a short one does.
+  const stretched = conn("s1", "s2");
+  stretched.geometry.b = [99999, 4321];
+  assert.strictEqual(arrowWeight.call(small, stretched), base,
+    "distance must not change the weight");
+  assert.strictEqual(
+    arrowWeight.call(small, conn("s1", "s2", [[10, 10], [40, 90], [80, 20]])),
+    base, "routing through bends must not change the weight");
+
+  // Zoom: there is no zoom term at all, which is the property the previous
+  // scheme lacked. Nothing in the call can observe the viewport.
+  assert.ok(!/_markerScale|_zoomPx|_arrowScale/.test(String(arrowWeight)),
+    "the weight must not consult the zoom in any form");
+
+  // Size: proportional, and measured as the geometric mean so it sits
+  // between the two dimensions rather than following one.
+  const twice = board([box("s1", 1400, 1000), box("s2", 1400, 1000)]);
+  assert.ok(Math.abs(arrowWeight.call(twice, conn("s1", "s2")) - base * 2) < 1e-9,
+    "twice the shape, twice the line");
+
+  // A square and a long thin banner of the SAME area weigh the same — this
+  // is what the geometric mean buys, and what width alone or the diagonal
+  // would each get wrong.
+  const sq = board([box("a", 1000, 1000), box("b", 1000, 1000)]);
+  const banner = board([box("a", 4000, 250), box("b", 4000, 250)]);
+  assert.ok(
+    Math.abs(arrowWeight.call(sq, conn("a", "b")) -
+             arrowWeight.call(banner, conn("a", "b"))) < 1e-9,
+    "equal area weighs the same whatever the aspect ratio");
+
+  // Both ends have a say: joining a large block to a small one lands between
+  // the two, not on either.
+  const mixed = board([box("big", 4000, 4000), box("wee", 400, 400)]);
+  const mid = arrowWeight.call(mixed, conn("big", "wee"));
+  const bigOnly = arrowWeight.call(board([box("big", 4000, 4000)]), conn("big", null));
+  const weeOnly = arrowWeight.call(board([box("wee", 400, 400)]), conn("wee", null));
+  assert.ok(mid > weeOnly && mid < bigOnly, "a mixed pair lands between its ends");
+  assert.ok(Math.abs(mid - (bigOnly + weeOnly) / 2) < 1e-9, "and lands on the mean");
+
+  // One end bound is enough — a connector being dragged out of a shape has
+  // no target yet and still has to be drawn.
+  assert.ok(arrowWeight.call(small, conn("s1", null)) > 0);
+  assert.ok(arrowWeight.call(small, conn(null, "s2")) > 0);
+
+  // Bound to nothing, or to shapes since deleted, there is nothing to
+  // measure. Null tells the caller to fall back, rather than handing back a
+  // zero-width invisible arrow.
+  assert.strictEqual(arrowWeight.call(small, conn(null, null)), null);
+  assert.strictEqual(arrowWeight.call(small, conn("gone", "alsogone")), null);
+  assert.strictEqual(arrowWeight.call(board([]), conn("s1", "s2")), null);
+
+  // A degenerate shape has no area to measure and must not drag the weight
+  // to zero or NaN — it is skipped, and the other end carries it.
+  const flatBoard = board([box("flat", 500, 0), box("s2", 700, 500)]);
+  assert.ok(Math.abs(arrowWeight.call(flatBoard, conn("flat", "s2")) -
+                     arrowWeight.call(flatBoard, conn(null, "s2"))) < 1e-9,
+    "a zero-area shape is skipped, not averaged in as zero");
+  assert.strictEqual(
+    arrowWeight.call(board([box("flat", 500, 0)]), conn("flat", null)), null);
+}
+
 console.log("connectors: all checks passed");

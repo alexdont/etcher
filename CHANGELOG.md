@@ -193,10 +193,12 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   with corners squared off and its scrub bar reduced to a hairline, because
   those clamps were held in screen pixels while the card around them grew.
 
-  Connectors anchor their weight to the zoom they were drawn at, the way
-  every other line already anchors its width — a board fitted to its contents
-  sits nowhere near 1:1, so reading "2px" literally would draw them far finer
-  than they have ever looked.
+  A connector takes its weight from the two shapes it joins. Two arrows
+  between the same pair match whether they cross the board or join adjacent
+  edges, and an arrow drawn while zoomed right in matches one drawn while
+  zoomed out — neither distance nor zoom is part of it. Wire up two
+  thumbnails and you get a fine line; wire up two large panels and you get a
+  heavy one.
 
   Two things deliberately do NOT scale. An audio card still drops its title
   and timecode below a fixed on-screen height, because that is a question of

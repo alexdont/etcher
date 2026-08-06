@@ -1279,8 +1279,13 @@
   // Screen-px geometry of the V at an arrow's head.
   var ARROW_HEAD_LEN = 11;
   var ARROW_HEAD_HALF_WIDTH = 6;
-  // A connector's stroke weight at 1:1 zoom; scaled with the canvas at render
-  // time so it keeps its proportion to the shapes it joins.
+  // A connector's stroke weight, as a fraction of the size of the shapes it
+  // joins (their bounding box's geometric mean). Calibrated so the shapes a
+  // board is usually built from — a media card, a block a few hundred px
+  // across — carry the 2px line connectors have always been drawn with.
+  var ARROW_WEIGHT_RATIO = 0.011;
+  // Fallback weight for an arrow bound to nothing, in px at the zoom it was
+  // drawn at. See `_arrowZoomFactor`.
   var ARROW_STROKE_PX = 2;
 
   // Connector dots are green rather than the shape's own colour: they're a
@@ -8709,7 +8714,13 @@
           var arHead = el.querySelector(".etcher-arrow-head");
           var arImg = self._arrowPath(g);
           var arC = arImg.map(function(p) { return self._imageToContainer(p); });
-          var arK = self._arrowZoomFactor(shape);
+          // Weight from the shapes this joins, converted to screen px. An
+          // arrow bound to nothing has no shapes to ask, and falls back to
+          // the zoom it was drawn at.
+          var arWeightImg = self._arrowWeightImagePx(shape);
+          var arK = arWeightImg != null
+            ? (arWeightImg * self._markerScale()) / ARROW_STROKE_PX
+            : self._arrowZoomFactor(shape);
           if (arShaft) {
             arShaft.setAttribute("points", arC.map(function(p) {
               return p.x + "," + p.y;
@@ -13028,18 +13039,55 @@
       return px * this._markerScale();
     },
 
+    // The weight a connector should be drawn with, in IMAGE px, taken from
+    // the shapes it joins.
+    //
+    // A connector belongs to the two things it connects, so its weight comes
+    // from their size and nothing else. Two arrows between the same pair of
+    // shapes match whether they run right across the board or between
+    // adjacent edges — length is not part of it — and an arrow drawn while
+    // zoomed right in matches one drawn while zoomed out, because the zoom is
+    // not part of it either. Wire up two thumbnails and you get a fine line;
+    // wire up two large panels and you get a heavy one.
+    //
+    // Size is the geometric mean of a shape's bounding box — the side of the
+    // square with the same area. It sits between width and height instead of
+    // following either, so a long thin banner isn't treated as though it were
+    // as big as it is wide.
+    //
+    // Returns null when neither end is bound: a free-floating arrow has
+    // nothing to take its weight from, and the caller falls back.
+    _arrowWeightImagePx: function(shape) {
+      var g = (shape && shape.geometry) || {};
+      var self = this;
+      var refs = [];
+      [g.from, g.to].forEach(function(binding) {
+        if (!binding || !binding.uuid) return;
+        var target = self._shapeByUuid(binding.uuid);
+        if (!target) return;
+        var bbox = self._shapeBBoxImagePx(target);
+        if (!bbox) return;
+        var w = Math.abs(bbox.w), h = Math.abs(bbox.h);
+        if (!(w > 0) || !(h > 0)) return;
+        refs.push(Math.sqrt(w * h));
+      });
+      if (!refs.length) return null;
+      var sum = 0;
+      refs.forEach(function(r) { sum += r; });
+      // Averaged, so both ends have a say: an arrow from a large block to a
+      // small one lands between the two rather than overwhelming the small
+      // one or vanishing against the large one.
+      return (sum / refs.length) * ARROW_WEIGHT_RATIO;
+    },
+
     // How much a connector has been zoomed since it was first drawn — the
     // multiplier for its stroke weight and its arrowhead.
     //
-    // Those are on-screen constants too, but the reading `_zoomPx` gives
-    // them — px at 1:1 zoom — is wrong here. A board is almost never viewed
-    // at 1:1: fitted to its contents it sits nearer a tenth of that, so
-    // taking the constants literally drew every arrow about twenty times too
-    // fine to see.
-    //
-    // Anchoring to the zoom the arrow is first drawn at is what every other
-    // line already does with its width. The arrow looks the weight it was
-    // designed to look, and thickens and thins from there with the board.
+    // Only reached by an arrow bound to nothing at either end, which has no
+    // shapes to take a weight from. Everything else uses
+    // `_arrowWeightImagePx`; this is the fallback for a half-drawn or
+    // orphaned connector, and anchoring to the zoom it was drawn at keeps
+    // that case looking the way it always has.
     _arrowZoomFactor: function(shape) {
       var scale = this._markerScale();
       if (!(shape._arrowScale > 0)) shape._arrowScale = scale;

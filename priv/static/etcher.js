@@ -985,9 +985,18 @@
       ".etcher-audio.is-chrome-hidden > * { display: none; }",
       // Uploading: the card is there, but nothing on it can be used yet.
       ".etcher-audio.is-uploading .etcher-audio-btn,",
-      ".etcher-audio.is-uploading .etcher-audio-glyph,",
-      ".etcher-audio.is-uploading .etcher-audio-track,",
-      ".etcher-audio.is-uploading .etcher-audio-fill { display: none; }",
+      ".etcher-audio.is-uploading .etcher-audio-glyph { display: none; }",
+      ".etcher-audio.is-uploading .etcher-audio-track { fill: rgba(245,245,247,0.18); }",
+      ".etcher-audio.is-uploading .etcher-audio-fill { fill: rgba(245,245,247,0.75); }",
+      // No progress reported: a stub that slides, so the bar still says
+      // "working" instead of sitting at zero looking stalled.
+      "@keyframes etcher-indeterminate {",
+      "  0% { transform: translateX(0); }",
+      "  100% { transform: translateX(300%); }",
+      "}",
+      ".etcher-audio.is-indeterminate .etcher-audio-fill {",
+      "  animation: etcher-indeterminate 1.1s ease-in-out infinite alternate;",
+      "}",
       ".etcher-audio.is-uploading .etcher-audio-title,",
       ".etcher-audio.is-uploading .etcher-audio-time { fill: rgba(245,245,247,0.55); }",
       ".etcher-audio.is-uploading .etcher-audio-scrub { pointer-events: none; }",
@@ -6376,9 +6385,29 @@
         });
       }
 
+      // `ctx.onProgress(0..1)` is how a host reports transfer progress. It's
+      // optional — a host that ignores it leaves the bar indeterminate,
+      // which still says "alive" but can't distinguish slow from stuck. That
+      // distinction is the whole reason a large upload needs a bar at all,
+      // so it's worth a host wiring up.
       var pending;
       try {
-        pending = upload(file, { frescoId: self.frescoId });
+        pending = upload(file, {
+          frescoId: self.frescoId,
+          onProgress: function(fraction) {
+            var s = self._shapeByUuid(uuid);
+            if (!s || !s._pendingUpload) return;
+            var f = Number(fraction);
+            if (!isFinite(f)) return;
+            // Never allowed to go backwards or reach 1 before the URL does:
+            // a bar that fills and then sits there is a worse lie than one
+            // that stops short.
+            f = Math.max(0, Math.min(0.99, f));
+            if (f < (s._uploadProgress || 0)) return;
+            s._uploadProgress = f;
+            self._renderShape(s);
+          }
+        });
       } catch (e) {
         return discard(e);
       }
@@ -6752,22 +6781,48 @@
 
       if (uploading) {
         // No transport while there is nothing to drive — a disabled player
-        // reads as a broken one. Just the name and what's happening,
+        // reads as a broken one. The name, a progress bar, and a percentage,
         // centred so it holds at any card size.
         var ufs = Math.max(10, Math.min(16, box.h * 0.09));
         var mid = box.x + box.w / 2;
+        var prog = shape._uploadProgress;
         titleEl.removeAttribute("visibility");
         timeEl.removeAttribute("visibility");
         titleEl.setAttribute("text-anchor", "middle");
         titleEl.setAttribute("x", mid);
-        titleEl.setAttribute("y", box.y + box.h / 2 - ufs * 0.8);
+        titleEl.setAttribute("y", box.y + box.h / 2 - ufs * 1.4);
         titleEl.setAttribute("font-size", ufs);
         titleEl.textContent = String(g.title || "Uploading");
         timeEl.setAttribute("text-anchor", "middle");
         timeEl.setAttribute("x", mid);
-        timeEl.setAttribute("y", box.y + box.h / 2 + ufs * 0.8);
+        timeEl.setAttribute("y", box.y + box.h / 2 + ufs * 1.8);
         timeEl.setAttribute("font-size", ufs);
-        timeEl.textContent = "Uploading\u2026";
+        timeEl.textContent = typeof prog === "number"
+          ? Math.round(prog * 100) + "%"
+          : "Uploading\u2026";
+
+        // The bar itself, reusing the scrub track and fill so there is one
+        // place that knows how a bar is drawn.
+        var pw = Math.min(box.w * 0.6, 260);
+        var ph = Math.max(3, Math.min(6, box.h * 0.03));
+        var px = mid - pw / 2;
+        var py = box.y + box.h / 2 - ph / 2;
+        track.setAttribute("x", px);
+        track.setAttribute("y", py);
+        track.setAttribute("width", pw);
+        track.setAttribute("height", ph);
+        track.setAttribute("rx", ph / 2);
+        fill.setAttribute("x", px);
+        fill.setAttribute("y", py);
+        // Indeterminate until the host reports something: a quarter-width
+        // stub that animates, so "no progress reported" still reads as
+        // alive rather than as stalled at zero.
+        fill.setAttribute("width", typeof prog === "number" ? pw * prog : pw * 0.25);
+        fill.setAttribute("height", ph);
+        fill.setAttribute("rx", ph / 2);
+        el.classList.toggle("is-indeterminate", typeof prog !== "number");
+        shape._audioBar = null;
+        return;
       } else if (compact && !inlineTime) {
         // Transport only — a title and a timecode would collide with the bar
         // and each other once the card is this short.

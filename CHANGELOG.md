@@ -37,7 +37,8 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   answer a peer who joins mid-playback instead of leaving them silent until
   the next command.
 
-  A dropped file **appears at once**, greyed out and labelled, and fills in
+  A dropped file **appears at once**, greyed out, labelled and with a
+  progress bar, and fills in
   when the upload finishes — letting go of a file and watching nothing happen
   gave no way to tell a large file from a broken one. The placeholder stays
   out of the annotations payload until it has a source, so nothing persists

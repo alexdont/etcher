@@ -362,7 +362,7 @@ type.
 
 Files can be dragged onto the canvas as well as pasted or picked, and land
 where they were dropped. A dropped file appears immediately as a greyed-out
-placeholder and fills in when the upload completes; it isn't persisted or
+placeholder with a progress bar, and fills in when the upload completes; it isn't persisted or
 broadcast until it has a source, and a failed upload removes it.
 
 A video shows its controls only while the pointer is on it or it's selected —
@@ -370,7 +370,11 @@ otherwise there is just the picture. The transport shows current and total
 time, and hovering the scrub bar previews the moment you'd seek to.
 
 Audio and video need a host uploader (`setImageUploader`, which handles every
-kind). Unlike images there is no embed fallback: base64'd audio would put
+kind). The uploader is called as `fn(file, ctx)` and returns a Promise of a
+URL; `ctx.onProgress(0..1)` reports transfer progress to the placeholder's
+bar. It's optional — without it the bar stays indeterminate, which says
+"alive" but can't tell slow from stuck, and telling those apart is the whole
+reason a large upload needs a bar. Unlike images there is no embed fallback: base64'd audio would put
 megabytes of JSON in the annotation payload on every save and every peer
 broadcast, so without an uploader the insert is refused and
 `etcher:media-upload-unavailable` fires.

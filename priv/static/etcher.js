@@ -1218,6 +1218,12 @@
     ".etcher-link-editor, " +
     ".etcher-popup, .etcher-tooltip";
 
+  // A dimension's label is a measurement written ON the drawing, not part of
+  // the line it belongs to, so it reads as annotation rather than as more of
+  // the shape and defaults to black instead of inheriting the line's colour.
+  // Every label can still be given a colour of its own.
+  var DIMENSION_LABEL_COLOR = "#000000";
+
   var ESSENTIAL_TOOLS = [
     "grabber", "freehand", "eraser", "line", "text", "callout", "image"
   ];
@@ -7805,25 +7811,46 @@
       // When syncing the toolbar color FROM a just-selected shape, skip this
       // — re-applying the same color would spuriously push an undo entry.
       var self = this;
-      // `editingTitleShape` is in the list because clicking a label puts you
-      // in title-edit mode, and `_enterTitleEditMode` clears `editingShape`
-      // on the way in. Without it, selecting a colour with a label focused
-      // had no target at all and silently did nothing — which is exactly
-      // what you do when the thing you want to recolour is the label.
-      var colorTargets = this._syncingColor
+      // A focused LABEL takes the colour itself, leaving its shape alone.
+      // Clicking a label puts you in title-edit mode (which clears
+      // `editingShape` on the way in), so this is unambiguous: the label is
+      // the only thing selected, and it is the only thing you can have meant.
+      // Colouring the shape from here would drag the dimension's line along
+      // with its measurement, which is the opposite of being able to pick
+      // them out from each other.
+      var titleTarget = !this._syncingColor &&
+        !(this.selectedShapes && this.selectedShapes.length) &&
+        !this.editingShape && this.editingTitleShape
+          ? this.editingTitleShape
+          : null;
+
+      if (titleTarget && titleTarget.uuid) {
+        var tBefore = self._snapshotShape(titleTarget);
+        titleTarget.metadata = Object.assign({}, titleTarget.metadata || {}, {
+          title_color: color
+        });
+        self._renderShape(titleTarget);
+        self._pushUndo(titleTarget.uuid, tBefore, self._snapshotShape(titleTarget));
+        self._emitChanged();
+      }
+
+      var colorTargets = (this._syncingColor || titleTarget)
         ? []
         : (this.selectedShapes && this.selectedShapes.length)
           ? this.selectedShapes.slice()
-          : (this.editingShape ? [this.editingShape]
-            : (this.editingTitleShape ? [this.editingTitleShape] : []));
+          : (this.editingShape ? [this.editingShape] : []);
       colorTargets.forEach(function(shape) {
         if (!shape.uuid) return;
         var before = self._snapshotShape(shape);
         shape.style = Object.assign({}, shape.style || {}, { color: color });
         if (shape.kind === "marker") self._renderShape(shape);
         else self._applyShapeColor(shape.el, color, shape.style);
-        // Keep the inline title sibling in sync with the shape color.
-        if (shape.titleGroup) shape.titleGroup.style.color = color || "";
+        // Keep the title sibling in step — but through the same resolver the
+        // render uses, so a label with a colour of its own keeps it instead
+        // of being overwritten every time its shape is recoloured.
+        if (shape.titleGroup) {
+          shape.titleGroup.style.color = self._titleColorFor(shape);
+        }
         self._pushUndo(shape.uuid, before, self._snapshotShape(shape));
       });
       if (colorTargets.length) self._emitChanged();
@@ -8855,9 +8882,7 @@
       // Re-applied on every render, not just when the group is built. The
       // colour was previously frozen at creation, so recolouring a shape
       // left its label behind in the old colour with no way to catch it up.
-      if (shape.style && shape.style.color) {
-        shape.titleGroup.style.color = shape.style.color;
-      }
+      shape.titleGroup.style.color = this._titleColorFor(shape);
 
       var titleBox = this._shapeTitleBoxImage(shape, bboxTopImage);
       var tbox = this._orientedBox(titleBox);
@@ -9143,6 +9168,21 @@
     // follow the shape as it moves and resizes. The size here is only a
     // first approximation for an aligned label — it auto-sizes to its text,
     // and `_renderTitleSibling` re-anchors it once the text is measured.
+    // What colour a shape's label is drawn in.
+    //
+    // A label carries its own colour when it has been given one, so it can be
+    // read against whatever it sits on top of without dragging the shape's
+    // colour along with it. Failing that it follows the shape, which is how
+    // labels have always behaved — except on a dimension, where the label is
+    // a measurement written on the drawing rather than part of the line, and
+    // black is what it has always been.
+    _titleColorFor: function(shape) {
+      var meta = (shape && shape.metadata) || {};
+      if (meta.title_color) return meta.title_color;
+      if (shape && shape.kind === "dimension") return DIMENSION_LABEL_COLOR;
+      return (shape && shape.style && shape.style.color) || "";
+    },
+
     _shapeTitleBoxImage: function(shape, bboxTopImage) {
       var meta = (shape && shape.metadata) || {};
       var stored = meta.title_box;

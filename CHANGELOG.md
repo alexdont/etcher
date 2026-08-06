@@ -189,9 +189,15 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   panel had no target; worse, the click on the panel was itself read as
   clicking away, so the mode was torn down before the colour could land.
 
-- **A shape's label follows its colour.** The label's colour was fixed when
-  it was first drawn, so recolouring a shape left its label behind with no
-  way to catch it up.
+- **A label has a colour of its own.** Recolouring a shape used to drag its
+  label along with it, so a dimension's line and its measurement could never
+  be told apart. A label focused on its own now takes the colour itself and
+  leaves its shape alone, and keeps that colour when the shape is recoloured
+  later. A dimension's label defaults to black, as it always looked; every
+  other label still follows its shape until given a colour.
+
+  (Label colour had also been fixed at the moment the label was first drawn,
+  so recolouring a shape left its label behind with no way to catch it up.)
 
 - **Shapes no longer light up under a drag.** Dragging a dimension's label
   along its line, or moving anything across the board, lit up every shape the

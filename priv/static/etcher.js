@@ -192,6 +192,13 @@
     // as "delete row", not "rub shapes out by sweeping".
     eraser: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path stroke-linecap="round" stroke-linejoin="round" d="M22 21H7"/><path stroke-linecap="round" stroke-linejoin="round" d="m5 11 9 9"/></svg>',
     grabber: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15 10.5V6a1.5 1.5 0 0 0-3 0m3 4.5V4.5a1.5 1.5 0 0 0-3 0v6m3 0V9a1.5 1.5 0 0 1 3 0v5.25a6.75 6.75 0 0 1-6.75 6.75H9.75a6.75 6.75 0 0 1-5.74-3.2l-2.39-3.86a1.5 1.5 0 0 1 2.46-1.72L6 15.75V6a1.5 1.5 0 0 1 3 0v4.5m3 0V6"/></svg>',
+    // A 3x3 of dots for the background grid, and a square with anchor dots on
+    // its corners for the connector anchors — each says what it switches.
+    grid: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="6" cy="6" r="1.6"/><circle cx="12" cy="6" r="1.6"/><circle cx="18" cy="6" r="1.6"/><circle cx="6" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="18" cy="12" r="1.6"/><circle cx="6" cy="18" r="1.6"/><circle cx="12" cy="18" r="1.6"/><circle cx="18" cy="18" r="1.6"/></svg>',
+    connectors: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5"/><circle cx="7" cy="7" r="2" fill="currentColor" stroke="none"/><circle cx="17" cy="7" r="2" fill="currentColor" stroke="none"/><circle cx="7" cy="17" r="2" fill="currentColor" stroke="none"/><circle cx="17" cy="17" r="2" fill="currentColor" stroke="none"/></svg>',
+    // Heroicons chevron-up / chevron-down — the style panel's size control.
+    chevronUp:   '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 15.75 7.5-7.5 7.5 7.5"/></svg>',
+    chevronDown: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5"/></svg>',
     // Heroicons cursor-arrow-rays — a pointer with rays coming off it, which
     // is what a laser pointer looks like when you are trying to draw one.
     pointer: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15.042 21.672 13.684 16.6m0 0-2.51 2.225.569-9.47 5.227 7.917-3.286-.672ZM12 2.25V4.5m5.834.166-1.591 1.591M20.25 10.5H18M7.757 14.743l-1.59 1.59M6 10.5H3.75m4.007-4.243-1.59-1.59"/></svg>',
@@ -416,6 +423,37 @@
       "  pointer-events: auto; width: 190px; max-width: calc(100vw - 24px);",
       "}",
       ".etcher-stylepanel.is-active { display: flex; }",
+      // Three sizes, because the panel is in the way at different amounts
+      // for different people. Full is everything. Compact keeps the two
+      // things reached for constantly — the colour and the line type — and
+      // drops the sliders, which are set once and left. Hidden is for
+      // presenting, where the board is the point and the chrome is not.
+      ".etcher-stylepanel { top: 52px; }",
+      ".etcher-stylepanel[data-size=\"compact\"] {",
+      "  width: auto; max-width: calc(100vw - 24px); padding: 8px; gap: 8px;",
+      "}",
+      ".etcher-stylepanel[data-size=\"compact\"] .etcher-marker-row { display: none; }",
+      ".etcher-stylepanel[data-size=\"compact\"] .etcher-stylepanel-swatches {",
+      "  display: flex; gap: 6px;",
+      "}",
+      ".etcher-stylepanel[data-size=\"compact\"] .etcher-swatch {",
+      "  width: 22px; height: 22px;",
+      "}",
+      ".etcher-stylepanel[data-size=\"hidden\"] { display: none; }",
+      // The chevron that cycles the three. Pinned above the panel rather
+      // than attached to its edge so it stays exactly where it was when the
+      // panel goes away — a control that moves when you use it is one you
+      // have to hunt for the second time.
+      ".etcher-panel-toggle {",
+      "  position: absolute; top: 12px; right: 12px; z-index: 12;",
+      "  display: none; align-items: center; justify-content: center;",
+      "  width: 30px; height: 30px; padding: 0; border: 0; cursor: pointer;",
+      "  border-radius: 8px; background: rgba(0, 0, 0, 0.72); color: #fff;",
+      "  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3); pointer-events: auto;",
+      "}",
+      ".etcher-panel-toggle.is-active { display: inline-flex; }",
+      ".etcher-panel-toggle:hover { background: rgba(0, 0, 0, 0.85); }",
+      ".etcher-panel-toggle svg { width: 18px; height: 18px; display: block; }",
       // Narrow container: the docked panel would eat the canvas, so it
       // becomes a popup over the tool bar, opened by `.etcher-style-trigger`.
       // JS owns the offsets (the tool bar's height and width both move), so
@@ -2150,6 +2188,19 @@
           //
           // The local user's own pointer is drawn from the tool itself. The
           // host feeds in everyone else's through these.
+          // ── Preferences ───────────────────────────────────────────────
+          //
+          // How this user likes the board set up — background dots, connector
+          // anchors, the style panel's size, which tools are on the bar.
+          // Saved to localStorage on their own; hand over an adapter and the
+          // host stores them instead, which is the only way they can follow
+          // a user between devices.
+          getPrefs: function() {
+            return Object.assign({}, self._loadPrefs());
+          },
+          setPref: function(name, value) { self._setPref(name, value); return true; },
+          setPrefsAdapter: function(adapter) { self._setPrefsAdapter(adapter); },
+
           isPointerMode: function() { return self.activeTool === "pointer"; },
 
           // Someone else pointed at `{x, y}` (canvas coords, as they arrived
@@ -2407,7 +2458,10 @@
       // their own chrome can hide them and wire `handle.toggleMode()`
       // / `handle.toggleVisible()` to their own buttons.
       if (self._chromeEnabled("visibility")) self._buildVisibilityButton();
+      if (self._chromeEnabled("view")) self._buildViewToggles();
       if (self._chromeEnabled("pencil")) self._buildNavButton();
+      // Preferences are read once the chrome they drive exists.
+      self._applyPrefs();
       self._wireUndoKeyboard();
       self._wireGlobalShapeListeners();
       self._wireImagePaste();
@@ -2494,7 +2548,10 @@
       self._buildStripTooltip();
       if (self.showToolbar) { self._buildToolbar(); self._buildActionBar(); self._buildStylePanel(); }
       if (self._chromeEnabled("visibility")) self._buildVisibilityButton();
+      if (self._chromeEnabled("view")) self._buildViewToggles();
       if (self._chromeEnabled("pencil")) self._buildNavButton();
+      // Preferences are read once the chrome they drive exists.
+      self._applyPrefs();
       self._wireUndoKeyboard();
       self._wireStripPointerInput();
       self._wireStripResize();
@@ -3456,11 +3513,88 @@
       self.handle.container.appendChild(panel);
       self.stylePanel = panel;
       self._buildStyleTrigger();
+      self._buildPanelToggle();
 
       // Seeds `_colorSlots` (if empty) and renders the slot row into the
       // panel — previously done inline while building the tool bar.
       self._refreshToolbarSwatches();
       self._syncStylePanel();
+    },
+
+    // The chevron that cycles the style panel between its three sizes.
+    //
+    // A cycle rather than three buttons or a menu: there are only three, and
+    // the one you want is nearly always "less than now". A menu to make a
+    // panel smaller is more chrome than the panel.
+    _buildPanelToggle: function() {
+      var self = this;
+      if (self.panelToggle) return;
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "etcher-panel-toggle";
+      btn.setAttribute("data-fresco-no-capture", "");
+      btn.addEventListener("click", function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        self._cyclePanelSize();
+      });
+      self.handle.container.appendChild(btn);
+      self.panelToggle = btn;
+      self._applyPanelPref(self._getPref("panel"));
+    },
+
+    // Which tools the toolbar actually shows: what the host offered, minus
+    // anything this user has turned off. The host's list stays the ceiling —
+    // a preference can hide a tool, never conjure one the host withheld.
+    _effectiveTools: function() {
+      var offered = (this.tools || []).slice();
+      var want = this._getPref("tools");
+      if (!Array.isArray(want)) return offered;
+      return offered.filter(function(t) { return want.indexOf(t) !== -1; });
+    },
+
+    // Applied by hiding buttons rather than rebuilding the bar: every other
+    // part of the toolbar holds references to those buttons (the pinned
+    // slot, the overflow popup, the active-tool highlight), and rebuilding
+    // would have to re-thread all of them for a change that is purely about
+    // what is on show.
+    _refreshToolbarTools: function() {
+      if (!this.toolbar) return;
+      var want = this._getPref("tools");
+      var allowed = Array.isArray(want) ? want : null;
+      var btns = this.toolbar.querySelectorAll("button[data-tool]");
+      for (var i = 0; i < btns.length; i++) {
+        var key = btns[i].dataset.tool;
+        // The cursor is not a drawing tool and is how you get out of one, so
+        // it is never something to hide.
+        if (!key || key === "cursor") continue;
+        var on = !allowed || allowed.indexOf(key) !== -1;
+        btns[i].style.display = on ? "" : "none";
+      }
+    },
+
+    _cyclePanelSize: function() {
+      var order = ["full", "compact", "hidden"];
+      var now = this._getPref("panel");
+      var i = order.indexOf(now);
+      this._setPref("panel", order[(i === -1 ? 0 : i + 1) % order.length]);
+    },
+
+    _applyPanelPref: function(mode) {
+      if (mode !== "compact" && mode !== "hidden") mode = "full";
+      if (this.stylePanel) this.stylePanel.setAttribute("data-size", mode);
+      var btn = this.panelToggle;
+      if (!btn) return;
+      // The chevron points at what pressing it does: up while there is still
+      // something to fold away, down once there is nothing left but to bring
+      // it all back.
+      btn.innerHTML = mode === "hidden" ? ICONS.chevronDown : ICONS.chevronUp;
+      var title = mode === "full"
+        ? "Shrink the style panel"
+        : (mode === "compact" ? "Hide the style panel" : "Show the style panel");
+      btn.title = title;
+      btn.setAttribute("aria-label", title);
+      btn.classList.toggle("is-active", !!this.annotationMode);
     },
 
     // The button that opens the style panel when it can't be docked. Lives
@@ -3647,6 +3781,11 @@
         this.stylePanel.appendChild(this.paramsPopup);
       }
       this.stylePanel.classList.toggle("is-active", !!this.annotationMode);
+      // The chevron follows annotation mode with the panel — it is the
+      // panel's control, and outside annotation mode there is no panel.
+      if (this.panelToggle) {
+        this.panelToggle.classList.toggle("is-active", !!this.annotationMode);
+      }
 
       // Docked on a roomy container, a popup on a narrow one. Re-evaluated
       // on every sync so a rotation or a resized split view moves it without
@@ -5578,6 +5717,45 @@
         self.annotationsVisible ? "Hide annotations" : "Show annotations",
         function() { self._toggleAnnotationsVisible(); }
       );
+    },
+
+    // Two view switches in the nav column: the background dots, and the green
+    // anchors an arrow is pulled from. Both are always-on affordances that
+    // some boards want and some do not, and neither is content — turning one
+    // off changes nothing anyone else sees.
+    _buildViewToggles: function() {
+      var self = this;
+      if (!self.handle || typeof self.handle.appendNavButton !== "function") return;
+
+      if (typeof self.handle.setGridVisible === "function") {
+        self.gridBtn = self.handle.appendNavButton(
+          ICONS.grid, self._gridTitle(), function() {
+            self._setPref("grid", self._getPref("grid") === false);
+            if (self.gridBtn && self.gridBtn.setTitle) {
+              self.gridBtn.setTitle(self._gridTitle());
+            }
+          }
+        );
+      }
+
+      self.connectorsBtn = self.handle.appendNavButton(
+        ICONS.connectors, self._connectorsTitle(), function() {
+          self._setPref("connectors", self._getPref("connectors") === false);
+          if (self.connectorsBtn && self.connectorsBtn.setTitle) {
+            self.connectorsBtn.setTitle(self._connectorsTitle());
+          }
+        }
+      );
+    },
+
+    _gridTitle: function() {
+      return this._getPref("grid") === false ? "Show background dots" : "Hide background dots";
+    },
+
+    _connectorsTitle: function() {
+      return this._getPref("connectors") === false
+        ? "Show connector anchors"
+        : "Hide connector anchors";
     },
 
     _toggleAnnotationsVisible: function() {
@@ -9889,6 +10067,113 @@
       this._dispatch("etcher:pointer-gone", {});
     },
 
+    // ── Preferences ─────────────────────────────────────────────────────────
+    //
+    // How this user likes the board set up: whether the background dots and
+    // the green connector anchors are shown, how much of the style panel is
+    // open, which tools are on the toolbar. Not board content — two people
+    // looking at the same board can have different answers, and neither is
+    // editing anything by choosing one.
+    //
+    // Stored in localStorage so it works with no host involvement at all,
+    // and handed to the host instead when it offers somewhere better. A host
+    // that knows who the user is can follow them between devices; etcher
+    // cannot, and should not pretend to.
+    //
+    // Keyed globally rather than per board on purpose: these are answers
+    // about how you work, not about a particular drawing. A host that wants
+    // them per board can scope its own adapter however it likes.
+    _prefsKey: "etcher:prefs",
+
+    _defaultPrefs: function() {
+      return {
+        grid: true,        // fresco's background dots
+        connectors: true,  // the green anchors an arrow is pulled from
+        panel: "full",     // full | compact | hidden
+        tools: null        // null = whatever the host configured
+      };
+    },
+
+    // The host's store wins when it has one. `load()` returns an object (or
+    // null); `save(prefs)` is told about every change.
+    _setPrefsAdapter: function(adapter) {
+      this._prefsAdapter =
+        (adapter && typeof adapter.save === "function") ? adapter : null;
+      // Re-read through the new adapter — a host that sets this after mount
+      // is telling us its answers are better than the ones already loaded.
+      this._prefs = null;
+      this._loadPrefs();
+      this._applyPrefs();
+    },
+
+    _loadPrefs: function() {
+      if (this._prefs) return this._prefs;
+      var stored = null;
+      var adapter = this._prefsAdapter;
+      if (adapter && typeof adapter.load === "function") {
+        try { stored = adapter.load(); } catch (_) { stored = null; }
+      } else {
+        try {
+          var raw = window.localStorage.getItem(this._prefsKey);
+          stored = raw ? JSON.parse(raw) : null;
+        } catch (_) {
+          // Private browsing, a disabled store, or corrupt JSON. Preferences
+          // are a convenience — none of this is worth failing a board over.
+          stored = null;
+        }
+      }
+      this._prefs = Object.assign(this._defaultPrefs(), stored || {});
+      return this._prefs;
+    },
+
+    _savePrefs: function() {
+      var prefs = this._loadPrefs();
+      var adapter = this._prefsAdapter;
+      if (adapter) {
+        try { adapter.save(Object.assign({}, prefs)); } catch (_) {}
+      } else {
+        try {
+          window.localStorage.setItem(this._prefsKey, JSON.stringify(prefs));
+        } catch (_) {}
+      }
+      this._dispatch("etcher:prefs-changed", Object.assign({}, prefs));
+    },
+
+    _getPref: function(name) {
+      var prefs = this._loadPrefs();
+      return prefs[name];
+    },
+
+    _setPref: function(name, value) {
+      var prefs = this._loadPrefs();
+      if (prefs[name] === value) return;
+      prefs[name] = value;
+      this._savePrefs();
+      this._applyPrefs();
+    },
+
+    // Push every preference at whatever it controls. Called on load and after
+    // any change, so there is one path from "what is preferred" to "what is
+    // on screen" rather than each toggle remembering to do its own work.
+    _applyPrefs: function() {
+      var prefs = this._loadPrefs();
+      this._applyGridPref(prefs.grid);
+      this._applyPanelPref(prefs.panel);
+      // Connector anchors are read from the pref at the moment they would be
+      // shown (`_connectorsAvailableFor`), so there is nothing to push here.
+      // The dots currently on screen do have to go, though.
+      if (prefs.connectors === false) this._removeConnectorDots();
+      this._refreshToolbarTools();
+    },
+
+    // Fresco owns the background dots — they are its canvas, not etcher's
+    // overlay — so this asks rather than reaching into its DOM.
+    _applyGridPref: function(on) {
+      var h = this.handle;
+      if (!h || typeof h.setGridVisible !== "function") return;
+      try { h.setGridVisible(on !== false); } catch (_) {}
+    },
+
     _pointerState: function() {
       if (!this._pointers) this._pointers = {};
       return this._pointers;
@@ -11358,6 +11643,10 @@
     // hover affordance, handles are the selected one.
     _connectorsAvailableFor: function(shape) {
       return !!shape &&
+        // Turned off by preference: the anchors are an affordance, and on a
+        // board nobody is drawing connectors on they are eight dots that
+        // appear under the cursor on every shape you pass over.
+        this._getPref("connectors") !== false &&
         this.annotationMode === true &&
         this.activeTool == null &&
         shape.kind !== "arrow" &&

@@ -8,6 +8,23 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Preferences.** How you like the board set up — the background dots, the
+  green connector anchors, how much of the style panel is open — now sticks
+  between sessions. Saved in the browser on its own; hand etcher a
+  `setPrefsAdapter` and the host stores them instead, which is the only way
+  they can follow a user between devices. None of it is board content: two
+  people looking at the same board can have different answers.
+
+- **Turn the background dots and the connector anchors off.** Two switches in
+  the nav column. The dots are a reading aid that reads as noise over a photo
+  you are annotating; the green anchors are an affordance you only want on a
+  board you are actually drawing connectors on.
+
+- **A smaller style panel.** The chevron above it cycles three sizes: all of
+  it, just the colour and the line type, and none of it. The sliders are set
+  once and left, so they are the first thing to go; presenting wants the
+  board and none of the chrome.
+
 - **Red pointer.** A tool that turns your cursor into a red dot with a trail
   behind it, so you can point at things while presenting and everyone on the
   board sees where you are pointing. It draws nothing and saves nothing — let

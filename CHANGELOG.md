@@ -183,6 +183,12 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   magnetic to the dimension: centred on the line, and dragging it slides it
   along rather than pulling it off.
 
+- **A label can be styled while it's focused.** Selecting a label and then
+  reaching for the palette — the obvious way to recolour one — did nothing at
+  all. Clicking a label puts you in label-edit mode, and from there the style
+  panel had no target; worse, the click on the panel was itself read as
+  clicking away, so the mode was torn down before the colour could land.
+
 - **A shape's label follows its colour.** The label's colour was fixed when
   it was first drawn, so recolouring a shape left its label behind with no
   way to catch it up.

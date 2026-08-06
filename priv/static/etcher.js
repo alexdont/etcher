@@ -7805,11 +7805,17 @@
       // When syncing the toolbar color FROM a just-selected shape, skip this
       // — re-applying the same color would spuriously push an undo entry.
       var self = this;
+      // `editingTitleShape` is in the list because clicking a label puts you
+      // in title-edit mode, and `_enterTitleEditMode` clears `editingShape`
+      // on the way in. Without it, selecting a colour with a label focused
+      // had no target at all and silently did nothing — which is exactly
+      // what you do when the thing you want to recolour is the label.
       var colorTargets = this._syncingColor
         ? []
         : (this.selectedShapes && this.selectedShapes.length)
           ? this.selectedShapes.slice()
-          : (this.editingShape ? [this.editingShape] : []);
+          : (this.editingShape ? [this.editingShape]
+            : (this.editingTitleShape ? [this.editingTitleShape] : []));
       colorTargets.forEach(function(shape) {
         if (!shape.uuid) return;
         var before = self._snapshotShape(shape);
@@ -9332,6 +9338,13 @@
         // any registered input-owner (modals, dialogs, ARIA dialogs)
         // also keep edit alive: the click belongs to that UI.
         if (e.target.closest(".etcher-shape")) return;
+        // Etcher's own chrome — the toolbar and the style panel. This is
+        // what the comment above always claimed, and what the code never
+        // did: only `isInputOwner` was checked, so picking a colour with a
+        // label focused tore title-edit down in the capture phase and the
+        // colour then had nothing left to apply to. Reaching for the palette
+        // is the most obvious thing to do with a label selected.
+        if (e.target.closest && e.target.closest(CHROME_SELECTOR)) return;
         if (isInputOwner(e.target, self.overlayWrapper)) return;
         // Shapes are `pointer-events: none`; fall back to image-px
         // hit-test so a click on a sibling shape doesn't tear down

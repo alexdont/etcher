@@ -18,6 +18,10 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   stays the same size on every screen: it is someone's finger on the board,
   not part of the drawing.
 
+  It sits in the toolbar proper rather than under "More tools" — it gets
+  reached for mid-sentence, in front of people who are watching you look for
+  it.
+
   Etcher owns what a pointer looks like; the host says who is pointing and
   carries the position. `etcher:pointer-moved` goes out while the tool is
   armed, and `applyRemotePointer` / `removeRemotePointer` bring everyone

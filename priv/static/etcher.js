@@ -1254,7 +1254,12 @@
   var POINTER_STALE_MS = 4000;
 
   var ESSENTIAL_TOOLS = [
-    "grabber", "freehand", "eraser", "line", "text", "callout", "image"
+    "grabber", "freehand", "eraser", "line", "text", "callout", "image",
+    // The red pointer earns a place in the narrow bar because of WHEN it is
+    // reached for: mid-sentence, while presenting to people who are watching
+    // you look for it. A tool you hunt for in an overflow menu is one you
+    // stop using.
+    "pointer"
   ];
 
   // Corner radius on image shapes, as a fraction of the shorter rendered

@@ -175,6 +175,24 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Connectors, play buttons and labels scale with the board.** Zooming out
+  shrank the shapes but not the things drawn on and between them: arrows
+  between blocks kept their weight and their arrowheads, a play button
+  outgrew the card it sits in, and a shape's title held its size until it was
+  the largest thing on screen.
+
+  These were all lengths written as on-screen pixels — a padding, a font
+  floor, an arrowhead — which are right at 1:1 and know nothing about zoom.
+  The clamps mattered as much as the sizes: a floor like "no smaller than 7px"
+  exists to keep a deliberately small card usable, and once the board is
+  zoomed out it wins every comparison and the card stops shrinking.
+
+  Two things deliberately do NOT scale. An audio card still drops its title
+  and timecode below a fixed on-screen height, because that is a question of
+  whether there is room to read them. And a connector's stroke keeps the same
+  minimum width every other line has, so a zoomed-out board still shows its
+  arrows.
+
 - **The board no longer breaks when you rotate the canvas.** Rotating turned
   each shape's *position* correctly but left the shape itself facing the way
   it always had: pictures stayed upright inside sideways boxes, labels ran

@@ -1279,6 +1279,9 @@
   // Screen-px geometry of the V at an arrow's head.
   var ARROW_HEAD_LEN = 11;
   var ARROW_HEAD_HALF_WIDTH = 6;
+  // A connector's stroke weight at 1:1 zoom; scaled with the canvas at render
+  // time so it keeps its proportion to the shapes it joins.
+  var ARROW_STROKE_PX = 2;
 
   // Connector dots are green rather than the shape's own colour: they're a
   // fixed piece of interface, like a cursor, and taking the shape's colour
@@ -6779,14 +6782,27 @@
       el.classList.toggle("is-chrome-hidden", !visible);
       if (!visible) return;
 
-      var pad = Math.max(6, Math.min(14, box.h * 0.16));
+      // Every bare number in this layout is an on-screen length chosen at
+      // 1:1, so each is taken at the current zoom. The clamps especially:
+      // their job is to keep a deliberately small card usable, not to stop
+      // the card shrinking when the whole board does. Unscaled, the floors
+      // won every comparison on a zoomed-out board and the transport stopped
+      // shrinking — which is how a play disc came to bulge out of the pill
+      // it sits in.
+      var zpad = this._zoomPx(6), zpadMax = this._zoomPx(14);
+      var pad = Math.max(zpad, Math.min(zpadMax, box.h * 0.16));
+      // NOT scaled, unlike everything else here. This is a legibility
+      // threshold, not a size: below it there is no room on screen for a
+      // title and a timecode, whatever the card measures in canvas units.
+      // Scaling it makes it zoom-invariant — the card then keeps trying to
+      // draw text at every zoom, and the title runs into the timecode.
       var compact = box.h < AUDIO_COMPACT_H;
       // The disc is sized off the card so the whole thing scales as one
       // object under zoom, rather than a fixed-size button on a card that
       // grows around it — but bounded by the SHORTER side, not the height.
       // Height alone meant a card resized tall and narrow grew a disc wider
       // than the card it sits in.
-      var r = Math.max(7, Math.min(
+      var r = Math.max(this._zoomPx(7), Math.min(
         (box.h - pad * 2) / 2, box.h * 0.28,
         (box.w - pad * 2) / 2, box.w * 0.18
       ));
@@ -6797,7 +6813,7 @@
       bg.setAttribute("y", box.y);
       bg.setAttribute("width", box.w);
       bg.setAttribute("height", box.h);
-      var radius = Math.max(4, Math.min(14, box.h * 0.18));
+      var radius = Math.max(this._zoomPx(4), Math.min(this._zoomPx(14), box.h * 0.18));
       bg.setAttribute("rx", radius);
       bg.setAttribute("ry", radius);
 
@@ -6841,7 +6857,7 @@
         // No transport while there is nothing to drive — a disabled player
         // reads as a broken one. The name, a progress bar, and a percentage,
         // centred so it holds at any card size.
-        var ufs = Math.max(10, Math.min(16, box.h * 0.09));
+        var ufs = Math.max(this._zoomPx(10), Math.min(this._zoomPx(16), box.h * 0.09));
         var mid = box.x + box.w / 2;
         var prog = shape._uploadProgress;
         titleEl.removeAttribute("visibility");
@@ -6861,8 +6877,8 @@
 
         // The bar itself, reusing the scrub track and fill so there is one
         // place that knows how a bar is drawn.
-        var pw = Math.min(box.w * 0.6, 260);
-        var ph = Math.max(3, Math.min(6, box.h * 0.03));
+        var pw = Math.min(box.w * 0.6, this._zoomPx(260));
+        var ph = Math.max(this._zoomPx(3), Math.min(this._zoomPx(6), box.h * 0.03));
         var px = mid - pw / 2;
         var py = box.y + box.h / 2 - ph / 2;
         track.setAttribute("x", px);
@@ -6920,7 +6936,7 @@
       }
 
       var barY = (compact || inlineTime) ? cy - 2 : box.y + box.h * 0.68;
-      var barH = Math.max(3, Math.min(6, box.h * 0.07));
+      var barH = Math.max(this._zoomPx(3), Math.min(this._zoomPx(6), box.h * 0.07));
       var barX = textLeft;
       // Room for the timecode when it shares the row.
       var timeGap = inlineTime
@@ -6979,7 +6995,9 @@
     // height. Proportional so it scales with the picture under zoom, clamped
     // so it stays usable on a small one and doesn't dominate a large one.
     _videoBarH: function(videoH) {
-      return Math.max(26, Math.min(48, videoH * 0.22));
+      return Math.max(
+        this._zoomPx(26), Math.min(this._zoomPx(48), videoH * 0.22)
+      );
     },
 
     // Stop and discard a shape's media element.
@@ -8375,10 +8393,10 @@
           }
           if (coText) {
             var calloutText = (shape.metadata && shape.metadata.title) || "";
-            var coPad = 4;
+            var coPad = self._zoomPx(4);
             var coFontFamily = "ui-sans-serif, system-ui, -apple-system, sans-serif";
             var coFontWeight = "500";
-            var coFontSizeByHeight = Math.max(10, bh * 0.65);
+            var coFontSizeByHeight = Math.max(self._zoomPx(10), bh * 0.65);
 
             // Width-fit cap: same fix `_renderTitleSibling` got in
             // 0.2.3 — without it, callout text that overflows the box
@@ -8401,7 +8419,7 @@
             var coAvailWidth = Math.max(1, bw - coPad * 2);
             var coFontSize = coFontSizeByHeight;
             if (coWidthAtHeightFont > coAvailWidth) {
-              coFontSize = Math.max(10, coFontSizeByHeight * coAvailWidth / coWidthAtHeightFont);
+              coFontSize = Math.max(self._zoomPx(10), coFontSizeByHeight * coAvailWidth / coWidthAtHeightFont);
             }
 
             coText.setAttribute("x", bx + coPad);
@@ -8525,8 +8543,8 @@
           }
           if (ttext) {
             var titleText = (shape.metadata && shape.metadata.title) || "";
-            var pad = 4;
-            var fontSize = Math.max(10, th * 0.65);
+            var pad = self._zoomPx(4);
+            var fontSize = Math.max(self._zoomPx(10), th * 0.65);
             ttext.setAttribute("x", tx + pad);
             ttext.setAttribute("y", ty + pad);
             ttext.setAttribute("font-size", fontSize);
@@ -8679,13 +8697,29 @@
             // on a routed arrow those point in quite different directions,
             // and it's the final approach that has to line up with whatever
             // the arrow is pointing at.
+            //
+            // Sized at the current zoom: a head fixed in screen px keeps its
+            // size while the shapes it connects shrink, so on a zoomed-out
+            // board the arrowheads end up bigger than the blocks.
             var tip = arC[arC.length - 1];
             var prev = arC[arC.length - 2] || tip;
             arHead.setAttribute(
               "points",
-              self._vArrowPoints(tip, prev, ARROW_HEAD_LEN, ARROW_HEAD_HALF_WIDTH)
+              self._vArrowPoints(
+                tip, prev,
+                self._zoomPx(ARROW_HEAD_LEN),
+                self._zoomPx(ARROW_HEAD_HALF_WIDTH)
+              )
             );
           }
+          // Connectors are drawn between shapes, so their weight has to
+          // track the drawing the same way every other line's now does —
+          // otherwise zooming out leaves a web of heavy strokes over
+          // whatever they were pointing at. Floored so an arrow on a very
+          // wide view stays visible rather than thinning to nothing.
+          var arW = Math.max(0.4, self._zoomPx(ARROW_STROKE_PX));
+          if (arShaft) arShaft.style.strokeWidth = arW + "px";
+          if (arHead) arHead.style.strokeWidth = arW + "px";
           var arMinY = arImg[0].y, arSumX = 0;
           arImg.forEach(function(p) {
             if (p.y < arMinY) arMinY = p.y;
@@ -8816,10 +8850,10 @@
         rectEl.setAttribute("height", th);
       }
       if (textEl) {
-        var pad = 4;
+        var pad = this._zoomPx(4);
         var fontFamily = "ui-sans-serif, system-ui, -apple-system, sans-serif";
         var fontWeight = "500";
-        var fontSizeByHeight = Math.max(10, th * 0.65);
+        var fontSizeByHeight = Math.max(this._zoomPx(10), th * 0.65);
 
         // Width-fit cap: scale the font down so the title fits the box
         // width on a single line. Critical for stability — without it,
@@ -8850,7 +8884,7 @@
           // `availWidth` makes the wrap helper break the line — so a
           // dragged one-line label came back as two lines, at a size that
           // would have fit on one.
-          fontSize = Math.max(10, fontSizeByHeight * availWidth / widthAtHeightFont * 0.99);
+          fontSize = Math.max(this._zoomPx(10), fontSizeByHeight * availWidth / widthAtHeightFont * 0.99);
         }
 
         textEl.setAttribute("x", tx + pad);
@@ -9050,8 +9084,28 @@
     // and `_renderTitleSibling` re-anchors it once the text is measured.
     _shapeTitleBoxImage: function(shape, bboxTopImage) {
       var meta = (shape && shape.metadata) || {};
-      var basePx = this._textDefaultBoxImagePx();
       var stored = meta.title_box;
+      // A title the user has never sized gets a default that is comfortable
+      // ON SCREEN — but only once. `_textDefaultBoxImagePx` answers in image
+      // px for the CURRENT zoom, so recomputing it every render (which is
+      // what used to happen) pinned the title to a constant screen size: it
+      // held still while the shape it belongs to shrank away beneath it,
+      // ending up the largest thing on a zoomed-out board.
+      //
+      // Anchoring it at first paint is the same bargain the stroke widths
+      // make: the title looks exactly as it did, and scales from there. Kept
+      // on the shape rather than written into `metadata` because this is a
+      // default, not a user decision — dragging a title still persists a real
+      // `title_box`, and that path is untouched.
+      var basePx;
+      if (stored) {
+        basePx = this._textDefaultBoxImagePx();
+      } else {
+        if (!(shape._titleBasePx > 0)) {
+          shape._titleBasePx = this._textDefaultBoxImagePx();
+        }
+        basePx = shape._titleBasePx;
+      }
       var size = stored
         ? { w: stored.w, h: stored.h }
         : { w: basePx * 6, h: basePx * 1.4 };
@@ -12934,6 +12988,23 @@
       } catch (e) {
         return 1;
       }
+    },
+
+    // A length written as on-screen px — a padding, a font floor, an arrow
+    // head — expressed at the current zoom instead.
+    //
+    // Constants like these read as "6px of padding" and are right at 1:1, but
+    // they don't know the board can be zoomed. Left alone they hold their
+    // on-screen size while everything around them shrinks, so a play disc
+    // ends up bulging out of the card it sits in and a 10px font floor turns
+    // a label into the largest thing on a zoomed-out board. Scaling them
+    // keeps the proportions the constants were chosen for.
+    //
+    // Note this applies to FLOORS as much as to sizes: `Math.max(7, …)` is
+    // there to keep a deliberately small card usable, not to defeat zooming
+    // out, and only scales correctly if the 7 scales too.
+    _zoomPx: function(px) {
+      return px * this._markerScale();
     },
 
     _applyMarkerStyle: function(el, style, scale) {

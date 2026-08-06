@@ -47,6 +47,7 @@ const orientedBox = lift("_orientedBox", "g");
 const canvasRotation = lift("_canvasRotation", "");
 const setRotateTransform = lift("_setRotateTransform", "el, box");
 const rotatePoint = lift("_rotatePoint", "pt, cx, cy, deg");
+const zoomPx = lift("_zoomPx", "px");
 
 // A stand-in for the real coordinate transform: the same composition fresco
 // applies — scale, then rotate, then translate by the container origin.
@@ -64,7 +65,8 @@ function layer(deg, scale) {
     },
     _markerScale: markerScale,
     _canvasRotation: canvasRotation,
-    _orientedBox: orientedBox
+    _orientedBox: orientedBox,
+    _zoomPx: zoomPx
   };
 }
 
@@ -110,6 +112,28 @@ assert.strictEqual(
   1,
   "a degenerate transform falls back to 1, not 0"
 );
+
+// ── lengths written as screen px ────────────────────────────────────────────
+
+// Paddings, font floors and arrow heads are all written as "px at 1:1" and
+// have to be taken at the current zoom, or they hold their on-screen size
+// while the board shrinks around them — a play disc bulging out of its card,
+// a 10px font floor turning a label into the biggest thing on the board.
+{
+  const l = layer(0, 0.25);
+  assert.strictEqual(l._zoomPx(4), 1);
+  assert.strictEqual(l._zoomPx(0), 0);
+}
+// At 1:1 it must be the identity, so every one of these constants still means
+// exactly what it says at normal zoom.
+assert.strictEqual(layer(0, 1)._zoomPx(7), 7);
+
+// Rotation must not change it — it rides on the same scale probe, and the
+// whole point of that probe's fix is that it is angle-independent.
+for (const deg of [0, 90, 180, 270]) {
+  assert.ok(Math.abs(layer(deg, 0.5)._zoomPx(10) - 5) < 1e-9,
+    `a screen length at ${deg}° is unaffected by rotation`);
+}
 
 // ── reading the canvas rotation ─────────────────────────────────────────────
 

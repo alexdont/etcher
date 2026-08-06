@@ -37,6 +37,18 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   answer a peer who joins mid-playback instead of leaving them silent until
   the next command.
 
+  A dropped file **appears at once**, greyed out and labelled, and fills in
+  when the upload finishes — letting go of a file and watching nothing happen
+  gave no way to tell a large file from a broken one. The placeholder stays
+  out of the annotations payload until it has a source, so nothing persists
+  or reaches a peer that they couldn't play, and a failed upload takes it
+  away again rather than stranding a dead card.
+
+  A video shows its controls only while pointed at (or selected) — the
+  picture is the point of it, and a bar welded across the bottom permanently
+  covers what you came to look at. The transport carries the current and
+  total time, and hovering the scrub bar previews the moment you'd seek to.
+
   Files can also be **dragged onto the canvas** now, and land where they were
   dropped. Nothing handled `drop` before — not for images either — so
   dragging a file onto a board did what a browser does with an unhandled

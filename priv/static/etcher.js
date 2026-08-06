@@ -980,6 +980,25 @@
       // rather than a card of its own: no outline (the video's edge is the
       // edge) and darker, so white text and a coloured bar stay readable
       // over whatever frame is underneath.
+      // Hidden entirely rather than faded: a translucent bar over the picture
+      // still covers it.
+      ".etcher-audio.is-chrome-hidden > * { display: none; }",
+      // Uploading: the card is there, but nothing on it can be used yet.
+      ".etcher-audio.is-uploading .etcher-audio-btn,",
+      ".etcher-audio.is-uploading .etcher-audio-glyph,",
+      ".etcher-audio.is-uploading .etcher-audio-track,",
+      ".etcher-audio.is-uploading .etcher-audio-fill { display: none; }",
+      ".etcher-audio.is-uploading .etcher-audio-title,",
+      ".etcher-audio.is-uploading .etcher-audio-time { fill: rgba(245,245,247,0.55); }",
+      ".etcher-audio.is-uploading .etcher-audio-scrub { pointer-events: none; }",
+      // Scrub preview — hidden until the pointer is on the bar.
+      ".etcher-audio-peek { display: none; pointer-events: none; }",
+      ".etcher-audio-peek[data-show] { display: block; }",
+      ".etcher-audio-peek-bg { fill: rgba(0, 0, 0, 0.85); stroke: none; }",
+      ".etcher-audio-peek-text {",
+      "  fill: #f5f5f7; stroke: none;",
+      "  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;",
+      "}",
       ".etcher-video .etcher-audio-bg {",
       "  fill: rgba(0, 0, 0, 0.55); stroke: none;",
       "}",
@@ -6154,6 +6173,20 @@
       hit.classList.add("etcher-audio-scrub");
       g.appendChild(hit);
 
+      // "You are about to seek to here." Every real player shows this, and
+      // without it a click on the bar is a guess.
+      var peek = svgEl("g");
+      peek.classList.add("etcher-audio-peek");
+      var peekBg = svgEl("rect");
+      peekBg.classList.add("etcher-audio-peek-bg");
+      var peekText = svgEl("text", {
+        "text-anchor": "middle", "dominant-baseline": "middle"
+      });
+      peekText.classList.add("etcher-audio-peek-text");
+      peek.appendChild(peekBg);
+      peek.appendChild(peekText);
+      g.appendChild(peek);
+
       return g;
     },
 
@@ -6228,7 +6261,10 @@
     },
 
     _insertMediaHref: function(kind, href, opts) {
-      if (!href) return null;
+      // An empty string is allowed and meaningful: it's the placeholder a
+      // dropped file is given while it uploads. Only a missing argument is
+      // an error.
+      if (typeof href !== "string") return null;
       opts = opts || {};
       var at = (opts.at && typeof opts.at.x === "number")
         ? opts.at
@@ -6307,19 +6343,33 @@
         return;
       }
       var placedAt = imagePt || this._viewportCenterImage() || { x: 0, y: 0 };
-      // Nothing is placed up front, unlike an image: there is no local
-      // preview of a sound, and a card with no source to stream would just
-      // be a dead control. It appears when the upload resolves.
+
+      // Placed NOW, empty, and filled in when the upload resolves. Waiting
+      // for the transfer meant letting go of a file and watching nothing
+      // happen for as long as it took, with no way to tell a large file from
+      // a broken one. The card is real from the first frame — it can be
+      // moved, resized and layered while its bytes are still going up — and
+      // stays out of the annotations payload until it has something to play
+      // (see `_emitChanged`).
       //
-      // The uploader's contract is `fn(file, ctx) -> Promise<url>` — the
-      // second argument is context, NOT a callback. Passing one there and
-      // waiting for it to fire is a card that never appears and no error
-      // anywhere, which is exactly what it did.
-      function failed(why) {
-        // Warned, not just dispatched. These events have no default
-        // listener, so without this a refused or failed upload is a file
-        // that silently doesn't arrive — indistinguishable from a bug in
-        // the shape code.
+      // The uploader's contract is `fn(file, ctx) -> Promise<url>`; the
+      // second argument is context, NOT a callback.
+      var title = opts.title || file.name ||
+        (kind === "video" ? "Video" : "Audio");
+      var uuid = this._insertMediaHref(kind, "", { at: placedAt, title: title });
+      var placed = this._shapeByUuid(uuid);
+      if (placed) {
+        placed._pendingUpload = true;
+        this._renderShape(placed);
+      }
+
+      function discard(why) {
+        var s = self._shapeByUuid(uuid);
+        // Take the placeholder away rather than leaving a card that will
+        // never play. Warned as well as dispatched: these events have no
+        // default listener, so on its own a failure is a file that silently
+        // doesn't arrive.
+        if (s) self._deleteShape(s);
         console.warn("[Etcher] media upload failed:", why);
         self._dispatch("etcher:media-upload-failed", {
           name: file.name || null, reason: String(why)
@@ -6330,20 +6380,26 @@
       try {
         pending = upload(file, { frescoId: self.frescoId });
       } catch (e) {
-        return failed(e);
+        return discard(e);
       }
       if (!pending || typeof pending.then !== "function") {
-        return failed("uploader did not return a promise");
+        return discard("uploader did not return a promise");
       }
       pending.then(function(href) {
         if (typeof href !== "string" || !href) {
-          return failed("uploader resolved without a URL");
+          return discard("uploader resolved without a URL");
         }
-        self._insertMediaHref(kind, href, {
-          at: placedAt,
-          title: opts.title || file.name || (kind === "video" ? "Video" : "Audio")
-        });
-      }, failed);
+        var s = self._shapeByUuid(uuid);
+        if (!s) return;                    // deleted while uploading
+        s._pendingUpload = false;
+        s.geometry = Object.assign({}, s.geometry, { href: href });
+        // Only now is there anything to play, so only now is there an
+        // element to build.
+        self._audioElFor(s);
+        self._renderShape(s);
+        // The second emit — the one that actually persists the card.
+        self._emitChanged();
+      }, discard);
     },
 
     // Can this browser play the file at all? `canPlayType` answers "", "maybe"
@@ -6542,6 +6598,12 @@
 
       var scrub = el.querySelector(".etcher-audio-scrub");
       if (scrub) {
+        scrub.addEventListener("pointermove", function(e) {
+          self._showScrubPeek(shape, e.clientX);
+        });
+        scrub.addEventListener("pointerleave", function() {
+          self._hideScrubPeek(shape);
+        });
         scrub.addEventListener("pointerdown", function(e) {
           if (e.button != null && e.button !== 0) return;
           e.preventDefault();
@@ -6552,6 +6614,48 @@
           self.seekAudio(shape.uuid, frac);
         });
       }
+    },
+
+    // The time under the pointer, floated over the scrub bar.
+    _showScrubPeek: function(shape, clientX) {
+      var el = shape && shape.el;
+      var bar = shape && shape._audioBar;
+      if (!el || !bar || !bar.w) return;
+      var peek = el.querySelector(".etcher-audio-peek");
+      var bg = el.querySelector(".etcher-audio-peek-bg");
+      var txt = el.querySelector(".etcher-audio-peek-text");
+      if (!peek || !bg || !txt) return;
+      var st = shape.uuid ? this._audioState(shape.uuid) : null;
+      var dur = st && st.duration;
+      if (!dur) { this._hideScrubPeek(shape); return; }
+
+      var x = Math.max(bar.x, Math.min(bar.x + bar.w, clientX - this._containerX(0)));
+      var frac = (x - bar.x) / bar.w;
+      txt.textContent = this._formatTime(frac * dur);
+
+      // Sized off the bar rather than a constant, so it stays in proportion
+      // as the card is zoomed.
+      var fs = Math.max(9, Math.min(13, bar.h * 2.2));
+      var w = Math.max(34, (txt.textContent.length + 1) * fs * 0.6);
+      var h = fs * 1.9;
+      // Clamped to the bar's span: a label hanging off the end of the card
+      // points at nothing.
+      var cx = Math.max(bar.x + w / 2, Math.min(bar.x + bar.w - w / 2, x));
+      var y = bar.y - h - 6;
+      bg.setAttribute("x", cx - w / 2);
+      bg.setAttribute("y", y);
+      bg.setAttribute("width", w);
+      bg.setAttribute("height", h);
+      bg.setAttribute("rx", Math.min(6, h / 2));
+      txt.setAttribute("x", cx);
+      txt.setAttribute("y", y + h / 2);
+      txt.setAttribute("font-size", fs);
+      peek.setAttribute("data-show", "");
+    },
+
+    _hideScrubPeek: function(shape) {
+      var peek = shape && shape.el && shape.el.querySelector(".etcher-audio-peek");
+      if (peek) peek.removeAttribute("data-show");
     },
 
     // A container-space x back into viewport space, for turning a pointer
@@ -6581,6 +6685,18 @@
       var fill = el.querySelector(".etcher-audio-fill");
       var scrub = el.querySelector(".etcher-audio-scrub");
 
+      // Both flags are set BEFORE the early return below: bailing out first
+      // left `is-uploading` stuck on a card whose upload had finished, so a
+      // ready video came back still dressed as a placeholder.
+      var uploading = this._isPendingMedia(shape);
+      el.classList.toggle("is-uploading", uploading);
+
+      // Nothing on screen when a video isn't being pointed at — the picture
+      // is the point of it.
+      var visible = this._showsMediaChrome(shape);
+      el.classList.toggle("is-chrome-hidden", !visible);
+      if (!visible) return;
+
       var pad = Math.max(6, Math.min(14, box.h * 0.16));
       var compact = box.h < AUDIO_COMPACT_H;
       // The disc is sized off the card's height so the whole thing scales as
@@ -6605,6 +6721,11 @@
       // Play triangle or pause bars, drawn to the disc's radius.
       var playing = !!(audio && !audio.paused && !audio.ended);
       var k = r * 0.46;
+      if (uploading) {
+        // No transport while there is nothing to drive. An enabled-looking
+        // play button that does nothing is worse than no button.
+        glyph.setAttribute("d", "");
+      } else
       if (playing) {
         var bw = k * 0.62, gap = k * 0.5;
         glyph.setAttribute("d",
@@ -6624,12 +6745,46 @@
         ? audio.duration
         : (typeof g.duration === "number" ? g.duration : null);
 
-      if (compact) {
+      // On a video the timecode sits inline at the right of the bar rather
+      // than on its own row: the strip is deliberately short, but "where am
+      // I in this" is the one number a player has to show.
+      var inlineTime = shape.kind === "video" && !uploading;
+
+      if (uploading) {
+        // No transport while there is nothing to drive — a disabled player
+        // reads as a broken one. Just the name and what's happening,
+        // centred so it holds at any card size.
+        var ufs = Math.max(10, Math.min(16, box.h * 0.09));
+        var mid = box.x + box.w / 2;
+        titleEl.removeAttribute("visibility");
+        timeEl.removeAttribute("visibility");
+        titleEl.setAttribute("text-anchor", "middle");
+        titleEl.setAttribute("x", mid);
+        titleEl.setAttribute("y", box.y + box.h / 2 - ufs * 0.8);
+        titleEl.setAttribute("font-size", ufs);
+        titleEl.textContent = String(g.title || "Uploading");
+        timeEl.setAttribute("text-anchor", "middle");
+        timeEl.setAttribute("x", mid);
+        timeEl.setAttribute("y", box.y + box.h / 2 + ufs * 0.8);
+        timeEl.setAttribute("font-size", ufs);
+        timeEl.textContent = "Uploading\u2026";
+      } else if (compact && !inlineTime) {
         // Transport only — a title and a timecode would collide with the bar
         // and each other once the card is this short.
         titleEl.setAttribute("visibility", "hidden");
         timeEl.setAttribute("visibility", "hidden");
+      } else if (inlineTime) {
+        titleEl.setAttribute("text-anchor", "start");
+        titleEl.setAttribute("visibility", "hidden");
+        timeEl.removeAttribute("visibility");
+        var vfs = Math.max(9, Math.min(14, box.h * 0.30));
+        timeEl.setAttribute("x", textRight);
+        timeEl.setAttribute("y", cy);
+        timeEl.setAttribute("font-size", vfs);
+        timeEl.textContent = this._formatTime(pos) + " / " + this._formatTime(dur);
       } else {
+        titleEl.setAttribute("text-anchor", "start");
+        timeEl.setAttribute("text-anchor", "end");
         titleEl.removeAttribute("visibility");
         timeEl.removeAttribute("visibility");
         var fs = Math.max(9, Math.min(15, box.h * 0.19));
@@ -6651,10 +6806,14 @@
         timeEl.textContent = this._formatTime(pos) + " / " + this._formatTime(dur);
       }
 
-      var barY = compact ? cy - 2 : box.y + box.h * 0.68;
+      var barY = (compact || inlineTime) ? cy - 2 : box.y + box.h * 0.68;
       var barH = Math.max(3, Math.min(6, box.h * 0.07));
       var barX = textLeft;
-      var barW = Math.max(0, textRight - barX);
+      // Room for the timecode when it shares the row.
+      var timeGap = inlineTime
+        ? Math.max(46, (timeEl.textContent || "").length * Math.max(9, Math.min(14, box.h * 0.30)) * 0.62)
+        : 0;
+      var barW = Math.max(0, textRight - barX - timeGap);
       track.setAttribute("x", barX);
       track.setAttribute("y", barY);
       track.setAttribute("width", barW);
@@ -6676,6 +6835,31 @@
       scrub.setAttribute("height", scrubH);
 
       shape._audioBar = { x: barX, y: barY, w: barW, h: barH };
+    },
+
+    // A video's controls come and go with hover, and hover is a class toggle
+    // that re-renders nothing on its own. No-op for every other kind.
+    _refreshMediaChrome: function(shape) {
+      if (shape && shape.kind === "video" && shape.el) this._renderShape(shape);
+    },
+
+    // A media card whose file is still on its way up.
+    _isPendingMedia: function(shape) {
+      return !!(shape && shape._pendingUpload &&
+                !(shape.geometry && shape.geometry.href));
+    },
+
+    // Should this shape's transport be on screen? Audio is nothing but its
+    // transport, so always. A video shows its controls while pointed at,
+    // selected, or being edited — and always while uploading, since the
+    // "card" is the only thing there is at that point.
+    _showsMediaChrome: function(shape) {
+      if (!shape) return false;
+      if (shape.kind !== "video") return true;
+      if (this._isPendingMedia(shape)) return true;
+      return this._hoveredShape === shape ||
+             this.editingShape === shape ||
+             this._isInSelection(shape);
     },
 
     // Height of the transport strip laid over a video, from the video's own
@@ -7212,7 +7396,15 @@
       // object URL it is being *drawn* from — a blob: URL means nothing
       // outside this document. The stored URL replaces the thumbnail in a
       // second emit when the upload resolves.
-      var payload = (this.shapes || []).map(function(s) {
+      var payload = (this.shapes || []).filter(function(s) {
+        // A media card placed before its upload finishes has no source yet,
+        // and unlike an image there is no thumbnail to stand in — a sound has
+        // nothing to draw. Persisting or broadcasting it would put a card
+        // with nothing to play on every peer, and strand one for good if the
+        // uploader never came back. It joins the payload on the second emit,
+        // when the URL lands.
+        return !(s._pendingUpload && !(s.geometry && s.geometry.href));
+      }).map(function(s) {
         var entry = { uuid: s.uuid, kind: s.kind, geometry: s.geometry };
         // Strip annotations carry per-image index (which page of N).
         // Canvas multi-image annotations carry `image_id` (which
@@ -7832,15 +8024,27 @@
             vEl.style.height = vh + "px";
             vEl.style.borderRadius = self._imageRadius(vw, vh) + "px";
           }
-          // The transport is drawn in SVG over the picture, not with the
-          // browser's own controls: native controls are a fixed pixel size
-          // that would swell as you zoom out, they can't be styled to match
-          // the board, and they'd drive playback locally without telling the
-          // room.
-          self._layoutAudioCard(shape, {
-            x: vx, y: vy + Math.max(0, vh - self._videoBarH(vh)),
-            w: vw, h: self._videoBarH(vh)
-          });
+          // While uploading there is no picture behind the transport, so the
+          // card fills the whole box and says so. A lone strip floating over
+          // nothing reads as a rendering fault.
+          if (self._isPendingMedia(shape)) {
+            self._layoutAudioCard(shape, { x: vx, y: vy, w: vw, h: vh });
+          } else {
+            // The transport is drawn in SVG over the picture, not with the
+            // browser's own controls: native controls are a fixed pixel size
+            // that would swell as you zoom out, can't be styled to match the
+            // board, and would drive playback locally without telling the
+            // room.
+            //
+            // Shown only while the pointer is on the video (or it's
+            // selected), the way every video player behaves — the point of a
+            // video on a board is the picture, and a bar welded across the
+            // bottom of it permanently covers what you came to look at.
+            self._layoutAudioCard(shape, {
+              x: vx, y: vy + Math.max(0, vh - self._videoBarH(vh)),
+              w: vw, h: self._videoBarH(vh)
+            });
+          }
           bboxTopImage = { x: g.x + g.w / 2, y: g.y };
           break;
         }
@@ -9839,18 +10043,25 @@
         next && !onTitle &&
         (next !== prev || (next === prev && prevOnTitle));
 
+      // `_hoveredShape` is assigned FIRST, before anything re-renders. A
+      // video decides whether to show its controls by asking who is hovered,
+      // so refreshing while the field still held the previous shape drew the
+      // old answer both times — controls that never appeared on the one you
+      // pointed at, and never left the one you'd left.
+      this._hoveredShape = next;
       if (prev !== next && prev && prev.el) {
         prev.el.classList.remove("is-hovered");
         this._refreshImageRing(prev);
+        this._refreshMediaChrome(prev);
       }
       if (prev !== next && next && next.el) {
         next.el.classList.add("is-hovered");
         this._refreshImageRing(next);
+        this._refreshMediaChrome(next);
       }
       if (hideTooltip && !this.tooltipPinned) this._scheduleHideTooltip();
       if (showTooltip && !this.tooltipPinned) this._showTooltipFor(next);
 
-      this._hoveredShape = next;
       this._hoveredOnTitle = onTitle;
       if (this.overlayWrapper) {
         this.overlayWrapper.classList.toggle("is-shape-hovered", !!next);
@@ -9977,6 +10188,26 @@
       // — no per-mode branching needed.
       var shapeRect = shape.el.getBoundingClientRect();
       var containerRect = this.handle.container.getBoundingClientRect();
+      // A video's element is only its transport strip, pinned to the bottom
+      // of the picture — anchoring to that put the tooltip in the middle of
+      // the video, over the very thing it labels. Media anchors to the box
+      // the shape actually occupies instead.
+      if (this._isMediaKind(shape.kind)) {
+        var mBox = this._shapeBBoxImagePx(shape);
+        if (mBox) {
+          var mTL = this._imageToContainer({ x: mBox.x, y: mBox.y });
+          var mBR = this._imageToContainer({
+            x: mBox.x + mBox.w, y: mBox.y + mBox.h
+          });
+          shapeRect = {
+            left: containerRect.left + Math.min(mTL.x, mBR.x),
+            top: containerRect.top + Math.min(mTL.y, mBR.y),
+            width: Math.abs(mBR.x - mTL.x),
+            height: Math.abs(mBR.y - mTL.y)
+          };
+          shapeRect.bottom = shapeRect.top + shapeRect.height;
+        }
+      }
       var sx = this.handle.container.scrollLeft || 0;
       var sy = this.handle.container.scrollTop  || 0;
       var x = shapeRect.left + shapeRect.width / 2 - containerRect.left + sx;

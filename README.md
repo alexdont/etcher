@@ -361,7 +361,13 @@ will never do anything. `etcher:media-unsupported` fires with the name and
 type.
 
 Files can be dragged onto the canvas as well as pasted or picked, and land
-where they were dropped.
+where they were dropped. A dropped file appears immediately as a greyed-out
+placeholder and fills in when the upload completes; it isn't persisted or
+broadcast until it has a source, and a failed upload removes it.
+
+A video shows its controls only while the pointer is on it or it's selected —
+otherwise there is just the picture. The transport shows current and total
+time, and hovering the scrub bar previews the moment you'd seek to.
 
 Audio and video need a host uploader (`setImageUploader`, which handles every
 kind). Unlike images there is no embed fallback: base64'd audio would put

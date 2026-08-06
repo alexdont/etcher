@@ -187,6 +187,12 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   exists to keep a deliberately small card usable, and once the board is
   zoomed out it wins every comparison and the card stops shrinking.
 
+  An audio or video card is now a single rigid design: every length in it —
+  padding, corner radius, play disc, scrub bar, text — is a fixed proportion
+  of the card, so at any size it is the same card scaled. It had been drawn
+  with corners squared off and its scrub bar reduced to a hairline, because
+  those clamps were held in screen pixels while the card around them grew.
+
   Connectors anchor their weight to the zoom they were drawn at, the way
   every other line already anchors its width — a board fitted to its contents
   sits nowhere near 1:1, so reading "2px" literally would draw them far finer

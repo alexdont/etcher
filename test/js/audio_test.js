@@ -213,4 +213,86 @@ assert.ok(withDoc("", () => canPlayFile("audio", {})));
   } finally { global.document = real; }
 }
 
+// ── the card is one rigid design ────────────────────────────────────────────
+
+// `_layoutAudioCard` is nearly all DOM writes, so rather than lift it this
+// reads its source and enforces the single rule that keeps it coherent: every
+// length in it is relative to `cardK`, the size the card is being drawn at
+// compared with the size it was designed at.
+//
+// That rule is worth guarding because breaking it is invisible in code review
+// and obvious on screen. A bare `Math.min(14, …)` corner radius looks
+// perfectly reasonable, and it squares off the corners of any card drawn
+// bigger than its design size while thinning the scrub bar to a hairline.
+// Both of those shipped. The numbers themselves are fine — they are what the
+// card looks like at `AUDIO_CARD_H` — they just have to scale.
+{
+  const start = src.indexOf("    _layoutAudioCard: function(shape, box) {");
+  assert.notStrictEqual(start, -1, "could not find _layoutAudioCard");
+  const end = src.indexOf("\n    },", start);
+  const body = src.slice(start, end);
+
+  // Numbers that are NOT lengths: fractions of a range, and a character
+  // count. Anything else clamped to a bare number is a length.
+  const notLengths = new Set(["0", "1"]);
+
+  const offenders = [];
+  const clamp = /Math\.(?:max|min)\(\s*(\d+(?:\.\d+)?)\s*([,)])/g;
+  let m;
+  while ((m = clamp.exec(body)) !== null) {
+    const num = m[1];
+    if (notLengths.has(num)) continue;
+    // `Math.max(3, Math.floor(avail / (fs * 0.55)))` counts characters.
+    const line = body.slice(body.lastIndexOf("\n", m.index) + 1,
+                            body.indexOf("\n", m.index));
+    if (line.includes("maxChars")) continue;
+    const after = body.slice(m.index + m[0].length - 1, m.index + m[0].length + 12);
+    if (!/^\s*\*\s*cardK/.test(after)) {
+      offenders.push(line.trim());
+    }
+  }
+
+  assert.deepStrictEqual(offenders, [],
+    "every length clamped in the audio card must be scaled by `cardK`, or the " +
+    "card stops being a single design and comes apart at sizes other than its " +
+    "own. Offending line(s) above.");
+}
+
+// And the arithmetic itself: at the design size the constants mean literally
+// what they say, and at any other size the whole card is that same design
+// scaled — nothing creeps toward a fixed on-screen size.
+{
+  const AUDIO_CARD_H = 88;
+  const metrics = (h, w) => {
+    const k = h / AUDIO_CARD_H;
+    const pad = Math.max(6 * k, Math.min(14 * k, h * 0.16));
+    return {
+      pad,
+      radius: Math.max(4 * k, Math.min(14 * k, h * 0.18)),
+      disc: Math.max(7 * k, Math.min((h - pad * 2) / 2, h * 0.28,
+                                     (w - pad * 2) / 2, w * 0.18)),
+      barH: Math.max(3 * k, Math.min(6 * k, h * 0.07)),
+      titleFs: Math.max(9 * k, Math.min(15 * k, h * 0.19))
+    };
+  };
+
+  // At design size, the original numbers.
+  const at1 = metrics(88, 360);
+  assert.ok(Math.abs(at1.pad - 14) < 1e-9, "pad at design size");
+  assert.ok(Math.abs(at1.radius - 14) < 1e-9, "corner radius at design size");
+  assert.ok(Math.abs(at1.barH - 6) < 1e-9, "bar height at design size");
+  assert.ok(Math.abs(at1.titleFs - 15) < 1e-9, "title size at design size");
+
+  // At any other size, exactly that design scaled — this is what "square
+  // corners on a big card" failed, and it fails for every factor, not just
+  // the extremes.
+  for (const f of [0.25, 0.5, 2, 2.744, 5, 20]) {
+    const at = metrics(88 * f, 360 * f);
+    for (const key of Object.keys(at1)) {
+      assert.ok(Math.abs(at[key] / f - at1[key]) < 1e-9,
+        `${key} at ${f}x should be ${f}x its design value, got ${at[key]}`);
+    }
+  }
+}
+
 console.log("audio: all checks passed");

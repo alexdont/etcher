@@ -6782,15 +6782,23 @@
       el.classList.toggle("is-chrome-hidden", !visible);
       if (!visible) return;
 
-      // Every bare number in this layout is an on-screen length chosen at
-      // 1:1, so each is taken at the current zoom. The clamps especially:
-      // their job is to keep a deliberately small card usable, not to stop
-      // the card shrinking when the whole board does. Unscaled, the floors
-      // won every comparison on a zoomed-out board and the transport stopped
-      // shrinking — which is how a play disc came to bulge out of the pill
-      // it sits in.
-      var zpad = this._zoomPx(6), zpadMax = this._zoomPx(14);
-      var pad = Math.max(zpad, Math.min(zpadMax, box.h * 0.16));
+      // How big this card is being drawn compared with the size it was
+      // designed at. Every bare number below — paddings, the corner radius,
+      // the bar heights — was chosen for a card `AUDIO_CARD_H` tall on
+      // screen, which is exactly the size `_insertMediaHref` gives a new one.
+      // Multiplying by this makes the card a rigid piece of design that
+      // scales as a single object: at its design size the numbers mean
+      // literally what they say, and at any other size everything grows and
+      // shrinks together.
+      //
+      // The zoom does not appear here at all, and that is the point. `box.h`
+      // already carries it. Reading these as px-at-1:1 (which is what
+      // `_zoomPx` gives) is the same mistake the connectors made: a board is
+      // rarely at 1:1, so the caps collapsed — a 14px corner radius became
+      // under 3px on a card 176px tall, squaring off the corners, and the
+      // scrub bar thinned to a hairline.
+      var cardK = box.h / AUDIO_CARD_H;
+      var pad = Math.max(6 * cardK, Math.min(14 * cardK, box.h * 0.16));
       // NOT scaled, unlike everything else here. This is a legibility
       // threshold, not a size: below it there is no room on screen for a
       // title and a timecode, whatever the card measures in canvas units.
@@ -6802,7 +6810,7 @@
       // grows around it — but bounded by the SHORTER side, not the height.
       // Height alone meant a card resized tall and narrow grew a disc wider
       // than the card it sits in.
-      var r = Math.max(this._zoomPx(7), Math.min(
+      var r = Math.max(7 * cardK, Math.min(
         (box.h - pad * 2) / 2, box.h * 0.28,
         (box.w - pad * 2) / 2, box.w * 0.18
       ));
@@ -6813,7 +6821,7 @@
       bg.setAttribute("y", box.y);
       bg.setAttribute("width", box.w);
       bg.setAttribute("height", box.h);
-      var radius = Math.max(this._zoomPx(4), Math.min(this._zoomPx(14), box.h * 0.18));
+      var radius = Math.max(4 * cardK, Math.min(14 * cardK, box.h * 0.18));
       bg.setAttribute("rx", radius);
       bg.setAttribute("ry", radius);
 
@@ -6857,7 +6865,7 @@
         // No transport while there is nothing to drive — a disabled player
         // reads as a broken one. The name, a progress bar, and a percentage,
         // centred so it holds at any card size.
-        var ufs = Math.max(this._zoomPx(10), Math.min(this._zoomPx(16), box.h * 0.09));
+        var ufs = Math.max(10 * cardK, Math.min(16 * cardK, box.h * 0.09));
         var mid = box.x + box.w / 2;
         var prog = shape._uploadProgress;
         titleEl.removeAttribute("visibility");
@@ -6877,8 +6885,8 @@
 
         // The bar itself, reusing the scrub track and fill so there is one
         // place that knows how a bar is drawn.
-        var pw = Math.min(box.w * 0.6, this._zoomPx(260));
-        var ph = Math.max(this._zoomPx(3), Math.min(this._zoomPx(6), box.h * 0.03));
+        var pw = Math.min(box.w * 0.6, 260 * cardK);
+        var ph = Math.max(3 * cardK, Math.min(6 * cardK, box.h * 0.03));
         var px = mid - pw / 2;
         var py = box.y + box.h / 2 - ph / 2;
         track.setAttribute("x", px);
@@ -6906,7 +6914,7 @@
         titleEl.setAttribute("text-anchor", "start");
         titleEl.setAttribute("visibility", "hidden");
         timeEl.removeAttribute("visibility");
-        var vfs = Math.max(9, Math.min(14, box.h * 0.30));
+        var vfs = Math.max(9 * cardK, Math.min(14 * cardK, box.h * 0.30));
         timeEl.setAttribute("x", textRight);
         timeEl.setAttribute("y", cy);
         timeEl.setAttribute("font-size", vfs);
@@ -6916,7 +6924,7 @@
         timeEl.setAttribute("text-anchor", "end");
         titleEl.removeAttribute("visibility");
         timeEl.removeAttribute("visibility");
-        var fs = Math.max(9, Math.min(15, box.h * 0.19));
+        var fs = Math.max(9 * cardK, Math.min(15 * cardK, box.h * 0.19));
         var rowY = box.y + box.h * 0.36;
         titleEl.setAttribute("x", textLeft);
         titleEl.setAttribute("y", rowY);
@@ -6936,11 +6944,11 @@
       }
 
       var barY = (compact || inlineTime) ? cy - 2 : box.y + box.h * 0.68;
-      var barH = Math.max(this._zoomPx(3), Math.min(this._zoomPx(6), box.h * 0.07));
+      var barH = Math.max(3 * cardK, Math.min(6 * cardK, box.h * 0.07));
       var barX = textLeft;
       // Room for the timecode when it shares the row.
       var timeGap = inlineTime
-        ? Math.max(46, (timeEl.textContent || "").length * Math.max(9, Math.min(14, box.h * 0.30)) * 0.62)
+        ? Math.max(46 * cardK, (timeEl.textContent || "").length * Math.max(9 * cardK, Math.min(14 * cardK, box.h * 0.30)) * 0.62)
         : 0;
       var barW = Math.max(0, textRight - barX - timeGap);
       track.setAttribute("x", barX);
@@ -6957,7 +6965,7 @@
       fill.setAttribute("rx", barH / 2);
 
       // Generous invisible scrub target over the bar — see `_makeAudioEl`.
-      var scrubH = Math.max(barH, Math.min(22, box.h * 0.34));
+      var scrubH = Math.max(barH, Math.min(22 * cardK, box.h * 0.34));
       scrub.setAttribute("x", barX);
       scrub.setAttribute("y", barY + barH / 2 - scrubH / 2);
       scrub.setAttribute("width", barW);
@@ -6995,9 +7003,13 @@
     // height. Proportional so it scales with the picture under zoom, clamped
     // so it stays usable on a small one and doesn't dominate a large one.
     _videoBarH: function(videoH) {
-      return Math.max(
-        this._zoomPx(26), Math.min(this._zoomPx(48), videoH * 0.22)
-      );
+      // Referenced to the video's own design size for the same reason the
+      // card's constants are: `_insertMediaHref` gives a new video a box
+      // VIDEO_BOX_H tall on screen, so that is the size these numbers were
+      // picked at. The strip is then a fixed fraction of the picture at
+      // every size, which is what "scales with the canvas" means here.
+      var k = videoH / VIDEO_BOX_H;
+      return Math.max(26 * k, Math.min(48 * k, videoH * 0.22));
     },
 
     // Stop and discard a shape's media element.
@@ -8393,7 +8405,12 @@
           }
           if (coText) {
             var calloutText = (shape.metadata && shape.metadata.title) || "";
-            var coPad = self._zoomPx(4);
+            // A fraction of the box rather than a fixed screen length: the font is
+            // already `height * 0.65`, so a proportional pad keeps the label
+            // self-similar at every size. A px-at-1:1 pad would crowd the text
+            // against the edge on a zoomed-out board and balloon on a zoomed-in
+            // one. 0.13 reproduces the original 4px at a typical label height.
+            var coPad = bh * 0.13;
             var coFontFamily = "ui-sans-serif, system-ui, -apple-system, sans-serif";
             var coFontWeight = "500";
             var coFontSizeByHeight = Math.max(self._zoomPx(10), bh * 0.65);
@@ -8543,7 +8560,12 @@
           }
           if (ttext) {
             var titleText = (shape.metadata && shape.metadata.title) || "";
-            var pad = self._zoomPx(4);
+            // A fraction of the box rather than a fixed screen length: the font is
+            // already `height * 0.65`, so a proportional pad keeps the label
+            // self-similar at every size. A px-at-1:1 pad would crowd the text
+            // against the edge on a zoomed-out board and balloon on a zoomed-in
+            // one. 0.13 reproduces the original 4px at a typical label height.
+            var pad = th * 0.13;
             var fontSize = Math.max(self._zoomPx(10), th * 0.65);
             ttext.setAttribute("x", tx + pad);
             ttext.setAttribute("y", ty + pad);
@@ -8848,7 +8870,8 @@
         rectEl.setAttribute("height", th);
       }
       if (textEl) {
-        var pad = this._zoomPx(4);
+        // Proportional to the box, as in the text and callout renders.
+        var pad = th * 0.13;
         var fontFamily = "ui-sans-serif, system-ui, -apple-system, sans-serif";
         var fontWeight = "500";
         var fontSizeByHeight = Math.max(this._zoomPx(10), th * 0.65);

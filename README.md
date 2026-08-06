@@ -365,6 +365,10 @@ where they were dropped. A dropped file appears immediately as a greyed-out
 placeholder with a progress bar, and fills in when the upload completes; it isn't persisted or
 broadcast until it has a source, and a failed upload removes it.
 
+Both kinds move and resize by their corners like any other shape. A video
+keeps its proportions (hold Shift to stretch); an audio card resizes freely,
+since it's a control rather than a picture.
+
 A video shows its controls only while the pointer is on it or it's selected —
 otherwise there is just the picture. The transport shows current and total
 time, and hovering the scrub bar previews the moment you'd seek to.

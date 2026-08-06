@@ -6728,10 +6728,15 @@
 
       var pad = Math.max(6, Math.min(14, box.h * 0.16));
       var compact = box.h < AUDIO_COMPACT_H;
-      // The disc is sized off the card's height so the whole thing scales as
-      // one object under zoom, instead of a fixed-size button on a card that
-      // grows around it.
-      var r = Math.max(7, Math.min((box.h - pad * 2) / 2, box.h * 0.28));
+      // The disc is sized off the card so the whole thing scales as one
+      // object under zoom, rather than a fixed-size button on a card that
+      // grows around it — but bounded by the SHORTER side, not the height.
+      // Height alone meant a card resized tall and narrow grew a disc wider
+      // than the card it sits in.
+      var r = Math.max(7, Math.min(
+        (box.h - pad * 2) / 2, box.h * 0.28,
+        (box.w - pad * 2) / 2, box.w * 0.18
+      ));
       var cx = box.x + pad + r;
       var cy = box.y + box.h / 2;
 
@@ -15499,6 +15504,63 @@
             else                { inx = iright - inw; iny = ig.y;          }
           }
           shape.geometry = { x: inx, y: iny, w: inw, h: inh, href: startGeom.href };
+          break;
+        }
+        case "audio":
+        case "video": {
+          var mg = startGeom;
+          var mright = mg.x + mg.w, mbottom = mg.y + mg.h;
+          var mx, my, mw, mh;
+          switch (idx) {
+            case 0: mx = pt.x; my = pt.y; mw = mright - pt.x; mh = mbottom - pt.y; break;
+            case 1: mx = mg.x; my = pt.y; mw = pt.x - mg.x;   mh = mbottom - pt.y; break;
+            case 2: mx = mg.x; my = mg.y; mw = pt.x - mg.x;   mh = pt.y - mg.y;    break;
+            case 3: mx = pt.x; my = mg.y; mw = mright - pt.x; mh = pt.y - mg.y;    break;
+            default: return;
+          }
+          if (mw < 0) { mx += mw; mw = -mw; }
+          if (mh < 0) { my += mh; mh = -mh; }
+
+          // Video holds its proportions the way an image does — a stretched
+          // picture reads as a mistake — with Shift to stretch anyway. Audio
+          // does NOT: it's a control, not a picture, and making the card
+          // wider without making it taller is a reasonable thing to want.
+          if (shape.kind === "video" && !freeform && mg.w > 0 && mg.h > 0) {
+            // Whichever axis was pulled further wins, so a mostly-sideways
+            // drag scales by width and a mostly-downward one by height.
+            var mscale = Math.max(mw / mg.w, mh / mg.h);
+            mw = Math.max(1, mg.w * mscale);
+            mh = Math.max(1, mg.h * mscale);
+            // The corner opposite the handle stays put, or fitting the
+            // aspect walks the whole shape across the canvas.
+            if (idx === 0)      { mx = mright - mw; my = mbottom - mh; }
+            else if (idx === 1) { mx = mg.x;        my = mbottom - mh; }
+            else if (idx === 2) { mx = mg.x;        my = mg.y;         }
+            else                { mx = mright - mw; my = mg.y;         }
+          }
+
+          // A floor in IMAGE px, scaled by zoom, so a card can't be dragged
+          // down to something too small to grab a handle on and therefore
+          // impossible to undo by dragging.
+          var floorPx = 24;
+          try { floorPx = 24 / (this._markerScale() || 1); } catch (_) {}
+          if (mw < floorPx) {
+            if (idx === 0 || idx === 3) mx = mright - floorPx;
+            mw = floorPx;
+          }
+          if (mh < floorPx) {
+            if (idx === 0 || idx === 1) my = mbottom - floorPx;
+            mh = floorPx;
+          }
+
+          // Everything the card renders from lives in geometry, so rebuild
+          // it explicitly — the same trap `_translateGeometry` has, where a
+          // resize that returned only the box would strip the file, its name
+          // and its duration.
+          shape.geometry = {
+            x: mx, y: my, w: mw, h: mh,
+            href: mg.href, title: mg.title, duration: mg.duration
+          };
           break;
         }
         case "rectangle":

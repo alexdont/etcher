@@ -45,6 +45,11 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   or reaches a peer that they couldn't play, and a failed upload takes it
   away again rather than stranding a dead card.
 
+  Both kinds resize by their corners. A video holds its proportions the way
+  an image does, with Shift to stretch; an audio card doesn't, because it's a
+  control rather than a picture and making it wider without making it taller
+  is a reasonable thing to want.
+
   A video shows its controls only while pointed at (or selected) — the
   picture is the point of it, and a bar welded across the bottom permanently
   covers what you came to look at. The transport carries the current and

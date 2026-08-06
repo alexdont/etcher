@@ -183,6 +183,11 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   magnetic to the dimension: centred on the line, and dragging it slides it
   along rather than pulling it off.
 
+- **Text breaks the same way at every zoom.** A label that sat on one line
+  zoomed in broke onto two zoomed out, on the same board, from the same text.
+  Where a line breaks is a property of the label, not of how closely it is
+  being looked at.
+
 - **A label can be styled while it's focused.** Selecting a label and then
   reaching for the palette — the obvious way to recolour one — did nothing at
   all. Clicking a label puts you in label-edit mode, and from there the style

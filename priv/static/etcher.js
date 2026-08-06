@@ -1224,6 +1224,11 @@
   // Every label can still be given a colour of its own.
   var DIMENSION_LABEL_COLOR = "#000000";
 
+  // The size every text measurement is taken at, whatever size the text will
+  // be drawn at. Text metrics are not linear in font size, so measuring at
+  // the rendered size makes line breaks and font-fitting depend on the zoom.
+  var TEXT_MEASURE_FONT_PX = 100;
+
   var ESSENTIAL_TOOLS = [
     "grabber", "freehand", "eraser", "line", "text", "callout", "image"
   ];
@@ -8465,14 +8470,9 @@
             // exponentially per interaction. Capping the font-size so
             // the text fits the box width on a single line bounds
             // `coActualH` to one line of text and breaks the cycle.
-            if (!self._measureCanvas) {
-              self._measureCanvas = document.createElement("canvas");
-            }
-            var coCtx = self._measureCanvas.getContext("2d");
-            coCtx.font = coFontWeight + " " + coFontSizeByHeight + "px " + coFontFamily;
-            var coWidthAtHeightFont;
-            try { coWidthAtHeightFont = coCtx.measureText(calloutText).width; }
-            catch (_) { coWidthAtHeightFont = calloutText.length * coFontSizeByHeight * 0.55; }
+            var coWidthAtHeightFont = self._measureTextWidth(
+              calloutText, coFontSizeByHeight, coFontFamily, coFontWeight
+            );
             var coAvailWidth = Math.max(1, bw - coPad * 2);
             var coFontSize = coFontSizeByHeight;
             if (coWidthAtHeightFont > coAvailWidth) {
@@ -8920,14 +8920,9 @@
         // larger font, more lines wrap, and the title grows
         // exponentially per interaction. With the cap, font-size is
         // bounded by both axes and the system has a fixed point.
-        if (!this._measureCanvas) {
-          this._measureCanvas = document.createElement("canvas");
-        }
-        var ctx = this._measureCanvas.getContext("2d");
-        ctx.font = fontWeight + " " + fontSizeByHeight + "px " + fontFamily;
-        var widthAtHeightFont;
-        try { widthAtHeightFont = ctx.measureText(trimmed).width; }
-        catch (_) { widthAtHeightFont = trimmed.length * fontSizeByHeight * 0.55; }
+        var widthAtHeightFont = this._measureTextWidth(
+          trimmed, fontSizeByHeight, fontFamily, fontWeight
+        );
         var availWidth = Math.max(1, tw - pad * 2);
         var fontSize = fontSizeByHeight;
         if (widthAtHeightFont > availWidth) {
@@ -9699,6 +9694,33 @@
     // `getComputedTextLength` — canvas runs synchronously and doesn't
     // depend on the SVG element having been laid out yet, so the
     // shrink path is reliable on first render.
+    // How wide `text` renders at `fontSize`.
+    //
+    // Measured at a FIXED reference size and scaled, never at the size it
+    // will actually be drawn at. Text metrics are not linear in font size —
+    // hinting and rounding make small text proportionally wider, and browsers
+    // clamp very small sizes outright — so measuring at the rendered size
+    // makes the answer depend on the zoom.
+    //
+    // Everything that reads a text width decides something the zoom must not
+    // change: where the line breaks, and how far the font is shrunk to fit
+    // its box. A label that fits on one line zoomed in was breaking onto two
+    // zoomed out, on the same board, from the same text.
+    _measureTextWidth: function(text, fontSize, fontFamily, fontWeight) {
+      var s = String(text == null ? "" : text);
+      if (!s) return 0;
+      if (!this._measureCanvas) {
+        this._measureCanvas = document.createElement("canvas");
+      }
+      var ctx = this._measureCanvas.getContext("2d");
+      ctx.font = (fontWeight || "500") + " " + TEXT_MEASURE_FONT_PX + "px " +
+        (fontFamily || "ui-sans-serif, system-ui, -apple-system, sans-serif");
+      var w;
+      try { w = ctx.measureText(s).width; }
+      catch (_) { w = s.length * TEXT_MEASURE_FONT_PX * 0.55; }
+      return w * (fontSize / TEXT_MEASURE_FONT_PX);
+    },
+
     _fillTextWithWrappedTspans: function(textEl, content, maxWidth, fontSize) {
       while (textEl.firstChild) textEl.removeChild(textEl.firstChild);
       if (!content) return { width: 0, height: 0 };
@@ -9710,14 +9732,9 @@
         "ui-sans-serif, system-ui, -apple-system, sans-serif";
       var fontWeight = textEl.getAttribute("font-weight") || "500";
 
-      if (!this._measureCanvas) {
-        this._measureCanvas = document.createElement("canvas");
-      }
-      var ctx = this._measureCanvas.getContext("2d");
-      ctx.font = fontWeight + " " + fontSize + "px " + fontFamily;
-
+      var self = this;
       function measure(s) {
-        try { return ctx.measureText(s).width; } catch (_) { return s.length * fontSize * 0.55; }
+        return self._measureTextWidth(s, fontSize, fontFamily, fontWeight);
       }
 
       var lines = [];

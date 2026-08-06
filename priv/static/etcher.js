@@ -10044,6 +10044,22 @@
             e.target.classList.contains("etcher-connector-hit")) {
           return;
         }
+        // A button is down, so this move is part of a gesture — dragging a
+        // label along its line, moving a shape, pulling a handle, sweeping a
+        // box-select, panning. Whatever it is, the shapes the pointer travels
+        // over on the way are not being pointed AT, and lighting each one up
+        // as it passes puts hover outlines and connector dots on top of the
+        // thing actually being dragged.
+        //
+        // Read off the buttons rather than off a flag each gesture has to
+        // remember to set and clear: there are a dozen places a drag can
+        // begin, and any one of them forgetting would be a bug nobody
+        // notices until it looks like this. Hover resumes on the first move
+        // after release, when `buttons` is 0 again.
+        if (e.buttons) {
+          if (self._hoveredShape) self._setHoveredShape(null, false);
+          return;
+        }
         // Grabber (hand) tool: pan only — never hover or highlight shapes.
         if (self.activeTool === "grabber") {
           if (self._hoveredShape) self._setHoveredShape(null, false);

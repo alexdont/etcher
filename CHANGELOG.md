@@ -175,6 +175,12 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Shapes no longer light up under a drag.** Dragging a dimension's label
+  along its line, or moving anything across the board, lit up every shape the
+  pointer crossed on the way — a hover outline and connector dots on each,
+  drawn over the thing actually being dragged. Hover now waits until the
+  button is released.
+
 - **Connectors, play buttons and labels scale with the board.** Zooming out
   shrank the shapes but not the things drawn on and between them: arrows
   between blocks kept their weight and their arrowheads, a play button

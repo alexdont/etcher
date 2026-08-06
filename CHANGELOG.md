@@ -175,6 +175,20 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **Stroke widths scale with the canvas.** A line was a fixed on-screen
+  thickness at every zoom, so zooming out left every outline sitting on top of
+  the shape it outlined — a 2px line around a 50px box reads very differently
+  from a 2px line around a 500px one. Widths are now stored in canvas units
+  like a marker's already were, so a line keeps the weight it was drawn with
+  relative to the drawing.
+
+  Widths saved before this are on-screen values authored at a zoom nobody
+  recorded, so they're anchored to the zoom they're first painted at: the
+  shape looks exactly as it did, and scales from there. Reading a stored `2`
+  as 2 canvas units instead would render it at a fifth of a pixel on a
+  zoomed-out board. The conversion is marked on the style, so it happens once
+  and travels to peers on the next edit rather than being redone forever.
+
 - **The marker draws a better line.** Three changes, none of which alter what
   a stroke stores:
 

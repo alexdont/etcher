@@ -4346,6 +4346,41 @@
     // The line params a new stroke shape adopts: the active color plus the
     // current global thickness / opacity / dash (on-screen px, like the slot
     // shapes have always used).
+    // A width saved before widths were in canvas units is an on-screen px
+    // value authored at a zoom nobody recorded. Anchoring it to the zoom it
+    // is first painted at makes it look exactly as it did, and scale from
+    // there like everything else — the alternative, reading a stored `2` as
+    // 2 canvas px, renders it at a fifth of a pixel on a zoomed-out board.
+    //
+    // Marked on the style so it happens once, and rides out to peers on the
+    // next edit rather than being redone by every client forever.
+    _anchorLegacyWidth: function(shape) {
+      var s = shape && shape.style;
+      if (!s || s.width_units === "canvas") return;
+      var scale = 0;
+      try { scale = this._markerScale() || 0; } catch (_) {}
+      if (!(scale > 0)) return;
+      shape.style = Object.assign({}, s, {
+        width: (s.width || 2) / scale,
+        width_units: "canvas"
+      });
+    },
+
+    // What a newly drawn stroke shape stores. The slider is in on-screen px;
+    // the shape keeps canvas units so the line holds its weight relative to
+    // the drawing — the same conversion `_currentMarkerStyle` does, for the
+    // same reason.
+    _lineParamsForNewShape: function() {
+      var lp = this._currentLineParams();
+      var scale = 0;
+      try { scale = this._markerScale() || 0; } catch (_) {}
+      if (!(scale > 0)) return lp;
+      return Object.assign({}, lp, {
+        width: (lp.width || 2) / scale,
+        width_units: "canvas"
+      });
+    },
+
     _currentLineParams: function() {
       var lp = this.lineParams || {};
       return {
@@ -4360,10 +4395,24 @@
     // Paint thickness / opacity / dash onto a stroke shape's element. Width is
     // an inline style (so the hover/select stroke-width:3 rules don't override
     // and visibly re-thin the line); dash is a presentation attribute.
-    _applyLineParams: function(el, style) {
+    // Stroke widths live in CANVAS units, like a marker's, so a line keeps
+    // the weight it was drawn with relative to the drawing: zoom out and it
+    // thins with everything else instead of sitting on top at a fixed
+    // on-screen thickness, which at low zoom made every outline dominate the
+    // shape it outlined.
+    //
+    // `scale` is container px per canvas px. Omitted (a draft being styled
+    // before it is placed) means "draw it at face value".
+    _applyLineParams: function(el, style, scale) {
       if (!el) return;
       var s = style || {};
       var w = s.width || 2;
+      if (typeof scale === "number" && scale > 0 && s.width_units === "canvas") {
+        // Floored, or a line becomes sub-pixel and disappears entirely at
+        // extreme zoom-out — a shape you can no longer see is worse than one
+        // drawn slightly heavier than the maths says.
+        w = Math.max(0.4, w * scale);
+      }
       el.style.strokeWidth = w + "px";
       el.removeAttribute("stroke-width");
       el.style.strokeOpacity = String(s.opacity == null ? 1 : s.opacity);
@@ -4759,14 +4808,16 @@
         }
         shapes.forEach(function(shape) {
           shape.style = Object.assign({}, shape.style || {});
-          // Slider thickness is on-screen px; a marker stores it in image px.
-          if (prop === "width" && shape.kind === "marker") {
+          // Slider thickness is on-screen px; shapes store canvas units.
+          if (prop === "width" &&
+              (shape.kind === "marker" || self._isStrokeShape(shape.kind))) {
             shape.style.width = value / self._markerScale();
+            if (shape.kind !== "marker") shape.style.width_units = "canvas";
           } else {
             shape.style[prop] = value;
           }
           if (shape.kind === "marker") self._renderShape(shape);
-          else self._applyLineParams(shape.el, shape.style);
+          else self._applyLineParams(shape.el, shape.style, self._markerScale());
         });
       } else {
         this.lineParams = this.lineParams || {};
@@ -8552,6 +8603,15 @@
         // anchor without recomputing the parent's bbox.
         shape.bboxTopImage = bboxTopImage;
         self._renderTitleSibling(shape, bboxTopImage);
+      }
+
+      // Stroke width tracks zoom, so it has to be re-applied every render the
+      // way a marker's is — `_renderShape` runs on every pan/zoom frame,
+      // whereas `_applyLineParams` otherwise only runs when the style itself
+      // changes.
+      if (self._isStrokeShape(shape.kind) && shape.style) {
+        self._anchorLegacyWidth(shape);
+        self._applyLineParams(el, shape.style, self._markerScale());
       }
 
       // Connector dots are positioned in container px, so they have to be
@@ -13528,7 +13588,7 @@
       // opacity / dash); every other kind just carries its color.
       var style;
       if (kind === "marker") style = this._currentMarkerStyle();
-      else if (this._isStrokeShape(kind)) style = this._currentLineParams();
+      else if (this._isStrokeShape(kind)) style = this._lineParamsForNewShape();
       else style = this.activeColor ? { color: this.activeColor } : null;
       var shape = {
         uuid: uuid,
@@ -13558,7 +13618,7 @@
       }
       this.shapes.push(shape);
       this._renderShape(shape);
-      if (this._isStrokeShape(kind)) this._applyLineParams(el, style);
+      if (this._isStrokeShape(kind)) this._applyLineParams(el, style, this._markerScale());
       this._attachShapeInteractions(shape);
       this._pushUndoCreate(shape);
 
@@ -13999,7 +14059,7 @@
       }
       // Restore persisted line params (thickness / opacity / dash) on stroke
       // shapes; older annotations without them fall back to the 2px default.
-      if (this._isStrokeShape(shape.kind)) this._applyLineParams(el, shape.style);
+      if (this._isStrokeShape(shape.kind)) this._applyLineParams(el, shape.style, this._markerScale());
       this._attachShapeInteractions(shape);
     },
 
@@ -15952,7 +16012,7 @@
       if (shape.kind !== "marker" && shape.style && shape.style.color) {
         this._applyShapeColor(shape.el, shape.style.color);
       }
-      if (this._isStrokeShape(shape.kind)) this._applyLineParams(shape.el, shape.style);
+      if (this._isStrokeShape(shape.kind)) this._applyLineParams(shape.el, shape.style, this._markerScale());
       if (this.editingShape === shape) {
         // Rebuild rather than reposition: an undo/redo can change the node
         // count or a node's smooth/corner type, which the handle elements

@@ -173,6 +173,23 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   view if neither side fits. Applies to all four (tools, colours, params,
   marker) in both canvas and strip mode.
 
+### Fixed
+
+- **The board no longer breaks when you rotate the canvas.** Rotating turned
+  each shape's *position* correctly but left the shape itself facing the way
+  it always had: pictures stayed upright inside sideways boxes, labels ran
+  across the drawing rather than along it, and media players kept their bar
+  welded to the screen's bottom edge instead of the picture's. Rotating now
+  gives you the same picture, turned.
+
+  Separately, every line on a rotated board rendered far too thick — around
+  fourteen times, at the zoom this was found at. The overlay works out how
+  much a canvas pixel is worth on screen by projecting a unit vector, and it
+  was reading only one axis of the result. At 90° and 270° that axis is zero,
+  and the guard behind it substituted a scale of 1, so stroke widths, hit
+  tolerances and default text boxes were all computed in raw canvas units.
+  The same probe had been copied into four places; there is now one.
+
 ### Changed
 
 - **Stroke widths scale with the canvas.** A line was a fixed on-screen

@@ -6179,6 +6179,8 @@
       ring.setAttribute("height", box.h);
       ring.setAttribute("rx", box.r);
       ring.setAttribute("ry", box.r);
+      // The ring traces the picture's edge, so it turns with it.
+      this._setRotateTransform(ring, box.box);
       if (hovered) ring.setAttribute("data-state", "hovered");
       else ring.removeAttribute("data-state");
     },
@@ -8044,6 +8046,81 @@
       return [x, y];
     },
 
+    // How far the canvas is currently turned, in degrees clockwise.
+    //
+    // The overlay is a child of fresco's container, but fresco rotates its
+    // *stage* — so the overlay never turns, and shapes only inherit rotation
+    // through `_imageToContainer` transforming their points. That's enough
+    // for anything drawn as a point list, and not enough for anything with
+    // an orientation of its own: a picture, a line of text, a video frame.
+    // Those have to be turned explicitly, which is what this feeds.
+    _canvasRotation: function() {
+      if (this.handleKind === "strip") return 0;
+      var h = this.handle;
+      if (!h || typeof h.getRotation !== "function") return 0;
+      var deg = h.getRotation();
+      return (typeof deg === "number" && isFinite(deg)) ? deg : 0;
+    },
+
+    // The container-px box to draw an image-space rect in, for content that
+    // has to turn with the board.
+    //
+    // Transforming two opposite corners gives the rect's *rotated* bounding
+    // box — at 90° that box has width and height swapped, which is why a
+    // rotated board still laid its pictures out correctly while every
+    // picture inside stayed upright. Here the box keeps the shape's own
+    // proportions (from the isometric scale) and is centred on the same
+    // point, so `rotate(deg, cx, cy)` lands it exactly where the bbox was
+    // with its content turned to match. At 0° the two agree, which keeps the
+    // unrotated case pixel-identical to what it was.
+    _orientedBox: function(g) {
+      // Coerced up front: a shape being created has a position before it has
+      // an extent, and `g.x + undefined` poisons the corner probe with NaN —
+      // which then reaches the DOM as an unparseable attribute rather than
+      // failing anywhere you could see it.
+      var gw = (typeof g.w === "number" && isFinite(g.w)) ? g.w : 0;
+      var gh = (typeof g.h === "number" && isFinite(g.h)) ? g.h : 0;
+      var tl = this._imageToContainer({ x: g.x, y: g.y });
+      var br = this._imageToContainer({ x: g.x + gw, y: g.y + gh });
+      var cx = (tl.x + br.x) / 2;
+      var cy = (tl.y + br.y) / 2;
+      var scale = this._markerScale();
+      var w = Math.abs(gw) * scale;
+      var h = Math.abs(gh) * scale;
+      return {
+        x: cx - w / 2, y: cy - h / 2, w: w, h: h,
+        cx: cx, cy: cy, deg: this._canvasRotation()
+      };
+    },
+
+    // Turn an SVG element about a container-px point. Removing the attribute
+    // at 0° rather than writing `rotate(0)` keeps unrotated markup identical
+    // to before — worth it because these run on every pan and zoom frame.
+    _setRotateTransform: function(el, box) {
+      if (!el) return;
+      if (!box || !box.deg) {
+        if (el.getAttribute("transform")) el.removeAttribute("transform");
+        return;
+      }
+      el.setAttribute(
+        "transform",
+        "rotate(" + box.deg + " " + box.cx + " " + box.cy + ")"
+      );
+    },
+
+    // Where a container-px point ends up once its element is turned by
+    // `_setRotateTransform`. Needed wherever something OUTSIDE the turned
+    // element has to meet it — a callout's leader is drawn in unturned
+    // container space but has to land on the corner of a label that is
+    // turning, so it needs the corner's post-rotation position.
+    _rotatePoint: function(pt, cx, cy, deg) {
+      if (!deg) return { x: pt.x, y: pt.y };
+      var r = deg * Math.PI / 180;
+      var c = Math.cos(r), s = Math.sin(r);
+      var dx = pt.x - cx, dy = pt.y - cy;
+      return { x: cx + dx * c - dy * s, y: cy + dx * s + dy * c };
+    },
+
     _imageToContainer: function(pt) {
       // Strip mode: each shape's SVG element lives inside a per-image
       // overlay whose `viewBox` is set to that image's natural pixel
@@ -8089,14 +8166,14 @@
           break;
         }
         case "image": {
-          var itl = self._imageToContainer({ x: g.x,         y: g.y });
-          var ibr = self._imageToContainer({ x: g.x + g.w,   y: g.y + g.h });
-          var iw = Math.abs(ibr.x - itl.x);
-          var ih = Math.abs(ibr.y - itl.y);
-          el.setAttribute("x", Math.min(itl.x, ibr.x));
-          el.setAttribute("y", Math.min(itl.y, ibr.y));
+          var ibox = self._orientedBox(g);
+          var iw = ibox.w;
+          var ih = ibox.h;
+          el.setAttribute("x", ibox.x);
+          el.setAttribute("y", ibox.y);
           el.setAttribute("width",  iw);
           el.setAttribute("height", ih);
+          self._setRotateTransform(el, ibox);
           // Rounded corners, sized from the box just computed. `inset()`
           // rather than an SVG <clipPath>, which would need a per-shape
           // <rect> kept in step with this box on every pan and zoom.
@@ -8116,17 +8193,18 @@
             el.setAttributeNS("http://www.w3.org/1999/xlink", "xlink:href", imgHref);
           }
           self._syncImageRing(shape, {
-            x: Math.min(itl.x, ibr.x), y: Math.min(itl.y, ibr.y),
-            w: iw, h: ih, r: self._imageRadius(iw, ih)
+            x: ibox.x, y: ibox.y, w: iw, h: ih,
+            r: self._imageRadius(iw, ih), box: ibox
           });
           bboxTopImage = { x: g.x + g.w / 2, y: g.y };
           break;
         }
         case "video": {
-          var viTL = self._imageToContainer({ x: g.x, y: g.y });
-          var viBR = self._imageToContainer({ x: g.x + g.w, y: g.y + g.h });
-          var vx = Math.min(viTL.x, viBR.x), vy = Math.min(viTL.y, viBR.y);
-          var vw = Math.abs(viBR.x - viTL.x), vh = Math.abs(viBR.y - viTL.y);
+          var vbox = self._orientedBox(g);
+          var vx = vbox.x, vy = vbox.y, vw = vbox.w, vh = vbox.h;
+          // The transport is a child of this <g>; turning it puts the bar
+          // back along the bottom edge of the picture as the board sees it.
+          self._setRotateTransform(el, vbox);
           var vEl = self._audioElFor(shape);
           if (vEl) {
             vEl.style.left = vx + "px";
@@ -8134,6 +8212,11 @@
             vEl.style.width = vw + "px";
             vEl.style.height = vh + "px";
             vEl.style.borderRadius = self._imageRadius(vw, vh) + "px";
+            // The frames live in a plain DOM layer rather than the SVG, so
+            // they turn via CSS. Origin is the box centre — the same pivot
+            // the SVG transform uses — so picture and transport stay welded.
+            vEl.style.transformOrigin = "50% 50%";
+            vEl.style.transform = vbox.deg ? "rotate(" + vbox.deg + "deg)" : "";
           }
           // While uploading there is no picture behind the transport, so the
           // card fills the whole box and says so. A lone strip floating over
@@ -8160,11 +8243,13 @@
           break;
         }
         case "audio": {
-          var auTL = self._imageToContainer({ x: g.x, y: g.y });
-          var auBR = self._imageToContainer({ x: g.x + g.w, y: g.y + g.h });
+          // Every part of the transport is a child of this <g>, so one turn
+          // carries the whole card — disc, title, timecode and scrub bar
+          // keep their arrangement instead of being re-laid-out sideways.
+          var abox = self._orientedBox(g);
+          self._setRotateTransform(el, abox);
           self._layoutAudioCard(shape, {
-            x: Math.min(auTL.x, auBR.x), y: Math.min(auTL.y, auBR.y),
-            w: Math.abs(auBR.x - auTL.x), h: Math.abs(auBR.y - auTL.y)
+            x: abox.x, y: abox.y, w: abox.w, h: abox.h
           });
           bboxTopImage = { x: g.x + g.w / 2, y: g.y };
           break;
@@ -8279,12 +8364,8 @@
           // Tolerate the legacy `text_at` point shape — derive a
           // default bbox at the legacy point so existing rows render.
           var box = self._calloutTextBoxImage(g);
-          var bTL = self._imageToContainer({ x: box.x,           y: box.y           });
-          var bBR = self._imageToContainer({ x: box.x + box.w,   y: box.y + box.h   });
-          var bx = Math.min(bTL.x, bBR.x);
-          var by = Math.min(bTL.y, bBR.y);
-          var bw = Math.abs(bBR.x - bTL.x);
-          var bh = Math.abs(bBR.y - bTL.y);
+          var cobox = self._orientedBox(box);
+          var bx = cobox.x, by = cobox.y, bw = cobox.w, bh = cobox.h;
 
           if (coRect) {
             coRect.setAttribute("x", bx);
@@ -8381,17 +8462,37 @@
             coUnderline.setAttribute("y2", byBottom);
           }
 
+          // The label — box, text and underline — turns with the board, about
+          // its own centre. That centre is taken AFTER the shrink-wrap above
+          // resized the box, so the label pivots on what is actually drawn
+          // rather than on the storage envelope it started from.
+          var coTurn = {
+            deg: cobox.deg, cx: bx + bw / 2, cy: by + bh / 2
+          };
+          self._setRotateTransform(coRect, coTurn);
+          self._setRotateTransform(coText, coTurn);
+          self._setRotateTransform(coUnderline, coTurn);
+
           if (coLine) {
             // Leader attaches to whichever bottom corner sits closer
             // to the anchor. Blueprint-style: anchor on the left →
             // line meets the bottom-left vertex; on the right → meets
             // the bottom-right.
+            //
+            // The leader itself does NOT turn: its anchor end is already in
+            // the right place, and turning it would swing that end off the
+            // thing the callout points at. Instead the label end is moved to
+            // where the corner lands once the label turns, so the two still
+            // meet.
             var bottomMidX = bx + bw / 2;
             var attachX = anchor.x < bottomMidX ? bx : bxRight;
+            var attach = self._rotatePoint(
+              { x: attachX, y: byBottom }, coTurn.cx, coTurn.cy, coTurn.deg
+            );
             coLine.setAttribute("x1", anchor.x);
             coLine.setAttribute("y1", anchor.y);
-            coLine.setAttribute("x2", attachX);
-            coLine.setAttribute("y2", byBottom);
+            coLine.setAttribute("x2", attach.x);
+            coLine.setAttribute("y2", attach.y);
           }
           if (coDot) {
             coDot.setAttribute("cx", anchor.x);
@@ -8408,12 +8509,13 @@
           // the visible rect, not the storage envelope.
           var trect = el.querySelector(".etcher-text-rect");
           var ttext = el.querySelector(".etcher-text-content");
-          var ttl = self._imageToContainer({ x: g.x,         y: g.y });
-          var tbr = self._imageToContainer({ x: g.x + g.w,   y: g.y + g.h });
-          var tx = Math.min(ttl.x, tbr.x);
-          var ty = Math.min(ttl.y, tbr.y);
-          var tw = Math.abs(tbr.x - ttl.x);
-          var th = Math.abs(tbr.y - ttl.y);
+          // The whole <g> turns, so the rect and the text inside it are
+          // still laid out against an upright box and carried round
+          // together — a label stays readable relative to the board
+          // instead of running across it at 90°.
+          var tbox = self._orientedBox(g);
+          var tx = tbox.x, ty = tbox.y, tw = tbox.w, th = tbox.h;
+          self._setRotateTransform(el, tbox);
 
           if (trect) {
             trect.setAttribute("x", tx);
@@ -8693,16 +8795,19 @@
       }
 
       var titleBox = this._shapeTitleBoxImage(shape, bboxTopImage);
-      var tl = this._imageToContainer({ x: titleBox.x,                 y: titleBox.y                 });
-      var br = this._imageToContainer({ x: titleBox.x + titleBox.w,    y: titleBox.y + titleBox.h    });
-      var tx = Math.min(tl.x, br.x);
-      var ty = Math.min(tl.y, br.y);
-      var tw = Math.abs(br.x - tl.x);
-      var th = Math.abs(br.y - tl.y);
+      var tbox = this._orientedBox(titleBox);
+      var tx = tbox.x, ty = tbox.y, tw = tbox.w, th = tbox.h;
 
       var rectEl = shape.titleGroup.querySelector(".etcher-text-rect");
       var textEl = shape.titleGroup.querySelector(".etcher-text-content");
       var lineEl = shape.titleGroup.querySelector(".etcher-title-leader");
+
+      // The box and its text turn with the board; the leader does NOT. Its
+      // two endpoints are computed in container space at each end, so they
+      // already sit where they should — turning it as well would swing it
+      // off both the label and the shape it points at.
+      this._setRotateTransform(rectEl, tbox);
+      this._setRotateTransform(textEl, tbox);
 
       if (rectEl) {
         rectEl.setAttribute("x", tx);
@@ -12812,12 +12917,20 @@
     // Container px per image px at the current zoom. Strip mode renders shapes
     // in image-px user units (the per-image SVG viewBox scales them), so its
     // markers already track the content — scale is 1 there.
+    //
+    // Measured as the LENGTH of the projected unit vector, not its
+    // y-component. Rotation is isometric, so the length is the scale at any
+    // angle; reading one axis collapses to ~0 at 90°/270° (an image-y offset
+    // projects entirely onto container x there), and the `|| 1` guard then
+    // handed back a scale of 1. Everything sized by this — stroke widths, hit
+    // tolerances, default text boxes — came out at raw image-px on a rotated
+    // canvas, which is how a 1.3px line rendered at 18.6px.
     _markerScale: function() {
       if (this.handleKind === "strip") return 1;
       try {
         var a = this._imageToContainer({ x: 0, y: 0 });
         var b = this._imageToContainer({ x: 0, y: 1 });
-        return Math.abs(b.y - a.y) || 1;
+        return Math.hypot(b.x - a.x, b.y - a.y) || 1;
       } catch (e) {
         return 1;
       }
@@ -12873,9 +12986,7 @@
       // Width is image px (zoom-anchored); half of it is the stroke radius in
       // image space. Add a 6px on-screen grab pad, converted to image px.
       var wImg = (shape.style && shape.style.width) || 10;
-      var a = this._imageToContainer({ x: 0, y: 0 });
-      var b = this._imageToContainer({ x: 0, y: 1 });
-      var perImagePx = Math.abs(b.y - a.y) || 1;
+      var perImagePx = this._markerScale();
       var tolImg = wImg / 2 + 6 / perImagePx;
       var tol2 = tolImg * tolImg;
       if (flat.length === 1) {
@@ -13305,9 +13416,7 @@
     // safe constant if the viewport isn't initialized yet.
     _textDefaultBoxImagePx: function() {
       try {
-        var a = this._imageToContainer({ x: 0, y: 0 });
-        var b = this._imageToContainer({ x: 0, y: 1 });
-        var perImagePx = Math.abs(b.y - a.y) || 1;
+        var perImagePx = this._markerScale();
         return 16 / perImagePx;
       } catch (e) {
         return 16;
@@ -14591,9 +14700,7 @@
     // edge, not directly on it.
     _midpointActivationRadiusImagePx: function() {
       try {
-        var a = this._imageToContainer({ x: 0, y: 0 });
-        var b = this._imageToContainer({ x: 0, y: 1 });
-        var perImagePx = Math.abs(b.y - a.y) || 1;
+        var perImagePx = this._markerScale();
         return 80 / perImagePx;
       } catch (e) {
         return 80;

@@ -303,7 +303,8 @@ defmodule Etcher.Layer do
       :callout,
       :text,
       :dimension,
-      :eraser
+      :eraser,
+      :pointer
     ],
     doc: """
     Subset of tools to show in the toolbar. Drawing tools: `:grabber`,
@@ -311,6 +312,11 @@ defmodule Etcher.Layer do
     `:text`, `:dimension`, `:line`, `:eraser`. Add `:image` for the image
     tool — a one-shot action (not a drawing mode) that inserts an image via
     the OS file picker or a host uploader (see `:image_source`).
+
+    `:pointer` is the red pointer: while it is armed the user's position is
+    drawn as a red dot with a trail and emitted as `etcher:pointer-moved`,
+    for a host to relay to everyone else on the board. It draws nothing and
+    stores nothing. See "Red pointer" below.
     """
   )
 

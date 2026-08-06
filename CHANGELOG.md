@@ -8,6 +8,21 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Red pointer.** A tool that turns your cursor into a red dot with a trail
+  behind it, so you can point at things while presenting and everyone on the
+  board sees where you are pointing. It draws nothing and saves nothing — let
+  go of the tool and it's gone.
+
+  The dot is held in canvas coordinates, so pointing at the corner of a photo
+  is that corner for everyone whatever they have zoomed or panned to, and it
+  stays the same size on every screen: it is someone's finger on the board,
+  not part of the drawing.
+
+  Etcher owns what a pointer looks like; the host says who is pointing and
+  carries the position. `etcher:pointer-moved` goes out while the tool is
+  armed, and `applyRemotePointer` / `removeRemotePointer` bring everyone
+  else's in.
+
 - **Audio and video annotations.** Drop or paste an audio file and it lands as a player
   card — play/pause, title, timecode, scrub bar — drawn entirely in SVG, so it
   pans, zooms, moves, resizes and layers like any other shape. The `<audio>`

@@ -192,6 +192,9 @@
     // as "delete row", not "rub shapes out by sweeping".
     eraser: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path stroke-linecap="round" stroke-linejoin="round" d="M22 21H7"/><path stroke-linecap="round" stroke-linejoin="round" d="m5 11 9 9"/></svg>',
     grabber: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15 10.5V6a1.5 1.5 0 0 0-3 0m3 4.5V4.5a1.5 1.5 0 0 0-3 0v6m3 0V9a1.5 1.5 0 0 1 3 0v5.25a6.75 6.75 0 0 1-6.75 6.75H9.75a6.75 6.75 0 0 1-5.74-3.2l-2.39-3.86a1.5 1.5 0 0 1 2.46-1.72L6 15.75V6a1.5 1.5 0 0 1 3 0v4.5m3 0V6"/></svg>',
+    // Heroicons cursor-arrow-rays — a pointer with rays coming off it, which
+    // is what a laser pointer looks like when you are trying to draw one.
+    pointer: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15.042 21.672 13.684 16.6m0 0-2.51 2.225.569-9.47 5.227 7.917-3.286-.672ZM12 2.25V4.5m5.834.166-1.591 1.591M20.25 10.5H18M7.757 14.743l-1.59 1.59M6 10.5H3.75m4.007-4.243-1.59-1.59"/></svg>',
     // Heroicons photo — framed picture with a mountain horizon and a sun.
     image:   '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z"/></svg>',
     sliders: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75"/></svg>',
@@ -1229,6 +1232,27 @@
   // the rendered size makes line breaks and font-fitting depend on the zoom.
   var TEXT_MEASURE_FONT_PX = 100;
 
+  // ── Red pointer ────────────────────────────────────────────────────────────
+  //
+  // A shared laser pointer: while the tool is armed, the pointer's position
+  // goes out to everyone on the board and is drawn as a red dot with a trail
+  // behind it. It is not an annotation — nothing is stored, nothing is undone,
+  // and it disappears the moment the person stops pointing.
+  var POINTER_COLOR = "#ef4444";
+  // How long a trail lingers. Long enough to read the direction of a sweep,
+  // short enough that it doesn't smear across the board on a fast movement.
+  var POINTER_TRAIL_MS = 650;
+  // Radius of the head, in SCREEN px. A pointer is not part of the drawing —
+  // it is someone's finger on the board — so it stays the same size at every
+  // zoom, and everyone sees it the same size whatever zoom they are at.
+  var POINTER_DOT_R = 7;
+  // Minimum gap between broadcasts. Pointer moves arrive far faster than
+  // anyone can see, and every one of them is a message to every viewer.
+  var POINTER_SEND_MS = 40;
+  // A remote pointer with nothing heard from it for this long is dropped, so
+  // a closed tab doesn't leave a dot stuck on everyone else's board.
+  var POINTER_STALE_MS = 4000;
+
   var ESSENTIAL_TOOLS = [
     "grabber", "freehand", "eraser", "line", "text", "callout", "image"
   ];
@@ -1427,6 +1451,7 @@
     dimension: { icon: ICONS.dimension, title: "Dimension (line with arrows + slidable label)" },
     line:      { icon: ICONS.line,      title: "Line" },
     eraser:    { icon: ICONS.eraser,    title: "Eraser (click and drag to wipe shapes)" },
+    pointer:   { icon: ICONS.pointer,   title: "Red pointer (everyone on the board sees where you point)" },
     // `momentary` tools are one-shot actions, not persistent drawing modes:
     // clicking fires an action and leaves the current tool selection alone
     // (see `_invokeMomentaryTool`). Image insertion opens the OS file picker
@@ -2108,6 +2133,41 @@
           // for every layer; this one wins.
           setImageUploader: function(fn) {
             self._uploadImageFn = typeof fn === "function" ? fn : null;
+          },
+
+          // ── Red pointer ───────────────────────────────────────────────
+          //
+          // Etcher owns what a pointer LOOKS like — a red dot with a trail,
+          // held in canvas coordinates so it lands on the same spot for
+          // everyone whatever they have zoomed to, and the same size on
+          // every screen. The host owns who is pointing and how the
+          // position reaches the other viewers; it already knows both.
+          //
+          // The local user's own pointer is drawn from the tool itself. The
+          // host feeds in everyone else's through these.
+          isPointerMode: function() { return self.activeTool === "pointer"; },
+
+          // Someone else pointed at `{x, y}` (canvas coords, as they arrived
+          // from that person's `etcher:pointer-moved`). `id` is whatever the
+          // host calls that person; passing the same id again moves their
+          // pointer rather than adding another.
+          applyRemotePointer: function(id, state) {
+            if (id == null) return false;
+            var st = state || {};
+            if (typeof st.x !== "number" || typeof st.y !== "number") return false;
+            self._notePointer(String(id), st.x, st.y, {
+              color: st.color, name: st.name
+            });
+            return true;
+          },
+
+          // They stopped pointing, or left. Pointers also time themselves out,
+          // so a lost connection cleans up on its own — this is for the case
+          // where the host knows sooner.
+          removeRemotePointer: function(id) {
+            if (id == null) return false;
+            self._dropPointer(String(id));
+            return true;
           },
 
           // Turn a pasted URL into a preview card. `fn(url, ctx)` returns a
@@ -7657,6 +7717,12 @@
       if (self.activeTool === "eraser" && toolKey !== "eraser") {
         self._clearEraserHover();
       }
+      // Leaving the red pointer takes the dot away — here, and through the
+      // host, on everyone else's board. A pointer left behind after someone
+      // has stopped presenting is worse than never having had one.
+      if (self.activeTool === "pointer" && toolKey !== "pointer") {
+        self._endPointer();
+      }
       self.activeTool = toolKey;
       // Connector dots are a cursor-tool affordance. Any other tool means
       // the user is drawing, and eight hit-targets sitting on the shape
@@ -9772,6 +9838,224 @@
       return { width: maxLine, height: height };
     },
 
+    // ── Red pointer ─────────────────────────────────────────────────────────
+    //
+    // Everyone's pointer lives in one map keyed by whoever it belongs to.
+    // The local user's own is keyed "self" and is drawn exactly like a remote
+    // one — a presenter has to see where they are pointing, and seeing the
+    // same dot the room sees is the only way to be sure of that.
+    //
+    // Positions are held in IMAGE coordinates so a point at the corner of a
+    // photo is that corner for everyone, whatever each viewer has zoomed or
+    // panned to. They are converted to the screen at draw time.
+
+    // The local user pointed somewhere: draw it here, and tell the room.
+    //
+    // Drawn locally straight away rather than waiting for the broadcast to
+    // come back — a presenter aiming at something cannot wait a round trip to
+    // see where they are aiming, and the round trip may never complete if the
+    // host has not wired the transport up at all.
+    _movePointer: function(e) {
+      var pt;
+      try { pt = this._toImage(e); } catch (_) { return; }
+      if (!pt || typeof pt.x !== "number") return;
+
+      this._notePointer("self", pt.x, pt.y, {
+        color: this._pointerColor, name: null
+      });
+
+      // Throttled: moves arrive far faster than anyone can see them, and each
+      // one would be a message to every viewer on the board.
+      var now = this._pointerNow();
+      if (this._pointerSentAt && now - this._pointerSentAt < POINTER_SEND_MS) return;
+      this._pointerSentAt = now;
+      this._dispatch("etcher:pointer-moved", {
+        x: pt.x, y: pt.y, color: this._pointerColor || POINTER_COLOR
+      });
+    },
+
+    // Leaving the tool takes the dot away — for this user and, through the
+    // host, for everyone else. A pointer that stays behind after someone has
+    // stopped presenting is worse than no pointer.
+    _endPointer: function() {
+      this._pointerSentAt = 0;
+      if (!this._pointers || !this._pointers.self) return;
+      this._dropPointer("self");
+      this._dispatch("etcher:pointer-gone", {});
+    },
+
+    _pointerState: function() {
+      if (!this._pointers) this._pointers = {};
+      return this._pointers;
+    },
+
+    // Record where a pointer is now, and remember the trail behind it.
+    _notePointer: function(id, x, y, opts) {
+      var o = opts || {};
+      var now = this._pointerNow();
+      var all = this._pointerState();
+      var p = all[id];
+      if (!p) {
+        p = all[id] = { trail: [], color: POINTER_COLOR, name: null };
+      }
+      if (o.color) p.color = o.color;
+      if (o.name != null) p.name = o.name;
+      p.x = x; p.y = y; p.seen = now;
+      p.trail.push({ x: x, y: y, t: now });
+      this._trimPointerTrail(p, now);
+      this._startPointerLoop();
+    },
+
+    _trimPointerTrail: function(p, now) {
+      var trail = p.trail;
+      while (trail.length && now - trail[0].t > POINTER_TRAIL_MS) trail.shift();
+      // A hard cap as well as the time window: a very fast machine can post
+      // hundreds of samples inside the window, and every one of them is a
+      // segment to draw.
+      if (trail.length > 64) trail.splice(0, trail.length - 64);
+    },
+
+    _pointerNow: function() {
+      try {
+        if (typeof performance !== "undefined" && performance.now) {
+          return performance.now();
+        }
+      } catch (_) {}
+      return +new Date();
+    },
+
+    _dropPointer: function(id) {
+      var all = this._pointerState();
+      if (!all[id]) return;
+      delete all[id];
+      this._drawPointers();
+    },
+
+    // The trail fades on its own, so it has to keep being redrawn after the
+    // last move — otherwise it freezes mid-fade the moment someone stops.
+    // The loop stops itself once there is nothing left to draw.
+    _startPointerLoop: function() {
+      var self = this;
+      if (self._pointerRaf) return;
+      function tick() {
+        self._pointerRaf = null;
+        var live = self._drawPointers();
+        if (live) {
+          self._pointerRaf = (typeof requestAnimationFrame === "function")
+            ? requestAnimationFrame(tick)
+            : setTimeout(tick, 33);
+        }
+      }
+      self._pointerRaf = (typeof requestAnimationFrame === "function")
+        ? requestAnimationFrame(tick)
+        : setTimeout(tick, 33);
+    },
+
+    _pointerLayerEl: function() {
+      if (!this.svg) return null;
+      if (this._pointerLayer && this._pointerLayer.parentNode === this.svg) {
+        return this._pointerLayer;
+      }
+      var g = svgEl("g");
+      g.classList.add("etcher-pointers");
+      // Pointers sit above the drawing and take no clicks — the person
+      // pointing is still able to use the board underneath.
+      g.setAttribute("pointer-events", "none");
+      this.svg.appendChild(g);
+      this._pointerLayer = g;
+      return g;
+    },
+
+    // Draw every pointer. Returns whether anything is still live, which is
+    // what stops the animation loop.
+    _drawPointers: function() {
+      var layer = this._pointerLayerEl();
+      if (!layer) return false;
+      var all = this._pointerState();
+      var now = this._pointerNow();
+      var ids = Object.keys(all);
+      var live = false;
+
+      for (var i = 0; i < ids.length; i++) {
+        var id = ids[i];
+        var p = all[id];
+        // Someone who closed their tab stops sending. Without this their dot
+        // would sit on everyone else's board indefinitely.
+        if (now - p.seen > POINTER_STALE_MS) { delete all[id]; continue; }
+        this._trimPointerTrail(p, now);
+        if (!p.trail.length) { delete all[id]; continue; }
+        live = true;
+      }
+
+      // Pointers that went away take their elements with them. Tracked by
+      // holding the element ON the pointer rather than looking it up by id:
+      // an id comes from whatever the host calls its users, and putting that
+      // in a selector is a needless escaping problem.
+      var seen = [];
+      ids = Object.keys(all);
+      for (var k = 0; k < ids.length; k++) {
+        var pp = all[ids[k]];
+        this._drawOnePointer(layer, pp, now);
+        if (pp.el) seen.push(pp.el);
+      }
+      var kids = [].slice.call(layer.childNodes);
+      for (var c = 0; c < kids.length; c++) {
+        if (seen.indexOf(kids[c]) === -1) layer.removeChild(kids[c]);
+      }
+      return live;
+    },
+
+    _drawOnePointer: function(layer, p, now) {
+      var g = p.el;
+      if (!g || g.parentNode !== layer) {
+        g = svgEl("g");
+        layer.appendChild(g);
+        p.el = g;
+      }
+      var self = this;
+      var pts = p.trail.map(function(s) {
+        var c = self._imageToContainer({ x: s.x, y: s.y });
+        return { x: c.x, y: c.y, t: s.t };
+      });
+
+      // The trail is drawn as separate segments rather than one path so each
+      // can fade and taper by its own age. A single path can only carry one
+      // opacity, which reads as a smear rather than a trail.
+      var want = Math.max(0, pts.length - 1);
+      var segs = [].slice.call(g.querySelectorAll("line"));
+      while (segs.length > want) { g.removeChild(segs.pop()); }
+      while (segs.length < want) {
+        var ln = svgEl("line", { "stroke-linecap": "round" });
+        g.insertBefore(ln, g.firstChild);
+        segs.push(ln);
+      }
+      for (var i = 0; i < want; i++) {
+        var a = pts[i], b = pts[i + 1];
+        // 0 at the tail, 1 at the head.
+        var age = 1 - Math.min(1, (now - b.t) / POINTER_TRAIL_MS);
+        var seg = segs[i];
+        seg.setAttribute("x1", a.x); seg.setAttribute("y1", a.y);
+        seg.setAttribute("x2", b.x); seg.setAttribute("y2", b.y);
+        seg.setAttribute("stroke", p.color || POINTER_COLOR);
+        seg.setAttribute("stroke-width", Math.max(0.5, POINTER_DOT_R * 0.9 * age));
+        seg.setAttribute("stroke-opacity", (0.55 * age).toFixed(3));
+      }
+
+      var head = g.querySelector("circle");
+      if (!head) { head = svgEl("circle"); g.appendChild(head); }
+      var hc = pts.length ? pts[pts.length - 1] : null;
+      if (hc) {
+        head.setAttribute("cx", hc.x);
+        head.setAttribute("cy", hc.y);
+        head.setAttribute("r", POINTER_DOT_R);
+        head.setAttribute("fill", p.color || POINTER_COLOR);
+        head.setAttribute("fill-opacity", "0.9");
+        // A pale ring so the dot reads against a photo the same colour as it.
+        head.setAttribute("stroke", "rgba(255,255,255,0.85)");
+        head.setAttribute("stroke-width", "2");
+      }
+    },
+
     _renderAll: function() {
       var self = this;
       this.shapes.forEach(function(s) { self._renderShape(s); });
@@ -10126,6 +10410,16 @@
         // over what you're drawing.
         if (self.activeTool === "marker") {
           if (self._hoveredShape) self._setHoveredShape(null, false);
+          return;
+        }
+        // Red pointer: the whole tool is a pointer move, so it is handled
+        // here rather than as a press-and-drag gesture — there is nothing to
+        // press. Hover is suppressed for the same reason it is for the
+        // marker: the board should not light up under someone who is
+        // presenting, and the audience cannot see the highlights anyway.
+        if (self.activeTool === "pointer") {
+          if (self._hoveredShape) self._setHoveredShape(null, false);
+          if (overContainer(e)) self._movePointer(e);
           return;
         }
         // Over Etcher's own chrome (toolbar / popup / tooltip): no shape hover.

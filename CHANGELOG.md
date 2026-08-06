@@ -193,6 +193,12 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   with corners squared off and its scrub bar reduced to a hairline, because
   those clamps were held in screen pixels while the card around them grew.
 
+  Dimensions scale with the board too, as one object: shaft, arrowheads,
+  label and the halo behind it. A dimension had kept its full size on a
+  zoomed-out board, so its measurement ended up the largest thing on screen.
+  It is drawn at the same weight connectors are, so the two match side by
+  side.
+
   Every connector on a board is drawn at the same weight. Nothing about an
   individual arrow — its length, how far apart its shapes are, which shapes
   they are, the zoom it was drawn at, or whether its head snapped to an

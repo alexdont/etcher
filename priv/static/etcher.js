@@ -1284,9 +1284,11 @@
   // board is usually built from — a media card, a block a few hundred px
   // across — carry the 2px line connectors have always been drawn with.
   var ARROW_WEIGHT_RATIO = 0.011;
-  // Fallback weight for an arrow bound to nothing, in px at the zoom it was
-  // drawn at. See `_arrowZoomFactor`.
-  var ARROW_STROKE_PX = 2;
+  // The weight a connector's shaft and a dimension's shaft are designed at,
+  // in screen px. Everything else fixed in either of them — arrowheads, the
+  // dimension's label and its halo — is kept in proportion to this, so a
+  // whole connector or dimension scales as one object.
+  var LINE_WEIGHT_PX = 2;
 
   // Connector dots are green rather than the shape's own colour: they're a
   // fixed piece of interface, like a cursor, and taking the shape's colour
@@ -8617,6 +8619,20 @@
           var arrowEls = el.querySelectorAll(".etcher-dim-arrow");
           var labelEl = el.querySelector(".etcher-dim-label");
 
+          // Every fixed length below — the shaft's weight, the V-arrows, the
+          // label and its halo — was chosen for a dimension drawn at the
+          // board's own line weight. Taken at that weight, the whole
+          // dimension scales as one object and thins with the board, instead
+          // of keeping its full size while the drawing shrinks away from it.
+          // The same number the connectors use, so a dimension and an arrow
+          // beside each other match.
+          var dimK = self._boardLineScale();
+          var dimStroke = Math.max(0.4, LINE_WEIGHT_PX * dimK);
+          if (shaftEl) shaftEl.style.strokeWidth = dimStroke + "px";
+          for (var dai = 0; dai < arrowEls.length; dai++) {
+            arrowEls[dai].style.strokeWidth = dimStroke + "px";
+          }
+
           var aImg = { x: g.a[0], y: g.a[1] };
           var bImg = { x: g.b[0], y: g.b[1] };
           var aC = self._imageToContainer(aImg);
@@ -8634,8 +8650,8 @@
           // (length 0) — draft state during the very first pointermove
           // tick — which blanks the heads rather than drawing a spike in
           // an arbitrary direction.
-          var dimHeadLen = 10;
-          var dimHeadHalf = 5;
+          var dimHeadLen = 10 * dimK;
+          var dimHeadHalf = 5 * dimK;
           if (arrowEls[0]) {
             arrowEls[0].setAttribute(
               "points", self._vArrowPoints(aC, bC, dimHeadLen, dimHeadHalf)
@@ -8660,7 +8676,7 @@
             }
             var labelX = aC.x + (bC.x - aC.x) * tOff;
             var labelYCenter = aC.y + (bC.y - aC.y) * tOff;
-            var dimFontSize = 14;
+            var dimFontSize = 14 * dimK;
             labelEl.setAttribute("x", labelX);
             // y here positions the alphabetic baseline; offset by
             // ~0.35em so the visible text glyphs are vertically
@@ -8672,6 +8688,10 @@
               "ui-sans-serif, system-ui, -apple-system, sans-serif"
             );
             labelEl.setAttribute("font-weight", "500");
+            // The halo that breaks the shaft line behind the text has to
+            // scale with the text, or it swallows the glyphs on a small
+            // label and disappears on a large one.
+            labelEl.setAttribute("stroke-width", 3 * dimK);
             labelEl.textContent = labelText;
           }
 
@@ -8714,13 +8734,7 @@
           var arHead = el.querySelector(".etcher-arrow-head");
           var arImg = self._arrowPath(g);
           var arC = arImg.map(function(p) { return self._imageToContainer(p); });
-          // Weight from the shapes this joins, converted to screen px. An
-          // arrow bound to nothing has no shapes to ask, and falls back to
-          // the zoom it was drawn at.
-          var arWeightImg = self._boardArrowWeightImagePx();
-          var arK = arWeightImg != null
-            ? (arWeightImg * self._markerScale()) / ARROW_STROKE_PX
-            : self._arrowZoomFactor(shape);
+          var arK = self._boardLineScale();
           if (arShaft) {
             arShaft.setAttribute("points", arC.map(function(p) {
               return p.x + "," + p.y;
@@ -8748,7 +8762,7 @@
           }
           // Floored the same way every other stroke is, so an arrow on a very
           // wide view stays visible rather than thinning away to nothing.
-          var arW = Math.max(0.4, ARROW_STROKE_PX * arK);
+          var arW = Math.max(0.4, LINE_WEIGHT_PX * arK);
           if (arShaft) arShaft.style.strokeWidth = arW + "px";
           if (arHead) arHead.style.strokeWidth = arW + "px";
           var arMinY = arImg[0].y, arSumX = 0;
@@ -13086,17 +13100,29 @@
       return median * ARROW_WEIGHT_RATIO;
     },
 
-    // How much a connector has been zoomed since it was first drawn — the
-    // multiplier for its stroke weight and its arrowhead.
+    // The weight this board draws its connectors and dimensions at, in
+    // screen px at the current zoom.
     //
-    // Only reached on a board with no measurable shapes on it at all, which
-    // cannot happen once an arrow exists — an arrow is drawn out of a shape.
-    // Kept so `_boardArrowWeightImagePx` returning null has somewhere to go
-    // rather than dividing by zero.
-    _arrowZoomFactor: function(shape) {
-      var scale = this._markerScale();
-      if (!(shape._arrowScale > 0)) shape._arrowScale = scale;
-      return scale / shape._arrowScale;
+    // One number for the whole board, so a connector and a dimension drawn
+    // beside each other are the same weight, and no two of either can
+    // disagree. `_boardArrowWeightImagePx` answers in image px; this is that
+    // taken at the current zoom, which is what makes the line thin as the
+    // board is zoomed out.
+    //
+    // The fallback is the designed weight, for a board with nothing
+    // measurable on it. That cannot arise in practice — an arrow is drawn out
+    // of a shape, and a dimension is itself a measurable shape.
+    _boardLineWeightPx: function() {
+      var img = this._boardArrowWeightImagePx();
+      if (img == null) return LINE_WEIGHT_PX;
+      return img * this._markerScale();
+    },
+
+    // The same weight as a multiplier on the designed sizes — the factor
+    // every fixed length in a connector or a dimension is taken at, so each
+    // stays in the proportion it was drawn in.
+    _boardLineScale: function() {
+      return this._boardLineWeightPx() / LINE_WEIGHT_PX;
     },
 
     _applyMarkerStyle: function(el, style, scale) {

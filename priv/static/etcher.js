@@ -2274,6 +2274,18 @@
           patchShape: function(uuid, fields) {
             var shape = self.shapes.find(function(s) { return s.uuid === uuid; });
             if (!shape || !fields) return;
+            // Geometry is REPLACED, not merged: it is a whole description of
+            // where a shape is, and merging would leave stale keys behind —
+            // an arrow re-pointed at a different shape keeps `from`, a
+            // straightened line keeps its bend points.
+            //
+            // Patching it at all is what lets a consumer applying a peer's
+            // move update the shape in place. Deleting and re-adding is the
+            // alternative, and it destroys the element: media reloads,
+            // images re-decode, and the shape visibly flashes.
+            if (fields.geometry && typeof fields.geometry === "object") {
+              shape.geometry = fields.geometry;
+            }
             if (fields.metadata && typeof fields.metadata === "object") {
               shape.metadata = Object.assign({}, shape.metadata || {}, fields.metadata);
             }
@@ -13360,13 +13372,29 @@
         anchor = svg.childNodes[i];
       }
 
+      // The sequence these elements should end up in, immediately before
+      // `anchor`. A shape's title rides directly above it.
+      var desired = [];
       this.shapes.forEach(function(s) {
-        if (s.el && s.el.parentNode === svg) svg.insertBefore(s.el, anchor);
-        // A shape's title rides directly above it.
-        if (s.titleGroup && s.titleGroup.parentNode === svg) {
-          svg.insertBefore(s.titleGroup, anchor);
-        }
+        if (s.el && s.el.parentNode === svg) desired.push(s.el);
+        if (s.titleGroup && s.titleGroup.parentNode === svg) desired.push(s.titleGroup);
       });
+
+      // Move only what is out of place.
+      //
+      // `insertBefore` on a node that is already where it belongs still
+      // detaches and re-attaches it, and the browser repaints it — images
+      // re-decode. This ran over every shape on every call, and a consumer
+      // re-imposing order after each remote edit therefore flashed the whole
+      // board every time anyone moved anything.
+      //
+      // Walked backwards so each element only has to be compared against the
+      // one that follows it, which is already in its final position.
+      var ref = anchor;
+      for (var d = desired.length - 1; d >= 0; d--) {
+        if (desired[d].nextSibling !== ref) svg.insertBefore(desired[d], ref);
+        ref = desired[d];
+      }
     },
 
     // Restore a recorded order (undo/redo, or a peer's order in a

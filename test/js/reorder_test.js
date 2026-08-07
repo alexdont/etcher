@@ -143,4 +143,121 @@ check("a single shape cannot be reordered", () => {
   }
 });
 
+// ── _syncShapeOrder ─────────────────────────────────────────────────────────
+//
+// Putting the DOM into the order `this.shapes` describes. `insertBefore` on a
+// node that is already where it belongs still detaches and re-attaches it, and
+// the browser repaints it — images re-decode. This ran over every shape on
+// every call, so a collaborative host re-imposing order after each remote edit
+// flashed the whole board every time anyone moved anything.
+
+const syncStart = src.indexOf("    _syncShapeOrder: function() {");
+assert.notStrictEqual(syncStart, -1, "could not find _syncShapeOrder in etcher.js");
+const syncEnd = src.indexOf("\n    },", syncStart);
+assert.notStrictEqual(syncEnd, -1, "could not find the end of _syncShapeOrder");
+const syncShapeOrder = eval(
+  "(" +
+    src
+      .slice(syncStart, syncEnd + "\n    }".length)
+      .replace("_syncShapeOrder: function", "function") +
+    ")"
+);
+
+// A DOM stand-in that counts moves. Only the few node operations
+// `_syncShapeOrder` touches are modelled.
+function svgWith(ids) {
+  const svg = {
+    childNodes: [],
+    moves: 0,
+    insertBefore(node, ref) {
+      svg.moves++;
+      const at = svg.childNodes.indexOf(node);
+      if (at !== -1) svg.childNodes.splice(at, 1);
+      const before = ref ? svg.childNodes.indexOf(ref) : -1;
+      if (before === -1) svg.childNodes.push(node);
+      else svg.childNodes.splice(before, 0, node);
+      relink();
+      return node;
+    }
+  };
+
+  // `nextSibling` is what the skip test reads, so it has to stay honest.
+  function relink() {
+    svg.childNodes.forEach((n, i) => {
+      n.nextSibling = svg.childNodes[i + 1] || null;
+    });
+  }
+
+  ids.forEach((id) => svg.childNodes.push({ id, parentNode: svg, nextSibling: null }));
+  relink();
+  return svg;
+}
+
+const elIn = (svg, id) => svg.childNodes.find((n) => n.id === id);
+const domOrder = (svg) => svg.childNodes.map((n) => n.id);
+
+console.log("\n_syncShapeOrder");
+
+check("already in order moves nothing", () => {
+  const svg = svgWith(["a", "b", "c"]);
+  const c = { svg, shapes: ["a", "b", "c"].map((id) => ({ uuid: id, el: elIn(svg, id) })) };
+
+  syncShapeOrder.call(c);
+
+  assert.strictEqual(svg.moves, 0, "a settled board must not touch the DOM at all");
+  assert.deepStrictEqual(domOrder(svg), ["a", "b", "c"]);
+});
+
+check("puts the DOM into the order the shape list describes", () => {
+  const svg = svgWith(["a", "b", "c"]);
+  const c = { svg, shapes: ["c", "a", "b"].map((id) => ({ uuid: id, el: elIn(svg, id) })) };
+
+  syncShapeOrder.call(c);
+
+  assert.deepStrictEqual(domOrder(svg), ["c", "a", "b"]);
+});
+
+check("moves only what is out of place", () => {
+  // One shape reseated: the others are already in their final relative
+  // positions and must be left alone.
+  const svg = svgWith(["a", "b", "c"]);
+  const shapes = ["a", "b", "c"].map((id) => ({ uuid: id, el: elIn(svg, id) }));
+  const c = { svg, shapes: [shapes[0], shapes[2], shapes[1]] };
+
+  syncShapeOrder.call(c);
+
+  assert.deepStrictEqual(domOrder(svg), ["a", "c", "b"]);
+  assert.strictEqual(svg.moves, 1, `moved ${svg.moves} nodes to reseat one`);
+});
+
+check("a title rides directly above its shape", () => {
+  const svg = svgWith(["a", "a-title", "b"]);
+  const c = {
+    svg,
+    shapes: [
+      { uuid: "b", el: elIn(svg, "b") },
+      { uuid: "a", el: elIn(svg, "a"), titleGroup: elIn(svg, "a-title") }
+    ]
+  };
+
+  syncShapeOrder.call(c);
+
+  assert.deepStrictEqual(domOrder(svg), ["b", "a", "a-title"]);
+});
+
+check("chrome above the shapes stays above them", () => {
+  // Anything after the last shape element is not ours — handles, tooltips —
+  // and the shapes have to stay behind it.
+  const svg = svgWith(["a", "b", "handles"]);
+  const c = { svg, shapes: ["b", "a"].map((id) => ({ uuid: id, el: elIn(svg, id) })) };
+
+  syncShapeOrder.call(c);
+
+  assert.deepStrictEqual(domOrder(svg), ["b", "a", "handles"]);
+});
+
+check("no svg is not a crash", () => {
+  syncShapeOrder.call({ svg: null, shapes: [] });
+});
+
 console.log(`\n${ran} checks passed`);

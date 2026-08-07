@@ -9,8 +9,8 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 
 - **Preferences.** How you like the board set up — the background dots, the
-  green connector anchors, how much of the style panel is open — now sticks
-  between sessions. Saved in the browser on its own; hand etcher a
+  green connector anchors, how much of the style panel is open, your colours
+  — now sticks between sessions. Saved in the browser on its own; hand etcher a
   `setPrefsAdapter` and the host stores them instead, which is the only way
   they can follow a user between devices. None of it is board content: two
   people looking at the same board can have different answers.

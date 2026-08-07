@@ -1301,6 +1301,11 @@
   // goes out to everyone on the board and is drawn as a red dot with a trail
   // behind it. It is not an annotation — nothing is stored, nothing is undone,
   // and it disappears the moment the person stops pointing.
+  // How long to wait before writing preferences out. A host may be saving
+  // them over the network, and a dragged slider is dozens of changes a
+  // second; nobody needs each one of those to be a request.
+  var PREFS_SAVE_DEBOUNCE_MS = 400;
+
   var POINTER_COLOR = "#ef4444";
   // How long a trail lingers. Long enough to read the direction of a sweep,
   // short enough that it doesn't smear across the board on a fast movement.
@@ -2224,6 +2229,21 @@
             return Object.assign({}, self._loadPrefs());
           },
           setPref: function(name, value) { self._setPref(name, value); return true; },
+
+          // Hand back what was stored for this user on this board. Merged
+          // over whatever is already there, so a host that keeps three of
+          // these keys does not blank the others, and NOT echoed back — it
+          // just told us, and saving it again would be a write on every load.
+          //
+          // This is the whole contract for a LiveView host: listen for
+          // `etcher:prefs-changed`, store it wherever you like, and push it
+          // back through here on mount. No JavaScript adapter needed, and
+          // nothing here assumes what "wherever you like" means.
+          setPrefs: function(prefs) { return self._hydratePrefs(prefs); },
+
+          // For hosts that would rather own storage in JS. `load()` may
+          // return an object or a promise of one; `save(prefs)` is called on
+          // a short debounce rather than on every frame of a drag.
           setPrefsAdapter: function(adapter) { self._setPrefsAdapter(adapter); },
 
           isPointerMode: function() { return self.activeTool === "pointer"; },
@@ -10118,7 +10138,8 @@
         grid: true,        // fresco's background dots
         connectors: true,  // the green anchors an arrow is pulled from
         panel: "full",     // full | compact | hidden
-        tools: null        // null = whatever the host configured
+        tools: null,       // null = whatever the host configured
+        colors: null       // null = the board's palette, unchanged
       };
     },
 
@@ -10140,6 +10161,14 @@
       var adapter = this._prefsAdapter;
       if (adapter && typeof adapter.load === "function") {
         try { stored = adapter.load(); } catch (_) { stored = null; }
+        // A host reading from a server answers with a promise. Carry on with
+        // the defaults and apply the real answer when it lands, rather than
+        // holding up the board for a round trip about chrome.
+        if (stored && typeof stored.then === "function") {
+          var self2 = this;
+          stored.then(function(late) { self2._hydratePrefs(late); }, function() {});
+          stored = null;
+        }
       } else {
         try {
           var raw = window.localStorage.getItem(this._prefsKey);
@@ -10155,16 +10184,41 @@
     },
 
     _savePrefs: function() {
-      var prefs = this._loadPrefs();
-      var adapter = this._prefsAdapter;
-      if (adapter) {
-        try { adapter.save(Object.assign({}, prefs)); } catch (_) {}
-      } else {
-        try {
-          window.localStorage.setItem(this._prefsKey, JSON.stringify(prefs));
-        } catch (_) {}
-      }
-      this._dispatch("etcher:prefs-changed", Object.assign({}, prefs));
+      var self = this;
+      var prefs = self._loadPrefs();
+
+      // The event fires immediately, every time. It is how a LiveView host
+      // hears about this without writing any JavaScript at all — the most
+      // generic hook there is, and the one most hosts will use.
+      self._dispatch("etcher:prefs-changed", Object.assign({}, prefs));
+
+      // The write is debounced. A host that saves to a server is one round
+      // trip per change otherwise, and dragging a slider is dozens of
+      // changes a second.
+      if (self._prefsSaveTimer) clearTimeout(self._prefsSaveTimer);
+      self._prefsSaveTimer = setTimeout(function() {
+        self._prefsSaveTimer = null;
+        var adapter = self._prefsAdapter;
+        if (adapter) {
+          try { adapter.save(Object.assign({}, self._loadPrefs())); } catch (_) {}
+        } else {
+          try {
+            window.localStorage.setItem(self._prefsKey, JSON.stringify(self._loadPrefs()));
+          } catch (_) {}
+        }
+      }, PREFS_SAVE_DEBOUNCE_MS);
+    },
+
+    // Take preferences from the host wholesale — what it had stored for this
+    // user, on this board. Merged over the defaults rather than replacing
+    // them, so a host that stores three keys does not blank the rest, and
+    // NOT saved straight back out: this is the host telling us what it
+    // already has, and echoing it would be a write per page load.
+    _hydratePrefs: function(stored) {
+      if (!stored || typeof stored !== "object") return false;
+      this._prefs = Object.assign(this._defaultPrefs(), this._prefs || {}, stored);
+      this._applyPrefs();
+      return true;
     },
 
     _getPref: function(name) {
@@ -10187,11 +10241,24 @@
       var prefs = this._loadPrefs();
       this._applyGridPref(prefs.grid);
       this._applyPanelPref(prefs.panel);
+      this._applyColorsPref(prefs.colors);
       // Connector anchors are read from the pref at the moment they would be
       // shown (`_connectorsAvailableFor`), so there is nothing to push here.
       // The dots currently on screen do have to go, though.
       if (prefs.connectors === false) this._removeConnectorDots();
       this._refreshToolbarTools();
+    },
+
+    // A palette the user has chosen for themselves. Null means they have not,
+    // and the board's own palette stands — a host that ships brand colours
+    // should not have them replaced by an empty preference.
+    _applyColorsPref: function(list) {
+      if (!Array.isArray(list) || !list.length) return;
+      var slots = this._sanitizeColorSlots(list);
+      if (!slots.length) return;
+      this._colorSlots = slots;
+      if (this._activeSlot >= slots.length) this._activeSlot = 0;
+      this._refreshToolbarSwatches();
     },
 
     // Fresco owns the background dots — they are its canvas, not etcher's

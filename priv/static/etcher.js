@@ -3833,9 +3833,9 @@
         "order them. Nothing is removed either way.";
       box.appendChild(sub);
 
-      function trayWithLabel(text) {
+      function trayWithLabel(text, gapAbove) {
         var label = document.createElement("p");
-        label.style.margin = "0 0 6px";
+        label.style.margin = (gapAbove ? "14px" : "0") + " 0 6px";
         label.textContent = text;
         box.appendChild(label);
         var tray = document.createElement("div");
@@ -3844,14 +3844,12 @@
         return tray;
       }
 
-      var barTray = trayWithLabel("On the toolbar");
-      var menuTray = document.createElement("div");
-      var menuLabel = document.createElement("p");
-      menuLabel.style.margin = "14px 0 6px";
-      menuLabel.textContent = "In the \u2026 menu";
-      box.appendChild(menuLabel);
-      menuTray.className = "etcher-customise-tray";
-      box.appendChild(menuTray);
+      // The menu is listed ABOVE the toolbar because that is where the two
+      // sit on screen: the bar runs along the bottom and the \u2026 menu opens
+      // upwards out of it. Listing them the other way round means dragging a
+      // tool "down" into the menu when the menu is up.
+      var menuTray = trayWithLabel("In the \u2026 menu");
+      var barTray = trayWithLabel("On the toolbar", true);
 
       var dragKey = null;
 

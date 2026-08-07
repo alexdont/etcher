@@ -3813,6 +3813,13 @@
 
       var backdrop = document.createElement("div");
       backdrop.className = "etcher-customise-backdrop";
+      // Claimed NOW, not after the dialog is built. Sortable's setup runs
+      // synchronously once the library is cached — every open after the
+      // first — and it checks this to tell "still the open dialog" from
+      // "closed while the library was loading". Assigned at the end, that
+      // check saw the null left by the previous close and bailed, so the
+      // drag worked exactly once per page load.
+      self.customiseBackdrop = backdrop;
       backdrop.setAttribute("data-fresco-no-capture", "");
       backdrop.addEventListener("pointerdown", function(e) {
         // Only a press on the backdrop itself dismisses — a press that
@@ -3914,7 +3921,10 @@
       // reorderable lists elsewhere use. One group across both trays, so a
       // tool can be carried from one to the other.
       self._withSortable(function(Sortable) {
-        if (!self.customiseBackdrop) return;
+        // Compared against THIS backdrop rather than merely non-null, so a
+        // dialog closed and reopened while the library was still loading
+        // cannot have the late callback attach Sortable to its trays.
+        if (self.customiseBackdrop !== backdrop) return;
         if (!Sortable) { enableNativeDnd(); return; }
         try {
           self._customiseSortable = [barTray, menuTray].map(function(tray) {
@@ -4005,7 +4015,6 @@
       // Displayed in its own frame so the opening is not batched with the
       // click that asked for it.
       backdrop.classList.add("is-open");
-      self.customiseBackdrop = backdrop;
 
       self._customiseEsc = function(e) {
         if (e.key === "Escape") self._closeCustomise();

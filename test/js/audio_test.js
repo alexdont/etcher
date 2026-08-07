@@ -246,6 +246,11 @@ assert.ok(withDoc("", () => canPlayFile("audio", {})));
     const line = body.slice(body.lastIndexOf("\n", m.index) + 1,
                             body.indexOf("\n", m.index));
     if (line.includes("maxChars")) continue;
+    // The sub-pixel floor on a stroke is deliberately absolute. Scaling it
+    // would defeat its whole purpose: a line thinner than about 0.4px is
+    // invisible at any size the card happens to be, which is the one thing
+    // this floor exists to prevent. Same floor every other stroke has.
+    if (line.includes("strokeWidth") && /Math\.max\(0\.4,/.test(line)) continue;
     const after = body.slice(m.index + m[0].length - 1, m.index + m[0].length + 12);
     if (!/^\s*\*\s*cardK/.test(after)) {
       offenders.push(line.trim());

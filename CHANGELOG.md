@@ -8,6 +8,20 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **The two toolbars meet as one control.** The auxiliary tier sits flush on
+  the tool bar now, rounded only along its outer edge and a shade lighter
+  than the bar below — so it reads as belonging to what is selected rather
+  than as a second toolbar that happens to be nearby.
+
+- **An edited colour sticks.** Changing a palette slot was lost on reload:
+  the palette had its own persistence channel predating the preferences hook
+  and nothing was wired to it. Colours save with the rest of your setup now,
+  so a palette edited on one board is the palette on the next.
+
+- **An audio card's outline scales with it.** Its 1.5px edge was the last
+  fixed length left in the card, so on a zoomed-out board the outline came
+  out heavier than the card it drew around.
+
 - **Customise the toolbar and the compact panel.** A dialog under the `…`
   menu holding two trays laid out the way the toolbar is — one for the bar,
   one for the `…` menu. Drag tools between them and along the bar to order

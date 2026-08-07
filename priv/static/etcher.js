@@ -270,6 +270,9 @@
       "  background: rgba(0, 0, 0, 0.7); border-radius: 10px;",
       "  pointer-events: auto;",
       "}",
+      // Squared off only where the auxiliary tier is resting on it, so the
+      // two meet as one shape. Alone, the bar keeps its full radius.
+      ".etcher-toolbar.is-stacked { border-radius: 4px 4px 10px 10px; }",
       // Strip mode: the scroll container IS the scrolling element, so
       // anchor the toolbar to the viewport instead of the container.
       // Otherwise it scrolls out of view with the content.
@@ -371,11 +374,17 @@
       // above the tool bar. Split out so the tool bar stays a row of tools
       // and nothing else: a first-time user reading it left-to-right meets
       // only things that change what they are about to draw.
+      // The auxiliary tier: sits directly on top of the tool bar, rounded
+      // only along its outer edge so the two meet as one shape rather than
+      // two stacked pills. Lighter than the bar below it — tldraw does the
+      // same, and it says "this belongs to what is selected" without needing
+      // a label or a border.
       ".etcher-actionbar {",
       "  position: absolute; z-index: 11; display: none;",
       "  align-items: center; gap: 2px;",
-      "  padding: 4px 6px; border-radius: 10px;",
-      "  background: rgba(0, 0, 0, 0.72);",
+      "  padding: 4px 6px;",
+      "  border-radius: 10px 10px 4px 4px;",
+      "  background: rgba(48, 48, 54, 0.86);",
       "  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);",
       "  pointer-events: auto;",
       "}",
@@ -1130,8 +1139,12 @@
       "  position: absolute; object-fit: fill; pointer-events: none;",
       "  background: #000;",
       "}",
+      // No `stroke-width` here: the card scales as one object, so its own
+      // outline has to as well, and the render sets it from `cardK` like
+      // every other length in the layout. Left in CSS it stayed 1.5px while
+      // the card shrank away from it.
       ".etcher-audio-bg {",
-      "  fill: rgba(17, 17, 20, 0.92); stroke: currentColor; stroke-width: 1.5;",
+      "  fill: rgba(17, 17, 20, 0.92); stroke: currentColor;",
       "}",
       ".etcher-audio-btn { fill: currentColor; stroke: none; pointer-events: all; cursor: pointer; }",
       // The glyph must not eat the press — the disc under it owns that, and
@@ -4322,8 +4335,11 @@
       if (!t.width) return;
       var o = self._chromeOrigin();
       self.actionBar.style.left = Math.round(t.left - o.left) + "px";
+      // Flush, not floating: the two read as one control stacked in two
+      // tiers, the way tldraw's do. The 4px gap made them look like two
+      // things that happened to be near each other.
       self.actionBar.style.top =
-        Math.round(t.top - o.top - self.actionBar.offsetHeight - 4) + "px";
+        Math.round(t.top - o.top - self.actionBar.offsetHeight) + "px";
     },
 
     // Delete whatever is selected, matching the Backspace/Delete key path so
@@ -4412,6 +4428,11 @@
 
       if (this.actionBar) {
         this.actionBar.classList.toggle("is-active", !!this.annotationMode);
+        // The tool bar only squares off where something is actually resting
+        // on it. On its own it keeps its full radius.
+        if (this.toolbar) {
+          this.toolbar.classList.toggle("is-stacked", !!this.annotationMode);
+        }
       }
       // Whether a label is in the selection changes with the selection, and
       // this is the one sync already wired to every selection change.
@@ -5926,6 +5947,11 @@
         btn.setAttribute("aria-label", "Color slot " + (i + 1) + ": " + hex);
       }
       if (i === this._activeSlot) this.activeColor = hex;
+      // Saved with the rest of this user's setup, so a palette edited on one
+      // board is the palette on the next one. `_emitColorsChanged` below is
+      // the older, colours-only channel and stays for hosts wired to it;
+      // this is the one that rides the preferences hook.
+      this._setPref("colors", this._colorSlots.slice());
     },
 
     // Generic persistence hook for the color palette — fires on every
@@ -7595,6 +7621,9 @@
       var radius = Math.max(4 * cardK, Math.min(14 * cardK, box.h * 0.18));
       bg.setAttribute("rx", radius);
       bg.setAttribute("ry", radius);
+      // Floored so the outline does not vanish entirely on a wide view —
+      // the same floor every other stroke on the board has.
+      bg.style.strokeWidth = Math.max(0.4, 1.5 * cardK) + "px";
 
       btn.setAttribute("cx", cx);
       btn.setAttribute("cy", cy);

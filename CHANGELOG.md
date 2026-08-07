@@ -15,6 +15,10 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   away by any of it: an unticked tool moves to the `…` menu, and the
   full style panel always has everything. Reset puts it all back.
 
+  Reordering uses SortableJS, the same drag library the rest of the site
+  uses, loaded from the same pin. Etcher does not depend on it — the list
+  falls back to the browser's own drag-and-drop if it cannot be fetched.
+
   Saved through the same hook as the rest, so a host can keep it against the
   user, the board, or both.
 
@@ -26,7 +30,7 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   people looking at the same board can have different answers.
 
 - **Turn the background dots and the connector anchors off.** Two switches in
-  the nav column. The dots are a reading aid that reads as noise over a photo
+  the `…` menu, beside Customise. The dots are a reading aid that reads as noise over a photo
   you are annotating; the green anchors are an affordance you only want on a
   board you are actually drawing connectors on.
 

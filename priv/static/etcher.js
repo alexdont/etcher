@@ -700,6 +700,24 @@
       "  background: rgba(255, 255, 255, 0.24);",
       "}",
       ".etcher-popup button[data-tool] svg { width: 18px; height: 18px; }",
+      // The popup's non-tool buttons — the view switches and Customise —
+      // match the tool buttons exactly. They sit in the same grid, and a
+      // button of a different size in a row of equal ones reads as a
+      // mistake rather than as a different kind of thing.
+      ".etcher-popup button[data-popup-action] {",
+      "  width: 36px; height: 36px; border: none; padding: 0;",
+      "  display: inline-flex; align-items: center; justify-content: center;",
+      "  background: transparent; color: #fff; border-radius: 6px;",
+      "  cursor: pointer; transition: background 120ms ease;",
+      "}",
+      ".etcher-popup button[data-popup-action]:hover {",
+      "  background: rgba(255, 255, 255, 0.12);",
+      "}",
+      // An enabled switch reads as pressed, the same as the active tool.
+      ".etcher-popup button[data-popup-action][aria-pressed=\"true\"] {",
+      "  background: rgba(255, 255, 255, 0.24);",
+      "}",
+      ".etcher-popup button[data-popup-action] svg { width: 18px; height: 18px; }",
       ".etcher-popup .etcher-swatch { width: 26px; height: 26px; }",
       // Full-width hairline divider used inside flex-wrap popups to
       // force the items after it onto a new row + visually section
@@ -1366,6 +1384,10 @@
   // them over the network, and a dragged slider is dozens of changes a
   // second; nobody needs each one of those to be a request.
   var PREFS_SAVE_DEBOUNCE_MS = 400;
+
+  // Kept in step with phoenix_kit's own pin, so a host running both loads
+  // one copy of the library rather than two versions of it.
+  var SORTABLE_CDN = "https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js";
 
   var POINTER_COLOR = "#ef4444";
   // How long a trail lingers. Long enough to read the direction of a sweep,
@@ -2564,7 +2586,6 @@
       // their own chrome can hide them and wire `handle.toggleMode()`
       // / `handle.toggleVisible()` to their own buttons.
       if (self._chromeEnabled("visibility")) self._buildVisibilityButton();
-      if (self._chromeEnabled("view")) self._buildViewToggles();
       if (self._chromeEnabled("pencil")) self._buildNavButton();
       // Preferences are read once the chrome they drive exists.
       self._applyPrefs();
@@ -2654,7 +2675,6 @@
       self._buildStripTooltip();
       if (self.showToolbar) { self._buildToolbar(); self._buildActionBar(); self._buildStylePanel(); }
       if (self._chromeEnabled("visibility")) self._buildVisibilityButton();
-      if (self._chromeEnabled("view")) self._buildViewToggles();
       if (self._chromeEnabled("pencil")) self._buildNavButton();
       // Preferences are read once the chrome they drive exists.
       self._applyPrefs();
@@ -3708,6 +3728,32 @@
       });
 
       if (self.toolsPopup) self._syncToolsPopup();
+      self._syncViewToggles();
+    },
+
+    // SortableJS, the drag-reorder library the rest of the site uses. Loaded
+    // from the same CDN pin phoenix_kit uses, so a page carrying both ends up
+    // with one copy and one behaviour.
+    //
+    // Etcher does not depend on it: the list falls back to the browser's own
+    // drag-and-drop if it cannot be fetched, so customising still works
+    // offline or behind a proxy that blocks the CDN.
+    _withSortable: function(cb) {
+      if (window.Sortable) { cb(window.Sortable); return; }
+      if (this._sortableFailed) { cb(null); return; }
+      var self = this;
+      if (self._sortableWaiting) { self._sortableWaiting.push(cb); return; }
+      self._sortableWaiting = [cb];
+      var done = function(lib) {
+        var waiting = self._sortableWaiting || [];
+        self._sortableWaiting = null;
+        waiting.forEach(function(fn) { try { fn(lib); } catch (_) {} });
+      };
+      var script = document.createElement("script");
+      script.src = SORTABLE_CDN;
+      script.onload = function() { done(window.Sortable || null); };
+      script.onerror = function() { self._sortableFailed = true; done(null); };
+      document.head.appendChild(script);
     },
 
     // ── Customise dialog ────────────────────────────────────────────────────
@@ -3758,6 +3804,9 @@
       list.className = "etcher-customise-list";
       box.appendChild(list);
 
+      // The DOM is the order. Sortable moves rows around itself, so keeping a
+      // parallel array in step would mean two answers to the same question —
+      // and the one on screen is the one the user arranged.
       var dragKey = null;
 
       function rowFor(entry) {
@@ -3812,20 +3861,31 @@
           e.preventDefault();
           row.classList.remove("is-over");
           if (!dragKey || dragKey === entry.key) return;
-          var from = draft.findIndex(function(d) { return d.key === dragKey; });
-          var to = draft.findIndex(function(d) { return d.key === entry.key; });
-          if (from === -1 || to === -1) return;
-          draft.splice(to, 0, draft.splice(from, 1)[0]);
-          render();
+          var moving = list.querySelector('[data-tool="' + dragKey + '"]');
+          if (moving) list.insertBefore(moving, row);
         });
         return row;
       }
 
-      function render() {
-        while (list.firstChild) list.removeChild(list.firstChild);
-        draft.forEach(function(entry) { list.appendChild(rowFor(entry)); });
-      }
-      render();
+      draft.forEach(function(entry) { list.appendChild(rowFor(entry)); });
+
+      // Sortable takes over when it is there — same library, same feel as the
+      // reorderable lists everywhere else. The handlers above stay wired as
+      // the fallback; Sortable stops its own drags from reaching them.
+      self._withSortable(function(Sortable) {
+        if (!Sortable || !self.customiseBackdrop) return;
+        try {
+          self._customiseSortable = new Sortable(list, {
+            animation: 150,
+            handle: ".etcher-customise-grip",
+            draggable: ".etcher-customise-row",
+            ghostClass: "is-dragging"
+          });
+          // With Sortable driving, the browser's own drag would run a second,
+          // conflicting reorder on the same pointer gesture.
+          [].forEach.call(list.children, function(r) { r.draggable = false; });
+        } catch (_) {}
+      });
 
       // The compact strip's parts.
       var h2 = document.createElement("h3");
@@ -3881,8 +3941,11 @@
       save.setAttribute("data-primary", "");
       save.textContent = "Save";
       save.addEventListener("click", function() {
-        self._setPref("tools", draft.filter(function(d) { return d.on; })
-          .map(function(d) { return d.key; }));
+        var chosen = [].filter.call(list.children, function(r) {
+          var cb = r.querySelector("input");
+          return cb && cb.checked;
+        }).map(function(r) { return r.dataset.tool; });
+        self._setPref("tools", chosen);
         self._setPref("compact", parts.slice());
         self._closeCustomise();
       });
@@ -3904,6 +3967,10 @@
     },
 
     _closeCustomise: function() {
+      if (this._customiseSortable) {
+        try { this._customiseSortable.destroy(); } catch (_) {}
+        this._customiseSortable = null;
+      }
       if (this._customiseEsc) {
         document.removeEventListener("keydown", this._customiseEsc, true);
         this._customiseEsc = null;
@@ -4613,16 +4680,26 @@
       customiseDivider.className = "etcher-popup-divider";
       popup.appendChild(customiseDivider);
 
-      var customiseBtn = document.createElement("button");
-      customiseBtn.type = "button";
-      customiseBtn.title = "Customise the toolbar and the style panel";
-      customiseBtn.setAttribute("aria-label", customiseBtn.title);
-      customiseBtn.innerHTML = ICONS.sliders;
-      customiseBtn.addEventListener("click", function(e) {
-        e.preventDefault();
-        self._closePopup();
-        self._openCustomise();
-      });
+      // The two view switches live here rather than in the nav column: they
+      // are board chrome like the tools around them, and the nav column is
+      // fresco's — zoom, rotate, home. Mixing "what is on the board" into
+      // "where am I looking" made both lists harder to read.
+      self.gridBtn = self._makePopupAction(
+        ICONS.grid, self._gridTitle(),
+        function() { self._setPref("grid", self._getPref("grid") === false); }
+      );
+      popup.appendChild(self.gridBtn);
+
+      self.connectorsBtn = self._makePopupAction(
+        ICONS.connectors, self._connectorsTitle(),
+        function() { self._setPref("connectors", self._getPref("connectors") === false); }
+      );
+      popup.appendChild(self.connectorsBtn);
+
+      var customiseBtn = self._makePopupAction(
+        ICONS.sliders, "Customise the toolbar and the style panel",
+        function() { self._closePopup(); self._openCustomise(); }
+      );
       popup.appendChild(customiseBtn);
 
       self.handle.container.appendChild(popup);
@@ -5912,7 +5989,10 @@
       }
       // Defensive: make sure the tools popup reflects the current overflow
       // set right before it's shown (in case a layout pass was missed).
-      if (kind === "tools") this._syncToolsPopup();
+      if (kind === "tools") {
+        this._syncToolsPopup();
+        this._syncViewToggles();
+      }
 
       // Position relative to the trigger — above it by preference, below
       // when there isn't room. Both popup and trigger live in the same
@@ -6085,33 +6165,39 @@
       );
     },
 
-    // Two view switches in the nav column: the background dots, and the green
-    // anchors an arrow is pulled from. Both are always-on affordances that
-    // some boards want and some do not, and neither is content — turning one
-    // off changes nothing anyone else sees.
-    _buildViewToggles: function() {
-      var self = this;
-      if (!self.handle || typeof self.handle.appendNavButton !== "function") return;
+    // A button in the tools popup that is not a tool: the view switches and
+    // Customise. Tagged so the stylesheet gives it the same box as the tools
+    // it sits among.
+    _makePopupAction: function(icon, title, onClick) {
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.setAttribute("data-popup-action", "");
+      btn.innerHTML = icon;
+      btn.title = title;
+      btn.setAttribute("aria-label", title);
+      btn.addEventListener("click", function(e) {
+        e.preventDefault();
+        onClick();
+      });
+      return btn;
+    },
 
-      if (typeof self.handle.setGridVisible === "function") {
-        self.gridBtn = self.handle.appendNavButton(
-          ICONS.grid, self._gridTitle(), function() {
-            self._setPref("grid", self._getPref("grid") === false);
-            if (self.gridBtn && self.gridBtn.setTitle) {
-              self.gridBtn.setTitle(self._gridTitle());
-            }
-          }
-        );
+    // Keep the two switches saying what they currently are. Called whenever
+    // the popup is shown, so they are right even if the preference changed
+    // from somewhere else.
+    _syncViewToggles: function() {
+      if (this.gridBtn) {
+        var gridOn = this._getPref("grid") !== false;
+        this.gridBtn.title = this._gridTitle();
+        this.gridBtn.setAttribute("aria-label", this.gridBtn.title);
+        this.gridBtn.setAttribute("aria-pressed", gridOn ? "true" : "false");
       }
-
-      self.connectorsBtn = self.handle.appendNavButton(
-        ICONS.connectors, self._connectorsTitle(), function() {
-          self._setPref("connectors", self._getPref("connectors") === false);
-          if (self.connectorsBtn && self.connectorsBtn.setTitle) {
-            self.connectorsBtn.setTitle(self._connectorsTitle());
-          }
-        }
-      );
+      if (this.connectorsBtn) {
+        var conOn = this._getPref("connectors") !== false;
+        this.connectorsBtn.title = this._connectorsTitle();
+        this.connectorsBtn.setAttribute("aria-label", this.connectorsBtn.title);
+        this.connectorsBtn.setAttribute("aria-pressed", conOn ? "true" : "false");
+      }
     },
 
     _gridTitle: function() {

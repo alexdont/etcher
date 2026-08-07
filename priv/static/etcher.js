@@ -770,13 +770,21 @@
       // of buttons; these need the full width and a column, the same shape
       // they have in the style panel.
       ".etcher-popup[data-kind=\"actions\"] {",
-      "  flex-wrap: wrap; max-width: 232px;",
+      "  flex-wrap: wrap; max-width: 208px; gap: 2px; padding: 6px;",
       "}",
       ".etcher-popup[data-kind=\"actions\"] .etcher-popup[data-kind=\"params\"] {",
       "  position: static; display: flex; flex-direction: column;",
-      "  width: 100%; min-width: 0; padding: 0; gap: 8px;",
+      "  width: 100%; min-width: 0; padding: 0; gap: 5px;",
       "  background: none; box-shadow: none; z-index: auto;",
       "}",
+      // Tighter than in the style panel: this is a menu that opens over the
+      // board, so every row it saves is board the user can still see.
+      ".etcher-popup[data-kind=\"actions\"] .etcher-marker-row { gap: 1px; }",
+      ".etcher-popup[data-kind=\"actions\"] .etcher-marker-row-head {",
+      "  font-size: 11px;",
+      "}",
+      ".etcher-popup[data-kind=\"actions\"] .etcher-marker-dash { gap: 4px; }",
+      ".etcher-popup[data-kind=\"actions\"] .etcher-popup-divider { margin: 2px 0; }",
       ".etcher-popup-divider {",
       "  flex: 0 0 100%; height: 1px; margin: 4px 0;",
       "  background: rgba(255, 255, 255, 0.15);",
@@ -3644,8 +3652,12 @@
         d.className = "etcher-popup-divider";
         this._paramsDivider = d;
       }
-      host.appendChild(this._paramsDivider);
-      host.appendChild(this.paramsPopup);
+      // Params first, arrange last. Sending something to the back of the
+      // canvas is the occasional action; thickness and line type are what
+      // you reach for between strokes, so they sit nearest the pointer —
+      // this menu opens upwards out of a bar at the bottom of the screen.
+      host.insertBefore(this.paramsPopup, host.firstChild);
+      host.insertBefore(this._paramsDivider, this.paramsPopup.nextSibling);
     },
 
     // Hand them back to the style panel. Called when the menu closes, so the

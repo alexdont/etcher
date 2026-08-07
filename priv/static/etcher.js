@@ -492,7 +492,7 @@
       "}",
       ".etcher-customise-backdrop.is-open { display: flex; }",
       ".etcher-customise {",
-      "  width: 320px; max-width: calc(100% - 32px);",
+      "  width: 360px; max-width: calc(100% - 32px);",
       "  max-height: calc(100% - 48px); overflow-y: auto;",
       "  padding: 16px; border-radius: 14px;",
       "  background: rgba(24, 24, 27, 0.98); color: #fff;",
@@ -509,14 +509,40 @@
       ".etcher-customise-row {",
       "  display: flex; align-items: center; gap: 10px;",
       "  padding: 7px 8px; border-radius: 8px;",
-      "  background: rgba(255, 255, 255, 0.06); cursor: grab;",
+      "  background: rgba(255, 255, 255, 0.06); cursor: pointer;",
       "}",
-      ".etcher-customise-row.is-dragging { opacity: 0.4; }",
-      ".etcher-customise-row.is-over { outline: 2px solid #3b82f6; }",
-      ".etcher-customise-row svg { width: 16px; height: 16px; flex: none; }",
       ".etcher-customise-row span { flex: 1; min-width: 0; }",
-      ".etcher-customise-grip { color: rgba(255, 255, 255, 0.35); flex: none; }",
       ".etcher-customise-row input { flex: none; cursor: pointer; }",
+      // The two trays are drawn as the toolbar is: a dark rounded bar of
+      // 36px icon buttons. The point of the dialog is to show what the bar
+      // will look like, so it shows a bar.
+      ".etcher-customise-tray {",
+      "  display: flex; flex-wrap: wrap; gap: 4px; min-height: 44px;",
+      "  padding: 4px; border-radius: 10px;",
+      "  background: rgba(0, 0, 0, 0.45);",
+      "  border: 1px dashed rgba(255, 255, 255, 0.14);",
+      "}",
+      // Somewhere to aim at when a tray is empty, rather than a 4px sliver.
+      ".etcher-customise-tray:empty::after {",
+      "  content: \"Drag tools here\"; display: flex; align-items: center;",
+      "  padding: 0 8px; color: rgba(255, 255, 255, 0.35); font-size: 12px;",
+      "}",
+      ".etcher-customise-chip {",
+      "  width: 36px; height: 36px; border-radius: 8px; cursor: grab;",
+      "  display: inline-flex; align-items: center; justify-content: center;",
+      "  background: rgba(255, 255, 255, 0.08); color: #fff;",
+      "  border: 0; padding: 0;",
+      "}",
+      ".etcher-customise-chip:hover { background: rgba(255, 255, 255, 0.18); }",
+      ".etcher-customise-chip svg { width: 18px; height: 18px; display: block; }",
+      // Sortable\'s own classes: the placeholder left behind, and the chip
+      // being carried. The placeholder is an outline rather than a faded
+      // copy, so the gap reads as "it will land here".
+      ".etcher-customise-chip.is-ghost {",
+      "  background: transparent; outline: 2px dashed #3b82f6; opacity: 1;",
+      "}",
+      ".etcher-customise-chip.is-ghost svg { opacity: 0.25; }",
+      ".etcher-customise-chip.is-chosen { cursor: grabbing; }",
       ".etcher-customise-actions {",
       "  display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;",
       "}",
@@ -3774,9 +3800,6 @@
       // the list opens looking like the bar it edits.
       var essential = self._essentialTools();
       var offered = (self.tools || []).filter(function(t) { return !!TOOL_DEFS[t]; });
-      var draft = essential.filter(function(t) { return offered.indexOf(t) !== -1; })
-        .concat(offered.filter(function(t) { return essential.indexOf(t) === -1; }))
-        .map(function(t) { return { key: t, on: essential.indexOf(t) !== -1 }; });
       var parts = (self._getPref("compact") || []).slice();
 
       var backdrop = document.createElement("div");
@@ -3797,93 +3820,98 @@
       box.appendChild(h);
       var sub = document.createElement("p");
       sub.textContent =
-        "Drag to reorder. Unticked tools move to the \u2026 menu rather than going away.";
+        "Drag tools between the bar and the \u2026 menu, and along the bar to " +
+        "order them. Nothing is removed either way.";
       box.appendChild(sub);
 
-      var list = document.createElement("div");
-      list.className = "etcher-customise-list";
-      box.appendChild(list);
-
-      // The DOM is the order. Sortable moves rows around itself, so keeping a
-      // parallel array in step would mean two answers to the same question —
-      // and the one on screen is the one the user arranged.
-      var dragKey = null;
-
-      function rowFor(entry) {
-        var row = document.createElement("div");
-        row.className = "etcher-customise-row";
-        row.draggable = true;
-        row.dataset.tool = entry.key;
-
-        var grip = document.createElement("span");
-        grip.className = "etcher-customise-grip";
-        grip.innerHTML = ICONS.grip;
-        row.appendChild(grip);
-
-        var icon = document.createElement("span");
-        icon.innerHTML = (TOOL_DEFS[entry.key] || {}).icon || "";
-        row.appendChild(icon);
-
-        var name = document.createElement("span");
-        // The tool titles carry a parenthetical explanation, which is right
-        // on a tooltip and noise in a list of twelve.
-        name.textContent = ((TOOL_DEFS[entry.key] || {}).title || entry.key)
-          .split(" (")[0];
-        row.appendChild(name);
-
-        var cb = document.createElement("input");
-        cb.type = "checkbox";
-        cb.checked = entry.on;
-        cb.title = "Show on the toolbar";
-        cb.addEventListener("change", function() { entry.on = cb.checked; });
-        // The row is draggable, so a press on the checkbox would otherwise
-        // start a drag instead of toggling it.
-        cb.addEventListener("pointerdown", function(e) { e.stopPropagation(); });
-        row.appendChild(cb);
-
-        row.addEventListener("dragstart", function(e) {
-          dragKey = entry.key;
-          row.classList.add("is-dragging");
-          try { e.dataTransfer.setData("text/plain", entry.key); } catch (_) {}
-        });
-        row.addEventListener("dragend", function() {
-          dragKey = null;
-          row.classList.remove("is-dragging");
-          [].forEach.call(list.children, function(c) { c.classList.remove("is-over"); });
-        });
-        row.addEventListener("dragover", function(e) {
-          if (!dragKey || dragKey === entry.key) return;
-          e.preventDefault();
-          row.classList.add("is-over");
-        });
-        row.addEventListener("dragleave", function() { row.classList.remove("is-over"); });
-        row.addEventListener("drop", function(e) {
-          e.preventDefault();
-          row.classList.remove("is-over");
-          if (!dragKey || dragKey === entry.key) return;
-          var moving = list.querySelector('[data-tool="' + dragKey + '"]');
-          if (moving) list.insertBefore(moving, row);
-        });
-        return row;
+      function trayWithLabel(text) {
+        var label = document.createElement("p");
+        label.style.margin = "0 0 6px";
+        label.textContent = text;
+        box.appendChild(label);
+        var tray = document.createElement("div");
+        tray.className = "etcher-customise-tray";
+        box.appendChild(tray);
+        return tray;
       }
 
-      draft.forEach(function(entry) { list.appendChild(rowFor(entry)); });
+      var barTray = trayWithLabel("On the toolbar");
+      var menuTray = document.createElement("div");
+      var menuLabel = document.createElement("p");
+      menuLabel.style.margin = "14px 0 6px";
+      menuLabel.textContent = "In the \u2026 menu";
+      box.appendChild(menuLabel);
+      menuTray.className = "etcher-customise-tray";
+      box.appendChild(menuTray);
 
-      // Sortable takes over when it is there — same library, same feel as the
-      // reorderable lists everywhere else. The handlers above stay wired as
-      // the fallback; Sortable stops its own drags from reaching them.
+      var dragKey = null;
+
+      function chipFor(key) {
+        var chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "etcher-customise-chip";
+        chip.dataset.tool = key;
+        chip.innerHTML = (TOOL_DEFS[key] || {}).icon || "";
+        // The tool titles carry a parenthetical explanation, which is right
+        // on a tooltip over a 36px square and nothing else would be.
+        chip.title = ((TOOL_DEFS[key] || {}).title || key).split(" (")[0];
+        chip.setAttribute("aria-label", chip.title);
+        // A button inside a drag surface: without this a press-and-drag ends
+        // as a click on whatever it was dropped on.
+        chip.addEventListener("click", function(e) { e.preventDefault(); });
+
+        // Fallback path, used only when SortableJS could not be fetched.
+        chip.draggable = true;
+        chip.addEventListener("dragstart", function(e) {
+          dragKey = key;
+          try { e.dataTransfer.setData("text/plain", key); } catch (_) {}
+        });
+        chip.addEventListener("dragend", function() { dragKey = null; });
+        return chip;
+      }
+
+      [barTray, menuTray].forEach(function(tray) {
+        tray.addEventListener("dragover", function(e) {
+          if (dragKey) e.preventDefault();
+        });
+        tray.addEventListener("drop", function(e) {
+          if (!dragKey) return;
+          e.preventDefault();
+          var moving = box.querySelector('.etcher-customise-chip[data-tool="' + dragKey + '"]');
+          if (!moving) return;
+          // Dropped ON a chip means "before this one"; dropped on the tray's
+          // empty space means the end.
+          var over = e.target.closest && e.target.closest(".etcher-customise-chip");
+          if (over && over !== moving) tray.insertBefore(moving, over);
+          else tray.appendChild(moving);
+        });
+      });
+
+      essential.filter(function(t) { return offered.indexOf(t) !== -1; })
+        .forEach(function(t) { barTray.appendChild(chipFor(t)); });
+      offered.filter(function(t) { return essential.indexOf(t) === -1; })
+        .forEach(function(t) { menuTray.appendChild(chipFor(t)); });
+
+      // Sortable takes over when it is there — the same library the
+      // reorderable lists elsewhere use. One group across both trays, so a
+      // tool can be carried from one to the other.
       self._withSortable(function(Sortable) {
         if (!Sortable || !self.customiseBackdrop) return;
         try {
-          self._customiseSortable = new Sortable(list, {
-            animation: 150,
-            handle: ".etcher-customise-grip",
-            draggable: ".etcher-customise-row",
-            ghostClass: "is-dragging"
+          self._customiseSortable = [barTray, menuTray].map(function(tray) {
+            return new Sortable(tray, {
+              group: "etcher-customise",
+              animation: 150,
+              draggable: ".etcher-customise-chip",
+              ghostClass: "is-ghost",
+              chosenClass: "is-chosen"
+            });
           });
           // With Sortable driving, the browser's own drag would run a second,
           // conflicting reorder on the same pointer gesture.
-          [].forEach.call(list.children, function(r) { r.draggable = false; });
+          [].forEach.call(box.querySelectorAll(".etcher-customise-chip"), function(c) {
+            c.draggable = false;
+          });
         } catch (_) {}
       });
 
@@ -3941,11 +3969,9 @@
       save.setAttribute("data-primary", "");
       save.textContent = "Save";
       save.addEventListener("click", function() {
-        var chosen = [].filter.call(list.children, function(r) {
-          var cb = r.querySelector("input");
-          return cb && cb.checked;
-        }).map(function(r) { return r.dataset.tool; });
-        self._setPref("tools", chosen);
+        self._setPref("tools", [].map.call(barTray.children, function(c) {
+          return c.dataset.tool;
+        }));
         self._setPref("compact", parts.slice());
         self._closeCustomise();
       });
@@ -3968,7 +3994,9 @@
 
     _closeCustomise: function() {
       if (this._customiseSortable) {
-        try { this._customiseSortable.destroy(); } catch (_) {}
+        [].concat(this._customiseSortable).forEach(function(s) {
+          try { s.destroy(); } catch (_) {}
+        });
         this._customiseSortable = null;
       }
       if (this._customiseEsc) {

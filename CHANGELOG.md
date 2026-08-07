@@ -8,12 +8,12 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- **Customise the toolbar and the compact panel.** A dialog under the
-  `…` menu: drag the tools into the order you want them, tick the ones
-  worth a permanent slot on the bar, and choose what the narrow style strip
-  keeps — colours, line types, fills, in any combination. Nothing is taken
-  away by any of it: an unticked tool moves to the `…` menu, and the
-  full style panel always has everything. Reset puts it all back.
+- **Customise the toolbar and the compact panel.** A dialog under the `…`
+  menu holding two trays laid out the way the toolbar is — one for the bar,
+  one for the `…` menu. Drag tools between them and along the bar to order
+  them, so what you are arranging looks like what you will get. Also choose
+  what the narrow style strip keeps: colours, line types, fills, in any
+  combination. Nothing is removed by any of it, and Reset puts it all back.
 
   Reordering uses SortableJS, the same drag library the rest of the site
   uses, loaded from the same pin. Etcher does not depend on it — the list

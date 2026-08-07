@@ -531,7 +531,8 @@
       "  width: 36px; height: 36px; border-radius: 8px; cursor: grab;",
       "  display: inline-flex; align-items: center; justify-content: center;",
       "  background: rgba(255, 255, 255, 0.08); color: #fff;",
-      "  border: 0; padding: 0;",
+      "  border: 0; padding: 0; box-sizing: border-box; flex: none;",
+      "  user-select: none; -webkit-user-select: none; touch-action: none;",
       "}",
       ".etcher-customise-chip:hover { background: rgba(255, 255, 255, 0.18); }",
       ".etcher-customise-chip svg { width: 18px; height: 18px; display: block; }",
@@ -543,6 +544,14 @@
       "}",
       ".etcher-customise-chip.is-ghost svg { opacity: 0.25; }",
       ".etcher-customise-chip.is-chosen { cursor: grabbing; }",
+      // The copy that follows the pointer under `forceFallback`. Sortable
+      // appends it to the body, so it needs a z-index of its own rather than
+      // inheriting the dialog\'s.
+      ".etcher-customise-chip.is-flying {",
+      "  z-index: 30; opacity: 0.9; cursor: grabbing;",
+      "  background: rgba(60, 60, 66, 0.98);",
+      "  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);",
+      "}",
       ".etcher-customise-actions {",
       "  display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;",
       "}",
@@ -3847,8 +3856,13 @@
       var dragKey = null;
 
       function chipFor(key) {
-        var chip = document.createElement("button");
-        chip.type = "button";
+        // A div rather than a button. Sortable's pointer-driven fallback is
+        // unreliable on interactive elements — the browser's own handling of
+        // a press on a button competes with it, which showed up as a chip
+        // that entered the drag state and then would not move. Nothing here
+        // needs button behaviour: it is dragged, not pressed.
+        var chip = document.createElement("div");
+        chip.setAttribute("role", "listitem");
         chip.className = "etcher-customise-chip";
         chip.dataset.tool = key;
         chip.innerHTML = (TOOL_DEFS[key] || {}).icon || "";
@@ -3856,36 +3870,42 @@
         // on a tooltip over a 36px square and nothing else would be.
         chip.title = ((TOOL_DEFS[key] || {}).title || key).split(" (")[0];
         chip.setAttribute("aria-label", chip.title);
-        // A button inside a drag surface: without this a press-and-drag ends
-        // as a click on whatever it was dropped on.
-        chip.addEventListener("click", function(e) { e.preventDefault(); });
-
-        // Fallback path, used only when SortableJS could not be fetched.
-        chip.draggable = true;
-        chip.addEventListener("dragstart", function(e) {
-          dragKey = key;
-          try { e.dataTransfer.setData("text/plain", key); } catch (_) {}
-        });
-        chip.addEventListener("dragend", function() { dragKey = null; });
         return chip;
       }
 
-      [barTray, menuTray].forEach(function(tray) {
-        tray.addEventListener("dragover", function(e) {
-          if (dragKey) e.preventDefault();
+      // The browser's own drag-and-drop, wired ONLY when SortableJS could not
+      // be fetched. Wiring it either way is what broke the drag: Sortable
+      // sets `draggable` on its items itself, and anything else touching that
+      // attribute afterwards leaves a chip that enters the drag state and
+      // then cannot move.
+      function enableNativeDnd() {
+        [].forEach.call(box.querySelectorAll(".etcher-customise-chip"), function(chip) {
+          chip.draggable = true;
+          chip.addEventListener("dragstart", function(e) {
+            dragKey = chip.dataset.tool;
+            try { e.dataTransfer.setData("text/plain", dragKey); } catch (_) {}
+          });
+          chip.addEventListener("dragend", function() { dragKey = null; });
         });
-        tray.addEventListener("drop", function(e) {
-          if (!dragKey) return;
-          e.preventDefault();
-          var moving = box.querySelector('.etcher-customise-chip[data-tool="' + dragKey + '"]');
-          if (!moving) return;
-          // Dropped ON a chip means "before this one"; dropped on the tray's
-          // empty space means the end.
-          var over = e.target.closest && e.target.closest(".etcher-customise-chip");
-          if (over && over !== moving) tray.insertBefore(moving, over);
-          else tray.appendChild(moving);
+        [barTray, menuTray].forEach(function(tray) {
+          tray.addEventListener("dragover", function(e) {
+            if (dragKey) e.preventDefault();
+          });
+          tray.addEventListener("drop", function(e) {
+            if (!dragKey) return;
+            e.preventDefault();
+            var moving = box.querySelector(
+              '.etcher-customise-chip[data-tool="' + dragKey + '"]'
+            );
+            if (!moving) return;
+            // Dropped ON a chip means "before this one"; dropped on the
+            // tray's empty space means the end.
+            var over = e.target.closest && e.target.closest(".etcher-customise-chip");
+            if (over && over !== moving) tray.insertBefore(moving, over);
+            else tray.appendChild(moving);
+          });
         });
-      });
+      }
 
       essential.filter(function(t) { return offered.indexOf(t) !== -1; })
         .forEach(function(t) { barTray.appendChild(chipFor(t)); });
@@ -3896,7 +3916,8 @@
       // reorderable lists elsewhere use. One group across both trays, so a
       // tool can be carried from one to the other.
       self._withSortable(function(Sortable) {
-        if (!Sortable || !self.customiseBackdrop) return;
+        if (!self.customiseBackdrop) return;
+        if (!Sortable) { enableNativeDnd(); return; }
         try {
           self._customiseSortable = [barTray, menuTray].map(function(tray) {
             return new Sortable(tray, {
@@ -3905,14 +3926,16 @@
               draggable: ".etcher-customise-chip",
               ghostClass: "is-ghost",
               chosenClass: "is-chosen"
+              // Sortable's defaults otherwise, which is what the reorderable
+              // lists elsewhere on the site use. Fresco exempts this dialog
+              // from pointer capture already (it checks `closest` for the
+              // no-capture attribute), so there is nothing here that native
+              // drag-and-drop has to survive.
             });
           });
-          // With Sortable driving, the browser's own drag would run a second,
-          // conflicting reorder on the same pointer gesture.
-          [].forEach.call(box.querySelectorAll(".etcher-customise-chip"), function(c) {
-            c.draggable = false;
-          });
-        } catch (_) {}
+        } catch (_) {
+          enableNativeDnd();
+        }
       });
 
       // The compact strip's parts.

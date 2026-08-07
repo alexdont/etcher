@@ -770,7 +770,7 @@
       // of buttons; these need the full width and a column, the same shape
       // they have in the style panel.
       ".etcher-popup[data-kind=\"actions\"] {",
-      "  flex-wrap: wrap; max-width: 208px; gap: 2px; padding: 6px;",
+      "  flex-wrap: wrap; max-width: 172px; gap: 2px; padding: 6px;",
       "}",
       ".etcher-popup[data-kind=\"actions\"] .etcher-popup[data-kind=\"params\"] {",
       "  position: static; display: flex; flex-direction: column;",
@@ -784,6 +784,15 @@
       "  font-size: 11px;",
       "}",
       ".etcher-popup[data-kind=\"actions\"] .etcher-marker-dash { gap: 4px; }",
+      // Square, and the same square the arrange buttons are. In the style
+      // panel these stretch to fill the width, which is right there — the
+      // panel is a column of full-width controls. Here they sit in a menu
+      // whose other row is four equal icon buttons, and a row of wider ones
+      // directly above reads as a different kind of control rather than as
+      // the same menu.
+      ".etcher-popup[data-kind=\"actions\"] .etcher-marker-dash button {",
+      "  flex: 0 0 34px; width: 34px; height: 34px;",
+      "}",
       ".etcher-popup[data-kind=\"actions\"] .etcher-popup-divider { margin: 2px 0; }",
       ".etcher-popup-divider {",
       "  flex: 0 0 100%; height: 1px; margin: 4px 0;",

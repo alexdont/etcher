@@ -196,6 +196,8 @@
     // its corners for the connector anchors — each says what it switches.
     grid: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="6" cy="6" r="1.6"/><circle cx="12" cy="6" r="1.6"/><circle cx="18" cy="6" r="1.6"/><circle cx="6" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="18" cy="12" r="1.6"/><circle cx="6" cy="18" r="1.6"/><circle cx="12" cy="18" r="1.6"/><circle cx="18" cy="18" r="1.6"/></svg>',
     connectors: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5"/><circle cx="7" cy="7" r="2" fill="currentColor" stroke="none"/><circle cx="17" cy="7" r="2" fill="currentColor" stroke="none"/><circle cx="7" cy="17" r="2" fill="currentColor" stroke="none"/><circle cx="17" cy="17" r="2" fill="currentColor" stroke="none"/></svg>',
+    // Two rows of dots — the drag handle every reorderable list uses.
+    grip: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>',
     // Heroicons chevron-up / chevron-down — the style panel's size control.
     chevronUp:   '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 15.75 7.5-7.5 7.5 7.5"/></svg>',
     chevronDown: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5"/></svg>',
@@ -440,20 +442,32 @@
       // something reached for mid-stroke. Both go.
       ".etcher-stylepanel[data-size=\"compact\"] .etcher-marker-row { display: none; }",
       ".etcher-stylepanel[data-size=\"compact\"] .etcher-stylepanel-divider { display: none; }",
-      ".etcher-stylepanel[data-size=\"compact\"] .etcher-stylepanel-swatches {",
+      // Everything is off in compact, then the chosen parts are put back.
+      // Written this way round so a part nobody asked for cannot appear
+      // through some other rule winning on source order — which is exactly
+      // how the fills stayed visible the first time.
+      ".etcher-stylepanel[data-size=\"compact\"] .etcher-stylepanel-swatches,",
+      ".etcher-stylepanel[data-size=\"compact\"] .etcher-marker-dash {",
+      "  display: none;",
+      "}",
+      ".etcher-stylepanel[data-size=\"compact\"][data-compact-parts~=\"colors\"] .etcher-stylepanel-swatches {",
       "  display: grid; grid-template-columns: 1fr; gap: 6px;",
       "}",
       ".etcher-stylepanel[data-size=\"compact\"] .etcher-swatch {",
       "  width: 30px; height: 30px;",
       "}",
-      ".etcher-stylepanel[data-size=\"compact\"] .etcher-marker-dash {",
+      // `:not(.etcher-marker-fill)` because the fill row carries the dash
+      // row's class too. Turning it off in a later rule does not work: the
+      // dash selector has an extra attribute on it and therefore wins on
+      // specificity regardless of order, so asking for line types was also
+      // showing fills. Excluding it here means each part answers only for
+      // itself.
+      ".etcher-stylepanel[data-size=\"compact\"][data-compact-parts~=\"dash\"] .etcher-marker-dash:not(.etcher-marker-fill) {",
       "  display: grid; grid-template-columns: 1fr; gap: 6px;",
       "}",
-      // AFTER the rule above, not before it. The fill row carries both
-      // classes, and the two selectors have equal specificity — so whichever
-      // is written last wins, and written first this loses to `display: grid`
-      // and the fills stay on screen.
-      ".etcher-stylepanel[data-size=\"compact\"] .etcher-marker-fill { display: none; }",
+      ".etcher-stylepanel[data-size=\"compact\"][data-compact-parts~=\"fills\"] .etcher-marker-fill {",
+      "  display: grid; grid-template-columns: 1fr; gap: 6px;",
+      "}",
       ".etcher-stylepanel[data-size=\"hidden\"] { display: none; }",
       // The chevron that cycles the three. Pinned above the panel rather
       // than attached to its edge so it stays exactly where it was when the
@@ -469,6 +483,52 @@
       ".etcher-panel-toggle.is-active { display: inline-flex; }",
       ".etcher-panel-toggle:hover { background: rgba(0, 0, 0, 0.85); }",
       ".etcher-panel-toggle svg { width: 18px; height: 18px; display: block; }",
+      // Customise dialog — what rides on the toolbar, in what order, and
+      // what the compact style strip keeps.
+      ".etcher-customise-backdrop {",
+      "  position: absolute; inset: 0; z-index: 20; display: none;",
+      "  align-items: center; justify-content: center;",
+      "  background: rgba(0, 0, 0, 0.45); pointer-events: auto;",
+      "}",
+      ".etcher-customise-backdrop.is-open { display: flex; }",
+      ".etcher-customise {",
+      "  width: 320px; max-width: calc(100% - 32px);",
+      "  max-height: calc(100% - 48px); overflow-y: auto;",
+      "  padding: 16px; border-radius: 14px;",
+      "  background: rgba(24, 24, 27, 0.98); color: #fff;",
+      "  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);",
+      "  font: 500 13px ui-sans-serif, system-ui, -apple-system, sans-serif;",
+      "}",
+      ".etcher-customise h3 {",
+      "  margin: 0 0 4px; font-size: 14px; font-weight: 600;",
+      "}",
+      ".etcher-customise p {",
+      "  margin: 0 0 12px; color: rgba(255, 255, 255, 0.6); font-size: 12px;",
+      "}",
+      ".etcher-customise-list { display: flex; flex-direction: column; gap: 4px; }",
+      ".etcher-customise-row {",
+      "  display: flex; align-items: center; gap: 10px;",
+      "  padding: 7px 8px; border-radius: 8px;",
+      "  background: rgba(255, 255, 255, 0.06); cursor: grab;",
+      "}",
+      ".etcher-customise-row.is-dragging { opacity: 0.4; }",
+      ".etcher-customise-row.is-over { outline: 2px solid #3b82f6; }",
+      ".etcher-customise-row svg { width: 16px; height: 16px; flex: none; }",
+      ".etcher-customise-row span { flex: 1; min-width: 0; }",
+      ".etcher-customise-grip { color: rgba(255, 255, 255, 0.35); flex: none; }",
+      ".etcher-customise-row input { flex: none; cursor: pointer; }",
+      ".etcher-customise-actions {",
+      "  display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;",
+      "}",
+      ".etcher-customise-actions button {",
+      "  padding: 7px 14px; border: 0; border-radius: 8px; cursor: pointer;",
+      "  font: 600 13px ui-sans-serif, system-ui, -apple-system, sans-serif;",
+      "  background: rgba(255, 255, 255, 0.12); color: #fff;",
+      "}",
+      ".etcher-customise-actions button[data-primary] {",
+      "  background: #3b82f6;",
+      "}",
+      ".etcher-customise-actions button:hover { filter: brightness(1.15); }",
       // Narrow container: the docked panel would eat the canvas, so it
       // becomes a popup over the tool bar, opened by `.etcher-style-trigger`.
       // JS owns the offsets (the tool bar's height and width both move), so
@@ -1280,6 +1340,7 @@
   var CHROME_SELECTOR =
     ".etcher-toolbar, .etcher-actionbar, .etcher-stylepanel, " +
     ".etcher-style-trigger, .etcher-panel-toggle, " +
+    ".etcher-customise-backdrop, .etcher-customise, " +
     ".etcher-link-menu, .etcher-link-popup, " +
     ".etcher-link-editor, " +
     ".etcher-popup, .etcher-tooltip";
@@ -3236,7 +3297,10 @@
         // Non-essentials are reachable only through the `[⋯]` grid, so they
         // get no bar button at all. `_syncToolsPopup` keeps them permanently
         // visible there rather than only on overflow.
-        if (ESSENTIAL_TOOLS.indexOf(toolKey) === -1) return;
+        // A button is built for EVERY tool the host offers, and
+        // `_refreshToolbarTools` decides which are shown. Building only the
+        // essentials meant a tool promoted onto the bar later had no button
+        // to promote — it saved, and nothing appeared.
         bar.appendChild(self._makeToolButton(toolKey, def.icon, def.title));
       });
 
@@ -3588,34 +3652,266 @@
       self._applyPanelPref(self._getPref("panel"));
     },
 
-    // Which tools the toolbar actually shows: what the host offered, minus
-    // anything this user has turned off. The host's list stays the ceiling —
-    // a preference can hide a tool, never conjure one the host withheld.
-    _effectiveTools: function() {
-      var offered = (this.tools || []).slice();
+    // The tools that ride on the bar itself, in the order they sit there.
+    // Everything else the host offered is still available — it lives in the
+    // overflow menu — so this is about what is worth a permanent slot, not
+    // about taking tools away.
+    //
+    // `ESSENTIAL_TOOLS` is the default rather than the rule: a board full of
+    // diagrams wants the dimension tool to hand, a board of photographs wants
+    // the marker, and neither is wrong.
+    _essentialTools: function() {
       var want = this._getPref("tools");
-      if (!Array.isArray(want)) return offered;
-      return offered.filter(function(t) { return want.indexOf(t) !== -1; });
+      if (!Array.isArray(want)) return ESSENTIAL_TOOLS;
+      return want;
     },
 
-    // Applied by hiding buttons rather than rebuilding the bar: every other
-    // part of the toolbar holds references to those buttons (the pinned
-    // slot, the overflow popup, the active-tool highlight), and rebuilding
-    // would have to re-thread all of them for a change that is purely about
-    // what is on show.
+    _isEssentialTool: function(key) {
+      return this._essentialTools().indexOf(key) !== -1;
+    },
+
+    // Applied by moving and hiding the existing buttons rather than
+    // rebuilding the bar: every other part of the toolbar holds references
+    // to those buttons — the pinned slot, the overflow popup, the
+    // active-tool highlight — and a rebuild would have to re-thread all of
+    // them for a change that is only about what is on show and in what
+    // order.
     _refreshToolbarTools: function() {
-      if (!this.toolbar) return;
-      var want = this._getPref("tools");
-      var allowed = Array.isArray(want) ? want : null;
-      var btns = this.toolbar.querySelectorAll("button[data-tool]");
-      for (var i = 0; i < btns.length; i++) {
-        var key = btns[i].dataset.tool;
+      var self = this;
+      if (!self.toolbar) return;
+      var order = self._essentialTools();
+      var btns = [].slice.call(self.toolbar.querySelectorAll("button[data-tool]"));
+
+      btns.forEach(function(btn) {
+        var key = btn.dataset.tool;
         // The cursor is not a drawing tool and is how you get out of one, so
-        // it is never something to hide.
-        if (!key || key === "cursor") continue;
-        var on = !allowed || allowed.indexOf(key) !== -1;
-        btns[i].style.display = on ? "" : "none";
+        // it never leaves the bar. Neither does the pinned slot, which shows
+        // whichever tool is active and would otherwise vanish mid-stroke.
+        if (!key || key === "cursor" || btn.hasAttribute("data-pinned-tool")) return;
+        btn.style.display = self._isEssentialTool(key) ? "" : "none";
+      });
+
+      // Re-order by moving each chosen tool to sit after the one before it.
+      // Only the tools in the preference move; the cursor, the grabber, the
+      // overflow button and the separators keep the places they were built
+      // in, so the bar's furniture is not disturbed by a reorder.
+      var prev = null;
+      order.forEach(function(key) {
+        var btn = btns.filter(function(b) {
+          return b.dataset.tool === key && !b.hasAttribute("data-pinned-tool");
+        })[0];
+        if (!btn || !btn.parentNode) return;
+        if (prev && prev.nextSibling !== btn) {
+          prev.parentNode.insertBefore(btn, prev.nextSibling);
+        }
+        prev = btn;
+      });
+
+      if (self.toolsPopup) self._syncToolsPopup();
+    },
+
+    // ── Customise dialog ────────────────────────────────────────────────────
+    //
+    // What rides on the toolbar, in what order, and what the compact style
+    // strip keeps. Nothing is taken away by any of it: a tool turned off the
+    // bar still lives in the overflow menu, and the full style panel still
+    // has everything.
+    //
+    // Edits are held in the dialog until Save. A settings panel that applies
+    // as you touch it cannot be backed out of, and reordering means dropping
+    // things in the wrong place on the way to the right one.
+    _openCustomise: function() {
+      var self = this;
+      if (self.customiseBackdrop) self._closeCustomise();
+
+      // The working copy. Every tool the host offered, in bar order first so
+      // the list opens looking like the bar it edits.
+      var essential = self._essentialTools();
+      var offered = (self.tools || []).filter(function(t) { return !!TOOL_DEFS[t]; });
+      var draft = essential.filter(function(t) { return offered.indexOf(t) !== -1; })
+        .concat(offered.filter(function(t) { return essential.indexOf(t) === -1; }))
+        .map(function(t) { return { key: t, on: essential.indexOf(t) !== -1 }; });
+      var parts = (self._getPref("compact") || []).slice();
+
+      var backdrop = document.createElement("div");
+      backdrop.className = "etcher-customise-backdrop";
+      backdrop.setAttribute("data-fresco-no-capture", "");
+      backdrop.addEventListener("pointerdown", function(e) {
+        // Only a press on the backdrop itself dismisses — a press that
+        // started inside the dialog and drifted out during a drag must not.
+        if (e.target === backdrop) self._closeCustomise();
+      });
+
+      var box = document.createElement("div");
+      box.className = "etcher-customise";
+      backdrop.appendChild(box);
+
+      var h = document.createElement("h3");
+      h.textContent = "Customise";
+      box.appendChild(h);
+      var sub = document.createElement("p");
+      sub.textContent =
+        "Drag to reorder. Unticked tools move to the \u2026 menu rather than going away.";
+      box.appendChild(sub);
+
+      var list = document.createElement("div");
+      list.className = "etcher-customise-list";
+      box.appendChild(list);
+
+      var dragKey = null;
+
+      function rowFor(entry) {
+        var row = document.createElement("div");
+        row.className = "etcher-customise-row";
+        row.draggable = true;
+        row.dataset.tool = entry.key;
+
+        var grip = document.createElement("span");
+        grip.className = "etcher-customise-grip";
+        grip.innerHTML = ICONS.grip;
+        row.appendChild(grip);
+
+        var icon = document.createElement("span");
+        icon.innerHTML = (TOOL_DEFS[entry.key] || {}).icon || "";
+        row.appendChild(icon);
+
+        var name = document.createElement("span");
+        // The tool titles carry a parenthetical explanation, which is right
+        // on a tooltip and noise in a list of twelve.
+        name.textContent = ((TOOL_DEFS[entry.key] || {}).title || entry.key)
+          .split(" (")[0];
+        row.appendChild(name);
+
+        var cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.checked = entry.on;
+        cb.title = "Show on the toolbar";
+        cb.addEventListener("change", function() { entry.on = cb.checked; });
+        // The row is draggable, so a press on the checkbox would otherwise
+        // start a drag instead of toggling it.
+        cb.addEventListener("pointerdown", function(e) { e.stopPropagation(); });
+        row.appendChild(cb);
+
+        row.addEventListener("dragstart", function(e) {
+          dragKey = entry.key;
+          row.classList.add("is-dragging");
+          try { e.dataTransfer.setData("text/plain", entry.key); } catch (_) {}
+        });
+        row.addEventListener("dragend", function() {
+          dragKey = null;
+          row.classList.remove("is-dragging");
+          [].forEach.call(list.children, function(c) { c.classList.remove("is-over"); });
+        });
+        row.addEventListener("dragover", function(e) {
+          if (!dragKey || dragKey === entry.key) return;
+          e.preventDefault();
+          row.classList.add("is-over");
+        });
+        row.addEventListener("dragleave", function() { row.classList.remove("is-over"); });
+        row.addEventListener("drop", function(e) {
+          e.preventDefault();
+          row.classList.remove("is-over");
+          if (!dragKey || dragKey === entry.key) return;
+          var from = draft.findIndex(function(d) { return d.key === dragKey; });
+          var to = draft.findIndex(function(d) { return d.key === entry.key; });
+          if (from === -1 || to === -1) return;
+          draft.splice(to, 0, draft.splice(from, 1)[0]);
+          render();
+        });
+        return row;
       }
+
+      function render() {
+        while (list.firstChild) list.removeChild(list.firstChild);
+        draft.forEach(function(entry) { list.appendChild(rowFor(entry)); });
+      }
+      render();
+
+      // The compact strip's parts.
+      var h2 = document.createElement("h3");
+      h2.style.marginTop = "18px";
+      h2.textContent = "Compact style panel";
+      box.appendChild(h2);
+      var sub2 = document.createElement("p");
+      sub2.textContent = "What the narrow strip keeps. The full panel always has everything.";
+      box.appendChild(sub2);
+
+      var partsList = document.createElement("div");
+      partsList.className = "etcher-customise-list";
+      [
+        { key: "colors", label: "Colours" },
+        { key: "dash", label: "Line types" },
+        { key: "fills", label: "Fills" }
+      ].forEach(function(part) {
+        var row = document.createElement("label");
+        row.className = "etcher-customise-row";
+        row.style.cursor = "pointer";
+        var cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.checked = parts.indexOf(part.key) !== -1;
+        cb.addEventListener("change", function() {
+          var at = parts.indexOf(part.key);
+          if (cb.checked && at === -1) parts.push(part.key);
+          if (!cb.checked && at !== -1) parts.splice(at, 1);
+        });
+        var name = document.createElement("span");
+        name.textContent = part.label;
+        row.appendChild(name);
+        row.appendChild(cb);
+        partsList.appendChild(row);
+      });
+      box.appendChild(partsList);
+
+      var actions = document.createElement("div");
+      actions.className = "etcher-customise-actions";
+      var reset = document.createElement("button");
+      reset.type = "button";
+      reset.textContent = "Reset";
+      reset.addEventListener("click", function() {
+        self._setPref("tools", null);
+        self._setPref("compact", ["colors", "dash"]);
+        self._closeCustomise();
+      });
+      var cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.textContent = "Cancel";
+      cancel.addEventListener("click", function() { self._closeCustomise(); });
+      var save = document.createElement("button");
+      save.type = "button";
+      save.setAttribute("data-primary", "");
+      save.textContent = "Save";
+      save.addEventListener("click", function() {
+        self._setPref("tools", draft.filter(function(d) { return d.on; })
+          .map(function(d) { return d.key; }));
+        self._setPref("compact", parts.slice());
+        self._closeCustomise();
+      });
+      actions.appendChild(reset);
+      actions.appendChild(cancel);
+      actions.appendChild(save);
+      box.appendChild(actions);
+
+      self.handle.container.appendChild(backdrop);
+      // Displayed in its own frame so the opening is not batched with the
+      // click that asked for it.
+      backdrop.classList.add("is-open");
+      self.customiseBackdrop = backdrop;
+
+      self._customiseEsc = function(e) {
+        if (e.key === "Escape") self._closeCustomise();
+      };
+      document.addEventListener("keydown", self._customiseEsc, true);
+    },
+
+    _closeCustomise: function() {
+      if (this._customiseEsc) {
+        document.removeEventListener("keydown", this._customiseEsc, true);
+        this._customiseEsc = null;
+      }
+      if (this.customiseBackdrop && this.customiseBackdrop.parentNode) {
+        this.customiseBackdrop.parentNode.removeChild(this.customiseBackdrop);
+      }
+      this.customiseBackdrop = null;
     },
 
     _cyclePanelSize: function() {
@@ -4134,11 +4430,14 @@
         var main = self.toolbar.querySelector(
           'button[data-tool="' + pb.dataset.tool + '"]:not([data-pinned-tool])'
         );
-        // No bar button means a non-essential tool: the popup is its only
-        // home, so it is always shown. Otherwise mirror the overflow state.
-        var hidden = main
-          ? main.classList.contains("etcher-overflow-hidden")
-          : true;
+        // Shown in the menu whenever it is not reachable on the bar: either
+        // there is no button at all, or the user has not chosen it as an
+        // essential (display cleared), or the bar ran short and collapsed it.
+        // Every tool has a button now, so "no button" alone is no longer the
+        // test for "lives in the menu".
+        var hidden = !main ||
+          main.style.display === "none" ||
+          main.classList.contains("etcher-overflow-hidden");
         pb.style.display = hidden ? "" : "none";
         if (hidden) anyToolHidden = true;
       });
@@ -4306,6 +4605,25 @@
         self._refreshUndoButtons();
       });
       popup.appendChild(self.popupRedoBtn);
+
+      // Customise lives at the bottom of this menu because this menu is
+      // where you end up when the tool you want is not on the bar — which is
+      // the moment you want to put it there.
+      var customiseDivider = document.createElement("div");
+      customiseDivider.className = "etcher-popup-divider";
+      popup.appendChild(customiseDivider);
+
+      var customiseBtn = document.createElement("button");
+      customiseBtn.type = "button";
+      customiseBtn.title = "Customise the toolbar and the style panel";
+      customiseBtn.setAttribute("aria-label", customiseBtn.title);
+      customiseBtn.innerHTML = ICONS.sliders;
+      customiseBtn.addEventListener("click", function(e) {
+        e.preventDefault();
+        self._closePopup();
+        self._openCustomise();
+      });
+      popup.appendChild(customiseBtn);
 
       self.handle.container.appendChild(popup);
       self.toolsPopup = popup;
@@ -5709,7 +6027,7 @@
       if (!btn) return;
 
       var extras = (self.tools || []).filter(function(t) {
-        return ESSENTIAL_TOOLS.indexOf(t) === -1 && TOOL_DEFS[t];
+        return !self._isEssentialTool(t) && TOOL_DEFS[t];
       });
       if (!extras.length) {
         btn.style.display = "none";
@@ -5737,7 +6055,7 @@
     // Called whenever a tool is chosen; only non-essentials claim the slot.
     _rememberPinnedTool: function(toolKey) {
       if (!toolKey) return;
-      if (ESSENTIAL_TOOLS.indexOf(toolKey) !== -1) return;
+      if (this._isEssentialTool(toolKey)) return;
       if (!TOOL_DEFS[toolKey]) return;
       if (this._pinnedTool === toolKey) return;
       this._pinnedTool = toolKey;
@@ -10139,7 +10457,11 @@
         connectors: true,  // the green anchors an arrow is pulled from
         panel: "full",     // full | compact | hidden
         tools: null,       // null = whatever the host configured
-        colors: null       // null = the board's palette, unchanged
+        colors: null,      // null = the board's palette, unchanged
+        // Which parts the compact style panel keeps. Some people reach for
+        // fills constantly and never touch a line type; the opposite is just
+        // as common, and neither should have to keep the full panel open.
+        compact: ["colors", "dash"]
       };
     },
 
@@ -10242,6 +10564,7 @@
       this._applyGridPref(prefs.grid);
       this._applyPanelPref(prefs.panel);
       this._applyColorsPref(prefs.colors);
+      this._applyCompactParts(prefs.compact);
       // Connector anchors are read from the pref at the moment they would be
       // shown (`_connectorsAvailableFor`), so there is nothing to push here.
       // The dots currently on screen do have to go, though.
@@ -10259,6 +10582,15 @@
       this._colorSlots = slots;
       if (this._activeSlot >= slots.length) this._activeSlot = 0;
       this._refreshToolbarSwatches();
+    },
+
+    // Which sections the compact strip keeps, as a space-separated attribute
+    // so the stylesheet can answer with `~=` rather than this reaching in and
+    // setting `display` on individual rows.
+    _applyCompactParts: function(parts) {
+      if (!this.stylePanel) return;
+      var list = Array.isArray(parts) ? parts : ["colors", "dash"];
+      this.stylePanel.setAttribute("data-compact-parts", list.join(" "));
     },
 
     // Fresco owns the background dots — they are its canvas, not etcher's

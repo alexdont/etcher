@@ -93,7 +93,7 @@ const flush = () => { const p = pending; pending = []; p.forEach((fn) => fn && f
   // over the defaults silently drops keys it has never heard of.
   assert.deepStrictEqual(
     Object.keys(d).sort(),
-    ["colors", "connectors", "grid", "panel", "tools"],
+    ["colors", "compact", "connectors", "grid", "panel", "tools"],
     "the full set of preferences"
   );
   // The two that mean 'the host's own choice stands' must default to null,
@@ -104,6 +104,10 @@ const flush = () => { const p = pending; pending = []; p.forEach((fn) => fn && f
   assert.strictEqual(d.grid, true);
   assert.strictEqual(d.connectors, true);
   assert.strictEqual(d.panel, "full");
+  // `compact` DOES default to a list rather than null: it is a choice among
+  // parts that all exist, not a stand-in for the host's own configuration,
+  // and an empty compact strip is a panel with nothing in it.
+  assert.deepStrictEqual(d.compact, ["colors", "dash"]);
   // A fresh object each time, or one layer's preferences become every
   // layer's.
   assert.notStrictEqual(defaultPrefs(), defaultPrefs());

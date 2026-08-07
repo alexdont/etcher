@@ -8,6 +8,16 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Customise the toolbar and the compact panel.** A dialog under the
+  `…` menu: drag the tools into the order you want them, tick the ones
+  worth a permanent slot on the bar, and choose what the narrow style strip
+  keeps — colours, line types, fills, in any combination. Nothing is taken
+  away by any of it: an unticked tool moves to the `…` menu, and the
+  full style panel always has everything. Reset puts it all back.
+
+  Saved through the same hook as the rest, so a host can keep it against the
+  user, the board, or both.
+
 - **Preferences.** How you like the board set up — the background dots, the
   green connector anchors, how much of the style panel is open, your colours
   — now sticks between sessions. Saved in the browser on its own; hand etcher a

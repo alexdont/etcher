@@ -429,16 +429,31 @@
       // drops the sliders, which are set once and left. Hidden is for
       // presenting, where the board is the point and the chrome is not.
       ".etcher-stylepanel { top: 52px; }",
+      // Compact is a narrow vertical strip, not a shrunken panel: the colour
+      // and the line type stacked in one column, everything else gone. The
+      // point is to give the board back its width, which a panel merely a
+      // bit smaller does not do.
       ".etcher-stylepanel[data-size=\"compact\"] {",
-      "  width: auto; max-width: calc(100vw - 24px); padding: 8px; gap: 8px;",
+      "  width: auto; max-width: calc(100vw - 24px); padding: 6px; gap: 6px;",
       "}",
+      // Sliders are set once and left; fills are a shape property rather than
+      // something reached for mid-stroke. Both go.
       ".etcher-stylepanel[data-size=\"compact\"] .etcher-marker-row { display: none; }",
+      ".etcher-stylepanel[data-size=\"compact\"] .etcher-stylepanel-divider { display: none; }",
       ".etcher-stylepanel[data-size=\"compact\"] .etcher-stylepanel-swatches {",
-      "  display: flex; gap: 6px;",
+      "  display: grid; grid-template-columns: 1fr; gap: 6px;",
       "}",
       ".etcher-stylepanel[data-size=\"compact\"] .etcher-swatch {",
-      "  width: 22px; height: 22px;",
+      "  width: 30px; height: 30px;",
       "}",
+      ".etcher-stylepanel[data-size=\"compact\"] .etcher-marker-dash {",
+      "  display: grid; grid-template-columns: 1fr; gap: 6px;",
+      "}",
+      // AFTER the rule above, not before it. The fill row carries both
+      // classes, and the two selectors have equal specificity — so whichever
+      // is written last wins, and written first this loses to `display: grid`
+      // and the fills stay on screen.
+      ".etcher-stylepanel[data-size=\"compact\"] .etcher-marker-fill { display: none; }",
       ".etcher-stylepanel[data-size=\"hidden\"] { display: none; }",
       // The chevron that cycles the three. Pinned above the panel rather
       // than attached to its edge so it stays exactly where it was when the
@@ -4761,7 +4776,10 @@
       // Fill mode. Rides the same `_setLineParam` path as thickness and dash,
       // so selection targeting, live preview and undo all come for free.
       var fillRow = document.createElement("div");
-      fillRow.className = "etcher-marker-dash";
+      // Same layout as the dash row, but its own name as well — the compact
+      // panel keeps line types and drops fills, and telling them apart by
+      // position in the popup would break the moment a row moved.
+      fillRow.className = "etcher-marker-dash etcher-marker-fill";
 
       // The explicit width/height matter: the row stretches its children to
       // full width, so an SVG sized only by `viewBox` scales up to fill the

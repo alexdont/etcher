@@ -21,7 +21,8 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   board you are actually drawing connectors on.
 
 - **A smaller style panel.** The chevron above it cycles three sizes: all of
-  it, just the colour and the line type, and none of it. The sliders are set
+  it, a narrow vertical strip of just the colours and the line types, and
+  none of it. The sliders are set
   once and left, so they are the first thing to go; presenting wants the
   board and none of the chrome.
 

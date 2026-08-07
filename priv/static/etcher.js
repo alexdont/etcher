@@ -1268,9 +1268,19 @@
   // Etcher's own UI. A pointer event landing on any of it must not reach the
   // canvas handlers, which would clear the selection the controls act on.
   // Kept as one constant because it is only ever wrong by omission.
+  // Everything that is Etcher's own UI rather than the drawing. A click that
+  // lands on any of it belongs to that control, and must not also be
+  // hit-tested against whatever shape happens to be underneath — the
+  // controls float over the canvas, so there is nearly always something.
+  //
+  // Any new piece of chrome has to be added here. Leaving one out does not
+  // break the control, which is what makes it easy to miss: the button works
+  // AND the shape beneath it reacts, so pressing a button over a link card
+  // opens the link.
   var CHROME_SELECTOR =
     ".etcher-toolbar, .etcher-actionbar, .etcher-stylepanel, " +
-    ".etcher-style-trigger, .etcher-link-menu, .etcher-link-popup, " +
+    ".etcher-style-trigger, .etcher-panel-toggle, " +
+    ".etcher-link-menu, .etcher-link-popup, " +
     ".etcher-link-editor, " +
     ".etcher-popup, .etcher-tooltip";
 

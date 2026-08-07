@@ -20,6 +20,10 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   you are annotating; the green anchors are an affordance you only want on a
   board you are actually drawing connectors on.
 
+- **Clicking a control no longer also hits the canvas underneath.** The style
+  panel's chevron floats over the board, so pressing it while it sat over a
+  pasted link opened the link as well as working the button.
+
 - **A smaller style panel.** The chevron above it cycles three sizes: all of
   it, a narrow vertical strip of just the colours and the line types, and
   none of it. The sliders are set

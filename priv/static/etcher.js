@@ -766,6 +766,17 @@
       // Full-width hairline divider used inside flex-wrap popups to
       // force the items after it onto a new row + visually section
       // them off (e.g., \"history\" buttons below the tools grid).
+      // The style controls borrowed by the arrange menu. That menu is a row
+      // of buttons; these need the full width and a column, the same shape
+      // they have in the style panel.
+      ".etcher-popup[data-kind=\"actions\"] {",
+      "  flex-wrap: wrap; max-width: 232px;",
+      "}",
+      ".etcher-popup[data-kind=\"actions\"] .etcher-popup[data-kind=\"params\"] {",
+      "  position: static; display: flex; flex-direction: column;",
+      "  width: 100%; min-width: 0; padding: 0; gap: 8px;",
+      "  background: none; box-shadow: none; z-index: auto;",
+      "}",
       ".etcher-popup-divider {",
       "  flex: 0 0 100%; height: 1px; margin: 4px 0;",
       "  background: rgba(255, 255, 255, 0.15);",
@@ -3623,12 +3634,46 @@
       self.actionMenu = menu;
     },
 
+    // Move the live params controls into `host`, with a divider above them so
+    // they read as a section rather than as more arrange buttons.
+    _hostParamsIn: function(host) {
+      if (!host || !this.paramsPopup) return;
+      if (this.paramsPopup.parentNode === host) return;
+      if (!this._paramsDivider) {
+        var d = document.createElement("div");
+        d.className = "etcher-popup-divider";
+        this._paramsDivider = d;
+      }
+      host.appendChild(this._paramsDivider);
+      host.appendChild(this.paramsPopup);
+    },
+
+    // Hand them back to the style panel. Called when the menu closes, so the
+    // panel is never left with an empty slot where its controls used to be.
+    _releaseParams: function() {
+      if (this._paramsDivider && this._paramsDivider.parentNode) {
+        this._paramsDivider.parentNode.removeChild(this._paramsDivider);
+      }
+      this._syncStylePanel();
+    },
+
     _toggleActionMenu: function() {
       var self = this;
       if (!self.actionMenu) return;
       var open = self.actionMenu.classList.contains("is-open");
       self._closeActionMenu();
       if (open) return;
+
+      // The style controls that are not colours — thickness, opacity, line
+      // type, fill — are hosted here while this menu is open, so they stay
+      // reachable when the compact strip has been set to leave them out.
+      // Nobody should have to turn a control back on in order to use it once.
+      //
+      // The very same element is moved rather than a second copy being built.
+      // Only one of the two places can be on screen at a time, and two sets
+      // of sliders for one value is a bug waiting to happen — they disagree
+      // the moment anything changes either one from elsewhere.
+      self._hostParamsIn(self.actionMenu);
 
       var barRect = self.actionBar.getBoundingClientRect();
       var contRect = self.handle.container.getBoundingClientRect();
@@ -3652,6 +3697,7 @@
       if (!this.actionMenu) return;
       this.actionMenu.classList.remove("is-open");
       if (this.actionMoreBtn) this.actionMoreBtn.classList.remove("is-active");
+      this._releaseParams();
       if (this._onActionMenuOutside) {
         document.removeEventListener("pointerdown", this._onActionMenuOutside, true);
         this._onActionMenuOutside = null;
@@ -4255,8 +4301,12 @@
     // The panel is only meaningful while annotating, same as the tool bar.
     _syncStylePanel: function() {
       if (!this.stylePanel) return;
-      // Adopt the params popup if it was built after the panel.
-      if (this.paramsPopup && this.paramsPopup.parentNode !== this.stylePanel) {
+      // Adopt the params popup if it was built after the panel — unless the
+      // arrange menu is currently borrowing it. This runs on a great many
+      // events, and without the guard it would pull the controls out from
+      // under the pointer the moment anything else on the board changed.
+      var borrowed = this.actionMenu && this.actionMenu.classList.contains("is-open");
+      if (!borrowed && this.paramsPopup && this.paramsPopup.parentNode !== this.stylePanel) {
         this.stylePanel.appendChild(this.paramsPopup);
       }
       this.stylePanel.classList.toggle("is-active", !!this.annotationMode);

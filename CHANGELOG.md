@@ -8,6 +8,12 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **The style controls are reachable from the `…` too.** Thickness, opacity,
+  line type and fill now appear in the arrange menu on the auxiliary tier as
+  well as in the style panel — so leaving them out of the compact strip hides
+  them without putting them out of reach. Nobody has to turn a control back
+  on in order to use it once.
+
 - **The two toolbars meet as one control.** The auxiliary tier sits flush on
   the tool bar now, rounded only along its outer edge and a shade lighter
   than the bar below — so it reads as belonging to what is selected rather

@@ -2453,6 +2453,38 @@
           // Without it — or if it rejects — a pasted URL stays a text shape.
           // `window.Etcher.linkUnfurler` sets the same thing for every
           // layer; this one wins.
+          // ── In-flight moves ─────────────────────────────────────────────
+          //
+          // Shapes are emitted for persistence when a gesture ends, which
+          // leaves a peer watching nothing happen for the length of a drag
+          // and then the shape somewhere new. Register here and `fn` is
+          // called with `[{uuid, geometry}, …]` once a frame while shapes are
+          // being dragged, so a collaborative host can show the movement as
+          // it happens.
+          //
+          // These are NOT edits: nothing is stored, no undo entry is made,
+          // and the authoritative `etcher:annotations-changed` still fires on
+          // release exactly as before. Pass `null` to stop.
+          //
+          // `onMoveEnd` is called once when the gesture finishes, which is a
+          // host's cue to drop whatever it was showing and wait for the real
+          // edit — so an abandoned drag snaps back rather than leaving peers
+          // looking at a position nobody recorded.
+          onShapesMoving: function(fn, onMoveEnd) {
+            self._liveMoveHandler = typeof fn === "function" ? fn : null;
+            self._liveMoveEndHandler = typeof onMoveEnd === "function" ? onMoveEnd : null;
+            if (self._liveMoveHandler) self._wireLiveMoveTracking();
+            return true;
+          },
+
+          // Show where a peer's shapes are while they are still dragging
+          // them. Transient by nature — overwritten by the next report and
+          // settled by the edit that arrives on release.
+          applyShapesMoving: function(list) {
+            self._applyLiveMoves(list);
+            return true;
+          },
+
           setLinkUnfurler: function(fn) {
             self._unfurlLinkFn = typeof fn === "function" ? fn : null;
           },
@@ -9695,6 +9727,111 @@
           }
         }
       }
+
+      // A collaborative host watches here for the same reason connectors do:
+      // every path that moves or resizes a shape ends at this function, so
+      // this is the one place that catches them all without a call bolted
+      // onto each gesture. See `_noteLiveMove`.
+      if (self._liveMoveHandler && shape.uuid) self._noteLiveMove(shape);
+    },
+
+    // ── In-flight moves ───────────────────────────────────────────────────
+    //
+    // Shapes are emitted for persistence when a gesture ENDS. That is right
+    // for storage and wrong for everyone watching: a peer sees nothing for
+    // the length of a drag and then the shape appears somewhere else.
+    //
+    // So while a shape is being dragged its position is also reported, at
+    // frame rate, to a host that asked for it (`onShapesMoving`). Those
+    // reports are not edits — nothing is stored, no undo entry is made, and
+    // `_emitChanged` is not involved. The real edit still lands the usual way
+    // on release, and a host that never registers a handler pays nothing but
+    // one property check per render.
+    _noteLiveMove: function(shape) {
+      // Only while a pointer is actually down. `_renderShape` runs for plenty
+      // of reasons that are not a drag — a colour change, a text edit, the
+      // initial paint of a loaded board — and none of those want reporting as
+      // movement.
+      if (!this._pointerHeld || this._applyingLiveMoves) return;
+
+      this._liveMoved = this._liveMoved || {};
+      this._liveMoved[shape.uuid] = shape;
+
+      var self = this;
+      if (this._liveMoveFrame) return;
+      this._liveMoveFrame = requestAnimationFrame(function() {
+        self._liveMoveFrame = null;
+        self._flushLiveMoves();
+      });
+    },
+
+    // Batched per frame: a drag renders on every pointer event, and pointer
+    // events can outrun the display. One report per frame is as often as it
+    // can possibly matter.
+    _flushLiveMoves: function() {
+      var moved = this._liveMoved;
+      this._liveMoved = null;
+      if (!moved || !this._liveMoveHandler) return;
+
+      var payload = [];
+      for (var uuid in moved) {
+        if (!Object.prototype.hasOwnProperty.call(moved, uuid)) continue;
+        payload.push({ uuid: uuid, geometry: moved[uuid].geometry });
+      }
+      if (payload.length) {
+        try { this._liveMoveHandler(payload); } catch (_) {}
+      }
+    },
+
+    // Apply positions a peer reported mid-drag.
+    //
+    // Guarded so applying them doesn't look like local movement and come
+    // straight back out: without this, holding the pointer down anywhere
+    // while a peer dragged something would rebroadcast their shape as ours.
+    _applyLiveMoves: function(list) {
+      if (!list || !list.length) return;
+      this._applyingLiveMoves = true;
+      try {
+        for (var i = 0; i < list.length; i++) {
+          var entry = list[i];
+          if (!entry || !entry.uuid || !entry.geometry) continue;
+          var shape = this.shapes.find(function(s) { return s.uuid === entry.uuid; });
+          if (!shape) continue;
+          shape.geometry = entry.geometry;
+          if (shape.el) this._renderShape(shape);
+        }
+      } finally {
+        this._applyingLiveMoves = false;
+      }
+    },
+
+    // Pointer state, tracked only once a host has asked for live moves.
+    // `pointerup` is on the document and in the capture phase so a drag that
+    // ends outside the canvas still closes.
+    _wireLiveMoveTracking: function() {
+      if (this._liveMoveWired) return;
+      this._liveMoveWired = true;
+
+      var self = this;
+      this._liveMoveDown = function() { self._pointerHeld = true; };
+      this._liveMoveUp = function() {
+        if (!self._pointerHeld) return;
+        self._pointerHeld = false;
+        // Anything batched but not yet reported would otherwise be dropped,
+        // leaving peers a frame short of where the shape actually finished.
+        if (self._liveMoveFrame) {
+          cancelAnimationFrame(self._liveMoveFrame);
+          self._liveMoveFrame = null;
+        }
+        self._flushLiveMoves();
+        if (self._liveMoveEndHandler) {
+          try { self._liveMoveEndHandler(); } catch (_) {}
+        }
+      };
+
+      document.addEventListener("pointerdown", this._liveMoveDown, true);
+      document.addEventListener("pointerup", this._liveMoveUp, true);
+      document.addEventListener("pointercancel", this._liveMoveUp, true);
     },
 
     // Render a movable "title group" for shapes that carry a non-blank

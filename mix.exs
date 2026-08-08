@@ -24,7 +24,13 @@ defmodule Etcher.MixProject do
 
   defp deps do
     [
-      {:fresco, "~> 0.5.9 or ~> 0.6.0 or ~> 0.7.0 or ~> 0.8.0 or ~> 0.9.0 or ~> 0.10.0"},
+      # Every minor is named because each one is a separate `~> 0.x.0` range;
+      # a two-part `~> 0.5` would run to 1.0 and promise compatibility with
+      # fresco versions that don't exist yet. Add the next one here when it
+      # ships — leaving it out caps hosts at the previous fresco, which is not
+      # obvious from the failure they get.
+      {:fresco,
+       "~> 0.5.9 or ~> 0.6.0 or ~> 0.7.0 or ~> 0.8.0 or ~> 0.9.0 or ~> 0.10.0 or ~> 0.11.0"},
       {:phoenix_live_view, "~> 1.1"},
       {:phoenix_html, "~> 4.0"},
       {:jason, "~> 1.4"},

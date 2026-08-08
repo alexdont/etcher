@@ -4,7 +4,7 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [0.11.0] — 2026-08-04
+## [0.11.0] — 2026-08-08
 
 ### Added
 
@@ -189,7 +189,49 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   carpet a small or zoomed-out shape and leave nowhere to press for selecting
   or moving it.
 
+- **A host can watch shapes while they are still being dragged.**
+  `onShapesMoving(fn, onEnd)` calls `fn` once a frame with
+  `[{uuid, geometry}, …]` for whatever is under the pointer, and
+  `applyShapesMoving(list)` puts a peer's shapes where they have got to so
+  far. Shapes are emitted for persistence when a gesture *ends*, which is
+  right for storage and leaves anyone watching a collaborative board looking
+  at nothing for the length of a drag and then a shape somewhere new.
+
+  These are not edits: nothing is stored, no undo entry is made, and the
+  authoritative `etcher:annotations-changed` still fires on release exactly
+  as before. `onEnd` marks the gesture finished, so a host can drop what it
+  was showing and wait for the real edit — an abandoned drag snaps back
+  rather than leaving peers at a position nobody recorded. A host that never
+  registers a handler pays one property check per render.
+
+- **The glyph for a tool is available to draw with.** `toolBadge(key)` hands
+  back the mark that already rides the local cursor while a tool is held,
+  unstroked and uncoloured so a caller styles it to suit. A collaborative
+  host draws it on a peer's cursor in that peer's colour, so everyone can
+  see what the others are holding instead of a row of identical arrows.
+  `null` for a tool with no mark, which reads as "just the arrow".
+
+  The grabber gained a mark for this. It never needed one locally — panning
+  gets the native `grab` hand — so it was the one tool that would have shown
+  up on someone else's screen as anonymous.
+
 ### Fixed
+
+- **Every shape was reseated whenever the z-order was imposed.**
+  `_syncShapeOrder` called `insertBefore` on all of them, in place or not,
+  and moving a node that is already where it belongs still detaches,
+  re-attaches and repaints it — images re-decode. On a collaborative board,
+  which re-imposes the sender's order after each remote edit, that flashed
+  every shape every time anyone moved anything. Only what is out of place
+  moves now, so a settled board touches the DOM not at all.
+
+- **`patchShape` could not move a shape.** It reached style and metadata but
+  not geometry, so a host applying a peer's move had to delete and re-add —
+  which rebuilds the element, reloads media, and appends, scrambling the
+  layering it then had to repair. Geometry is replaced rather than merged: it
+  describes where a shape is as a whole, and merging would strand keys,
+  keeping `from` on a re-pointed arrow or the bend points on a straightened
+  line.
 
 - **Dragging a multi-selection moved one shape and broke the group.** A
   selected shape has pointer events enabled, so a press on it lands on the

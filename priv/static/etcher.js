@@ -2453,6 +2453,19 @@
           // Without it — or if it rejects — a pasted URL stays a text shape.
           // `window.Etcher.linkUnfurler` sets the same thing for every
           // layer; this one wins.
+          // The little glyph that marks out this tool — the same one riding
+          // the local cursor while the tool is held. SVG markup drawn in a
+          // 24x24 box, unstroked and uncoloured, so a caller styles it to
+          // suit: a collaborative host draws it beside a peer's cursor in
+          // that peer's colour, which is how everyone can see what the other
+          // people are holding.
+          //
+          // `null` for tools that have no glyph (and for the plain pointer),
+          // which a caller should read as "just the arrow".
+          toolBadge: function(key) {
+            return (key && CURSOR_BADGES[key]) || null;
+          },
+
           // ── In-flight moves ─────────────────────────────────────────────
           //
           // Shapes are emitted for persistence when a gesture ends, which

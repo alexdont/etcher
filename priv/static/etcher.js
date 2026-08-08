@@ -1708,6 +1708,12 @@
     polygon:   '<path d="M12 3.5 21 9.5 18 20H6L3 9.5 12 3.5Z"/>',
     freehand:  '<g transform="rotate(-10 12 12)"><path d="M4.5 15.5A7.6 7.6 0 0 1 19.5 15.5"/><path stroke-dasharray="2.4 2" d="M4.5 15.5 19.5 15.5"/><circle cx="4.5" cy="15.5" r="1.5"/><circle cx="19.5" cy="15.5" r="1.5"/></g>',
     marker:    '<g transform="rotate(45 12 12)"><path d="M10 2h4a1 1 0 0 1 1 1v7h-6V3a1 1 0 0 1 1-1Z"/><path d="M9 10h6l-1 4h-4l-1-4Z"/><path d="M11.2 14h1.6v3h-1.6z"/></g><path d="M3 21c3-1.5 6-1.5 8-1"/>',
+    // The grabber never reaches `toolCursor` — panning gets the native `grab`
+    // hand, and `drawingNow` excludes it — so this is not the local cursor.
+    // It is here for hosts drawing OTHER people: without it, someone panning
+    // is the only tool that shows up as an anonymous arrow. Same hand as the
+    // toolbar button, so it reads as the tool they picked.
+    grabber:   '<path d="M15 10.5V6a1.5 1.5 0 0 0-3 0m3 4.5V4.5a1.5 1.5 0 0 0-3 0v6m3 0V9a1.5 1.5 0 0 1 3 0v5.25a6.75 6.75 0 0 1-6.75 6.75H9.75a6.75 6.75 0 0 1-5.74-3.2l-2.39-3.86a1.5 1.5 0 0 1 2.46-1.72L6 15.75V6a1.5 1.5 0 0 1 3 0v4.5m3 0V6"/>',
     callout:   '<circle cx="3.5" cy="20" r="2"/><path d="M4 19.5 8.5 14 21 14"/>',
     text:      '<path d="M5 6h14M12 6v12"/>',
     dimension: '<path d="M5 12h14M5 12l3-3M5 12l3 3M19 12l-3-3M19 12l-3 3"/>',

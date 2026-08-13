@@ -108,6 +108,13 @@ comparable canvas tool has trained people to expect.
   shipped every clicked callout with its box sitting exactly on the
   anchor.
 
+- **Dragging a callout label moves the label, not the whole callout.**
+  A grab that lands on the text box slides only the box — the anchor
+  stays pinned to what it points at and the leader stretches. Grabbing
+  the leader line or the anchor dot still moves the whole shape. The
+  grab region is the shrunk-to-text rendered box, so it matches what is
+  drawn rather than the wider storage envelope.
+
 - **The last label colour is remembered.** Recolouring a focused label
   (click a label, pick a swatch) now also saves that colour, and the
   next label created — on any shape, dimensions included — starts in

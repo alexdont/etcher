@@ -17542,6 +17542,20 @@
         shape.metadata && shape.metadata.title_box
           ? Object.assign({}, shape.metadata.title_box)
           : null;
+      // Callout: a grab that lands on the TEXT BOX moves only the box —
+      // the anchor marks what the callout points at, and dragging the
+      // label to a better spot must not drag the pointer off its target.
+      // Grabbing the leader line or the anchor dot still moves the whole
+      // shape. Hit-tested against the shrunk-to-text rendered box when
+      // available, so the grab region matches what is drawn rather than
+      // the (often wider) storage envelope.
+      var calloutBoxGrab = false;
+      if (shape.kind === "callout") {
+        var grabBox = shape._renderedBox || self._calloutTextBoxImage(startGeom);
+        calloutBoxGrab = !!grabBox &&
+          startPt.x >= grabBox.x && startPt.x <= grabBox.x + grabBox.w &&
+          startPt.y >= grabBox.y && startPt.y <= grabBox.y + grabBox.h;
+      }
       var dragged = false;
       try { el.setPointerCapture(e.pointerId); } catch (_) {}
 
@@ -17567,7 +17581,21 @@
         }
         var dxI = pt.x - startPt.x;
         var dyI = pt.y - startPt.y;
-        shape.geometry = self._translateGeometry(shape.kind, startGeom, dxI, dyI);
+        if (calloutBoxGrab) {
+          // Box-only: the anchor stays pinned and the leader stretches.
+          var cbStart = self._calloutTextBoxImage(startGeom);
+          shape.geometry = {
+            anchor: [startGeom.anchor[0], startGeom.anchor[1]],
+            text_box: {
+              x: cbStart.x + dxI,
+              y: cbStart.y + dyI,
+              w: cbStart.w,
+              h: cbStart.h
+            }
+          };
+        } else {
+          shape.geometry = self._translateGeometry(shape.kind, startGeom, dxI, dyI);
+        }
         if (startTitleBox) {
           shape.metadata = Object.assign({}, shape.metadata || {}, {
             title_box: {

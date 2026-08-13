@@ -175,11 +175,29 @@ for (const prefix of ["image.etcher-shape", ".etcher-shape.etcher-text"]) {
 assert.ok(/#3b82f6/.test(ruleFor(".etcher-image-ring")),
   "the image selection ring is not blue while every other selected shape is");
 
-// The text bbox shows selection in the same blue, not the old dash.
+// The text bbox shows selection in the same blue, not the old dash — and
+// explicitly kills the hover dash, which shares specificity and otherwise
+// leaves a just-clicked box rendering blue-dashed while the cursor is
+// still over it.
 {
   const body = ruleFor(".etcher-text.is-selected .etcher-text-rect");
-  assert.ok(/#3b82f6/.test(body) && !/stroke-dasharray/.test(body),
+  assert.ok(/#3b82f6/.test(body) && !/stroke-dasharray:\s*5/.test(body),
     "a selected text box should carry a solid blue border, not a dash");
+  assert.ok(/stroke-dasharray:\s*none/.test(body),
+    "the selected text box no longer suppresses the hover dash — a just-clicked box renders blue-dashed");
+}
+
+// A selected callout's POINTING parts — leader, underline, anchor dot —
+// take the outline on the children, so the whole shape reads selected
+// while the glyphs (the reason for the etcher-text opt-out) stay clean.
+for (const child of ["line", "circle"]) {
+  for (const state of ["is-selected", "is-editing", "is-multi-selected"]) {
+    assert.ok(
+      /drop-shadow\([^)]*#3b82f6\)/.test(ruleFor(`.etcher-shape.etcher-callout.${state} ${child}`)),
+      `a ${state} callout's ${child} has no blue outline — the shape looks half-selected next to its blue box`);
+  }
+  assert.ok(/drop-shadow/.test(ruleFor(`.etcher-shape.etcher-callout.is-hovered ${child}`)),
+    `a hovered callout's ${child} has no glow`);
 }
 
 // ── what selection must NOT have broken ─────────────────────────────────────

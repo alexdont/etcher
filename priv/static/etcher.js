@@ -1050,9 +1050,13 @@
       "  stroke: currentColor;",
       "  stroke-dasharray: 5 4;",
       "}",
+      // `stroke-dasharray: none` so selection reads solid even while the
+      // cursor is still hovering — without it the hover rule above keeps
+      // its dash and a just-clicked box renders blue-dashed.
       ".etcher-text.is-selected .etcher-text-rect,",
       ".etcher-text.is-editing .etcher-text-rect {",
       "  stroke: #3b82f6;",
+      "  stroke-dasharray: none;",
       "}",
       // No halo behind the glyphs. A 2px white stroke under every letter was
       // there to hold contrast over a photograph, but it reads as an outline
@@ -1196,6 +1200,25 @@
       ".etcher-shape.etcher-text.is-editing,",
       ".etcher-shape.etcher-text.is-hovered {",
       "  filter: none;",
+      "}",
+      // ...but a callout's POINTING parts — leader, underline, anchor dot —
+      // are shafts, and a selected callout whose line stays plain looks
+      // half-selected next to its blue box. The filter goes on the
+      // children, not the <g>: SVG filters apply per element, so the
+      // line/circle children take the outline while the glyphs (the reason
+      // for the opt-out above) stay clean.
+      ".etcher-shape.etcher-callout.is-selected line,",
+      ".etcher-shape.etcher-callout.is-editing line,",
+      ".etcher-shape.etcher-callout.is-multi-selected line,",
+      ".etcher-shape.etcher-callout.is-selected circle,",
+      ".etcher-shape.etcher-callout.is-editing circle,",
+      ".etcher-shape.etcher-callout.is-multi-selected circle {",
+      "  filter: drop-shadow(1.2px 0 0 #3b82f6) drop-shadow(-1.2px 0 0 #3b82f6)",
+      "          drop-shadow(0 1.2px 0 #3b82f6) drop-shadow(0 -1.2px 0 #3b82f6);",
+      "}",
+      ".etcher-shape.etcher-callout.is-hovered line,",
+      ".etcher-shape.etcher-callout.is-hovered circle {",
+      "  filter: drop-shadow(0 0 2.5px rgba(59, 130, 246, 0.9));",
       "}",
       // The ring image shapes get instead: a stroked rect tracking the
       // image's box and corner radius, drawn as a sibling so nothing

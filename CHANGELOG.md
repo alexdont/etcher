@@ -113,7 +113,11 @@ comparable canvas tool has trained people to expect.
   stays pinned to what it points at and the leader stretches. Grabbing
   the leader line or the anchor dot still moves the whole shape. The
   grab region is the shrunk-to-text rendered box, so it matches what is
-  drawn rather than the wider storage envelope.
+  drawn rather than the wider storage envelope. Selecting a callout also
+  outlines its pointing parts — leader, underline, anchor dot — in the
+  same blue as its box (applied per child, so the glyphs stay clean),
+  and the selected box border renders solid even under the cursor
+  instead of inheriting the hover dash.
 
 - **The last label colour is remembered.** Recolouring a focused label
   (click a label, pick a swatch) now also saves that colour, and the

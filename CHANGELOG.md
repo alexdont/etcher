@@ -4,6 +4,46 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.12.0] — 2026-08-13
+
+First round of user-testing feedback, aimed at the conventions every
+comparable canvas tool has trained people to expect.
+
+### Changed
+
+- **Selecting a shape no longer restyles it.** The selected and editing
+  states forced `stroke-dasharray` onto the shape, so selecting a solid
+  line looked like it *changed* the line to a dashed one — testers read
+  it as an accidental style edit, not as selection. (The orange stroke
+  and fill overrides in the same rules were already dead: the shape's
+  own paint is applied as inline styles, which beat class rules, so the
+  dash was the entire visible effect.)
+
+  Selection is now a blue outline traced around the vector — built from
+  stacked drop-shadows of the shape's rendered pixels, so it follows the
+  true silhouette (dashes, arrowheads, fills, `<g>` children) with no
+  outline geometry to keep in sync during drags — and the shape's own
+  stroke, dash and fill are never touched. Hover is the same idea as a
+  soft glow, so "can select" and "is selected" read as one visual
+  language. Text and callout boxes show the same blue on their border
+  instead of outlining every glyph; the image ring turns blue to match.
+  The dashed orange draft look is untouched — that dash means "still
+  being drawn", which is a different statement from "selected".
+
+### Added
+
+- **A fresh shape is born selected.** Finishing a stroke used to drop
+  back to the cursor and stop, so restyling what you just drew took a
+  second click on it. `_finalizeShape` now enters edit mode on the shape
+  it created: handles appear, and the thickness / opacity / line-type /
+  fill controls and the color swatches target it immediately. The click
+  a browser synthesizes from the drawing gesture's own release is
+  swallowed by a short guard window so it cannot tear the fresh
+  selection straight back down. Two carve-outs, both deliberate: the
+  marker keeps its tool armed for the next stroke, and kinds with an
+  `afterCreate` hook (text drops into inline typing; media inserts
+  return to their dialog) keep their richer post-create state.
+
 ## [0.11.0] — 2026-08-08
 
 ### Added

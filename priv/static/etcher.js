@@ -975,12 +975,18 @@
       "  pointer-events: all;",
       "  transition: stroke 120ms ease, fill 120ms ease;",
       "}",
+      // Hover and draft keep the dashed currentColor box (\"there is an
+      // invisible bbox here\"); selected/editing switch to the same solid
+      // blue as every other selected shape, so text doesn't have its own
+      // private idea of what selection looks like.
       ".etcher-text.is-hovered .etcher-text-rect,",
-      ".etcher-text.is-selected .etcher-text-rect,",
-      ".etcher-text.is-editing .etcher-text-rect,",
       ".etcher-text.is-draft   .etcher-text-rect {",
       "  stroke: currentColor;",
       "  stroke-dasharray: 5 4;",
+      "}",
+      ".etcher-text.is-selected .etcher-text-rect,",
+      ".etcher-text.is-editing .etcher-text-rect {",
+      "  stroke: #3b82f6;",
       "}",
       // No halo behind the glyphs. A 2px white stroke under every letter was
       // there to hold contrast over a photograph, but it reads as an outline
@@ -1044,27 +1050,35 @@
       "  stroke: #f59e0b; stroke-dasharray: 5 4;",
       "  fill: rgba(245, 158, 11, 0.15);",
       "}",
+      // Hover / selected / editing / multi-selected leave the shape's own
+      // paint completely alone. The old rules recolored the stroke orange
+      // and — the only part that actually painted — forced
+      // `stroke-dasharray: 5 4`, so selecting a solid line looked like it
+      // CHANGED the line to a dashed one. (The stroke/fill overrides were
+      // dead on any colored shape: `_applyShapeColor` paints via inline
+      // styles, which beat these class rules. Only the dasharray landed,
+      // because `_applyLineParams` writes it as a presentation attribute,
+      // which loses to any class rule.)
+      //
+      // Selection is now what it is in every canvas tool users compare us
+      // to: a blue outline traced around the vector, built by stacking
+      // offset drop-shadows of the shape's rendered pixels. That follows
+      // the true silhouette — dashes, arrowheads, labels, fills — with no
+      // outline geometry to keep in sync during drags, and it works
+      // unchanged on the `<g>` kinds (arrow / line / callout) whose
+      // children own their paint. Hover is the same idea, softer, so
+      // \"can select\" and \"is selected\" read as one visual language.
       ".etcher-shape.is-hovered {",
-      "  fill: rgba(59, 130, 246, 0.22); stroke-width: 3;",
+      "  filter: drop-shadow(0 0 2.5px rgba(59, 130, 246, 0.9));",
       "}",
-      ".etcher-shape.is-selected {",
-      "  stroke: #f59e0b; fill: rgba(245, 158, 11, 0.18);",
-      "}",
-      ".etcher-shape.is-editing {",
-      "  stroke: #f59e0b; stroke-dasharray: 5 4;",
-      "  fill: rgba(245, 158, 11, 0.12);",
-      "  cursor: grab;",
-      "}",
-      ".etcher-shape.is-editing.is-moving { cursor: grabbing; }",
-      // Multi-selection (shift-click) — distinct from `.is-editing` so
-      // a shape that's part of a multi-selection doesn't grow vertex
-      // handles. Solid orange stroke + a soft glow reads as
-      // \"grouped\" without competing with the dashed edit-mode stroke.
+      ".etcher-shape.is-selected,",
+      ".etcher-shape.is-editing,",
       ".etcher-shape.is-multi-selected {",
-      "  stroke: #f59e0b; stroke-width: 3;",
-      "  fill: rgba(245, 158, 11, 0.16);",
-      "  filter: drop-shadow(0 0 3px rgba(245, 158, 11, 0.7));",
+      "  filter: drop-shadow(1.2px 0 0 #3b82f6) drop-shadow(-1.2px 0 0 #3b82f6)",
+      "          drop-shadow(0 1.2px 0 #3b82f6) drop-shadow(0 -1.2px 0 #3b82f6);",
       "}",
+      ".etcher-shape.is-editing { cursor: grab; }",
+      ".etcher-shape.is-editing.is-moving { cursor: grabbing; }",
       // Images opt out of every one of those. `stroke` and `fill` don't
       // paint on an `<image>` at all, and the drop-shadow is drawn outside
       // the element's box — which `clip-path` (the rounded corners) then
@@ -1078,15 +1092,27 @@
       "image.etcher-shape.is-hovered {",
       "  filter: none;",
       "}",
+      // Text (and callout text boxes) opt out of the outline filter too —
+      // they already show selection via the solid blue bbox stroke above,
+      // and outlining every glyph reads as bolding the type, not as
+      // selecting it.
+      ".etcher-shape.etcher-text.is-multi-selected,",
+      ".etcher-shape.etcher-text.is-selected,",
+      ".etcher-shape.etcher-text.is-editing,",
+      ".etcher-shape.etcher-text.is-hovered {",
+      "  filter: none;",
+      "}",
       // The ring image shapes get instead: a stroked rect tracking the
       // image's box and corner radius, drawn as a sibling so nothing
-      // clips it.
+      // clips it. Blue like every other selected shape — hover is the
+      // same ring, thinner and translucent, matching the soft hover glow
+      // on vector shapes.
       ".etcher-image-ring {",
-      "  fill: none; stroke: #f59e0b; stroke-width: 3;",
+      "  fill: none; stroke: #3b82f6; stroke-width: 2.5;",
       "  pointer-events: none;",
       "}",
       ".etcher-image-ring[data-state=\"hovered\"] {",
-      "  stroke: #3b82f6; stroke-width: 2;",
+      "  stroke: rgba(59, 130, 246, 0.65); stroke-width: 2;",
       "}",
       ".etcher-shape.is-multi-selected.is-moving { cursor: grabbing; }",
       // Marquee rectangle drawn while box-selecting on the cursor tool.
@@ -15465,6 +15491,31 @@
       // several strokes in a row, so it stays armed until they pick another
       // tool (or cursor) themselves.
       if (kind !== "marker") this._selectTool(null);
+
+      // ...and select what was just drawn. Finishing a stroke and then
+      // having to click it AGAIN before the thickness / dash / color
+      // controls would target it was the top piece of user feedback — every
+      // comparable canvas tool selects the new shape on release. Edit mode
+      // is that selection: `_paramsTargetShapes` targets `editingShape`, so
+      // the params popup and the swatches restyle the fresh shape
+      // immediately, and the handles double as \"this is now selected\".
+      //
+      // Skipped when an afterCreate hook took over — text goes straight
+      // into inline typing, which is the richer editing state, and the
+      // media-insert path returns to its dialog flow. The marker skips too:
+      // its tool stays armed (above), and `_enterEditMode` under an armed
+      // tool would fight the next stroke.
+      //
+      // The guard timestamp swallows the click the browser synthesizes
+      // from the drawing gesture's own pointerup: it lands after
+      // `_enterEditMode` registered its outside-click dismisser, at
+      // coordinates that may sit outside the shape (a circle's drag handle,
+      // a polygon's closing click), and would otherwise tear the fresh
+      // selection straight back down.
+      if (kind !== "marker" && typeof afterCreate !== "function") {
+        this._suppressEditDismissUntil = Date.now() + 400;
+        this._enterEditMode(shape);
+      }
     },
 
     // Returns the shape's bottom-left corner in container px (the
@@ -15929,6 +15980,12 @@
           var pt = self._toImage(e);
           if (self._shapeAt(pt)) return;
         } catch (_) {}
+        // The click synthesized from the draw gesture that JUST created and
+        // auto-selected this shape (see `_finalizeShape`). Time-boxed rather
+        // than a consume-once flag: on touch, no click is synthesized at
+        // all, and a lingering flag would silently eat the user's next real
+        // dismissal.
+        if (Date.now() < (self._suppressEditDismissUntil || 0)) return;
         self._exitEditMode();
       };
       document.addEventListener("click", this._outsideClickHandler, true);

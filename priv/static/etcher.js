@@ -10375,12 +10375,11 @@
           lineEl.setAttribute("visibility", "hidden");
         } else {
           lineEl.removeAttribute("visibility");
-          var titleAnchor = { x: tx + tw / 2, y: ty + th };
-          var parentAnchor = this._shapeNearestPoint(shape, titleAnchor);
-          lineEl.setAttribute("x1", titleAnchor.x);
-          lineEl.setAttribute("y1", titleAnchor.y);
-          lineEl.setAttribute("x2", parentAnchor.x);
-          lineEl.setAttribute("y2", parentAnchor.y);
+          var anchors = this._titleLeaderAnchors(shape, tx, ty, tw, th);
+          lineEl.setAttribute("x1", anchors.title.x);
+          lineEl.setAttribute("y1", anchors.title.y);
+          lineEl.setAttribute("x2", anchors.parent.x);
+          lineEl.setAttribute("y2", anchors.parent.y);
         }
       }
     },
@@ -10525,6 +10524,27 @@
         y: bboxTopImage.y - size.h - basePx,
         w: size.w,
         h: size.h
+      };
+    },
+
+    // Both ends of a label's leader line, in container px, each anchored
+    // at the point FACING the other end. The label end used to be
+    // hardcoded to the box's bottom-center — right for the float-above
+    // default, and exactly wrong for a label dragged below its shape,
+    // where the leader left from the label's far side and crossed the
+    // text on its way to the parent. Clamping the parent's nearest point
+    // into the label rect lands on the facing edge or corner wherever the
+    // label sits; directly above, that degenerates to the old
+    // bottom-center, so the default layout is unchanged.
+    _titleLeaderAnchors: function(shape, tx, ty, tw, th) {
+      var center = { x: tx + tw / 2, y: ty + th / 2 };
+      var parentAnchor = this._shapeNearestPoint(shape, center);
+      return {
+        title: {
+          x: Math.max(tx, Math.min(tx + tw, parentAnchor.x)),
+          y: Math.max(ty, Math.min(ty + th, parentAnchor.y))
+        },
+        parent: parentAnchor
       };
     },
 

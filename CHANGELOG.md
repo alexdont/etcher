@@ -108,6 +108,16 @@ comparable canvas tool has trained people to expect.
   shipped every clicked callout with its box sitting exactly on the
   anchor.
 
+- **A label's leader attaches to its facing edge.** The leader line's
+  label end was pinned to the box's bottom-center — right for a label
+  floating above its shape, and exactly wrong for one dragged below,
+  where the leader left from the far side and crossed the text on its
+  way to the shape. Each end now anchors at the point facing the other
+  (the shape's nearest perimeter point, clamped onto the label's rect),
+  so a label below connects from its top edge, one to the side from its
+  side edge, and the classic float-above layout is pixel-for-pixel
+  unchanged.
+
 - **The label editor opens where the label will land.** Double-clicking
   a shape to name it popped the input ABOVE the shape while the typed
   label then landed centered inside it. For a shape with no label yet,

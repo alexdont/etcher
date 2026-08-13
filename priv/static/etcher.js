@@ -1233,6 +1233,15 @@
       "  stroke: rgba(59, 130, 246, 0.65); stroke-width: 2;",
       "}",
       ".etcher-shape.is-multi-selected.is-moving { cursor: grabbing; }",
+      // Snap guides — the cyan lines shown while a dragged shape's edge or
+      // center is magnetized to another shape's. Cyan deliberately: blue is
+      // selection and the warm tones belong to shapes and drafts, so the
+      // guides read as chrome, not content. Dashed and hairline-thin, gone
+      // the moment the drag ends.
+      ".etcher-snap-guide {",
+      "  stroke: #06b6d4; stroke-width: 1; stroke-dasharray: 4 3;",
+      "  pointer-events: none;",
+      "}",
       // Marquee rectangle drawn while box-selecting on the cursor tool.
       ".etcher-marquee {",
       "  position: absolute; pointer-events: none; z-index: 11;",
@@ -1756,6 +1765,11 @@
   // looks the same on screen wherever the canvas happens to be.
   var CLICK_PLACE_THRESHOLD_PX = 5;
   var CLICK_PLACE_SIZE_PX = 120;
+
+  // How close (screen px) a dragged shape's edge or center has to come to
+  // another shape's before it magnetizes. Screen px so the pull feels the
+  // same at every zoom.
+  var SNAP_THRESHOLD_PX = 6;
 
   // Stroke and fill styles, in the order they appear in the panel. Kept as
   // lists so the buttons, the persisted-value validation and the emitted
@@ -17736,6 +17750,135 @@
     // flow but applies a uniform offset to every geometry field. Uses a
     // small dead-zone so a stationary click on the shape body doesn't
     // emit a no-op `etcher:updated` event.
+    // -------------------------------------------------------------------------
+    // Snap & alignment guides — while a shape's body is dragged, its edges
+    // and centers magnetize to the edges and centers of every other shape
+    // within a few screen px, and cyan guide lines show what aligned with
+    // what. Candidates are collected ONCE at drag start (nothing else
+    // moves during a drag), and ⌘/Ctrl held bypasses snapping entirely —
+    // the standard escape hatch for "no, I really want it 2px off".
+    // -------------------------------------------------------------------------
+
+    // The best snap correction for a bbox at its tentative position, per
+    // axis: the smallest delta (within `thr`) that lands one of the box's
+    // [start, center, end] on one of a candidate's. `axes` masks an axis
+    // out — a shift-locked drag must not be nudged off its lock.
+    _computeSnap: function(box, candidates, thr, axes) {
+      function xs(b) { return [b.x, b.x + b.w / 2, b.x + b.w]; }
+      function ys(b) { return [b.y, b.y + b.h / 2, b.y + b.h]; }
+      var best = { x: null, y: null };
+      function consider(axis, dv, cv) {
+        var d = cv - dv;
+        if (Math.abs(d) > thr) return;
+        if (best[axis] === null || Math.abs(d) < Math.abs(best[axis].delta)) {
+          best[axis] = { delta: d, coord: cv };
+        }
+      }
+      for (var i = 0; i < candidates.length; i++) {
+        var c = candidates[i];
+        var j, k;
+        if (!axes || axes.x) {
+          var bx = xs(box), cx = xs(c);
+          for (j = 0; j < 3; j++) for (k = 0; k < 3; k++) consider("x", bx[j], cx[k]);
+        }
+        if (!axes || axes.y) {
+          var by = ys(box), cy = ys(c);
+          for (j = 0; j < 3; j++) for (k = 0; k < 3; k++) consider("y", by[j], cy[k]);
+        }
+      }
+      return best;
+    },
+
+    // The guide lines for a SNAPPED box: for each of its edge/center
+    // coordinates that now matches a candidate's, one line at that
+    // coordinate spanning from the box to the farthest matching candidate
+    // — so the guide visibly connects everything that lines up, not just
+    // the nearest neighbour.
+    _snapGuidesFor: function(box, candidates) {
+      var EPS = 0.01;
+      var guides = [];
+      function collect(axis, coords, spanLo, spanHi, candCoords, candLo, candHi) {
+        coords.forEach(function(v) {
+          var lo = spanLo, hi = spanHi, matched = false;
+          candidates.forEach(function(c) {
+            var cc = candCoords(c);
+            for (var i = 0; i < 3; i++) {
+              if (Math.abs(cc[i] - v) < EPS) {
+                matched = true;
+                lo = Math.min(lo, candLo(c));
+                hi = Math.max(hi, candHi(c));
+                break;
+              }
+            }
+          });
+          if (matched) guides.push({ axis: axis, at: v, from: lo, to: hi });
+        });
+      }
+      collect("v", [box.x, box.x + box.w / 2, box.x + box.w],
+        box.y, box.y + box.h,
+        function(c) { return [c.x, c.x + c.w / 2, c.x + c.w]; },
+        function(c) { return c.y; }, function(c) { return c.y + c.h; });
+      collect("h", [box.y, box.y + box.h / 2, box.y + box.h],
+        box.x, box.x + box.w,
+        function(c) { return [c.y, c.y + c.h / 2, c.y + c.h]; },
+        function(c) { return c.x; }, function(c) { return c.x + c.w; });
+      return guides;
+    },
+
+    // Every other shape's bbox, collected once at drag start. Locked
+    // shapes ARE candidates — they can't move, which makes them the most
+    // reliable reference geometry on the board. Strip mode snaps within
+    // the same page only: cross-page coordinates share numbers but not
+    // meaning.
+    _snapCandidatesFor: function(dragged) {
+      var self = this;
+      var out = [];
+      (this.shapes || []).forEach(function(s) {
+        if (!s || !s.el || s === dragged) return;
+        if (s.image_idx !== dragged.image_idx) return;
+        var box = self._shapeBBoxImagePx(s);
+        if (box) out.push(box);
+      });
+      return out;
+    },
+
+    _renderSnapGuides: function(guides) {
+      var self = this;
+      this._snapGuideEls = this._snapGuideEls || [];
+      while (this._snapGuideEls.length < guides.length) {
+        var ln = svgEl("line");
+        ln.classList.add("etcher-snap-guide");
+        this.svg.appendChild(ln);
+        this._snapGuideEls.push(ln);
+      }
+      while (this._snapGuideEls.length > guides.length) {
+        var extra = this._snapGuideEls.pop();
+        if (extra.parentNode) extra.parentNode.removeChild(extra);
+      }
+      guides.forEach(function(g, i) {
+        var el = self._snapGuideEls[i];
+        var a, b;
+        if (g.axis === "v") {
+          a = self._imageToContainer({ x: g.at, y: g.from });
+          b = self._imageToContainer({ x: g.at, y: g.to });
+        } else {
+          a = self._imageToContainer({ x: g.from, y: g.at });
+          b = self._imageToContainer({ x: g.to, y: g.at });
+        }
+        el.setAttribute("x1", a.x);
+        el.setAttribute("y1", a.y);
+        el.setAttribute("x2", b.x);
+        el.setAttribute("y2", b.y);
+      });
+    },
+
+    _clearSnapGuides: function() {
+      (this._snapGuideEls || []).forEach(function(el) {
+        if (el.parentNode) el.parentNode.removeChild(el);
+      });
+      this._snapGuideEls = null;
+    },
+
     _startShapeMove: function(shape, e) {
       // Tapping the same spot again reaches for whatever is underneath —
       // without this, a shape covered by a larger one can never be selected,
@@ -17783,6 +17926,11 @@
           startPt.x >= grabBox.x && startPt.x <= grabBox.x + grabBox.w &&
           startPt.y >= grabBox.y && startPt.y <= grabBox.y + grabBox.h;
       }
+      // Snap setup — every other shape's bbox, taken once. The callout
+      // box-only drag doesn't snap: its bbox includes the anchor it is
+      // deliberately NOT moving, so edge alignment would lie.
+      var snapStartBox = calloutBoxGrab ? null : self._shapeBBoxImagePx(shape);
+      var snapCandidates = snapStartBox ? self._snapCandidatesFor(shape) : [];
       var dragged = false;
       try { el.setPointerCapture(e.pointerId); } catch (_) {}
 
@@ -17811,9 +17959,40 @@
         // Shift locks the move to whichever axis has traveled further —
         // the standard "keep it on the same line" gesture. Read per move
         // event so the lock engages and releases with the key.
+        var lockedAxis = null;
         if (ev.shiftKey) {
-          if (Math.abs(dxI) > Math.abs(dyI)) dyI = 0;
-          else dxI = 0;
+          if (Math.abs(dxI) > Math.abs(dyI)) { dyI = 0; lockedAxis = "y"; }
+          else { dxI = 0; lockedAxis = "x"; }
+        }
+        // Snap the tentative position to nearby shapes' edges/centers.
+        // ⌘/Ctrl bypasses; a shift-locked axis is never nudged off its
+        // lock. Threshold in screen px so the pull feels the same at
+        // every zoom.
+        if (snapStartBox && snapCandidates.length && !ev.metaKey && !ev.ctrlKey) {
+          var snScale = 1;
+          try { snScale = self._markerScale() || 1; } catch (_) {}
+          var tentative = {
+            x: snapStartBox.x + dxI, y: snapStartBox.y + dyI,
+            w: snapStartBox.w, h: snapStartBox.h
+          };
+          var sn = self._computeSnap(
+            tentative, snapCandidates,
+            SNAP_THRESHOLD_PX / (snScale > 0 ? snScale : 1),
+            { x: lockedAxis !== "x", y: lockedAxis !== "y" }
+          );
+          if (sn.x) dxI += sn.x.delta;
+          if (sn.y) dyI += sn.y.delta;
+          if (sn.x || sn.y) {
+            var snapped = {
+              x: snapStartBox.x + dxI, y: snapStartBox.y + dyI,
+              w: snapStartBox.w, h: snapStartBox.h
+            };
+            self._renderSnapGuides(self._snapGuidesFor(snapped, snapCandidates));
+          } else {
+            self._clearSnapGuides();
+          }
+        } else {
+          self._clearSnapGuides();
         }
         if (calloutBoxGrab) {
           // Box-only: the anchor stays pinned and the leader stretches.
@@ -17855,6 +18034,7 @@
         el.removeEventListener("pointerup", onUp);
         el.removeEventListener("pointercancel", onUp);
         try { el.releasePointerCapture(ev.pointerId); } catch (_) {}
+        self._clearSnapGuides();
         self._resumeMidpointHighlight();
         if (dragged) {
           // Sync stored title_box to the shrunk-to-text bbox after

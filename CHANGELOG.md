@@ -36,6 +36,19 @@ comparable canvas tool has trained people to expect.
 
 ### Added
 
+- **Snap & alignment guides.** While a shape's body is dragged, its
+  edges and centers magnetize to the edges and centers of every other
+  shape within 6 screen px, and cyan dashed guide lines show what
+  aligned with what — spanning to the farthest shape sharing the line,
+  so aligning a third card to a row reads as one guide through all
+  three. ⌘/Ctrl held bypasses the snap ("no, I really want it 2px
+  off"), a shift-locked axis is never nudged off its lock, locked
+  shapes count as reference geometry (they can't move, which makes
+  them the most reliable thing to align to), strip mode snaps within
+  its own page only, and the guides vanish the moment the drag ends.
+  Candidates are collected once at drag start, so a busy board pays
+  nothing per frame beyond the comparison itself.
+
 - **The keyboard basics.** Escape now steps down one rung per press —
   cancel the in-flight draft, then drop an armed tool back to the
   cursor, then release the selection — and falls through to the host

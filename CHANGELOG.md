@@ -32,6 +32,25 @@ comparable canvas tool has trained people to expect.
 
 ### Added
 
+- **Lines, arrows and dimensions take thickness, opacity and line type —
+  not just color.** Selecting one and opening the params popup used to
+  silently edit the *global default* while the shaft stayed 2px solid,
+  because `_paramsTargetShapes` excluded the shaft kinds and their widths
+  were recomputed from the board scale on every render frame — no styled
+  width could have survived a pan. Now the render cases read the shape's
+  style: widths live in canvas units like every other stroke (so a shaft
+  thins with the drawing on zoom-out, floored so it can never vanish),
+  arrowheads are sized off the shaft so a fattened line gets a
+  proportionate V rather than a hairline one, and the dash pattern lands
+  on the shaft only — heads stay solid, as in every comparable tool.
+  Newly drawn shafts adopt the current global params, so setting the
+  thickness once styles the next line, arrow and dimension alike. A shape
+  with no styled width renders exactly as it always did, so untouched
+  boards don't change. The popup also now hides the fill row when nothing
+  in the selection can hold a fill, and converts canvas-anchored widths
+  to on-screen px for display — previously a stroke drawn zoomed-in
+  reported a width severalfold off.
+
 - **A fresh shape is born selected.** Finishing a stroke used to drop
   back to the cursor and stop, so restyling what you just drew took a
   second click on it. `_finalizeShape` now enters edit mode on the shape

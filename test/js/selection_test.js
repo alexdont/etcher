@@ -135,6 +135,7 @@ function run(kind, afterCreate) {
     _currentMarkerStyle: () => ({}),
     _isStrokeShape: (k) => ["rectangle", "circle", "polygon", "freehand"].indexOf(k) !== -1,
     _lineParamsForNewShape: () => ({ color: "#ff0000" }),
+    _isShaftKind: (k) => ["line", "arrow", "dimension"].indexOf(k) !== -1,
     _markerScale: () => 1,
     _resolveCanvasImageId: () => null,
     _renderShape: () => {},

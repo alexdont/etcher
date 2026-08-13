@@ -5320,15 +5320,26 @@
       el.style.strokeWidth = w + "px";
       el.removeAttribute("stroke-width");
       el.style.strokeOpacity = String(s.opacity == null ? 1 : s.opacity);
-      if (s.dash === "none") {
+      this._applyStrokeDash(el, s.dash, w);
+      // Opacity applies to the body as well as the outline. Fill first —
+      // whether the outline may be dropped depends on the fill being there.
+      this._applyFill(el, s);
+      this._applyStrokeVisibility(el, s);
+    },
+
+    // The dash pattern for a stroke of width `w`, shared by the outline
+    // shapes (via `_applyLineParams`) and the shaft kinds (via their render
+    // cases) so "dashed" and "dotted" mean the same picture everywhere.
+    _applyStrokeDash: function(el, dash, w) {
+      if (dash === "none") {
         // Whether this actually hides anything is `_applyStrokeVisibility`'s
         // call; either way there's no dash pattern to draw.
         el.removeAttribute("stroke-dasharray");
         el.style.strokeLinecap = "";
-      } else if (s.dash === "dashed") {
+      } else if (dash === "dashed") {
         el.setAttribute("stroke-dasharray", (w * 2.2) + " " + (w * 1.6));
         el.style.strokeLinecap = "";
-      } else if (s.dash === "dotted") {
+      } else if (dash === "dotted") {
         // A zero-length dash only paints as a dot under a round linecap.
         // Shapes default to `butt`, where these rendered as nothing at all —
         // "dotted" looked identical to no line. Markers happened to work
@@ -5344,10 +5355,51 @@
         el.removeAttribute("stroke-dasharray");
         el.style.strokeLinecap = "";
       }
-      // Opacity applies to the body as well as the outline. Fill first —
-      // whether the outline may be dropped depends on the fill being there.
-      this._applyFill(el, s);
-      this._applyStrokeVisibility(el, s);
+    },
+
+    // ----- Shaft kinds (line / arrow / dimension) ----------------------------
+    // A <g> whose visible body is a stroked shaft (plus arrowheads and, for
+    // dimension, a label). They take the same width / opacity / dash params
+    // as the outline shapes; fill modes don't apply — there is nothing to
+    // fill on an open shaft. Their stroke is applied inside their
+    // `_renderShape` cases rather than by `_applyLineParams`, because the
+    // arrowhead geometry has to be sized off the same number and only the
+    // render case has the endpoints in hand.
+
+    _isShaftKind: function(kind) {
+      return kind === "line" || kind === "arrow" || kind === "dimension";
+    },
+
+    // A shaft's stroke width in on-screen px. A styled width lives in canvas
+    // units like every other stroke, so the shaft thins with the drawing on
+    // zoom-out. No styled width → `fallbackPx`, which each kind supplies as
+    // whatever it rendered before widths existed (line: a fixed 2px; arrow /
+    // dimension: the board-anchored weight) — so untouched boards are
+    // byte-for-byte unchanged.
+    _shaftStrokePx: function(shape, fallbackPx) {
+      var s = (shape && shape.style) || {};
+      if (typeof s.width === "number" && isFinite(s.width)) {
+        var w = s.width;
+        if (s.width_units === "canvas") {
+          var scale = 0;
+          try { scale = this._markerScale() || 0; } catch (_) {}
+          if (scale > 0) w = w * scale;
+        }
+        return Math.max(0.4, w);
+      }
+      return Math.max(0.4, fallbackPx);
+    },
+
+    // Width + opacity for any shaft child; dash only where asked — the shaft
+    // takes the pattern, arrowheads stay solid (a dashed V reads as broken,
+    // and every comparable tool leaves heads solid on a dashed connector).
+    _applyShaftStroke: function(el, shape, w, withDash) {
+      if (!el) return;
+      el.style.strokeWidth = w + "px";
+      el.removeAttribute("stroke-width");
+      var s = (shape && shape.style) || {};
+      el.style.strokeOpacity = String(s.opacity == null ? 1 : s.opacity);
+      if (withDash) this._applyStrokeDash(el, s.dash, w);
     },
 
     // Params popup: weight + opacity sliders and a dash picker, opened by the
@@ -5487,6 +5539,10 @@
         return b;
       });
       popup.appendChild(fillRow);
+      // Kept so `_syncParamsPopup` can hide it when nothing in the selection
+      // can hold a fill (shaft kinds, markers) — same reasoning as the label
+      // section below.
+      self._paramsFillRow = fillRow;
 
       // Label placement. Hidden unless something in the selection actually
       // carries a label — an alignment control with nothing to align is
@@ -5620,12 +5676,14 @@
     },
 
     // The shapes the params popup edits: the multi-selection if there is one,
-    // else the single shape in edit mode — filtered to stroke/marker kinds.
+    // else the single shape in edit mode — filtered to the kinds that carry
+    // stroke params (outline shapes, markers, and the shaft kinds).
     // Empty → the popup edits the global default for new shapes.
     _paramsTargetShapes: function() {
       var self = this;
       function eligible(s) {
-        return !!s && (s.kind === "marker" || self._isStrokeShape(s.kind));
+        return !!s && (s.kind === "marker" || self._isStrokeShape(s.kind) ||
+                       self._isShaftKind(s.kind));
       }
       if (this.selectedShapes && this.selectedShapes.length) {
         return this.selectedShapes.filter(eligible);
@@ -5636,12 +5694,17 @@
 
     _syncParamsPopup: function() {
       // Reflect the first target shape (the group shares one set of controls).
-      var shape = this._paramsTargetShapes()[0];
+      var targets = this._paramsTargetShapes();
+      var shape = targets[0];
       var width, opacity, dash, fill;
       if (shape) {
         var st = shape.style || {};
-        // A marker stores width in image px (zoom-anchored) → show on-screen.
-        width = shape.kind === "marker"
+        // Markers store width in image px, and every canvas-anchored width
+        // (stroke shapes, shafts) in canvas units — both zoom-anchored, both
+        // shown on-screen. The slider otherwise displays the stored number
+        // as px, which for a shape drawn zoomed-in can be off severalfold.
+        var anchored = shape.kind === "marker" || st.width_units === "canvas";
+        width = anchored
           ? Math.max(1, Math.round((st.width || 2) * this._markerScale()))
           : (st.width || 2);
         opacity = st.opacity == null ? 1 : st.opacity;
@@ -5669,6 +5732,15 @@
       (this._paramsFillBtns || []).forEach(function(b) {
         b.classList.toggle("is-selected", b.dataset.fill === fill);
       });
+      // A selection that cannot hold a fill (shafts, markers) hides the fill
+      // row rather than offering buttons that would edit dead data. With no
+      // targets the popup edits the global default, which IS fillable.
+      if (this._paramsFillRow) {
+        var self = this;
+        var fillable = !targets.length ||
+          targets.some(function(s) { return self._isStrokeShape(s.kind); });
+        this._paramsFillRow.style.display = fillable ? "" : "none";
+      }
       this._syncLabelSection();
     },
 
@@ -5717,14 +5789,21 @@
           shape.style = Object.assign({}, shape.style || {});
           // Slider thickness is on-screen px; shapes store canvas units.
           if (prop === "width" &&
-              (shape.kind === "marker" || self._isStrokeShape(shape.kind))) {
+              (shape.kind === "marker" || self._isStrokeShape(shape.kind) ||
+               self._isShaftKind(shape.kind))) {
             shape.style.width = value / self._markerScale();
             if (shape.kind !== "marker") shape.style.width_units = "canvas";
           } else {
             shape.style[prop] = value;
           }
-          if (shape.kind === "marker") self._renderShape(shape);
-          else self._applyLineParams(shape.el, shape.style, self._markerScale());
+          // Markers and shafts restyle inside `_renderShape` (a shaft's
+          // arrowheads are sized off the stroke, and only the render case
+          // has the endpoints); outline shapes take the params directly.
+          if (shape.kind === "marker" || self._isShaftKind(shape.kind)) {
+            self._renderShape(shape);
+          } else {
+            self._applyLineParams(shape.el, shape.style, self._markerScale());
+          }
         });
       } else {
         this.lineParams = this.lineParams || {};
@@ -9607,10 +9686,13 @@
           // The same number the connectors use, so a dimension and an arrow
           // beside each other match.
           var dimK = self._boardLineScale();
-          var dimStroke = Math.max(0.4, LINE_WEIGHT_PX * dimK);
-          if (shaftEl) shaftEl.style.strokeWidth = dimStroke + "px";
+          // A styled width (canvas units) wins; without one this is exactly
+          // the old `LINE_WEIGHT_PX * dimK`. Dash lands on the shaft only —
+          // heads stay solid.
+          var dimStroke = self._shaftStrokePx(shape, LINE_WEIGHT_PX * dimK);
+          self._applyShaftStroke(shaftEl, shape, dimStroke, true);
           for (var dai = 0; dai < arrowEls.length; dai++) {
-            arrowEls[dai].style.strokeWidth = dimStroke + "px";
+            self._applyShaftStroke(arrowEls[dai], shape, dimStroke, false);
           }
 
           var aImg = { x: g.a[0], y: g.a[1] };
@@ -9630,8 +9712,13 @@
           // (length 0) — draft state during the very first pointermove
           // tick — which blanks the heads rather than drawing a spike in
           // an arbitrary direction.
-          var dimHeadLen = 10 * dimK;
-          var dimHeadHalf = 5 * dimK;
+          // Heads keep their proportion to the SHAFT, not to the default
+          // weight — `dimStroke / LINE_WEIGHT_PX` is `dimK` when no width is
+          // styled (identical picture), and grows the V with a fattened
+          // shaft instead of leaving a hairline arrowhead on a heavy line.
+          var dimHeadK = dimStroke / LINE_WEIGHT_PX;
+          var dimHeadLen = 10 * dimHeadK;
+          var dimHeadHalf = 5 * dimHeadK;
           if (arrowEls[0]) {
             arrowEls[0].setAttribute(
               "points", self._vArrowPoints(aC, bC, dimHeadLen, dimHeadHalf)
@@ -9669,6 +9756,12 @@
             lineShaft.setAttribute("y1", lAC.y);
             lineShaft.setAttribute("x2", lBC.x);
             lineShaft.setAttribute("y2", lBC.y);
+            // A styled width (canvas units) wins; without one the fallback
+            // is the fixed 2px screen weight lines have always had, so
+            // untouched boards don't change.
+            self._applyShaftStroke(
+              lineShaft, shape, self._shaftStrokePx(shape, LINE_WEIGHT_PX), true
+            );
           }
           bboxTopImage = {
             x: (lAImg.x + lBImg.x) / 2,
@@ -9694,31 +9787,36 @@
               return p.x + "," + p.y;
             }).join(" "));
           }
+          // A styled width (canvas units) wins; without one this is exactly
+          // the old `LINE_WEIGHT_PX * arK`, floored the same way every other
+          // stroke is so an arrow on a very wide view stays visible rather
+          // than thinning away to nothing.
+          var arW = self._shaftStrokePx(shape, LINE_WEIGHT_PX * arK);
           if (arHead) {
             // The head follows the LAST segment, not the tail-to-head chord —
             // on a routed arrow those point in quite different directions,
             // and it's the final approach that has to line up with whatever
             // the arrow is pointing at.
             //
-            // Sized off the arrow's own zoom anchor, so the head keeps its
-            // proportion to the shapes it connects instead of staying a fixed
-            // screen size and swamping them on a zoomed-out board.
+            // Sized off the SHAFT's weight — `arW / LINE_WEIGHT_PX` is `arK`
+            // when no width is styled (identical picture), so the head keeps
+            // its proportion to the shapes it connects by default and grows
+            // with a fattened shaft instead of staying a hairline V on it.
+            var arHeadK = arW / LINE_WEIGHT_PX;
             var tip = arC[arC.length - 1];
             var prev = arC[arC.length - 2] || tip;
             arHead.setAttribute(
               "points",
               self._vArrowPoints(
                 tip, prev,
-                ARROW_HEAD_LEN * arK,
-                ARROW_HEAD_HALF_WIDTH * arK
+                ARROW_HEAD_LEN * arHeadK,
+                ARROW_HEAD_HALF_WIDTH * arHeadK
               )
             );
           }
-          // Floored the same way every other stroke is, so an arrow on a very
-          // wide view stays visible rather than thinning away to nothing.
-          var arW = Math.max(0.4, LINE_WEIGHT_PX * arK);
-          if (arShaft) arShaft.style.strokeWidth = arW + "px";
-          if (arHead) arHead.style.strokeWidth = arW + "px";
+          // Dash lands on the shaft only — the head stays solid.
+          self._applyShaftStroke(arShaft, shape, arW, true);
+          self._applyShaftStroke(arHead, shape, arW, false);
           var arMinY = arImg[0].y, arSumX = 0;
           arImg.forEach(function(p) {
             if (p.y < arMinY) arMinY = p.y;
@@ -15407,9 +15505,20 @@
       // polygon / freehand) adopt the global line params (color + thickness /
       // opacity / dash); every other kind just carries its color.
       var style;
-      if (kind === "marker") style = this._currentMarkerStyle();
-      else if (this._isStrokeShape(kind)) style = this._lineParamsForNewShape();
-      else style = this.activeColor ? { color: this.activeColor } : null;
+      if (kind === "marker") {
+        style = this._currentMarkerStyle();
+      } else if (this._isStrokeShape(kind)) {
+        style = this._lineParamsForNewShape();
+      } else if (this._isShaftKind(kind)) {
+        // Shafts adopt the global stroke params like every other line the
+        // user draws — set the thickness once, and the next line, arrow and
+        // dimension all come out in it. No fill: there is nothing to fill
+        // on an open shaft, and a dead key would still ride every payload.
+        style = this._lineParamsForNewShape();
+        delete style.fill;
+      } else {
+        style = this.activeColor ? { color: this.activeColor } : null;
+      }
       var shape = {
         uuid: uuid,
         kind: kind,

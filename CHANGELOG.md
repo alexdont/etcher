@@ -36,6 +36,20 @@ comparable canvas tool has trained people to expect.
 
 ### Added
 
+- **The keyboard basics.** Escape now steps down one rung per press —
+  cancel the in-flight draft, then drop an armed tool back to the
+  cursor, then release the selection — and falls through to the host
+  page when there is nothing left to do. Arrow keys nudge the selection
+  1 screen px (10 with shift) at any zoom, with a held key coalescing
+  into a single undo entry and a single server round-trip. ⌘/Ctrl+D
+  duplicates the selection (the button's tooltip has promised it since
+  the button shipped) and only consumes the key when something was
+  actually duplicated, so the browser keeps its bookmark shortcut
+  otherwise. ⌘/Ctrl+A selects every editable shape in cursor mode.
+  Holding shift constrains drawing — rectangles to squares, lines and
+  dimensions to 45° steps, engaging and releasing mid-drag with the
+  key — and locks a shape drag to its dominant axis.
+
 - **Lines, arrows and dimensions take thickness, opacity and line type —
   not just color.** Selecting one and opening the params popup used to
   silently edit the *global default* while the shaft stayed 2px solid,

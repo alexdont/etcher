@@ -3395,6 +3395,29 @@
           return;
         }
 
+        // Escape steps down one rung — draft, then armed tool, then
+        // selection. Consumed only when a rung actually fired, so the
+        // host page keeps an idle Escape. (The text editor and the
+        // arrow-drag machinery handle their own Escapes before this: the
+        // editor's target is an INPUT, gated above; the drag listens in
+        // the capture phase and stops propagation.)
+        if (e.key === "Escape") {
+          if (self._escapeLadder()) e.preventDefault();
+          return;
+        }
+
+        // Arrow keys nudge the selection: 1 screen px, 10 with shift.
+        if (e.key === "ArrowLeft" || e.key === "ArrowRight" ||
+            e.key === "ArrowUp" || e.key === "ArrowDown") {
+          var step = e.shiftKey ? 10 : 1;
+          var ndx = e.key === "ArrowLeft" ? -step
+                  : e.key === "ArrowRight" ? step : 0;
+          var ndy = e.key === "ArrowUp" ? -step
+                  : e.key === "ArrowDown" ? step : 0;
+          if (self._nudgeSelection(ndx, ndy)) e.preventDefault();
+          return;
+        }
+
         var meta = e.metaKey || e.ctrlKey;
         if (!meta) return;
         if (e.key === "z" || e.key === "Z") {
@@ -3406,6 +3429,14 @@
           // for Shift.
           e.preventDefault();
           self._redo();
+        } else if (e.key === "d" || e.key === "D") {
+          // The duplicate button has advertised ⌘D in its tooltip since it
+          // shipped; this makes it true. Consumed only when something was
+          // actually duplicated — otherwise the browser keeps its
+          // bookmark shortcut, which is rude to steal for a no-op.
+          if (self._duplicateSelection()) e.preventDefault();
+        } else if (e.key === "a" || e.key === "A") {
+          if (self._selectAll()) e.preventDefault();
         }
       };
       document.addEventListener("keydown", self._undoKeyHandler);
@@ -11569,6 +11600,10 @@
         return;
       }
       var pt = this._toImage(e);
+      // Shift is read at use, not at pointerdown: constraints engage and
+      // release mid-drag as the key goes down and up, which is how every
+      // comparable tool behaves.
+      this.draftState.shift = !!e.shiftKey;
       switch (this.draftState.kind) {
         case "rectangle": this._updateRectangle(pt); break;
         case "circle":    this._updateCircle(pt); break;
@@ -11612,6 +11647,7 @@
       }
       if (!this.draftState) return;
       var pt = this._toImage(e);
+      this.draftState.shift = !!e.shiftKey;
       switch (this.draftState.kind) {
         case "rectangle": this._commitRectangle(pt); break;
         case "circle":    this._commitCircle(pt); break;
@@ -13446,6 +13482,107 @@
       this._syncArrangeButtons();
     },
 
+    // One Escape, one rung — the panic key every comparable tool honors.
+    // An in-flight draft dies first; then an armed tool drops back to the
+    // cursor; then whatever is selected or being edited lets go. Returns
+    // whether the press was consumed, so an Escape with nothing to do
+    // falls through to the host page.
+    _escapeLadder: function() {
+      if (this.draftState || this.draftPolygon || this.draftCallout) {
+        this._cancelDraft();
+        return true;
+      }
+      if (this.activeTool != null) {
+        this._selectTool(null);
+        return true;
+      }
+      if ((this.selectedShapes && this.selectedShapes.length) ||
+          this.editingShape || this.editingTitleShape) {
+        this._exitEditMode();
+        this._exitTitleEditMode();
+        this._clearSelection();
+        this._syncActionBar();
+        return true;
+      }
+      return false;
+    },
+
+    // Select every editable shape on the board (⌘/Ctrl+A). Cursor mode
+    // only — mid-draw, the keystroke belongs to whatever the host does
+    // with it. Locked shapes stay out: selecting what cannot be moved or
+    // deleted only sets up a surprise.
+    _selectAll: function() {
+      if (this.activeTool != null) return false;
+      var self = this;
+      var targets = (this.shapes || []).filter(function(s) {
+        return s && s.el && !s.readonly;
+      });
+      if (!targets.length) return false;
+      this._exitEditMode();
+      this._exitTitleEditMode();
+      this._clearSelection();
+      targets.forEach(function(s) { self._addToSelection(s); });
+      this._syncActionBar();
+      return true;
+    },
+
+    // Nudge the selection by arrow key: 1 screen px, 10 with shift —
+    // converted to image px so a nudge moves the same distance on screen
+    // at every zoom. The whole burst of a held key becomes ONE undo entry
+    // and ONE server emit, flushed after the keys go quiet: per-keypress
+    // entries would bury the undo stack, and per-keypress emits would
+    // spray the server with 60 intermediate positions.
+    _nudgeSelection: function(dxScreen, dyScreen) {
+      var self = this;
+      var targets = (this.selectedShapes && this.selectedShapes.length)
+        ? this.selectedShapes.slice()
+        : (this.editingShape ? [this.editingShape] : []);
+      targets = targets.filter(function(s) { return s && s.uuid && !s.readonly; });
+      if (!targets.length) return false;
+
+      var scale = 1;
+      try { scale = this._markerScale() || 1; } catch (_) {}
+      var dx = dxScreen / (scale > 0 ? scale : 1);
+      var dy = dyScreen / (scale > 0 ? scale : 1);
+
+      if (!this._nudgeBurst) {
+        this._nudgeBurst = targets.map(function(s) {
+          return { uuid: s.uuid, before: self._snapshotShape(s) };
+        });
+      }
+      targets.forEach(function(shape) {
+        shape.geometry = self._translateGeometry(shape.kind, shape.geometry, dx, dy);
+        if (shape.metadata && shape.metadata.title_box) {
+          var tb = shape.metadata.title_box;
+          shape.metadata = Object.assign({}, shape.metadata, {
+            title_box: { x: tb.x + dx, y: tb.y + dy, w: tb.w, h: tb.h }
+          });
+        }
+        self._renderShape(shape);
+      });
+      if (this.editingShape && targets.indexOf(this.editingShape) !== -1) {
+        if (this.freehandEditor) this._renderFreehandEditor(this.editingShape);
+        else this._positionAllHandles(this.editingShape);
+      }
+      clearTimeout(this._nudgeFlushTimer);
+      this._nudgeFlushTimer = setTimeout(function() { self._flushNudge(); }, 400);
+      return true;
+    },
+
+    _flushNudge: function() {
+      clearTimeout(this._nudgeFlushTimer);
+      this._nudgeFlushTimer = null;
+      var burst = this._nudgeBurst;
+      this._nudgeBurst = null;
+      if (!burst) return;
+      var self = this;
+      this._emitChanged();
+      burst.forEach(function(rec) {
+        var shape = self.shapes.find(function(s) { return s.uuid === rec.uuid; });
+        if (shape) self._pushUndo(rec.uuid, rec.before, self._snapshotShape(shape));
+      });
+    },
+
     _isInSelection: function(shape) {
       return !!(this.selectedShapes &&
                 this.selectedShapes.indexOf(shape) !== -1);
@@ -13942,8 +14079,35 @@
       try { e.target.setPointerCapture(e.pointerId); } catch (_) {}
     },
 
+    // Shift-constrain a rectangle drag to a square: the longer axis wins,
+    // and the corner stays in the quadrant the drag went. Same convention
+    // as every comparable tool.
+    _constrainRectPoint: function(a, pt) {
+      var dx = pt.x - a.x;
+      var dy = pt.y - a.y;
+      var side = Math.max(Math.abs(dx), Math.abs(dy));
+      return {
+        x: a.x + (dx < 0 ? -side : side),
+        y: a.y + (dy < 0 ? -side : side)
+      };
+    },
+
+    // Shift-constrain a shaft endpoint to 45° increments around its
+    // anchor, length preserved — a shift-drawn dimension is how you get an
+    // exactly horizontal or vertical measurement.
+    _constrainShaftPoint: function(a, pt) {
+      var dx = pt.x - a.x;
+      var dy = pt.y - a.y;
+      var len = Math.sqrt(dx * dx + dy * dy);
+      if (!len) return pt;
+      var step = Math.PI / 4;
+      var ang = Math.round(Math.atan2(dy, dx) / step) * step;
+      return { x: a.x + Math.cos(ang) * len, y: a.y + Math.sin(ang) * len };
+    },
+
     _updateRectangle: function(pt) {
       var a = this.draftState.anchor;
+      if (this.draftState.shift) pt = this._constrainRectPoint(a, pt);
       this.draftState.geometry = {
         x: Math.min(a.x, pt.x), y: Math.min(a.y, pt.y),
         w: Math.abs(pt.x - a.x), h: Math.abs(pt.y - a.y)
@@ -13954,6 +14118,7 @@
 
     _commitRectangle: function(pt) {
       var a = this.draftState.anchor;
+      if (this.draftState.shift) pt = this._constrainRectPoint(a, pt);
       var geom = {
         x: Math.min(a.x, pt.x),
         y: Math.min(a.y, pt.y),
@@ -14340,6 +14505,7 @@
 
     _updateDimension: function(pt) {
       var a = this.draftState.anchor;
+      if (this.draftState.shift) pt = this._constrainShaftPoint(a, pt);
       this.draftState.geometry = {
         a: [a.x, a.y],
         b: [pt.x, pt.y]
@@ -14364,6 +14530,7 @@
         var half = this._clickPlaceSizeImagePx() / 2;
         this._commitShaftDraft({ a: [a.x - half, a.y], b: [a.x + half, a.y] });
       } else {
+        if (this.draftState.shift) pt = this._constrainShaftPoint(a, pt);
         this._commitShaftDraft({ a: [a.x, a.y], b: [pt.x, pt.y] });
       }
     },
@@ -17641,6 +17808,13 @@
         }
         var dxI = pt.x - startPt.x;
         var dyI = pt.y - startPt.y;
+        // Shift locks the move to whichever axis has traveled further —
+        // the standard "keep it on the same line" gesture. Read per move
+        // event so the lock engages and releases with the key.
+        if (ev.shiftKey) {
+          if (Math.abs(dxI) > Math.abs(dyI)) dyI = 0;
+          else dxI = 0;
+        }
         if (calloutBoxGrab) {
           // Box-only: the anchor stays pinned and the leader stretches.
           var cbStart = self._calloutTextBoxImage(startGeom);

@@ -54,6 +54,19 @@ comparable canvas tool has trained people to expect.
   direction, then the host's new `snap={true}` attr, then off — the
   pull is an acquired taste, so nobody gets it uninvited.
 
+- **Shapes copy, cut and paste.** ⌘/Ctrl+C puts the selection on the
+  real system clipboard as a JSON envelope (custom MIME type plus a
+  text/plain fallback), ⌘X also deletes it, and ⌘V rebuilds the shapes
+  — offset 16px so a same-board paste doesn't land invisibly under its
+  source, with fresh identities so it can't collide with the original,
+  each with its own undo entry, and selected on arrival (one shape
+  straight into edit mode, several as a group). Because it rides the
+  system clipboard, shapes travel between boards, between tabs, and
+  through anything that can carry text. A real text selection or a
+  focused form field always wins — ⌘C there copies words, as it should
+  — and pasted content that isn't an etcher envelope falls through to
+  the existing image and text handling.
+
 - **Single-key tool shortcuts.** V cursor, H hand, D draw, M marker,
   E eraser, R rectangle, O circle, P polygon, L line, N dimension,
   C callout, T text — the tldraw/Figma dialect where the tools overlap.

@@ -2924,6 +2924,7 @@
       self._wireUndoKeyboard();
       self._wireGlobalShapeListeners();
       self._wireImagePaste();
+      self._wireShapeClipboard();
       self._wireFileDrop();
 
       // Multi-image canvases (paged readers, lookbooks): subscribe
@@ -8500,14 +8501,157 @@
       container.addEventListener("drop", self._dropHandler);
     },
 
+    // ----- Shape clipboard (⌘C / ⌘X / ⌘V) ------------------------------------
+    // Shapes travel as a JSON envelope on the DOM copy/paste events — the
+    // one clipboard channel that needs no permission prompt, works across
+    // tabs and boards, and hands the data over synchronously. Written to
+    // BOTH a custom MIME type and text/plain: the custom type is the
+    // honest label, the text fallback is what survives apps that only
+    // carry text (and makes a paste of the JSON from anywhere work).
+
+    _serializeSelection: function() {
+      function clone(v) {
+        if (v == null) return v;
+        try { return JSON.parse(JSON.stringify(v)); } catch (_) { return v; }
+      }
+      var targets = (this.selectedShapes && this.selectedShapes.length)
+        ? this.selectedShapes.slice()
+        : (this.editingShape ? [this.editingShape] : []);
+      if (!targets.length) return null;
+      var shapes = targets.map(function(s) {
+        // No uuid on purpose — a payload carrying one would make
+        // `_addShape` REUSE it, and pasting onto the same board would
+        // collide with the original.
+        var p = { kind: s.kind, geometry: clone(s.geometry) };
+        if (s.style != null) p.style = clone(s.style);
+        if (s.metadata != null) p.metadata = clone(s.metadata);
+        if (typeof s.image_idx === "number") p.image_idx = s.image_idx;
+        if (typeof s.image_id === "string") p.image_id = s.image_id;
+        return p;
+      });
+      return { etcher: "shapes", version: 1, shapes: shapes };
+    },
+
+    // Clipboard text → shape payloads, or null when the text is not ours.
+    // The cheap indexOf pre-check keeps every ordinary text paste from
+    // paying for a JSON.parse of arbitrary content; the count cap keeps a
+    // hostile payload from creating shapes until the tab dies.
+    _parseShapeEnvelope: function(text) {
+      if (!text || typeof text !== "string") return null;
+      var s = text.trim();
+      if (s.charAt(0) !== "{" || s.indexOf('"etcher"') === -1) return null;
+      var parsed;
+      try { parsed = JSON.parse(s); } catch (_) { return null; }
+      if (!parsed || parsed.etcher !== "shapes" || !Array.isArray(parsed.shapes)) {
+        return null;
+      }
+      return parsed.shapes.slice(0, 200);
+    },
+
+    // Materialize pasted payloads: +16px offset (so a same-board paste
+    // doesn't land invisibly under its source), one create-undo entry
+    // each, and the result selected — a single shape straight into edit
+    // mode, several as a multi-selection. Mirrors what ⌘D leaves behind.
+    _pasteShapes: function(payloads) {
+      var self = this;
+      var OFFSET = 16;
+      function clone(v) {
+        if (v == null) return v;
+        try { return JSON.parse(JSON.stringify(v)); } catch (_) { return v; }
+      }
+      var made = [];
+      (payloads || []).forEach(function(p) {
+        if (!p || typeof p !== "object" ||
+            typeof p.kind !== "string" || !p.geometry) return;
+        var payload = {
+          kind: p.kind,
+          geometry: self._translateGeometry(p.kind, clone(p.geometry), OFFSET, OFFSET)
+        };
+        if (p.style != null) payload.style = clone(p.style);
+        if (p.metadata != null) payload.metadata = clone(p.metadata);
+        if (typeof p.image_idx === "number") payload.image_idx = p.image_idx;
+        if (typeof p.image_id === "string") payload.image_id = p.image_id;
+        var uuid = self._addShape(payload);
+        if (uuid) made.push(uuid);
+      });
+      if (!made.length) return false;
+      self._clearSelection();
+      self._exitEditMode();
+      made.forEach(function(uuid) {
+        var shape = self.shapes.find(function(x) { return x.uuid === uuid; });
+        if (!shape) return;
+        self._pushUndoCreate(shape);
+        self._addToSelection(shape);
+      });
+      if (made.length === 1) {
+        var only = self.shapes.find(function(x) { return x.uuid === made[0]; });
+        if (only) self._enterEditMode(only);
+      }
+      self._syncActionBar();
+      return true;
+    },
+
+    // Copy (and cut) fire from the DOM events, not from a keydown: the
+    // event hands over a writable clipboardData with no permissions, and
+    // firing only when the browser itself decided this was a copy keeps
+    // every native behavior (address bar, devtools, text fields) intact.
+    _onShapeCopy: function(e, isCut) {
+      if (!this.annotationMode) return;
+      var t = e.target;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" ||
+                t.isContentEditable === true)) return;
+      // A real text selection on the page wins — the user is copying words.
+      try {
+        var sel = window.getSelection && window.getSelection();
+        if (sel && String(sel).length) return;
+      } catch (_) {}
+      var envelope = this._serializeSelection();
+      if (!envelope || !e.clipboardData) return;
+      e.preventDefault();
+      var json = JSON.stringify(envelope);
+      try { e.clipboardData.setData("application/x-etcher-shapes", json); } catch (_) {}
+      e.clipboardData.setData("text/plain", json);
+      if (isCut) {
+        if (this.selectedShapes && this.selectedShapes.length) {
+          this._deleteSelectedShapes();
+        } else if (this.editingShape) {
+          this._deleteShape(this.editingShape);
+        }
+      }
+    },
+
+    _wireShapeClipboard: function() {
+      var self = this;
+      self._copyHandler = function(e) { self._onShapeCopy(e, false); };
+      self._cutHandler = function(e) { self._onShapeCopy(e, true); };
+      document.addEventListener("copy", self._copyHandler);
+      document.addEventListener("cut", self._cutHandler);
+    },
+
     _wireImagePaste: function() {
       var self = this;
-      if (self.pasteImages === false) return;
       self._pasteHandler = function(e) {
-        if (self.pasteImages === false || self.annotationsVisible === false) return;
+        if (self.annotationsVisible === false) return;
         var t = e.target;
         if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable === true)) return;
         if (document.activeElement && document.activeElement.isContentEditable) return;
+        // Etcher shapes win over everything: our own envelope on the
+        // clipboard means the user copied shapes, and turning it into a
+        // text label of raw JSON (the text branch below) would be the
+        // worst possible reading of their intent. Checked regardless of
+        // `pasteImages` — that flag governs media, not shapes.
+        if (self.annotationMode) {
+          var shapesJson = e.clipboardData &&
+            (e.clipboardData.getData("application/x-etcher-shapes") ||
+             e.clipboardData.getData("text/plain"));
+          var payloads = self._parseShapeEnvelope(shapesJson);
+          if (payloads) {
+            e.preventDefault();
+            self._pasteShapes(payloads);
+            return;
+          }
+        }
+        if (self.pasteImages === false) return;
         var items = (e.clipboardData && e.clipboardData.items) || [];
         // Images win over text. Copying from a page often puts both on the
         // clipboard — an <img> carries its markup as text/html and its alt
@@ -8794,6 +8938,14 @@
       if (this._pasteHandler) {
         document.removeEventListener("paste", this._pasteHandler);
         this._pasteHandler = null;
+      }
+      if (this._copyHandler) {
+        document.removeEventListener("copy", this._copyHandler);
+        this._copyHandler = null;
+      }
+      if (this._cutHandler) {
+        document.removeEventListener("cut", this._cutHandler);
+        this._cutHandler = null;
       }
     },
 

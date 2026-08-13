@@ -244,9 +244,75 @@
   // ===========================================================================
 
   var stylesInjected = false;
+
+  // The SVG filters the selection CSS references. Filled shapes can't use
+  // the stacked drop-shadow outline: a drop-shadow paints BEHIND the
+  // element, and a semi-transparent fill lets it show through — selecting
+  // a red shape visibly tinted its body toward blue. These filters build
+  // the ring from the silhouette instead: saturate the alpha (so a
+  // translucent fill counts as solid body), dilate it, subtract the
+  // original — leaving a band strictly OUTSIDE the shape — and flood that
+  // band blue under the untouched source. The interior never changes.
+  //
+  // They live in one hidden svg on <body>, never torn down: `filter:
+  // url(#id)` resolves document-wide, and an id that disappears (an
+  // overlay's own <defs> being removed with its page) doesn't degrade
+  // gracefully — Chrome stops rendering the element entirely.
+  function ensureSelectionFilters() {
+    if (typeof document === "undefined") return;
+    if (document.getElementById("etcher-selection-filters")) return;
+
+    function outlineFilter(id, radius, opacity) {
+      // The region must reach past the bbox: getBBox excludes stroke, so
+      // the stroke's overhang plus the dilate radius live outside it, and
+      // a region that stops at the bbox clips the ring off small shapes.
+      var f = svgEl("filter", {
+        id: id, x: "-60%", y: "-60%", width: "220%", height: "220%"
+      });
+      var solid = svgEl("feComponentTransfer", {
+        in: "SourceAlpha", result: "solid"
+      });
+      solid.appendChild(svgEl("feFuncA", {
+        type: "linear", slope: "255", intercept: "0"
+      }));
+      f.appendChild(solid);
+      f.appendChild(svgEl("feMorphology", {
+        in: "solid", operator: "dilate", radius: String(radius),
+        result: "dilated"
+      }));
+      f.appendChild(svgEl("feComposite", {
+        in: "dilated", in2: "solid", operator: "out", result: "band"
+      }));
+      f.appendChild(svgEl("feFlood", {
+        "flood-color": "#3b82f6", "flood-opacity": String(opacity),
+        result: "blue"
+      }));
+      f.appendChild(svgEl("feComposite", {
+        in: "blue", in2: "band", operator: "in", result: "ring"
+      }));
+      var merge = svgEl("feMerge");
+      merge.appendChild(svgEl("feMergeNode", { in: "ring" }));
+      merge.appendChild(svgEl("feMergeNode", { in: "SourceGraphic" }));
+      f.appendChild(merge);
+      return f;
+    }
+
+    var holder = svgEl("svg", { id: "etcher-selection-filters", "aria-hidden": "true" });
+    holder.style.position = "absolute";
+    holder.style.width = "0";
+    holder.style.height = "0";
+    holder.style.overflow = "hidden";
+    var defs = svgEl("defs");
+    defs.appendChild(outlineFilter("etcher-selection-outline", 1.6, 1));
+    defs.appendChild(outlineFilter("etcher-hover-outline", 1.4, 0.55));
+    holder.appendChild(defs);
+    document.body.appendChild(holder);
+  }
+
   function injectStyles() {
     if (stylesInjected) return;
     stylesInjected = true;
+    ensureSelectionFilters();
 
     var css = [
       // Every chrome surface paints on its own near-black background, in
@@ -1076,6 +1142,35 @@
       ".etcher-shape.is-multi-selected {",
       "  filter: drop-shadow(1.2px 0 0 #3b82f6) drop-shadow(-1.2px 0 0 #3b82f6)",
       "          drop-shadow(0 1.2px 0 #3b82f6) drop-shadow(0 -1.2px 0 #3b82f6);",
+      "}",
+      // The kinds that can hold a FILL override those with the silhouette
+      // filters (see `ensureSelectionFilters`): a drop-shadow paints behind
+      // the element, and a semi-transparent fill lets it show through, so
+      // selecting a red shape tinted its body toward blue. The silhouette
+      // ring is drawn strictly outside the shape — the outline goes blue,
+      // the fill stays exactly the shape's own color. Matched by element
+      // type since CSS can't ask the shape kind: rect / circle / polygon
+      // are the closed shapes, path / polyline are freehand (`:not` keeps
+      // markers — fill-less by definition — on the cheap drop-shadows).
+      "rect.etcher-shape.is-selected, rect.etcher-shape.is-editing,",
+      "rect.etcher-shape.is-multi-selected,",
+      "circle.etcher-shape.is-selected, circle.etcher-shape.is-editing,",
+      "circle.etcher-shape.is-multi-selected,",
+      "polygon.etcher-shape.is-selected, polygon.etcher-shape.is-editing,",
+      "polygon.etcher-shape.is-multi-selected,",
+      "path.etcher-shape.is-selected:not(.etcher-marker),",
+      "path.etcher-shape.is-editing:not(.etcher-marker),",
+      "path.etcher-shape.is-multi-selected:not(.etcher-marker),",
+      "polyline.etcher-shape.is-selected:not(.etcher-marker),",
+      "polyline.etcher-shape.is-editing:not(.etcher-marker),",
+      "polyline.etcher-shape.is-multi-selected:not(.etcher-marker) {",
+      "  filter: url(#etcher-selection-outline);",
+      "}",
+      "rect.etcher-shape.is-hovered, circle.etcher-shape.is-hovered,",
+      "polygon.etcher-shape.is-hovered,",
+      "path.etcher-shape.is-hovered:not(.etcher-marker),",
+      "polyline.etcher-shape.is-hovered:not(.etcher-marker) {",
+      "  filter: url(#etcher-hover-outline);",
       "}",
       ".etcher-shape.is-editing { cursor: grab; }",
       ".etcher-shape.is-editing.is-moving { cursor: grabbing; }",

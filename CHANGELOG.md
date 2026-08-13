@@ -19,16 +19,20 @@ comparable canvas tool has trained people to expect.
   own paint is applied as inline styles, which beat class rules, so the
   dash was the entire visible effect.)
 
-  Selection is now a blue outline traced around the vector — built from
-  stacked drop-shadows of the shape's rendered pixels, so it follows the
-  true silhouette (dashes, arrowheads, fills, `<g>` children) with no
-  outline geometry to keep in sync during drags — and the shape's own
-  stroke, dash and fill are never touched. Hover is the same idea as a
-  soft glow, so "can select" and "is selected" read as one visual
-  language. Text and callout boxes show the same blue on their border
-  instead of outlining every glyph; the image ring turns blue to match.
-  The dashed orange draft look is untouched — that dash means "still
-  being drawn", which is a different statement from "selected".
+  Selection is now a blue outline traced around the vector, and the
+  shape's own stroke, dash and fill are never touched. Shapes that can
+  hold a fill use an SVG silhouette filter that draws the ring strictly
+  *outside* the shape — the first cut used stacked drop-shadows, which
+  paint behind the element, and a semi-transparent fill let the blue show
+  through and visibly tinted a red shape's body. Fill-less kinds (shafts,
+  markers) keep the cheap drop-shadow outline, which follows dashes,
+  arrowheads and `<g>` children with no geometry to sync during drags.
+  Hover is the same idea, softer, so "can select" and "is selected" read
+  as one visual language. Text and callout boxes show the same blue on
+  their border instead of outlining every glyph; the image ring turns
+  blue to match. The dashed orange draft look is untouched — that dash
+  means "still being drawn", which is a different statement from
+  "selected".
 
 ### Added
 

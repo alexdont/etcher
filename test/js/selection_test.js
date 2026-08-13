@@ -75,6 +75,90 @@ for (const state of [".etcher-shape.is-selected", ".etcher-shape.is-editing",
 assert.ok(/drop-shadow/.test(ruleFor(".etcher-shape.is-hovered")),
   "hover lost its glow — with the old fill/stroke overrides gone it needs the filter to show at all");
 
+// ── filled shapes get the silhouette ring, not the drop-shadow stack ────────
+
+// A drop-shadow paints BEHIND the element, and a semi-transparent fill lets
+// it show through — selecting a red shape visibly tinted its body toward
+// blue. The fillable element types must use the silhouette filter, which
+// draws the ring strictly outside the shape and never touches the interior.
+for (const tag of ["rect", "circle", "polygon"]) {
+  for (const state of ["is-selected", "is-editing", "is-multi-selected"]) {
+    assert.ok(/url\(#etcher-selection-outline\)/.test(ruleFor(`${tag}.etcher-shape.${state}`)),
+      `${tag}.${state} is back on drop-shadows — its translucent fill will tint blue when selected`);
+  }
+  assert.ok(/url\(#etcher-hover-outline\)/.test(ruleFor(`${tag}.etcher-shape.is-hovered`)),
+    `${tag} hover is back on the glow — its translucent fill will tint blue on hover`);
+}
+// Freehand paths are fillable too; markers are not and stay on the cheap
+// drop-shadows via :not.
+assert.ok(
+  /url\(#etcher-selection-outline\)/.test(ruleFor("path.etcher-shape.is-selected:not(.etcher-marker)")),
+  "a selected freehand path must use the silhouette ring — a lassoed fill tints blue otherwise");
+
+// ── the referenced filters actually exist, shaped to do that job ────────────
+
+// `filter: url(#missing)` doesn't degrade — Chrome stops rendering the
+// element entirely — so the defs the CSS points at must be created, in a
+// holder that never gets torn down with an overlay.
+{
+  const fnStart = src.indexOf("  function ensureSelectionFilters() {");
+  assert.notStrictEqual(fnStart, -1, "ensureSelectionFilters is gone");
+  const fnEnd = src.indexOf("\n  }", fnStart);
+  const fnSrc = src.slice(fnStart, fnEnd + "\n  }".length);
+
+  // Drive it with a recording DOM.
+  function node(tag, attrs) {
+    return {
+      tag, attrs: attrs || {}, children: [], style: {},
+      appendChild(c) { this.children.push(c); return c; },
+      setAttribute(k, v) { this.attrs[k] = v; }
+    };
+  }
+  global.svgEl = (tag, attrs) => node(tag, attrs);
+  const body = node("body");
+  global.document = {
+    getElementById: () => null,
+    body
+  };
+  eval("(" + fnSrc.replace("function ensureSelectionFilters", "function") + ")")();
+
+  assert.strictEqual(body.children.length, 1, "the filter holder was not appended to <body>");
+  const holder = body.children[0];
+  assert.strictEqual(holder.attrs.id, "etcher-selection-filters");
+  const defs = holder.children[0];
+  const ids = defs.children.map((f) => f.attrs.id);
+  assert.deepStrictEqual(ids, ["etcher-selection-outline", "etcher-hover-outline"],
+    `the CSS references filters that are not defined, got ${JSON.stringify(ids)}`);
+
+  // The graph that keeps the interior clean: saturate the alpha so a
+  // translucent fill counts as solid body, dilate, subtract the original
+  // (operator OUT — the band lies strictly outside), flood blue into the
+  // band, merge under the untouched source.
+  const f = defs.children[0];
+  const kinds = f.children.map((p) => p.tag);
+  assert.deepStrictEqual(
+    kinds,
+    ["feComponentTransfer", "feMorphology", "feComposite", "feFlood", "feComposite", "feMerge"],
+    `unexpected filter graph: ${JSON.stringify(kinds)}`);
+  assert.strictEqual(f.children[0].children[0].attrs.slope, "255",
+    "the alpha saturation is gone — a semi fill's silhouette will be translucent and the ring will bleed inside");
+  assert.strictEqual(f.children[2].attrs.operator, "out",
+    "the band must be composited OUT of the shape — anything else paints inside the fill");
+  assert.strictEqual(f.children[3].attrs["flood-color"], "#3b82f6");
+  const mergeIns = f.children[5].children.map((m) => m.attrs.in);
+  assert.deepStrictEqual(mergeIns, ["ring", "SourceGraphic"],
+    "the source must merge OVER the ring, or the ring paints across the shape");
+
+  // And injectStyles is what calls it, so the defs exist wherever the CSS does.
+  const inject = src.slice(src.indexOf("  function injectStyles() {"),
+    src.indexOf("var css = ["));
+  assert.ok(inject.includes("ensureSelectionFilters();"),
+    "injectStyles no longer creates the filters the CSS references — selected filled shapes will vanish");
+
+  delete global.document;
+  delete global.svgEl;
+}
+
 // ── the states that opt out of the filter still do ──────────────────────────
 
 // Images: the drop-shadow lands outside the box where the corner clip-path

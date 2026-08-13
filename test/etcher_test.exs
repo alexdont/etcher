@@ -40,6 +40,26 @@ defmodule EtcherTest do
       assert html =~ ~s(data-connectors="true")
     end
 
+    test "drag snapping is off unless the host opts in" do
+      assigns = %{}
+
+      # Same three-layer contract as the connectors: absent attr → off,
+      # host default via snap={true}, user's saved toggle wins over both.
+      html =
+        rendered_to_string(~H"""
+        <Etcher.Layer.layer fresco_id="board" />
+        """)
+
+      refute html =~ "data-snap"
+
+      html =
+        rendered_to_string(~H"""
+        <Etcher.Layer.layer fresco_id="board" snap={true} />
+        """)
+
+      assert html =~ ~s(data-snap="true")
+    end
+
     test "default :tools list renders all seven shapes plus the eraser" do
       assigns = %{}
 

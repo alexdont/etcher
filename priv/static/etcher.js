@@ -196,6 +196,8 @@
     // its corners for the connector anchors — each says what it switches.
     grid: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="6" cy="6" r="1.6"/><circle cx="12" cy="6" r="1.6"/><circle cx="18" cy="6" r="1.6"/><circle cx="6" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="18" cy="12" r="1.6"/><circle cx="6" cy="18" r="1.6"/><circle cx="12" cy="18" r="1.6"/><circle cx="18" cy="18" r="1.6"/></svg>',
     connectors: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5"/><circle cx="7" cy="7" r="2" fill="currentColor" stroke="none"/><circle cx="17" cy="7" r="2" fill="currentColor" stroke="none"/><circle cx="7" cy="17" r="2" fill="currentColor" stroke="none"/><circle cx="17" cy="17" r="2" fill="currentColor" stroke="none"/></svg>',
+    // Two boxes centered on a shared dashed guide — the snap toggle.
+    snap: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><line x1="12" y1="2.5" x2="12" y2="21.5" stroke-dasharray="2.4 2.2" stroke-opacity="0.6"/><rect x="5" y="5.5" width="14" height="5" rx="1.2"/><rect x="8" y="14" width="8" height="5" rx="1.2"/></svg>',
     // Two rows of dots — the drag handle every reorderable list uses.
     grip: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>',
     // Heroicons chevron-up / chevron-down — the style panel's size control.
@@ -1860,6 +1862,28 @@
     image:     { icon: ICONS.image,     title: "Insert image", momentary: true }
   };
 
+  // Single-key tool shortcuts, tldraw/Figma dialect where the tools
+  // overlap: V select, H hand, D draw, R rectangle, O circle, L line,
+  // T text, E eraser. The rest take the tool's initial (M marker,
+  // P polygon, C callout) and N for dimensioN, D being taken. `null`
+  // means the cursor. `image` has no key on purpose: it is a momentary
+  // action that opens the OS file picker, which is a startling thing for
+  // a keystroke to do.
+  var TOOL_SHORTCUTS = {
+    v: null,
+    h: "grabber",
+    d: "freehand",
+    m: "marker",
+    e: "eraser",
+    r: "rectangle",
+    o: "circle",
+    p: "polygon",
+    l: "line",
+    n: "dimension",
+    c: "callout",
+    t: "text"
+  };
+
   // ===========================================================================
   // Per-tool mouse cursors — a small crosshair (the hotspot) with the tool's
   // glyph as a badge at bottom-right, so the pointer itself says which tool
@@ -3406,6 +3430,18 @@
             ? (toExtreme ? "front" : "forward")
             : (toExtreme ? "back" : "backward");
           if (self._arrange(where)) e.preventDefault();
+          return;
+        }
+
+        // Single-key tool shortcuts. Bare keys only — a modifier means
+        // the keystroke is a chord that belongs to something else (⌘R is
+        // reload, alt-drag is duplicate). Consumed only when the key maps
+        // to a tool this board actually offers.
+        if (!e.metaKey && !e.ctrlKey && !e.altKey && e.key &&
+            TOOL_SHORTCUTS.hasOwnProperty(e.key.toLowerCase())) {
+          if (self._selectToolByShortcut(TOOL_SHORTCUTS[e.key.toLowerCase()])) {
+            e.preventDefault();
+          }
           return;
         }
 
@@ -5109,6 +5145,12 @@
       );
       popup.appendChild(self.connectorsBtn);
 
+      self.snapBtn = self._makePopupAction(
+        ICONS.snap, self._snapTitle(),
+        function() { self._setPref("snap", !self._snapOn()); }
+      );
+      popup.appendChild(self.snapBtn);
+
       var customiseBtn = self._makePopupAction(
         ICONS.sliders, "Customise the toolbar and the style panel",
         function() { self._closePopup(); self._openCustomise(); }
@@ -6695,6 +6737,12 @@
         this.connectorsBtn.setAttribute("aria-label", this.connectorsBtn.title);
         this.connectorsBtn.setAttribute("aria-pressed", conOn ? "true" : "false");
       }
+      if (this.snapBtn) {
+        var snapOn = this._snapOn();
+        this.snapBtn.title = this._snapTitle();
+        this.snapBtn.setAttribute("aria-label", this.snapBtn.title);
+        this.snapBtn.setAttribute("aria-pressed", snapOn ? "true" : "false");
+      }
     },
 
     _gridTitle: function() {
@@ -6705,6 +6753,12 @@
       return this._connectorsOn()
         ? "Hide connector anchors"
         : "Show connector anchors";
+    },
+
+    _snapTitle: function() {
+      return this._snapOn()
+        ? "Turn off drag snapping"
+        : "Snap dragged shapes to their neighbours";
     },
 
     _toggleAnnotationsVisible: function() {
@@ -11306,6 +11360,16 @@
       return !!(this.el && this.el.dataset && this.el.dataset.connectors === "true");
     },
 
+    // Whether drag snapping (edge/center magnetism + alignment guides) is
+    // on. Same three layers as the connectors, for the same reason: the
+    // pull is an acquired taste, so the user's own toggle wins in either
+    // direction, then the host's `snap={true}` default, then off.
+    _snapOn: function() {
+      var pref = this._getPref("snap");
+      if (pref === true || pref === false) return pref;
+      return !!(this.el && this.el.dataset && this.el.dataset.snap === "true");
+    },
+
     // Push every preference at whatever it controls. Called on load and after
     // any change, so there is one path from "what is preferred" to "what is
     // on screen" rather than each toggle remembering to do its own work.
@@ -13494,6 +13558,22 @@
       });
       this.selectedShapes = [];
       this._syncArrangeButtons();
+    },
+
+    // Arm a tool from its shortcut key. The cursor (null) is always
+    // reachable; every other key works only when the board's `:tools`
+    // allowlist offers that tool — a key silently arming a tool the
+    // toolbar doesn't show would strand the user in a mode they can't
+    // see, and the host page keeps the keystroke instead.
+    _selectToolByShortcut: function(toolKey) {
+      if (toolKey === null) {
+        this._selectTool(null);
+        return true;
+      }
+      if (!TOOL_DEFS[toolKey]) return false;
+      if ((this.tools || []).indexOf(toolKey) === -1) return false;
+      this._selectTool(toolKey);
+      return true;
     },
 
     // One Escape, one rung — the panic key every comparable tool honors.
@@ -17879,6 +17959,27 @@
       this._snapGuideEls = null;
     },
 
+    // Duplicate a shape exactly in place and return the copy — the
+    // alt-drag half of duplication: the copy is what the drag then moves,
+    // the original stays put. Rides `_addShape` (render, interactions,
+    // server emit) plus a create-undo entry, same as the ⌘D path.
+    _cloneShapeInPlace: function(shape) {
+      function clone(v) {
+        if (v == null) return v;
+        try { return JSON.parse(JSON.stringify(v)); } catch (_) { return v; }
+      }
+      var payload = { kind: shape.kind, geometry: clone(shape.geometry) };
+      if (shape.style != null) payload.style = clone(shape.style);
+      if (shape.metadata != null) payload.metadata = clone(shape.metadata);
+      if (typeof shape.image_idx === "number") payload.image_idx = shape.image_idx;
+      if (typeof shape.image_id === "string") payload.image_id = shape.image_id;
+      var uuid = this._addShape(payload);
+      if (!uuid) return null;
+      var made = this.shapes.find(function(s) { return s.uuid === uuid; });
+      if (made) this._pushUndoCreate(made);
+      return made || null;
+    },
+
     _startShapeMove: function(shape, e) {
       // Tapping the same spot again reaches for whatever is underneath —
       // without this, a shape covered by a larger one can never be selected,
@@ -17887,6 +17988,16 @@
       // Locked shape: no drag-to-move. Fall through to the tap path so a
       // click still pins the tooltip (browse-mode behavior).
       if (shape.readonly) { this._onShapeTap(shape); return; }
+      // Alt-grab drags a COPY — the tldraw/Figma duplication gesture. The
+      // clone is created in place before the drag starts, so the rest of
+      // this function simply moves it; the original never moves, and the
+      // clone conveniently snaps against it (candidates exclude only the
+      // dragged shape). Alt read at grab time: it decides WHAT is dragged,
+      // which cannot change mid-gesture.
+      if (e.altKey && shape.uuid) {
+        var altCopy = this._cloneShapeInPlace(shape);
+        if (altCopy) shape = altCopy;
+      }
       var self = this;
       var el = shape.el;
       // Strip mode: make sure handle / drag-preview elements created
@@ -17926,10 +18037,14 @@
           startPt.x >= grabBox.x && startPt.x <= grabBox.x + grabBox.w &&
           startPt.y >= grabBox.y && startPt.y <= grabBox.y + grabBox.h;
       }
-      // Snap setup — every other shape's bbox, taken once. The callout
-      // box-only drag doesn't snap: its bbox includes the anchor it is
+      // Snap setup — every other shape's bbox, taken once. Only when the
+      // user (or host) has snapping ON — it is an acquired taste, off by
+      // default like the connector anchors. The callout box-only drag
+      // doesn't snap either way: its bbox includes the anchor it is
       // deliberately NOT moving, so edge alignment would lie.
-      var snapStartBox = calloutBoxGrab ? null : self._shapeBBoxImagePx(shape);
+      var snapStartBox = (calloutBoxGrab || !self._snapOn())
+        ? null
+        : self._shapeBBoxImagePx(shape);
       var snapCandidates = snapStartBox ? self._snapCandidatesFor(shape) : [];
       var dragged = false;
       try { el.setPointerCapture(e.pointerId); } catch (_) {}

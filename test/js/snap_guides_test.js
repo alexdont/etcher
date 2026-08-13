@@ -145,6 +145,7 @@ function dragWith(evProps, endPt) {
     _translateGeometry: translateGeometry,
     _shapeBBoxImagePx: shapeBBoxImagePx,
     _snapCandidatesFor: snapCandidatesFor,
+    _snapOn: () => true,
     _computeSnap: computeSnap,
     _snapGuidesFor: snapGuidesFor,
     _renderSnapGuides: (g) => rendered.push(g),

@@ -420,6 +420,19 @@ defmodule Etcher.Layer do
     """
   )
 
+  attr(:snap, :boolean,
+    default: false,
+    doc: """
+    Host default for drag snapping — dragged shapes magnetizing to
+    the edges and centers of their neighbours, with alignment guide
+    lines. Off by default: the pull is an acquired taste. The user's
+    own toggle (persisted through the prefs mechanism, next to the
+    grid and connector toggles) always wins over this default, in
+    either direction; ⌘/Ctrl held during a drag bypasses the snap
+    even when it is on.
+    """
+  )
+
   attr(:rest, :global)
 
   @doc """
@@ -460,6 +473,7 @@ defmodule Etcher.Layer do
       data-nav-buttons={@nav_buttons_csv}
       data-toolbar={@toolbar == false && "false"}
       data-connectors={@connectors == true && "true"}
+      data-snap={@snap == true && "true"}
       data-image-source={@image_source == :custom && "custom"}
       data-paste-images={@paste_images == false && "false"}
       data-colors={@colors_json}

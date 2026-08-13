@@ -214,6 +214,7 @@ function ladderCtx(state) {
     _translateGeometry: translateGeometry,
     _shapeBBoxImagePx: () => null,
     _snapCandidatesFor: () => [],
+    _snapOn: () => false,
     _clearSnapGuides: noop,
     _hideTooltip: noop, _showTooltipFor: noop,
     _suspendMidpointHighlight: noop, _resumeMidpointHighlight: noop,

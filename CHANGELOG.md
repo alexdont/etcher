@@ -36,7 +36,8 @@ comparable canvas tool has trained people to expect.
 
 ### Added
 
-- **Snap & alignment guides.** While a shape's body is dragged, its
+- **Snap & alignment guides — off by default, togglable, saved.** While
+  snapping is on and a shape's body is dragged, its
   edges and centers magnetize to the edges and centers of every other
   shape within 6 screen px, and cyan dashed guide lines show what
   aligned with what — spanning to the farthest shape sharing the line,
@@ -47,7 +48,25 @@ comparable canvas tool has trained people to expect.
   them the most reliable thing to align to), strip mode snaps within
   its own page only, and the guides vanish the moment the drag ends.
   Candidates are collected once at drag start, so a busy board pays
-  nothing per frame beyond the comparison itself.
+  nothing per frame beyond the comparison itself. The toggle sits next
+  to the grid and connector switches in the customise menu and resolves
+  like the connectors do: the user's saved choice wins in either
+  direction, then the host's new `snap={true}` attr, then off — the
+  pull is an acquired taste, so nobody gets it uninvited.
+
+- **Single-key tool shortcuts.** V cursor, H hand, D draw, M marker,
+  E eraser, R rectangle, O circle, P polygon, L line, N dimension,
+  C callout, T text — the tldraw/Figma dialect where the tools overlap.
+  Bare keys only (a modifier means the keystroke is a chord that belongs
+  to something else), consumed only when the key maps to a tool the
+  board's `:tools` allowlist actually offers, and the image tool has no
+  key on purpose: a keystroke opening the OS file picker is startling.
+
+- **Alt-drag duplicates.** Holding alt when grabbing a shape drags a
+  copy — the original stays put, the copy gets its own undo entry like
+  ⌘D, and it conveniently snaps against the original when snapping is
+  on. Alt is read at grab time: it decides what is dragged, which
+  cannot change mid-gesture.
 
 - **The keyboard basics.** Escape now steps down one rung per press —
   cancel the in-flight draft, then drop an armed tool back to the

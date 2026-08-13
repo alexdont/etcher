@@ -71,6 +71,21 @@ comparable canvas tool has trained people to expect.
   flow; polygon stays click-per-vertex, and closing one degenerate
   (a double-click in place) still cancels cleanly.
 
+- **Dimension and callout finish on release and ask for their label.**
+  Both used a two-click flow — release armed the draft, and only the
+  *next* click placed the far end. A mode with no visible affordance:
+  testers read the first click as the tool doing nothing. Now pointerup
+  ends the gesture like every other tool. A bare click places a
+  default-length dimension centered on the point (or a callout with its
+  anchor under the cursor and the text box a short hop away), and a
+  press-drag-release places exactly what was dragged — dimension arrows
+  from press to release, callout box centered where you let go. Either
+  way the shape lands selected with its inline label editor already
+  open, waiting for text — a dimension or callout without a label is a
+  shape you'd only have to come back for. Lines share the machinery but
+  deliberately stay label-silent: hosts that collect line titles through
+  their own composer on `etcher:shape-drawn` keep their clean slate.
+
 - **A fresh shape is born selected.** Finishing a stroke used to drop
   back to the cursor and stop, so restyling what you just drew took a
   second click on it. `_finalizeShape` now enters edit mode on the shape

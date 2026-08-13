@@ -11541,6 +11541,12 @@
         this._commitErase();
         return;
       }
+      // Callout drafts live in `draftCallout`, not `draftState`, so they
+      // need their own gate ahead of the guard below.
+      if (this.activeTool === "callout" && this.draftCallout) {
+        this._commitCallout(this._toImage(e));
+        return;
+      }
       if (!this.draftState) return;
       var pt = this._toImage(e);
       switch (this.draftState.kind) {
@@ -14122,9 +14128,9 @@
         this._applyShapeColor(g, this.activeColor);
         this.svg.appendChild(g);
 
-        // Default-sized text bbox a short hop from the anchor — the
-        // user will refine size + position via the second click and
-        // post-commit handle drags.
+        // Default-sized text bbox a short hop from the anchor — exactly
+        // what a bare click commits; a drag moves it before release, and
+        // post-commit handle drags refine it after.
         var basePx = this._textDefaultBoxImagePx();
         var defaultBox = {
           x: pt.x + basePx * 2,
@@ -14144,23 +14150,40 @@
         return;
       }
 
-      // Second click — commit at the new text-bbox top-left. The title
-      // is collected by the host's annotation composer (opened in
-      // response to the `annotations-changed` event) and arrives back
-      // here via `patchShape` once posted. No inline-edit auto-open —
-      // the composer is the single edit surface for callouts; opening
-      // both stacks UI on top of each other and confuses the user
-      // about where to type.
-      var anchor = this.draftCallout.geometry.anchor;
-      var box = this.draftCallout.geometry.text_box;
-      var geom = {
-        anchor: anchor,
-        text_box: { x: pt.x, y: pt.y - box.h / 2, w: box.w, h: box.h }
-      };
-      var el = this.draftCallout.el;
+      // A draft already exists — the pointerup commit in `_commitCallout`
+      // owns completion now, so a second pointerdown reaching here means
+      // that commit somehow didn't happen. Do nothing rather than stack a
+      // second draft on the first.
+    },
+
+    // Pointerup ends the callout gesture, like every other tool. A bare
+    // click commits the placeholder as previewed — anchor under the
+    // cursor, default-sized text box a short hop away — and a
+    // press-drag-release commits with the box centered on the release
+    // point (the live preview `_calloutHover` was already showing).
+    // Either way it drops straight into label editing: a callout IS a
+    // label, so placing one and not asking for its text is a shape the
+    // user still has to come back for. This replaced the two-click flow
+    // (anchor click, rubber-band, placement click), which testers read as
+    // the first click having done nothing.
+    _commitCallout: function(pt) {
+      var draft = this.draftCallout;
+      if (!draft) return;
+      var anchor = draft.geometry.anchor;
+      var box = draft.geometry.text_box;
+      var geom;
+      if (this._isClickGesture({ x: anchor[0], y: anchor[1] }, pt)) {
+        geom = draft.geometry;
+      } else {
+        geom = {
+          anchor: anchor,
+          text_box: { x: pt.x, y: pt.y - box.h / 2, w: box.w, h: box.h }
+        };
+      }
+      var el = draft.el;
       el.classList.remove("is-draft");
       this.draftCallout = null;
-      this._finalizeShape("callout", geom, el);
+      this._finalizeLabeled("callout", geom, el);
     },
 
     _calloutHover: function(pt) {
@@ -14187,16 +14210,6 @@
     // -------------------------------------------------------------------------
 
     _startDimension: function(pt, e) {
-      // Click-rubberband mode: a previous pointerdown released without
-      // a drag, so the draft is sitting in two-click mode waiting for
-      // the second click. This pointerdown IS that second click —
-      // commit with the current point and clear the draft.
-      if (this.draftState && this.draftState.kind === "dimension" &&
-          this.draftState.pendingClickEnd) {
-        this._commitDimensionAt(pt);
-        return;
-      }
-
       var g = svgEl("g");
       g.classList.add("etcher-shape", "etcher-dimension", "is-draft");
 
@@ -14236,9 +14249,7 @@
         kind: "dimension",
         anchor: pt,
         geometry: { a: [pt.x, pt.y], b: [pt.x, pt.y] },
-        el: g,
-        dragged: false,
-        pendingClickEnd: false
+        el: g
       };
       this._renderShape(this.draftState);
       this._syncDraftHandles();
@@ -14251,56 +14262,61 @@
         a: [a.x, a.y],
         b: [pt.x, pt.y]
       };
-      // Track drag for the click-vs-drag mode-switch on pointerup.
-      // Once dragged is set, the next pointerup commits; otherwise
-      // pointerup transitions to two-click rubberband mode and waits
-      // for the next pointerdown to commit. 3-px screen-space dead
-      // zone matches the body-drag and title-drag detectors.
-      if (!this.draftState.dragged && !this.draftState.pendingClickEnd) {
-        var aC = this._imageToContainer({ x: a.x, y: a.y });
-        var bC = this._imageToContainer({ x: pt.x, y: pt.y });
-        var sdx = bC.x - aC.x, sdy = bC.y - aC.y;
-        if (sdx * sdx + sdy * sdy >= 9) {
-          this.draftState.dragged = true;
-        }
-      }
+      // No drag bookkeeping — click vs drag is decided once, on
+      // pointerup, by `_isClickGesture` in `_commitDimension`.
       this._renderShape(this.draftState);
       this._positionAllHandles(this.draftState);
     },
 
     _commitDimension: function(pt) {
-      if (this.draftState.dragged) {
-        // Drag mode — pointerup commits at the release point.
-        this._commitDimensionAt(pt);
+      // Click → a default-length horizontal placeholder centered on the
+      // point; drag → exactly the span that was dragged. This replaced the
+      // two-click rubberband (release armed the draft, the next click
+      // placed the far end): a mode with no visible affordance that
+      // testers read as the first click having done nothing. Judged by
+      // `_isClickGesture`, not the 3px `dragged` flag, so a hand-jitter
+      // "drag" still counts as a click, and no degenerate-length guard is
+      // needed — anything past the click threshold is a real span.
+      var a = this.draftState.anchor;
+      if (this._isClickGesture(a, pt)) {
+        var half = this._clickPlaceSizeImagePx() / 2;
+        this._commitShaftDraft({ a: [a.x - half, a.y], b: [a.x + half, a.y] });
       } else {
-        // Click mode — first pointerup with no drag arms two-click
-        // rubberband. The next pointermove keeps updating endpoint B
-        // (preview), and the next pointerdown commits via the gate
-        // at the top of _startDimension.
-        this.draftState.pendingClickEnd = true;
+        this._commitShaftDraft({ a: [a.x, a.y], b: [pt.x, pt.y] });
       }
     },
 
-    _commitDimensionAt: function(pt) {
-      var a = this.draftState.anchor;
-      var dx = pt.x - a.x;
-      var dy = pt.y - a.y;
-      // Minimum 4-image-px length so a stationary click doesn't commit
-      // a degenerate zero-length shape.
-      if (dx * dx + dy * dy < 16) {
-        this._cancelDraft();
-        return;
-      }
-      var geom = { a: [a.x, a.y], b: [pt.x, pt.y] };
+    // Finalize the dimension / line draft with the given endpoints.
+    //
+    // A dimension exists to carry a label, so it drops straight into label
+    // editing — placed, selected, input open, waiting for text. A line
+    // does not: consumers that open their own composer popup on
+    // `etcher:shape-drawn` (taking the title via a composer field and
+    // creating a linked comment in one flow) need the clean slate here,
+    // and a line without a label is a complete shape in a way an
+    // unlabeled dimension is not.
+    _commitShaftDraft: function(geom) {
       var el = this.draftState.el;
       var kind = this.draftState.kind;
       el.classList.remove("is-draft");
-      // No afterCreate — consumers that open their own composer popup
-      // on `etcher:shape-drawn` (taking the title via a composer field
-      // and creating a linked comment in one flow) need a clean slate
-      // here. Re-editing the title later still works via double-click
-      // (dimension) or composer reopen (line) per shape kind.
-      this._finalizeShape(kind, geom, el);
+      if (kind === "dimension") this._finalizeLabeled(kind, geom, el);
+      else this._finalizeShape(kind, geom, el);
+    },
+
+    // Finalize + drop straight into label editing: selected with handles,
+    // inline input open on the label position. The afterCreate hook is how
+    // `_finalizeShape` hands the shape back, and passing one suppresses
+    // its own enter-edit-mode — deliberately, since the order here matters
+    // (edit mode first, then the text editor on top, same as the tap
+    // path). The dismiss guard swallows the click the browser synthesizes
+    // from the gesture, exactly as in `_finalizeShape`.
+    _finalizeLabeled: function(kind, geom, el) {
+      var made = null;
+      this._finalizeShape(kind, geom, el, function(shape) { made = shape; });
+      if (!made) return;
+      this._suppressEditDismissUntil = Date.now() + 400;
+      this._enterEditMode(made);
+      this._startTextEdit(made);
     },
 
     // -------------------------------------------------------------------------
@@ -14313,13 +14329,6 @@
     // -------------------------------------------------------------------------
 
     _startLine: function(pt, e) {
-      // Two-click rubberband re-entry (mirrors _startDimension).
-      if (this.draftState && this.draftState.kind === "line" &&
-          this.draftState.pendingClickEnd) {
-        this._commitDimensionAt(pt);
-        return;
-      }
-
       var g = svgEl("g");
       g.classList.add("etcher-shape", "etcher-line", "is-draft");
 
@@ -14339,9 +14348,7 @@
         kind: "line",
         anchor: pt,
         geometry: { a: [pt.x, pt.y], b: [pt.x, pt.y] },
-        el: g,
-        dragged: false,
-        pendingClickEnd: false
+        el: g
       };
       this._renderShape(this.draftState);
       this._syncDraftHandles();

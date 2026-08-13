@@ -108,6 +108,14 @@ comparable canvas tool has trained people to expect.
   shipped every clicked callout with its box sitting exactly on the
   anchor.
 
+- **The label editor opens where the label will land.** Double-clicking
+  a shape to name it popped the input ABOVE the shape while the typed
+  label then landed centered inside it. For a shape with no label yet,
+  the editor now opens centered in the shape — the same alignment the
+  commit stamps — so what you see while typing is where the text stays.
+  Existing labels keep their editor wherever the label actually is, and
+  host-supplied labels keep their float-above default.
+
 - **Dragging a callout label moves the label, not the whole callout.**
   A grab that lands on the text box slides only the box — the anchor
   stays pinned to what it points at and the leader stretches. Grabbing

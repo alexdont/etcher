@@ -15559,6 +15559,23 @@
         g = { x: lblX - dlw / 2, y: lblY - dlh / 2, w: dlw, h: dlh };
       } else {
         g = this._shapeTitleBoxImage(shape, this._lastBboxTopImageFor(shape));
+        // A shape with no label yet gets its label CENTERED on creation
+        // (`_commitTextEdit` stamps center/middle), so the editor opens
+        // where the label will land — double-clicking a rectangle used to
+        // pop the input ABOVE it and the typed text then jumped into the
+        // middle on commit. Only for label-less shapes: an existing label
+        // keeps its editor wherever the label actually is (the aligned /
+        // stored box `_shapeTitleBoxImage` already resolves), and
+        // host-supplied labels keep their float-above default.
+        var hasTitle =
+          shape.metadata && String(shape.metadata.title || "").trim() !== "";
+        if (!hasTitle && g) {
+          var editBBox = this._shapeBBoxImagePx(shape);
+          if (editBBox) {
+            g = alignedBox(editBBox, { w: g.w, h: g.h },
+              { h: "center", v: "middle" });
+          }
+        }
       }
       if (!g) return;
       var tl = this._imageToContainer({ x: g.x, y: g.y });

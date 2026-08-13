@@ -1628,6 +1628,17 @@
   // Shared by shapes and markers so the two read as the same dot pattern.
   var DOT_GAP_RATIO = 2.4;
 
+  // A bare click with a shape tool places a default-sized shape centered on
+  // the point, the way every comparable canvas tool does — the alternatives
+  // were placing a degenerate shape whose corners all sat within a few
+  // pixels (unusable: nothing to grab, nothing to see) or silently placing
+  // nothing, which reads as the tool being broken. The threshold is SCREEN
+  // px so a click means the same gesture at every zoom; the size is screen
+  // px too, converted to image px at placement, so a click-placed square
+  // looks the same on screen wherever the canvas happens to be.
+  var CLICK_PLACE_THRESHOLD_PX = 5;
+  var CLICK_PLACE_SIZE_PX = 120;
+
   // Stroke and fill styles, in the order they appear in the panel. Kept as
   // lists so the buttons, the persisted-value validation and the emitted
   // payload can't drift apart.
@@ -13786,9 +13797,28 @@
         w: Math.abs(pt.x - a.x),
         h: Math.abs(pt.y - a.y)
       };
-      if (geom.w < 2 || geom.h < 2) {
-        this._cancelDraft();
-        return;
+      if (this._isClickGesture(a, pt)) {
+        // A bare click places a default-sized square centered on the point
+        // (and `_finalizeShape` selects it), so click-drop-adjust works the
+        // way every comparable tool has trained people to expect. This used
+        // to cancel outright — a tool that does nothing on click reads as
+        // broken — and a click with a few px of jitter produced a shape
+        // whose corners all sat within those px: visible as a speck,
+        // grabbable by nothing.
+        var side = this._clickPlaceSizeImagePx();
+        geom = { x: a.x - side / 2, y: a.y - side / 2, w: side, h: side };
+      } else {
+        // A real drag that still spans nothing on one axis (a fast
+        // horizontal swipe has width but no height) can't make a usable
+        // shape — drop it. Judged in screen px like the click check: the
+        // old image-px compare canceled deliberate small drags at high
+        // zoom, where 20 screen px of intent is under 2 image px.
+        var rScale = 1;
+        try { rScale = this._markerScale() || 1; } catch (_) {}
+        if (geom.w * rScale < 2 || geom.h * rScale < 2) {
+          this._cancelDraft();
+          return;
+        }
       }
       var el = this.draftState.el;
       el.classList.remove("is-draft");
@@ -13823,10 +13853,16 @@
       var c = this.draftState.center;
       var dx = pt.x - c.x, dy = pt.y - c.y;
       var r = Math.sqrt(dx * dx + dy * dy);
-      if (r < 2) {
-        this._cancelDraft();
-        return;
+      if (this._isClickGesture(c, pt)) {
+        // A bare click places a default-sized circle centered on the point —
+        // same reasoning as `_commitRectangle`, and the circle is centered
+        // by construction since the draft anchors at the pointerdown.
+        r = this._clickPlaceSizeImagePx() / 2;
       }
+      // No sliver guard here: the radius IS the gesture distance, so
+      // anything past the click threshold is already ≥ 5 screen px of
+      // visible circle. (The old `r < 2` image-px cancel was dead weight at
+      // low zoom and canceled deliberate small circles at high zoom.)
       var geom = { cx: c.x, cy: c.y, r: r };
       var el = this.draftState.el;
       el.classList.remove("is-draft");
@@ -14852,7 +14888,7 @@
 
     _commitFreehand: function(_pt) {
       var pts = this.draftState.geometry.points;
-      if (pts.length < 2) {
+      if (pts.length < 2 || this._strokeIsClick(pts)) {
         this._cancelDraft();
         return;
       }
@@ -15230,6 +15266,46 @@
       } catch (e) {
         return 16;
       }
+    },
+
+    // Whether the draw gesture from `a` to `b` (image px) was a bare click.
+    // Judged in SCREEN px so the answer doesn't change with zoom — the old
+    // check compared image px, which at high zoom canceled deliberate small
+    // drags and at low zoom accepted accidental jitter as a shape.
+    _isClickGesture: function(a, b) {
+      var scale = 1;
+      try { scale = this._markerScale() || 1; } catch (_) {}
+      var dx = (b.x - a.x) * scale;
+      var dy = (b.y - a.y) * scale;
+      return dx * dx + dy * dy <
+        CLICK_PLACE_THRESHOLD_PX * CLICK_PLACE_THRESHOLD_PX;
+    },
+
+    // The side of a click-placed shape in image px — `CLICK_PLACE_SIZE_PX`
+    // on screen at the current zoom, same conversion the text default uses.
+    _clickPlaceSizeImagePx: function() {
+      try {
+        var per = this._markerScale();
+        if (per > 0) return CLICK_PLACE_SIZE_PX / per;
+      } catch (_) {}
+      return CLICK_PLACE_SIZE_PX;
+    },
+
+    // A stroke whose every sample fits inside the click threshold is a tap,
+    // not a drawing. The point count can't tell (a click with a pixel of
+    // jitter yields several samples), and committing it placed a speck that
+    // is nearly impossible to see, select or erase. The closed shapes turn
+    // a tap into a default-sized shape instead; a pen stroke has no default
+    // worth inventing, so it just doesn't happen.
+    _strokeIsClick: function(pts) {
+      var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (var i = 0; i < pts.length; i++) {
+        if (pts[i][0] < minX) minX = pts[i][0];
+        if (pts[i][0] > maxX) maxX = pts[i][0];
+        if (pts[i][1] < minY) minY = pts[i][1];
+        if (pts[i][1] > maxY) maxY = pts[i][1];
+      }
+      return this._isClickGesture({ x: minX, y: minY }, { x: maxX, y: maxY });
     },
 
     // Resolve a callout's text bbox in IMAGE coords. New callouts ship

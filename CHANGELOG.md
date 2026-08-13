@@ -51,6 +51,22 @@ comparable canvas tool has trained people to expect.
   to on-screen px for display — previously a stroke drawn zoomed-in
   reported a width severalfold off.
 
+- **A bare click places a usable shape, never a speck.** Clicking with the
+  rectangle or circle tool used to either place nothing — which reads as
+  the tool being broken — or, with a pixel or two of hand jitter, place a
+  shape whose corners all sat within those pixels: visible as a speck,
+  grabbable by nothing. A click now drops a default-sized shape centered
+  on the cursor (and selected, per the item below), so click-drop-adjust
+  works the way every comparable tool has trained people to expect.
+  Freehand and marker taps cancel cleanly instead of committing a speck —
+  a pen stroke has no default worth inventing. Both judgments happen in
+  screen px, so a click is the same gesture at every zoom; the old
+  image-px minimums also canceled deliberate small drags at high zoom
+  (20 screen px of intent was "under 2 image px") — those create real
+  shapes now. Line, dimension and callout already had their two-click
+  flow; polygon stays click-per-vertex, and closing one degenerate
+  (a double-click in place) still cancels cleanly.
+
 - **A fresh shape is born selected.** Finishing a stroke used to drop
   back to the cursor and stop, so restyling what you just drew took a
   second click on it. `_finalizeShape` now enters edit mode on the shape

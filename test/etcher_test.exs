@@ -20,6 +20,26 @@ defmodule EtcherTest do
       assert html =~ ~s(aria-hidden="true")
     end
 
+    test "connector anchors are off unless the host opts in" do
+      assigns = %{}
+
+      # No attr → no data-connectors: the JS resolves absent as OFF, and a
+      # user's own saved toggle wins over either host answer.
+      html =
+        rendered_to_string(~H"""
+        <Etcher.Layer.layer fresco_id="board" />
+        """)
+
+      refute html =~ "data-connectors"
+
+      html =
+        rendered_to_string(~H"""
+        <Etcher.Layer.layer fresco_id="board" connectors={true} />
+        """)
+
+      assert html =~ ~s(data-connectors="true")
+    end
+
     test "default :tools list renders all seven shapes plus the eraser" do
       assigns = %{}
 

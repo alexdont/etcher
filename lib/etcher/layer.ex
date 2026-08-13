@@ -407,6 +407,19 @@ defmodule Etcher.Layer do
     """
   )
 
+  attr(:connectors, :boolean,
+    default: false,
+    doc: """
+    Host default for the connector anchors — the eight bindable dots
+    that appear on shape hover for drawing arrows between shapes.
+    Off by default: they are an affordance for boards where people
+    draw connectors, and everywhere else they are eight dots that
+    appear under the cursor on every shape passed over. The user's
+    own toggle (persisted through the prefs mechanism) always wins
+    over this default, in either direction.
+    """
+  )
+
   attr(:rest, :global)
 
   @doc """
@@ -446,6 +459,7 @@ defmodule Etcher.Layer do
       data-tools={@tools_json}
       data-nav-buttons={@nav_buttons_csv}
       data-toolbar={@toolbar == false && "false"}
+      data-connectors={@connectors == true && "true"}
       data-image-source={@image_source == :custom && "custom"}
       data-paste-images={@paste_images == false && "false"}
       data-colors={@colors_json}

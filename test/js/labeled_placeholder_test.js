@@ -163,6 +163,24 @@ function ctx(draft) {
     "_onPointerUp never routed the callout draft to _commitCallout");
 }
 
+// ── the callout placeholder's leader is a real diagonal ─────────────────────
+
+// A callout IS "a line pointing at something". The default box used to sit
+// a two-basePx hop from the anchor, drawing a leader too short to read as
+// one. Parsed from the draft construction: the box's left edge and bottom
+// edge must both clear the anchor by enough basePx that the leader rises
+// at a visible angle.
+{
+  const m = src.match(
+    /x: pt\.x \+ basePx \* ([\d.]+),\n\s*y: pt\.y - basePx \* ([\d.]+) - calloutBoxH,/
+  );
+  assert.ok(m, "could not parse the callout default box offsets");
+  const dx = Number(m[1]);
+  const bottomRise = Number(m[2]);
+  assert.ok(dx >= 3, `the box starts only ${dx} basePx right of the anchor — the leader reads as a nudge, not a diagonal`);
+  assert.ok(bottomRise >= 2.5, `the box bottom sits only ${bottomRise} basePx above the anchor — the leader is nearly horizontal`);
+}
+
 // ── the two-click mode is gone, entirely ────────────────────────────────────
 
 // Half-removed would be worse than either state: a pointerdown gate still

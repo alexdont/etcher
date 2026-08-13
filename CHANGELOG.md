@@ -86,6 +86,22 @@ comparable canvas tool has trained people to expect.
   deliberately stay label-silent: hosts that collect line titles through
   their own composer on `etcher:shape-drawn` keep their clean slate.
 
+- **Connector anchors are off by default.** The eight bindable dots that
+  appear on shape hover are an affordance for boards where people draw
+  connectors — everywhere else they were eight dots appearing under the
+  cursor on every shape passed over. Resolution is three layers, most
+  specific wins: the user's own saved toggle (either direction, persisted
+  through the prefs mechanism / usermeta), else the host's new
+  `connectors={true}` attr on `<Etcher.Layer.layer>`, else off. Existing
+  users who had already hidden them keep that answer; users who never
+  touched the toggle get the new quiet default and can turn them on from
+  the same button as before.
+
+- **The callout placeholder's leader is a real diagonal.** A bare click
+  used to park the text box a two-basePx hop from the anchor, drawing a
+  leader too short to read as "a line pointing at something". The default
+  box now sits up-and-right far enough that the leader rises at ≈40°.
+
 - **A fresh shape is born selected.** Finishing a stroke used to drop
   back to the cursor and stop, so restyling what you just drew took a
   second click on it. `_finalizeShape` now enters edit mode on the shape

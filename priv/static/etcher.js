@@ -5037,7 +5037,7 @@
 
       self.connectorsBtn = self._makePopupAction(
         ICONS.connectors, self._connectorsTitle(),
-        function() { self._setPref("connectors", self._getPref("connectors") === false); }
+        function() { self._setPref("connectors", !self._connectorsOn()); }
       );
       popup.appendChild(self.connectorsBtn);
 
@@ -6622,7 +6622,7 @@
         this.gridBtn.setAttribute("aria-pressed", gridOn ? "true" : "false");
       }
       if (this.connectorsBtn) {
-        var conOn = this._getPref("connectors") !== false;
+        var conOn = this._connectorsOn();
         this.connectorsBtn.title = this._connectorsTitle();
         this.connectorsBtn.setAttribute("aria-label", this.connectorsBtn.title);
         this.connectorsBtn.setAttribute("aria-pressed", conOn ? "true" : "false");
@@ -6634,9 +6634,9 @@
     },
 
     _connectorsTitle: function() {
-      return this._getPref("connectors") === false
-        ? "Show connector anchors"
-        : "Hide connector anchors";
+      return this._connectorsOn()
+        ? "Hide connector anchors"
+        : "Show connector anchors";
     },
 
     _toggleAnnotationsVisible: function() {
@@ -11198,6 +11198,20 @@
       this._applyPrefs();
     },
 
+    // Whether connector anchors are on. Three layers, most specific wins:
+    // the user's saved preference (either value — a toggle they touched is
+    // their answer), else the host's declared default
+    // (`connectors={true}` → `data-connectors="true"`), else OFF. Off
+    // because the anchors are an affordance for boards where people draw
+    // connectors — everywhere else they are eight dots that appear under
+    // the cursor on every shape you pass over. (They previously defaulted
+    // on, which is exactly how that felt.)
+    _connectorsOn: function() {
+      var pref = this._getPref("connectors");
+      if (pref === true || pref === false) return pref;
+      return !!(this.el && this.el.dataset && this.el.dataset.connectors === "true");
+    },
+
     // Push every preference at whatever it controls. Called on load and after
     // any change, so there is one path from "what is preferred" to "what is
     // on screen" rather than each toggle remembering to do its own work.
@@ -11207,10 +11221,10 @@
       this._applyPanelPref(prefs.panel);
       this._applyColorsPref(prefs.colors);
       this._applyCompactParts(prefs.compact);
-      // Connector anchors are read from the pref at the moment they would be
-      // shown (`_connectorsAvailableFor`), so there is nothing to push here.
-      // The dots currently on screen do have to go, though.
-      if (prefs.connectors === false) this._removeConnectorDots();
+      // Connector anchors are resolved at the moment they would be shown
+      // (`_connectorsAvailableFor` → `_connectorsOn`), so there is nothing
+      // to push here. The dots currently on screen do have to go, though.
+      if (!this._connectorsOn()) this._removeConnectorDots();
       this._refreshToolbarTools();
     },
 
@@ -12718,10 +12732,9 @@
     // hover affordance, handles are the selected one.
     _connectorsAvailableFor: function(shape) {
       return !!shape &&
-        // Turned off by preference: the anchors are an affordance, and on a
-        // board nobody is drawing connectors on they are eight dots that
-        // appear under the cursor on every shape you pass over.
-        this._getPref("connectors") !== false &&
+        // Resolved through `_connectorsOn` — user pref, else host default,
+        // else off.
+        this._connectorsOn() &&
         this.annotationMode === true &&
         this.activeTool == null &&
         shape.kind !== "arrow" &&
@@ -14128,15 +14141,19 @@
         this._applyShapeColor(g, this.activeColor);
         this.svg.appendChild(g);
 
-        // Default-sized text bbox a short hop from the anchor — exactly
-        // what a bare click commits; a drag moves it before release, and
-        // post-commit handle drags refine it after.
+        // Default-sized text bbox up-and-right of the anchor, far enough
+        // that the leader reads as a real diagonal (≈40°) rather than a
+        // nudge — a callout IS "a line pointing at something", and the old
+        // two-basePx hop drew a leader too short to read as one. This is
+        // exactly what a bare click commits; a drag moves the box before
+        // release, and post-commit handle drags refine it after.
         var basePx = this._textDefaultBoxImagePx();
+        var calloutBoxH = basePx * 1.4;
         var defaultBox = {
-          x: pt.x + basePx * 2,
-          y: pt.y - basePx * 1.5,
+          x: pt.x + basePx * 4,
+          y: pt.y - basePx * 3.5 - calloutBoxH,
           w: basePx * 6,
-          h: basePx * 1.4
+          h: calloutBoxH
         };
 
         this.draftCallout = {

@@ -8967,6 +8967,12 @@
         titleTarget.metadata = Object.assign({}, titleTarget.metadata || {}, {
           title_color: color
         });
+        // Remember it: colouring a label is a statement about how this
+        // user's labels should look, and the next label they create starts
+        // in this colour (`_commitTextEdit` stamps it at creation).
+        // Persisted through the prefs mechanism, so it survives reloads
+        // wherever the host stores prefs.
+        self._setPref("label_color", color);
         self._renderShape(titleTarget);
         self._pushUndo(titleTarget.uuid, tBefore, self._snapshotShape(titleTarget));
         self._emitChanged();
@@ -14141,20 +14147,10 @@
         this._applyShapeColor(g, this.activeColor);
         this.svg.appendChild(g);
 
-        // Default-sized text bbox up-and-right of the anchor, far enough
-        // that the leader reads as a real diagonal (≈40°) rather than a
-        // nudge — a callout IS "a line pointing at something", and the old
-        // two-basePx hop drew a leader too short to read as one. This is
-        // exactly what a bare click commits; a drag moves the box before
-        // release, and post-commit handle drags refine it after.
-        var basePx = this._textDefaultBoxImagePx();
-        var calloutBoxH = basePx * 1.4;
-        var defaultBox = {
-          x: pt.x + basePx * 4,
-          y: pt.y - basePx * 3.5 - calloutBoxH,
-          w: basePx * 6,
-          h: calloutBoxH
-        };
+        // Default-sized text bbox up-and-right of the anchor (see
+        // `_calloutDefaultBox`) — what a bare click commits; a drag moves
+        // the box before release, and post-commit handle drags refine it.
+        var defaultBox = this._calloutDefaultBox(pt);
 
         this.draftCallout = {
           kind: "callout",
@@ -14190,7 +14186,18 @@
       var box = draft.geometry.text_box;
       var geom;
       if (this._isClickGesture({ x: anchor[0], y: anchor[1] }, pt)) {
-        geom = draft.geometry;
+        // Rebuilt from the anchor rather than read off the draft: ANY
+        // pointermove between press and release — including the move
+        // browsers synthesize at the click point itself — runs
+        // `_calloutHover`, which re-centers the draft box on the cursor.
+        // Trusting the draft here committed every clicked callout with
+        // its box sitting exactly on the anchor, leader collapsed to
+        // nothing. (Found live: the persisted text_box.x equaled
+        // anchor[0] to the last float digit.)
+        geom = {
+          anchor: anchor,
+          text_box: this._calloutDefaultBox({ x: anchor[0], y: anchor[1] })
+        };
       } else {
         geom = {
           anchor: anchor,
@@ -14201,6 +14208,21 @@
       el.classList.remove("is-draft");
       this.draftCallout = null;
       this._finalizeLabeled("callout", geom, el);
+    },
+
+    // The text box a bare-click callout gets: up-and-right of the anchor,
+    // far enough that the leader reads as a real diagonal (≈40°) rather
+    // than a nudge — a callout IS "a line pointing at something", and a
+    // short hop draws a leader too short to read as one.
+    _calloutDefaultBox: function(pt) {
+      var basePx = this._textDefaultBoxImagePx();
+      var h = basePx * 1.4;
+      return {
+        x: pt.x + basePx * 4,
+        y: pt.y - basePx * 3.5 - h,
+        w: basePx * 6,
+        h: h
+      };
     },
 
     _calloutHover: function(pt) {
@@ -15607,6 +15629,22 @@
       if (newTitle && !prevTitle && !this._isTextKind(shape.kind) &&
           !normalizeTitleAlign(shape.metadata && shape.metadata.title_align)) {
         patch.title_align = { h: "center", v: "middle" };
+      }
+      // A brand-new label starts in the colour the user last gave a label
+      // (saved by the swatch path when a focused label is recoloured) —
+      // labelling three parts of a drawing in blue shouldn't mean
+      // recolouring each one by hand. Creation only, and only where no
+      // explicit colour exists, so re-editing text never repaints a label.
+      // Text and callout are excluded — their text IS the shape and takes
+      // the shape's colour; dimension is in, its label honours
+      // `title_color` ahead of its black default.
+      if (newTitle && !prevTitle &&
+          shape.kind !== "text" && shape.kind !== "callout" &&
+          !(shape.metadata && shape.metadata.title_color)) {
+        var rememberedLabelColor = this._getPref("label_color");
+        if (typeof rememberedLabelColor === "string" && rememberedLabelColor) {
+          patch.title_color = rememberedLabelColor;
+        }
       }
       shape.metadata = Object.assign({}, shape.metadata || {}, patch);
       this._endTextEdit();

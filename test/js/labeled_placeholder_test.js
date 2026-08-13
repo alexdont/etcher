@@ -43,6 +43,7 @@ const commitDimension = extract("_commitDimension");
 const commitShaftDraft = extract("_commitShaftDraft");
 const finalizeLabeled = extract("_finalizeLabeled");
 const commitCallout = extract("_commitCallout");
+const calloutDefaultBox = extract("_calloutDefaultBox");
 
 // A context that behaves like the hook for exactly these paths: real
 // gesture judgment, recorded finalize/edit calls, and a `_finalizeShape`
@@ -57,8 +58,10 @@ function ctx(draft) {
       ? Object.assign({ el: { classList: { remove: () => {} } } }, draft.callout)
       : null,
     _markerScale: () => 1,
+    _textDefaultBoxImagePx: () => 16,
     _isClickGesture: isClickGesture,
     _clickPlaceSizeImagePx: clickPlaceSize,
+    _calloutDefaultBox: calloutDefaultBox,
     _commitShaftDraft: commitShaftDraft,
     _finalizeLabeled: finalizeLabeled,
     _finalizeShape(kind, geom, el, afterCreate) {
@@ -114,16 +117,28 @@ function ctx(draft) {
   assert.deepStrictEqual(c.out.edit, [], "a dragged line stays label-silent too");
 }
 
-// ── callout: click → placeholder as previewed, label editor open ────────────
+// ── callout: click → diagonal placeholder REBUILT from the anchor ───────────
 
+// The draft's box cannot be trusted at commit: any pointermove between
+// press and release — including the move browsers synthesize at the click
+// point itself — runs `_calloutHover`, which re-centers the draft box on
+// the cursor. Committing the draft as-is shipped every clicked callout
+// with its box sitting exactly on the anchor, leader collapsed to nothing
+// (caught live: the persisted text_box.x equaled anchor[0] to the last
+// float digit). So the click branch must rebuild from the anchor.
 {
-  const box = { x: 210, y: 90, w: 96, h: 22 };
-  const c = ctx({ callout: { kind: "callout", geometry: { anchor: [200, 100], text_box: box } } });
+  // The clobbered state hover leaves behind: box centered on the cursor.
+  const clobbered = { x: 200, y: 89, w: 96, h: 22.4 };
+  const c = ctx({ callout: { kind: "callout", geometry: { anchor: [200, 100], text_box: clobbered } } });
   commitCallout.call(c, { x: 200, y: 101 });
   const f = c.out.finalized;
   assert.ok(f, "a click should commit the callout placeholder");
-  assert.deepStrictEqual(f.geom.text_box, box,
-    "a bare click keeps the default-offset box the draft was previewing");
+  assert.deepStrictEqual(f.geom.text_box, calloutDefaultBox.call(c, { x: 200, y: 100 }),
+    "a bare click must rebuild the default-offset box from the anchor — the draft's box was re-centered onto the cursor by hover");
+  assert.ok(f.geom.text_box.x > 200 + 16 * 2,
+    "the rebuilt box does not clear the anchor to the right — the leader reads as a nudge");
+  assert.ok(f.geom.text_box.y + f.geom.text_box.h < 100 - 16 * 2,
+    "the rebuilt box's bottom does not clear the anchor upward — the leader is nearly horizontal");
   assert.deepStrictEqual(c.out.edit, [["edit", "u1"], ["label", "u1"]],
     "a placed callout must drop into label editing — a callout IS a label");
   assert.strictEqual(c.draftCallout, null, "the draft must be cleared on commit");
@@ -167,18 +182,14 @@ function ctx(draft) {
 
 // A callout IS "a line pointing at something". The default box used to sit
 // a two-basePx hop from the anchor, drawing a leader too short to read as
-// one. Parsed from the draft construction: the box's left edge and bottom
-// edge must both clear the anchor by enough basePx that the leader rises
-// at a visible angle.
+// one. Driven through the real helper: with basePx = 16, the box must
+// clear the anchor by a visible margin on both axes.
 {
-  const m = src.match(
-    /x: pt\.x \+ basePx \* ([\d.]+),\n\s*y: pt\.y - basePx \* ([\d.]+) - calloutBoxH,/
-  );
-  assert.ok(m, "could not parse the callout default box offsets");
-  const dx = Number(m[1]);
-  const bottomRise = Number(m[2]);
-  assert.ok(dx >= 3, `the box starts only ${dx} basePx right of the anchor — the leader reads as a nudge, not a diagonal`);
-  assert.ok(bottomRise >= 2.5, `the box bottom sits only ${bottomRise} basePx above the anchor — the leader is nearly horizontal`);
+  const box = calloutDefaultBox.call({ _textDefaultBoxImagePx: () => 16 }, { x: 0, y: 0 });
+  assert.ok(box.x >= 16 * 3,
+    `the box starts only ${box.x / 16} basePx right of the anchor — the leader reads as a nudge, not a diagonal`);
+  assert.ok(box.y + box.h <= -(16 * 2.5),
+    `the box bottom sits only ${-(box.y + box.h) / 16} basePx above the anchor — the leader is nearly horizontal`);
 }
 
 // ── the two-click mode is gone, entirely ────────────────────────────────────

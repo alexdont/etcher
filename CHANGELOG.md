@@ -100,7 +100,23 @@ comparable canvas tool has trained people to expect.
 - **The callout placeholder's leader is a real diagonal.** A bare click
   used to park the text box a two-basePx hop from the anchor, drawing a
   leader too short to read as "a line pointing at something". The default
-  box now sits up-and-right far enough that the leader rises at ≈40°.
+  box now sits up-and-right far enough that the leader rises at ≈40° —
+  and it is rebuilt from the anchor at commit rather than read off the
+  draft, because any pointermove between press and release (browsers
+  synthesize one at the click point itself) runs the hover preview,
+  which re-centers the draft box onto the cursor. Trusting the draft
+  shipped every clicked callout with its box sitting exactly on the
+  anchor.
+
+- **The last label colour is remembered.** Recolouring a focused label
+  (click a label, pick a swatch) now also saves that colour, and the
+  next label created — on any shape, dimensions included — starts in
+  it: labelling three parts of a drawing in blue no longer means
+  recolouring each label by hand. Creation only, so re-editing text
+  never repaints a label and an explicit colour is never overwritten;
+  text and callout are untouched (their text is the shape). Persisted
+  through the prefs mechanism, so it survives reloads wherever the host
+  stores prefs.
 
 - **A fresh shape is born selected.** Finishing a stroke used to drop
   back to the cursor and stop, so restyling what you just drew took a

@@ -79,6 +79,111 @@ defmodule Etcher.RasterTest do
     end
   end
 
+  describe "labels — glyphs, not boxes" do
+    defp labeled(kind, geometry, title) do
+      %{"kind" => kind, "geometry" => geometry, "metadata" => %{"title" => title}}
+    end
+
+    test "a titled text shape bakes as drawn text, with no rectangle" do
+      args =
+        Raster.to_draw_args([
+          labeled("text", %{"x" => 100, "y" => 200, "w" => 300, "h" => 40}, "hello world")
+        ])
+
+      draws = for ["-draw", v] <- Enum.chunk_every(args, 2, 1), do: v
+      assert ["text " <> _] = draws
+      assert hd(draws) =~ "'hello world'"
+      refute Enum.any?(draws, &String.starts_with?(&1, "rectangle"))
+      # Font tracks the box height (65% of 40 = 26) and the draw origin sits
+      # inside the box, not on its corner.
+      assert ["-pointsize", "26"] in Enum.chunk_every(args, 2, 1)
+      assert hd(draws) =~ ~r/^text 105,230 /
+    end
+
+    test "text draws are filled with the shape colour and the fill is reset after" do
+      args =
+        Raster.to_draw_args([
+          labeled("text", %{"x" => 0, "y" => 0, "w" => 10, "h" => 10}, "a"),
+          shape("rectangle", %{"x" => 1, "y" => 1, "w" => 2, "h" => 2})
+        ])
+
+      pairs = Enum.chunk_every(args, 2, 1)
+      # The label sets a real fill…
+      assert ["-fill", "#ef4444"] in pairs
+      # …and hands `none` back before the rectangle outline draws, so the
+      # rectangle isn't silently filled with the label's colour.
+      fill_none_count = Enum.count(pairs, &(&1 == ["-fill", "none"]))
+      assert fill_none_count >= 2
+    end
+
+    test "quotes and backslashes cannot escape the IM draw string; whitespace collapses" do
+      # Title carries a quote, a real backslash, a newline and a tab:
+      #   it's a\two   +  "\nline"
+      title = "it's a" <> "\\" <> "two\nline"
+
+      args =
+        Raster.to_draw_args([
+          labeled("text", %{"x" => 0, "y" => 0, "w" => 10, "h" => 10}, title)
+        ])
+
+      [draw] = for ["-draw", v] <- Enum.chunk_every(args, 2, 1), do: v
+      # The quote and the backslash are escaped, the newline collapses to a
+      # space — one drawable line, still inside one quoted IM argument.
+      assert draw =~ "'it" <> "\\'" <> "s a" <> "\\\\" <> "two line'"
+    end
+
+    test "a titled callout bakes leader + underline + glyphs, and no box" do
+      args =
+        Raster.to_draw_args([
+          labeled(
+            "callout",
+            %{
+              "anchor" => [10, 100],
+              "text_box" => %{"x" => 50, "y" => 20, "w" => 80, "h" => 20}
+            },
+            "check this"
+          )
+        ])
+
+      draws = for ["-draw", v] <- Enum.chunk_every(args, 2, 1), do: v
+      refute Enum.any?(draws, &String.starts_with?(&1, "rectangle"))
+      # leader: anchor to the box's bottom-left corner
+      assert "line 10,100 50,40" in draws
+      # underline along the bottom edge
+      assert "line 50,40 130,40" in draws
+      assert Enum.any?(draws, &(&1 =~ "'check this'"))
+    end
+
+    test "an untitled label still falls back to its box" do
+      args = Raster.to_draw_args([shape("text", %{"x" => 1, "y" => 2, "w" => 3, "h" => 4})])
+      assert "rectangle 1,2 4,6" in for(["-draw", v] <- Enum.chunk_every(args, 2, 1), do: v)
+
+      blank = %{
+        "kind" => "text",
+        "geometry" => %{"x" => 1, "y" => 2, "w" => 3, "h" => 4},
+        "metadata" => %{"title" => "   "}
+      }
+
+      args2 = Raster.to_draw_args([blank])
+      assert "rectangle 1,2 4,6" in for(["-draw", v] <- Enum.chunk_every(args2, 2, 1), do: v)
+    end
+
+    test "to_svg renders a <text> element with markup escaped and a font floor" do
+      svg =
+        Raster.to_svg(
+          [labeled("text", %{"x" => 5, "y" => 5, "w" => 40, "h" => 4}, "<b>&yo</b>")],
+          width: 100,
+          height: 100
+        )
+
+      assert svg =~ "<text "
+      assert svg =~ "&lt;b&gt;&amp;yo&lt;/b&gt;"
+      refute svg =~ "<rect"
+      # h=4 would give a 2.6px font; the floor keeps it legible.
+      assert svg =~ ~s(font-size="8")
+    end
+  end
+
   describe "to_svg/2" do
     test "renders a sized viewBox with object-cover-matching slice" do
       svg =

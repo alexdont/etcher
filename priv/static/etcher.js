@@ -10395,7 +10395,7 @@
         tLine.classList.add("etcher-title-leader");
         var tRect = svgEl("rect", {
           fill: "transparent",
-          stroke: "currentColor",
+          stroke: "transparent",
           "stroke-width": "2"
         });
         tRect.classList.add("etcher-text-rect");
@@ -14575,7 +14575,7 @@
         underline.classList.add("etcher-callout-underline");
         var rect = svgEl("rect", {
           fill: "transparent",
-          stroke: "currentColor",
+          stroke: "transparent",
           "stroke-width": "2"
         });
         rect.classList.add("etcher-text-rect");
@@ -15552,7 +15552,7 @@
       // dragging the draft so the user can see what they're sizing.
       var rect = svgEl("rect", {
         fill: "transparent",
-        stroke: "currentColor",
+        stroke: "transparent",
         "stroke-width": "2"
       });
       rect.classList.add("etcher-text-rect");
@@ -16512,11 +16512,22 @@
           // <g> wrapping a hit-zone <rect> and a content <text>. The
           // group bind to `currentColor` so _applyShapeColor can recolor
           // the rect border and text fill in one stroke.
+          //
+          // The rect's stroke ATTRIBUTE is "transparent" (here and at every
+          // other .etcher-text-rect creation site): the attribute is only
+          // the fallback for a context where the injected stylesheet isn't
+          // in effect, and the correct fallback is the at-rest look —
+          // invisible. It used to be "currentColor", which cost nothing
+          // while the CSS ruled it out but painted a solid box around every
+          // label the moment anything rendered these shapes without the
+          // stylesheet. The hover/draft/selected borders all come from
+          // class rules, which override presentation attributes, so no
+          // interactive state changes.
           el = svgEl("g");
           el.classList.add("etcher-text");
           var trect = svgEl("rect", {
             fill: "transparent",
-            stroke: "currentColor",
+            stroke: "transparent",
             "stroke-width": "2"
           });
           trect.classList.add("etcher-text-rect");
@@ -16556,7 +16567,7 @@
           el.appendChild(coUnderline);
           var coRect = svgEl("rect", {
             fill: "transparent",
-            stroke: "currentColor",
+            stroke: "transparent",
             "stroke-width": "2"
           });
           coRect.classList.add("etcher-text-rect");

@@ -4,6 +4,34 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.12.1] — 2026-08-14
+
+Label rendering fixes, both halves of the same report ("why are there
+squares around the labels?").
+
+### Fixed
+
+- **Text-rect fallback no longer paints a box.** Every `.etcher-text-rect`
+  was created with a `stroke="currentColor"` presentation attribute. The
+  injected stylesheet overrides it everywhere it is in effect, but any
+  context that renders shapes without that stylesheet fell back to the
+  attribute — a solid shape-coloured rectangle around every label. The
+  attribute is now `"transparent"`, matching the at-rest look; the
+  hover/draft/selected borders are class rules and behave exactly as
+  before. Pinned by `test/text_rect_fallback_test.exs` across all five
+  creation sites.
+
+- **`Etcher.Raster` draws label text instead of an empty box.** A baked
+  or SVG-overlaid render turned every text shape into a mystery
+  rectangle (the bounding box, with the words missing) and every callout
+  into a box on a stick. When the annotation carries its text
+  (`metadata.title`, the same field the live canvas reads), Raster now
+  renders real glyphs — filled, sized from the box height with the live
+  canvas's ratios — for both backends, with quoting hardened so a title
+  cannot escape the ImageMagick draw argument or inject SVG markup.
+  Callouts keep their leader line and gain the live underline. Without a
+  title the old box remains as the fallback marker.
+
 ## [0.12.0] — 2026-08-13
 
 First round of user-testing feedback, aimed at the conventions every

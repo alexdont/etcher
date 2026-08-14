@@ -43,7 +43,8 @@ defmodule Etcher.Raster do
   @type opts :: keyword()
 
   @doc """
-  Builds ImageMagick `convert` arguments that draw the annotations' outlines.
+  Builds ImageMagick `convert` arguments that draw the annotations — shape
+  outlines, plus real glyphs for labels whose text is known (see `primitives/1`).
 
   Returns a flat arg list to splice into a `convert` invocation *before* any
   resize/crop, so shapes are drawn in the source image's pixel space (Etcher
@@ -64,15 +65,35 @@ defmodule Etcher.Raster do
     draws =
       annotations
       |> primitives()
-      |> Enum.flat_map(fn {prim, color} ->
-        ["-stroke", color || default, "-strokewidth", sw, "-draw", im_draw(prim)]
+      |> Enum.flat_map(fn
+        {{:label, x, y, _w, h, text}, color} ->
+          # Glyphs, not an outline: filled text, stroke off, then fill reset
+          # to `none` so the next outline primitive doesn't inherit it.
+          # Sizing mirrors the live canvas (font ≈ 65% of the box height,
+          # baseline ≈ 75% down, left pad ≈ 13%).
+          [
+            "-stroke",
+            "none",
+            "-fill",
+            color || default,
+            "-pointsize",
+            to_string(label_font_size(h)),
+            "-draw",
+            "text #{x + label_pad(h)},#{y + label_baseline(h)} '#{im_escape(text)}'",
+            "-fill",
+            "none"
+          ]
+
+        {prim, color} ->
+          ["-stroke", color || default, "-strokewidth", sw, "-draw", im_draw(prim)]
       end)
 
     if draws == [], do: [], else: ["-fill", "none"] ++ draws
   end
 
   @doc """
-  Renders the annotations as a standalone `<svg>` string (outlines only).
+  Renders the annotations as a standalone `<svg>` string — shape outlines,
+  plus real glyphs for labels whose text is known (see `primitives/1`).
 
   Suitable as an absolutely-positioned overlay on an image. With
   `preserveAspectRatio="xMidYMid slice"` the SVG crops identically to CSS
@@ -120,7 +141,8 @@ defmodule Etcher.Raster do
   Each entry is `{primitive, color}` where `primitive` is one of:
   `{:rect, x, y, w, h}`, `{:circle, cx, cy, r}`, `{:polygon, points}`,
   `{:polyline, points}`, `{:line, x1, y1, x2, y2}` (coords are numbers, `points`
-  is a list of `{x, y}`). Exposed so callers can add their own backend.
+  is a list of `{x, y}`), or `{:label, x, y, w, h, text}` — a text label drawn
+  as glyphs, not outlined. Exposed so callers can add their own backend.
   """
   @spec primitives([annotation()]) :: [{tuple(), String.t() | nil}]
   def primitives(annotations) when is_list(annotations) do
@@ -130,12 +152,51 @@ defmodule Etcher.Raster do
       color = color(get(ann, "style"))
 
       kind
-      |> shape_primitives(geometry)
+      |> shape_primitives(geometry, label_title(ann))
       |> Enum.map(&{&1, color})
     end)
   end
 
   # ── kind → primitive(s) (mirrors the README geometry table) ──────────────
+
+  # The label-bearing kinds render their TEXT when the annotation carries it
+  # (`metadata.title` — the same field the live canvas reads). The old
+  # behaviour drew the label's bounding box instead, which on a baked
+  # thumbnail looked like a mystery rectangle where a word should be: the
+  # box is the one part of a label the viewer was never meant to see live.
+  # The box remains only as the no-title fallback, so a caller that doesn't
+  # pass metadata still gets a mark where the label sits.
+  defp shape_primitives("text", %{} = g, title) when is_binary(title) do
+    case rect(g) do
+      [{:rect, x, y, w, h}] -> [{:label, x, y, w, h, title}]
+      other -> other
+    end
+  end
+
+  # A titled callout mirrors the live composition: leader line from the
+  # anchor to the box's bottom-left corner, underline along the box's bottom
+  # edge, glyphs above it — and no box.
+  defp shape_primitives("callout", g, title) when is_binary(title) do
+    case rect(get(g, "text_box") || %{}) do
+      [{:rect, x, y, w, h}] ->
+        underline = {:line, x, y + h, x + w, y + h}
+        label = {:label, x, y, w, h, title}
+
+        case get(g, "anchor") do
+          nil ->
+            [underline, label]
+
+          anchor ->
+            {ax, ay} = pt(anchor)
+            [{:line, num(ax), num(ay), x, y + h}, underline, label]
+        end
+
+      _ ->
+        shape_primitives("callout", g)
+    end
+  end
+
+  defp shape_primitives(kind, g, _title), do: shape_primitives(kind, g)
 
   defp shape_primitives("rectangle", %{} = g), do: rect(g)
   defp shape_primitives("text", %{} = g), do: rect(g)
@@ -327,8 +388,54 @@ defmodule Etcher.Raster do
   defp svg_element({:line, x1, y1, x2, y2}, color, sw),
     do: ~s(<line x1="#{x1}" y1="#{y1}" x2="#{x2}" y2="#{y2}" #{stroke(color, sw)}/>)
 
+  defp svg_element({:label, x, y, _w, h, text}, color, _sw) do
+    ~s(<text x="#{x + label_pad(h)}" y="#{y + label_baseline(h)}") <>
+      ~s( font-size="#{label_font_size(h)}") <>
+      ~s( font-family="ui-sans-serif, system-ui, sans-serif" font-weight="500") <>
+      ~s( fill="#{color}" stroke="none">#{svg_escape(text)}</text>)
+  end
+
   defp svg_points(points), do: Enum.map_join(points, " ", fn {x, y} -> "#{x},#{y}" end)
   defp stroke(color, sw), do: ~s(stroke="#{color}" stroke-width="#{sw}")
+
+  # ── label helpers ────────────────────────────────────────────────────────
+
+  # The live canvas draws the label font at 65% of the box height, the first
+  # baseline about 75% down, and pads the left edge by 13% — the same ratios
+  # here keep a baked label sitting where the live one did. The floor stops a
+  # sub-pixel box from producing unreadable (or zero) sizes.
+  defp label_font_size(h), do: max(round(h * 0.65), 8)
+  defp label_baseline(h), do: round(h * 0.75)
+  defp label_pad(h), do: round(h * 0.13)
+
+  # `metadata.title`, normalised to a single drawable line — server backends
+  # here don't wrap, and a thumbnail-scale label reads fine on one line.
+  # Blank/absent titles answer nil so the caller falls back to the box.
+  defp label_title(ann) do
+    with %{} = meta <- get(ann, "metadata"),
+         t when is_binary(t) <- get(meta, "title"),
+         t = t |> String.replace(~r/\s+/u, " ") |> String.trim(),
+         false <- t == "" do
+      t
+    else
+      _ -> nil
+    end
+  end
+
+  # ImageMagick `-draw "text .. '...'"` string: backslashes and single
+  # quotes are the two characters that can escape the quoted argument.
+  defp im_escape(text) do
+    text
+    |> String.replace("\\", "\\\\")
+    |> String.replace("'", "\\'")
+  end
+
+  defp svg_escape(text) do
+    text
+    |> String.replace("&", "&amp;")
+    |> String.replace("<", "&lt;")
+    |> String.replace(">", "&gt;")
+  end
 
   # ── helpers ──────────────────────────────────────────────────────────────
 

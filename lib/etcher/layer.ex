@@ -407,16 +407,25 @@ defmodule Etcher.Layer do
     """
   )
 
-  attr(:connectors, :boolean,
+  attr(:connectors, :any,
     default: false,
     doc: """
-    Host default for the connector anchors — the eight bindable dots
+    Host policy for the connector anchors — the eight bindable dots
     that appear on shape hover for drawing arrows between shapes.
-    Off by default: they are an affordance for boards where people
-    draw connectors, and everywhere else they are eight dots that
-    appear under the cursor on every shape passed over. The user's
-    own toggle (persisted through the prefs mechanism) always wins
-    over this default, in either direction.
+
+      * `false` (default) — off, but the user's own toggle (persisted
+        through the prefs mechanism) wins in either direction. They are
+        an affordance for boards where people draw connectors, and
+        everywhere else they are eight dots that appear under the
+        cursor on every shape passed over.
+      * `true` — on by default; the user's toggle still wins.
+      * `:off` — hard off: the surface has no use for anchors at all,
+        so the saved preference is ignored and the toolbar toggle is
+        hidden. Use this where connectors can't be drawn anyway (e.g.
+        a viewer that doesn't offer the arrow tool) — the preference
+        is shared across every Etcher surface in the browser, so
+        without the hard form a toggle flipped on a board follows the
+        user onto surfaces where the dots point at nothing.
     """
   )
 
@@ -472,7 +481,7 @@ defmodule Etcher.Layer do
       data-tools={@tools_json}
       data-nav-buttons={@nav_buttons_csv}
       data-toolbar={@toolbar == false && "false"}
-      data-connectors={@connectors == true && "true"}
+      data-connectors={connectors_data(@connectors)}
       data-snap={@snap == true && "true"}
       data-image-source={@image_source == :custom && "custom"}
       data-paste-images={@paste_images == false && "false"}
@@ -490,6 +499,13 @@ defmodule Etcher.Layer do
   #   nil  → omit attr (JS treats as "all enabled" — back-compat default)
   #   []   → "none" sentinel (JS seeds an empty Set → every button hidden)
   #   list → CSV of atom names (JS splits + intersects)
+  # The three-valued connectors policy → data attribute. `nil` (absent)
+  # keeps the JS's soft resolution (pref > "true" > off); "off" is the hard
+  # form `_connectorsHardOff` reads.
+  defp connectors_data(true), do: "true"
+  defp connectors_data(:off), do: "off"
+  defp connectors_data(_), do: nil
+
   defp nav_buttons_csv(nil), do: nil
   defp nav_buttons_csv([]), do: "none"
 

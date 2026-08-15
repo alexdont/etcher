@@ -5140,11 +5140,17 @@
       );
       popup.appendChild(self.gridBtn);
 
-      self.connectorsBtn = self._makePopupAction(
-        ICONS.connectors, self._connectorsTitle(),
-        function() { self._setPref("connectors", !self._connectorsOn()); }
-      );
-      popup.appendChild(self.connectorsBtn);
+      // No toggle on a hard-off surface (`connectors={:off}`) — the pref
+      // could never win there, and a switch that can't switch reads as
+      // broken. `self.connectorsBtn` stays undefined; the sync block is
+      // already null-safe.
+      if (!self._connectorsHardOff()) {
+        self.connectorsBtn = self._makePopupAction(
+          ICONS.connectors, self._connectorsTitle(),
+          function() { self._setPref("connectors", !self._connectorsOn()); }
+        );
+        popup.appendChild(self.connectorsBtn);
+      }
 
       self.snapBtn = self._makePopupAction(
         ICONS.snap, self._snapTitle(),
@@ -11507,9 +11513,22 @@
     // the cursor on every shape you pass over. (They previously defaulted
     // on, which is exactly how that felt.)
     _connectorsOn: function() {
+      if (this._connectorsHardOff()) return false;
       var pref = this._getPref("connectors");
       if (pref === true || pref === false) return pref;
       return !!(this.el && this.el.dataset && this.el.dataset.connectors === "true");
+    },
+
+    // `connectors={:off}` → `data-connectors="off"`: the host declares the
+    // surface has no use for anchors AT ALL — stronger than the soft
+    // default above, which a user's saved toggle overrides. Needed because
+    // the preference is shared across every Etcher surface in the browser:
+    // a toggle flipped on a board followed people into the media viewer,
+    // where the anchors point at nothing (the arrow tool isn't even
+    // offered). Hard off also hides the toggle — a switch that can't
+    // switch reads as broken, not as policy.
+    _connectorsHardOff: function() {
+      return !!(this.el && this.el.dataset && this.el.dataset.connectors === "off");
     },
 
     // Whether drag snapping (edge/center magnetism + alignment guides) is

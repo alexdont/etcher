@@ -27,13 +27,15 @@ function extract(name) {
 }
 
 const connectorsOn = extract("_connectorsOn");
+const hardOff = extract("_connectorsHardOff");
 const availableFor = extract("_connectorsAvailableFor");
 
 function ctx(pref, hostAttr) {
   return {
     _getPref: (name) => (name === "connectors" ? pref : undefined),
     el: { dataset: hostAttr === undefined ? {} : { connectors: hostAttr } },
-    _connectorsOn: connectorsOn
+    _connectorsOn: connectorsOn,
+    _connectorsHardOff: hardOff
   };
 }
 
@@ -55,6 +57,23 @@ assert.strictEqual(connectorsOn.call(ctx(false, "true")), false,
 // rather than counting as an answer.
 assert.strictEqual(connectorsOn.call(ctx("yes", undefined)), false,
   "a malformed pref value should fall through the layers, not enable anchors");
+
+// ── the hard form: connectors={:off} beats even the user's pref ─────────────
+
+// The pref is shared across every Etcher surface in the browser, so a toggle
+// flipped on a board used to follow the user into surfaces where the anchors
+// point at nothing (no arrow tool offered). "off" is the host saying the
+// surface has no use for anchors at all — the one layer above the user.
+assert.strictEqual(connectorsOn.call(ctx(true, "off")), false,
+  "data-connectors=\"off\" must beat a saved pref of true — that pref leaking across surfaces is the bug");
+
+assert.strictEqual(connectorsOn.call(ctx(undefined, "off")), false,
+  "data-connectors=\"off\" with no pref must be off");
+
+// And the toggle is hidden there — a switch that can't switch reads as
+// broken, not as policy.
+assert.ok(src.includes("if (!self._connectorsHardOff()) {"),
+  "the connectors toggle is still built on hard-off surfaces");
 
 // ── the hover gate consults the resolution ──────────────────────────────────
 

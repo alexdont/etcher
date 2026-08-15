@@ -4,6 +4,21 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.12.2] — 2026-08-15
+
+### Added
+
+- **`connectors={:off}` — a host-declared hard off for connector
+  anchors.** The saved connectors preference is shared across every
+  Etcher surface in the browser, so a toggle flipped on a board followed
+  the user into surfaces where the anchors point at nothing (a media
+  viewer that doesn't even offer the arrow tool). The existing `false`
+  default stays soft — the user's toggle wins in either direction — but
+  `:off` (`data-connectors="off"`) now says the surface has no use for
+  anchors at all: the preference is ignored and the toolbar toggle is
+  hidden, because a switch that can't switch reads as broken, not as
+  policy.
+
 ## [0.12.1] — 2026-08-14
 
 Label rendering fixes, both halves of the same report ("why are there

@@ -4,6 +4,33 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.13.0] — 2026-08-15
+
+Host-integration surface for annotation discussions.
+
+### Added
+
+- **Tooltip action buttons reach the host.** Slot HTML could always
+  render buttons, but the tooltip's click handler stops propagation, so
+  a host button was a dead click. Any `data-etcher-action` other than
+  Etcher's own `"delete"` is now re-dispatched as a bubbling
+  `etcher:tooltip-action` CustomEvent
+  (`detail: {fresco_id, uuid, action}`) on the layer host — a consumer
+  can wire "reply" / "resolve" / anything into its app without forking
+  the tooltip.
+
+- **`api.editLabel(uuid)`.** Opens the inline label editor on a shape —
+  the same editor double-clicking opens — so a host can offer label
+  editing from its own chrome (e.g. an "Edit" tooltip action). No-ops
+  on unknown uuids and readonly shapes.
+
+- **`metadata.badge` — a discussion-count bubble.** A number or short
+  string renders as a small screen-sized bubble pinned to the shape's
+  top-right corner (blue, white count, capped at "99+"), refreshed by
+  every render path and torn down with the shape. Absent / 0 / empty
+  removes it. Hosts set it when hydrating metadata and keep it fresh
+  through `patchShape`.
+
 ## [0.12.2] — 2026-08-15
 
 ### Added

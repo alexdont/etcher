@@ -1011,6 +1011,17 @@
       "  fill: none;",
       "  stroke-linecap: round; stroke-linejoin: round;",
       "}",
+      // Discussion-count bubble (`metadata.badge`). Blue like the selection
+      // language so it reads as chrome, not as part of the drawing; never
+      // interactive — the shape underneath owns hover and click.
+      ".etcher-badge { pointer-events: none; }",
+      ".etcher-badge circle {",
+      "  fill: #3b82f6; stroke: #fff; stroke-width: 1.5;",
+      "}",
+      ".etcher-badge-count {",
+      "  fill: #fff; stroke: none; user-select: none;",
+      "  font: 600 11px ui-sans-serif, system-ui, sans-serif;",
+      "}",
       // Reveal-pulse: a brief halo flash triggered by
       // `handle.revealShape(uuid, { pulse: true })` so users
       // can spot the just-navigated-to shape against a busy page.
@@ -2332,6 +2343,15 @@
             if (shape) self._enterEditMode(shape);
           },
           exitEditMode: function() { self._exitEditMode(); },
+          // Open the inline label editor on a shape — the same editor
+          // double-clicking it opens. Lets a host wire label editing into
+          // its own chrome (e.g. an "Edit" tooltip action) without
+          // synthesizing dblclick events. No-ops on unknown uuids and on
+          // readonly shapes; `_startTextEdit` itself owns kind rules.
+          editLabel: function(uuid) {
+            var shape = self.shapes.find(function(s) { return s.uuid === uuid; });
+            if (shape && !shape.readonly) self._startTextEdit(shape);
+          },
           deleteShape: function(uuid) {
             var shape = self.shapes.find(function(s) { return s.uuid === uuid; });
             if (shape) self._deleteShape(shape);
@@ -3137,6 +3157,8 @@
         if (!btn) return;
         if (btn.dataset.etcherAction === "delete") {
           self._deleteShape(self._tooltipShape);
+        } else {
+          self._dispatchTooltipAction(btn.dataset.etcherAction);
         }
       });
       container.appendChild(tip);
@@ -3572,6 +3594,8 @@
         if (!btn) return;
         if (btn.dataset.etcherAction === "delete") {
           self._deleteShape(self._tooltipShape);
+        } else {
+          self._dispatchTooltipAction(btn.dataset.etcherAction);
         }
       });
 
@@ -10268,6 +10292,61 @@
       // this is the one place that catches them all without a call bolted
       // onto each gesture. See `_noteLiveMove`.
       if (self._liveMoveHandler && shape.uuid) self._noteLiveMove(shape);
+
+      // Badge last, so it reads the geometry this render just wrote.
+      self._renderBadge(shape);
+    },
+
+    // ── Shape badges ──────────────────────────────────────────────────────
+    //
+    // `metadata.badge` (a number or short string) renders as a small count
+    // bubble pinned to the shape's top-right corner — a host showing "this
+    // annotation has N discussion entries" sets it when hydrating metadata
+    // (and keeps it fresh through `patchShape`). Absent / 0 / "" removes
+    // the bubble. Screen-sized (container px), so it neither balloons nor
+    // vanishes with zoom, and pointer-transparent so it never steals the
+    // shape's own hover/click.
+    _renderBadge: function(shape) {
+      var value = shape && shape.metadata ? shape.metadata.badge : null;
+      var show = value != null && value !== 0 && value !== "" && value !== "0";
+
+      if (!show) {
+        if (shape && shape._badgeEl && shape._badgeEl.parentNode) {
+          shape._badgeEl.parentNode.removeChild(shape._badgeEl);
+        }
+        if (shape) shape._badgeEl = null;
+        return;
+      }
+
+      var bbox = this._shapeBBoxImagePx(shape);
+      var parent = shape.el && shape.el.parentNode;
+      if (!bbox || !parent) return;
+
+      var label = String(value);
+      if (/^\d+$/.test(label) && parseInt(label, 10) > 99) label = "99+";
+
+      var badge = shape._badgeEl;
+      if (!badge) {
+        badge = svgEl("g");
+        badge.classList.add("etcher-badge");
+        badge.appendChild(svgEl("circle", { r: "9" }));
+        var btext = svgEl("text", {
+          "text-anchor": "middle",
+          "dominant-baseline": "central"
+        });
+        btext.classList.add("etcher-badge-count");
+        badge.appendChild(btext);
+        shape._badgeEl = badge;
+      }
+      // Re-append every render: keeps the bubble above the shape (and its
+      // siblings) even after z-order rearranges re-insert elements.
+      parent.appendChild(badge);
+
+      var corner = this._imageToContainer({ x: bbox.x + bbox.w, y: bbox.y });
+      badge.setAttribute("transform", "translate(" + corner.x + "," + corner.y + ")");
+
+      var textEl = badge.querySelector(".etcher-badge-count");
+      if (textEl && textEl.textContent !== label) textEl.textContent = label;
     },
 
     // ── In-flight moves ───────────────────────────────────────────────────
@@ -12487,6 +12566,31 @@
       if (!box) return false;
       return pt.x >= box.x && pt.x <= box.x + box.w &&
              pt.y >= box.y && pt.y <= box.y + box.h;
+    },
+
+    // Any tooltip button with a `data-etcher-action` other than Etcher's own
+    // "delete" belongs to the HOST (slot HTML is consumer-authored, and the
+    // tooltip's click handler stops propagation, so ordinary delegated
+    // listeners never see these clicks). Re-dispatch as a bubbling
+    // CustomEvent on the layer host element:
+    //
+    //   etcher:tooltip-action  { detail: { fresco_id, uuid, action } }
+    //
+    // so a consumer can wire "reply" / "resolve" / anything into its own
+    // app without forking the tooltip.
+    _dispatchTooltipAction: function(action) {
+      var shape = this._tooltipShape;
+      if (!shape || !this.el) return;
+      try {
+        this.el.dispatchEvent(new CustomEvent("etcher:tooltip-action", {
+          bubbles: true,
+          detail: {
+            fresco_id: this.frescoId || null,
+            uuid: shape.uuid || null,
+            action: action
+          }
+        }));
+      } catch (_) {}
     },
 
     _showTooltipFor: function(shape) {
@@ -18685,6 +18789,10 @@
       if (shape.el && shape.el.parentNode) shape.el.parentNode.removeChild(shape.el);
       if (shape.titleGroup && shape.titleGroup.parentNode) {
         shape.titleGroup.parentNode.removeChild(shape.titleGroup);
+      }
+      if (shape._badgeEl && shape._badgeEl.parentNode) {
+        shape._badgeEl.parentNode.removeChild(shape._badgeEl);
+        shape._badgeEl = null;
       }
       this.shapes.splice(idx, 1);
       // Removed shape's element can no longer fire mouseleave, so close

@@ -25,11 +25,22 @@ Host-integration surface for annotation discussions.
   on unknown uuids and readonly shapes.
 
 - **`metadata.badge` — a discussion-count bubble.** A number or short
-  string renders as a small screen-sized bubble pinned to the shape's
-  top-right corner (blue, white count, capped at "99+"), refreshed by
-  every render path and torn down with the shape. Absent / 0 / empty
-  removes it. Hosts set it when hydrating metadata and keep it fresh
-  through `patchShape`.
+  string renders as a small screen-sized bubble (blue, white count,
+  capped at "99+"), refreshed by every render path and torn down with
+  the shape. Absent / 0 / empty removes it. Hosts set it when hydrating
+  metadata and keep it fresh through `patchShape`. Anchoring follows
+  the annotation's face: the top-right corner of its LABEL when it has
+  one, else a point ON the shape as close as possible to its bbox
+  top-right — the 45° point on a circle, the nearest vertex/endpoint on
+  point-built kinds — so the bubble touches the shape instead of
+  floating in the empty corner of a round or scribbled one.
+
+- **`window.Etcher.tooltipActions` — host buttons on the tooltip
+  header.** `(shape) => [{action, title, icon}]` renders real buttons on
+  the same row as the built-in trash (shared `.etcher-tooltip-btn`
+  styling), whose clicks re-dispatch through `etcher:tooltip-action`
+  like any host action. Reserved `"delete"` is refused so a host can't
+  shadow the built-in.
 
 ## [0.12.2] — 2026-08-15
 

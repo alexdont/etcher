@@ -75,4 +75,56 @@ assert.ok(src.includes("if (shape._badgeEl && shape._badgeEl.parentNode) {"),
 assert.ok(src.includes('var show = value != null && value !== 0 && value !== "" && value !== "0";'),
   "badge show predicate changed — 0/empty must hide the bubble");
 
+// ── 4. badge anchoring — label first, else touching the shape ───────────────
+
+{
+  const anchorFn = extract("_badgeAnchorContainer");
+  const ctx = {
+    _imageToContainer: (pt) => pt,                       // identity: image == container
+    _shapeBBoxImagePx: (s) => s._bbox || null
+  };
+
+  // Circle: the 45° point on the circumference, not the floating bbox corner.
+  const circle = { kind: "circle", geometry: { cx: 100, cy: 100, r: 10 } };
+  const c = anchorFn.call(ctx, circle);
+  assert.ok(Math.abs(c.x - (100 + 10 * Math.SQRT1_2)) < 1e-9, "circle badge x is off the circumference");
+  assert.ok(Math.abs(c.y - (100 - 10 * Math.SQRT1_2)) < 1e-9, "circle badge y is off the circumference");
+
+  // Boxy kinds: the actual top-right corner.
+  const rect = { kind: "rectangle", geometry: { x: 10, y: 20, w: 30, h: 40 } };
+  assert.deepStrictEqual(anchorFn.call(ctx, rect), { x: 40, y: 20 });
+
+  // Point-built kinds: the vertex nearest the bbox top-right, so the bubble
+  // touches the shape even when the corner itself is empty air.
+  const poly = {
+    kind: "polygon",
+    geometry: { points: [[0, 100], [50, 0], [100, 100]] },
+    _bbox: { x: 0, y: 0, w: 100, h: 100 }
+  };
+  assert.deepStrictEqual(anchorFn.call(ctx, poly), { x: 50, y: 0 },
+    "polygon badge should sit on its nearest vertex, not the empty bbox corner");
+
+  // A rendered label rect wins over everything (host: "top right of the
+  // label if there is one").
+  const labelled = {
+    kind: "rectangle",
+    geometry: { x: 10, y: 20, w: 30, h: 40 },
+    titleGroup: {
+      querySelector: () => ({
+        getAttribute: (k) => ({ x: "200", y: "300", width: "80" }[k])
+      })
+    }
+  };
+  assert.deepStrictEqual(anchorFn.call(ctx, labelled), { x: 280, y: 300 });
+}
+
+// ── 5. host header actions render next to the trash ─────────────────────────
+
+assert.ok(src.includes("window.Etcher.tooltipActions"),
+  "tooltipActions host API is gone");
+assert.ok(src.includes('class="etcher-tooltip-btn etcher-tooltip-delete"'),
+  "delete no longer shares the header button base class");
+assert.ok(src.includes('if (!a || !a.action || a.action === "delete") return;'),
+  "host actions may shadow the built-in delete");
+
 console.log("tooltip actions + badge: all checks passed");

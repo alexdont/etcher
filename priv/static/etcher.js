@@ -1504,13 +1504,24 @@
       ".etcher-tooltip-kind {",
       "  font-weight: 600; text-transform: capitalize; flex: 1;",
       "}",
-      ".etcher-tooltip-delete {",
+      // Shared base for every header action button (host-declared via
+      // `window.Etcher.tooltipActions` and the built-in trash alike);
+      // `.etcher-tooltip-delete` layers its red accent on top.
+      ".etcher-tooltip-btn {",
       "  background: rgba(255, 255, 255, 0.08); border: none;",
-      "  color: rgba(252, 165, 165, 0.95);",
+      "  color: rgba(255, 255, 255, 0.85);",
       "  width: 24px; height: 24px; padding: 0;",
       "  border-radius: 4px; cursor: pointer;",
       "  display: inline-flex; align-items: center; justify-content: center;",
       "  transition: background 120ms ease, color 120ms ease;",
+      "}",
+      ".etcher-tooltip-btn svg { width: 14px; height: 14px; }",
+      ".etcher-tooltip-btn:hover { background: rgba(255, 255, 255, 0.18); }",
+      ".etcher-tooltip-btn:focus-visible {",
+      "  outline: 2px solid rgba(147, 197, 253, 0.9); outline-offset: 1px;",
+      "}",
+      ".etcher-tooltip-delete {",
+      "  color: rgba(252, 165, 165, 0.95);",
       "}",
       ".etcher-tooltip-delete:hover {",
       "  background: rgba(239, 68, 68, 0.32); color: #fff;",
@@ -10318,9 +10329,9 @@
         return;
       }
 
-      var bbox = this._shapeBBoxImagePx(shape);
       var parent = shape.el && shape.el.parentNode;
-      if (!bbox || !parent) return;
+      var corner = this._badgeAnchorContainer(shape);
+      if (!corner || !parent) return;
 
       var label = String(value);
       if (/^\d+$/.test(label) && parseInt(label, 10) > 99) label = "99+";
@@ -10342,11 +10353,88 @@
       // siblings) even after z-order rearranges re-insert elements.
       parent.appendChild(badge);
 
-      var corner = this._imageToContainer({ x: bbox.x + bbox.w, y: bbox.y });
       badge.setAttribute("transform", "translate(" + corner.x + "," + corner.y + ")");
 
       var textEl = badge.querySelector(".etcher-badge-count");
       if (textEl && textEl.textContent !== label) textEl.textContent = label;
+    },
+
+    // Where the badge sits, in container px. Not the bounding box corner —
+    // on a circle or a freehand scribble that floats in empty air. The
+    // precedence is:
+    //
+    //   1. The LABEL's top-right corner, when the shape has one — the label
+    //      is the annotation's face, so the count hangs off it. Read from
+    //      the rendered label rect (title group, or the shape's own text
+    //      rect for text/callout), which is already laid out in container
+    //      px; dimension labels have no rect, so their <text> bbox stands
+    //      in.
+    //   2. Otherwise the point ON the shape closest to its bbox top-right:
+    //      the corner itself for boxy kinds, the 45° point on a circle,
+    //      the nearest vertex/endpoint for point-built kinds — so the
+    //      bubble always touches the shape it counts.
+    _badgeAnchorContainer: function(shape) {
+      var g = shape.geometry || {};
+
+      var rectEl =
+        (shape.titleGroup && shape.titleGroup.querySelector(".etcher-text-rect")) ||
+        (shape.el && shape.el.querySelector &&
+          shape.el.querySelector(".etcher-text-rect"));
+      if (rectEl) {
+        var rx = parseFloat(rectEl.getAttribute("x"));
+        var ry = parseFloat(rectEl.getAttribute("y"));
+        var rw = parseFloat(rectEl.getAttribute("width"));
+        if (isFinite(rx) && isFinite(ry) && isFinite(rw) && rw > 0) {
+          return { x: rx + rw, y: ry };
+        }
+      }
+
+      if (shape.metadata && shape.metadata.title && shape.el &&
+          shape.el.querySelector) {
+        var labelEl = shape.el.querySelector(".etcher-text-content, text");
+        if (labelEl && labelEl.getBBox) {
+          try {
+            var lb = labelEl.getBBox();
+            if (lb.width > 0) return { x: lb.x + lb.width, y: lb.y };
+          } catch (_) {}
+        }
+      }
+
+      var anchor = null;
+      if (shape.kind === "circle" && isFinite(g.cx)) {
+        // 45° up-right on the circumference.
+        var k = Math.SQRT1_2;
+        anchor = { x: g.cx + g.r * k, y: g.cy - g.r * k };
+      } else if (isFinite(g.x) && isFinite(g.w)) {
+        anchor = { x: g.x + g.w, y: g.y };
+      } else {
+        var pts = [];
+        if (Array.isArray(g.points)) pts = pts.concat(g.points);
+        if (Array.isArray(g.nodes)) {
+          g.nodes.forEach(function(n) { if (n && n.p) pts.push(n.p); });
+        }
+        if (g.a) pts.push(g.a);
+        if (g.b) pts.push(g.b);
+        var bbox = this._shapeBBoxImagePx(shape);
+        if (!bbox) return null;
+        var corner = { x: bbox.x + bbox.w, y: bbox.y };
+        if (pts.length) {
+          var best = null;
+          var bestD = Infinity;
+          pts.forEach(function(p) {
+            var px = Array.isArray(p) ? p[0] : p.x;
+            var py = Array.isArray(p) ? p[1] : p.y;
+            if (!isFinite(px) || !isFinite(py)) return;
+            var d = (px - corner.x) * (px - corner.x) + (py - corner.y) * (py - corner.y);
+            if (d < bestD) { bestD = d; best = { x: px, y: py }; }
+          });
+          anchor = best || corner;
+        } else {
+          anchor = corner;
+        }
+      }
+
+      return anchor ? this._imageToContainer(anchor) : null;
     },
 
     // ── In-flight moves ───────────────────────────────────────────────────
@@ -12609,12 +12697,37 @@
 
       var html = '<div class="etcher-tooltip-header">';
       html += '<span class="etcher-tooltip-kind">' + (headerHtml || "") + '</span>';
+      // Host-declared action buttons, rendered as REAL buttons on the same
+      // row as the trash — `window.Etcher.tooltipActions = (shape) =>
+      // [{action, title, icon}]`. Clicks flow through the tooltip's click
+      // handler and are re-dispatched as `etcher:tooltip-action` (see
+      // `_dispatchTooltipAction`), so the host wires behavior without
+      // touching the tooltip. Errors and non-arrays degrade to no buttons.
+      var hostActions = [];
+      if (typeof window.Etcher.tooltipActions === "function") {
+        try {
+          hostActions = window.Etcher.tooltipActions(shape) || [];
+        } catch (e) {
+          console.warn("[Etcher] tooltipActions threw:", e);
+          hostActions = [];
+        }
+      }
+      if (Array.isArray(hostActions)) {
+        hostActions.forEach(function(a) {
+          if (!a || !a.action || a.action === "delete") return;
+          var label = escapeHtml(a.title || a.action);
+          html += '<button type="button" class="etcher-tooltip-btn"' +
+                  ' data-etcher-action="' + escapeHtml(a.action) + '"' +
+                  ' title="' + label + '" aria-label="' + label + '">' +
+                  (a.icon || label) + '</button>';
+        });
+      }
       // Trash button stays Etcher-controlled — delete is a core UX,
       // consumers shouldn't have to reimplement it. Only shown for
       // persisted shapes (temp drafts have no server-side uuid yet), and
       // never for locked (readonly) shapes — the viewer can't delete them.
       if (shape.uuid && !shape.readonly) {
-        html += '<button type="button" class="etcher-tooltip-delete"' +
+        html += '<button type="button" class="etcher-tooltip-btn etcher-tooltip-delete"' +
                 ' data-etcher-action="delete" title="Delete annotation"' +
                 ' aria-label="Delete annotation">' + ICONS.trash + '</button>';
       }

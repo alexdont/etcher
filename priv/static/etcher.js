@@ -1016,11 +1016,11 @@
       // interactive — the shape underneath owns hover and click.
       ".etcher-badge { pointer-events: none; }",
       ".etcher-badge circle {",
-      "  fill: #3b82f6; stroke: #fff; stroke-width: 1.5;",
+      "  fill: #3b82f6; stroke: #fff; stroke-width: 1.25;",
       "}",
       ".etcher-badge-count {",
       "  fill: #fff; stroke: none; user-select: none;",
-      "  font: 600 11px ui-sans-serif, system-ui, sans-serif;",
+      "  font: 600 9px ui-sans-serif, system-ui, sans-serif;",
       "}",
       // Reveal-pulse: a brief halo flash triggered by
       // `handle.revealShape(uuid, { pulse: true })` so users
@@ -10340,7 +10340,7 @@
       if (!badge) {
         badge = svgEl("g");
         badge.classList.add("etcher-badge");
-        badge.appendChild(svgEl("circle", { r: "9" }));
+        badge.appendChild(svgEl("circle", { r: "7" }));
         var btext = svgEl("text", {
           "text-anchor": "middle",
           "dominant-baseline": "central"

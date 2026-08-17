@@ -4,6 +4,16 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.13.1] — 2026-08-18
+
+### Fixed
+
+- **The tooltip no longer opens on top of the label it describes.** Its
+  anchor box is now the whole annotation — the shape element unioned
+  with the label sibling (titleGroup) and the count badge — so "above
+  the shape" means above everything the annotation draws, and the
+  near-top flip below clears all of it too.
+
 ## [0.13.0] — 2026-08-15
 
 Host-integration surface for annotation discussions.

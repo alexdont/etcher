@@ -12830,6 +12830,33 @@
           shapeRect.bottom = shapeRect.top + shapeRect.height;
         }
       }
+      // The anchor box is the whole ANNOTATION, not just the shape element:
+      // the label sibling (titleGroup) usually floats above the body and the
+      // badge hangs off its corner — anchoring to the shape alone opened the
+      // tooltip exactly on top of the label it was describing. Union them so
+      // "above" means above everything the annotation draws (and the flip
+      // below clears all of it too).
+      var uLeft = shapeRect.left;
+      var uTop = shapeRect.top;
+      var uRight = shapeRect.left + shapeRect.width;
+      var uBottom = shapeRect.top + shapeRect.height;
+      [shape.titleGroup, shape._badgeEl].forEach(function(extra) {
+        if (!extra || !extra.getBoundingClientRect) return;
+        var r = extra.getBoundingClientRect();
+        if (!r.width && !r.height) return;
+        if (r.left < uLeft) uLeft = r.left;
+        if (r.top < uTop) uTop = r.top;
+        if (r.right > uRight) uRight = r.right;
+        if (r.bottom > uBottom) uBottom = r.bottom;
+      });
+      shapeRect = {
+        left: uLeft,
+        top: uTop,
+        width: uRight - uLeft,
+        height: uBottom - uTop,
+        bottom: uBottom
+      };
+
       var sx = this.handle.container.scrollLeft || 0;
       var sy = this.handle.container.scrollTop  || 0;
       var x = shapeRect.left + shapeRect.width / 2 - containerRect.left + sx;

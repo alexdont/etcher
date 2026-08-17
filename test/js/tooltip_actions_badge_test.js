@@ -127,4 +127,11 @@ assert.ok(src.includes('class="etcher-tooltip-btn etcher-tooltip-delete"'),
 assert.ok(src.includes('if (!a || !a.action || a.action === "delete") return;'),
   "host actions may shadow the built-in delete");
 
+// ── 6. tooltip anchors to the whole annotation ──────────────────────────────
+
+// The label sibling and badge join the anchor union, so the tooltip opens
+// above ALL of it instead of on top of the label it describes.
+assert.ok(src.includes("[shape.titleGroup, shape._badgeEl].forEach(function(extra) {"),
+  "tooltip positioning no longer unions the label/badge into its anchor box");
+
 console.log("tooltip actions + badge: all checks passed");

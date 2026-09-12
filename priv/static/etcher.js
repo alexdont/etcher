@@ -191,7 +191,7 @@
     // Eraser wedge over a surface line — the trash can it replaced reads
     // as "delete row", not "rub shapes out by sweeping".
     eraser: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path stroke-linecap="round" stroke-linejoin="round" d="M22 21H7"/><path stroke-linecap="round" stroke-linejoin="round" d="m5 11 9 9"/></svg>',
-    grabber: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15 10.5V6a1.5 1.5 0 0 0-3 0m3 4.5V4.5a1.5 1.5 0 0 0-3 0v6m3 0V9a1.5 1.5 0 0 1 3 0v5.25a6.75 6.75 0 0 1-6.75 6.75H9.75a6.75 6.75 0 0 1-5.74-3.2l-2.39-3.86a1.5 1.5 0 0 1 2.46-1.72L6 15.75V6a1.5 1.5 0 0 1 3 0v4.5m3 0V6"/></svg>',
+    grabber: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M18 11V6a2 2 0 0 0-2-2 2 2 0 0 0-2 2"/><path stroke-linecap="round" stroke-linejoin="round" d="M14 10V4a2 2 0 0 0-2-2 2 2 0 0 0-2 2v2"/><path stroke-linecap="round" stroke-linejoin="round" d="M10 10.5V6a2 2 0 0 0-2-2 2 2 0 0 0-2 2v8"/><path stroke-linecap="round" stroke-linejoin="round" d="m7 15-1.76-1.76a2 2 0 0 0-2.83 2.82l3.6 3.6C7.5 21.14 9.2 22 12 22h2a8 8 0 0 0 8-8V7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v3"/></svg>',
     // A 3x3 of dots for the background grid, and a square with anchor dots on
     // its corners for the connector anchors — each says what it switches.
     grid: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="6" cy="6" r="1.6"/><circle cx="12" cy="6" r="1.6"/><circle cx="18" cy="6" r="1.6"/><circle cx="6" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="18" cy="12" r="1.6"/><circle cx="6" cy="18" r="1.6"/><circle cx="12" cy="18" r="1.6"/><circle cx="18" cy="18" r="1.6"/></svg>',
@@ -494,7 +494,9 @@
       // not tools, and mixing the two is what made the old single bar hard
       // to scan. Mirrors tldraw's placement.
       ".etcher-stylepanel {",
-      "  position: absolute; top: 12px; right: 12px; z-index: 11;",
+      "  position: absolute; z-index: 11;",
+      "  top: calc(var(--etcher-panel-anchor-top, 12px) + 40px);",
+      "  right: var(--etcher-panel-anchor-right, 12px);",
       "  display: none; flex-direction: column; gap: 10px;",
       "  padding: 10px; border-radius: 12px;",
       "  background: rgba(0, 0, 0, 0.72);",
@@ -507,7 +509,6 @@
       // things reached for constantly — the colour and the line type — and
       // drops the sliders, which are set once and left. Hidden is for
       // presenting, where the board is the point and the chrome is not.
-      ".etcher-stylepanel { top: 52px; }",
       // Compact is a narrow vertical strip, not a shrunken panel: the colour
       // and the line type stacked in one column, everything else gone. The
       // point is to give the board back its width, which a panel merely a
@@ -551,7 +552,9 @@
       // panel goes away — a control that moves when you use it is one you
       // have to hunt for the second time.
       ".etcher-panel-toggle {",
-      "  position: absolute; top: 12px; right: 12px; z-index: 12;",
+      "  position: absolute; z-index: 12;",
+      "  top: var(--etcher-panel-anchor-top, 12px);",
+      "  right: var(--etcher-panel-anchor-right, 12px);",
       "  display: none; align-items: center; justify-content: center;",
       "  width: 30px; height: 30px; padding: 0; border: 0; cursor: pointer;",
       "  border-radius: 8px; background: rgba(0, 0, 0, 0.72); color: #fff;",
@@ -1870,7 +1873,9 @@
     polygon:   { icon: ICONS.polygon,   title: "Polygon (double-click to close)" },
     freehand:  { icon: ICONS.freehand,  title: "Freehand curve (editable — drag its nodes after drawing)" },
     marker:    { icon: ICONS.marker,    title: "Marker (freehand ink stroke)" },
-    grabber:   { icon: ICONS.grabber,   title: "Grab (pan only)" },
+    // `styleless` tools take no stroke or fill, so the style panel has
+    // nothing to offer while one is armed — _syncStylePanel hides it.
+    grabber:   { icon: ICONS.grabber,   title: "Grab (pan only)", styleless: true },
     callout:   { icon: ICONS.callout,   title: "Callout (point at something, write a label)" },
     text:      { icon: ICONS.text,      title: "Text label (drag a box, then type)" },
     dimension: { icon: ICONS.dimension, title: "Dimension (line with arrows + slidable label)" },
@@ -1928,7 +1933,7 @@
     // It is here for hosts drawing OTHER people: without it, someone panning
     // is the only tool that shows up as an anonymous arrow. Same hand as the
     // toolbar button, so it reads as the tool they picked.
-    grabber:   '<path d="M15 10.5V6a1.5 1.5 0 0 0-3 0m3 4.5V4.5a1.5 1.5 0 0 0-3 0v6m3 0V9a1.5 1.5 0 0 1 3 0v5.25a6.75 6.75 0 0 1-6.75 6.75H9.75a6.75 6.75 0 0 1-5.74-3.2l-2.39-3.86a1.5 1.5 0 0 1 2.46-1.72L6 15.75V6a1.5 1.5 0 0 1 3 0v4.5m3 0V6"/>',
+    grabber:   '<path stroke-linecap="round" stroke-linejoin="round" d="M18 11V6a2 2 0 0 0-2-2 2 2 0 0 0-2 2"/><path stroke-linecap="round" stroke-linejoin="round" d="M14 10V4a2 2 0 0 0-2-2 2 2 0 0 0-2 2v2"/><path stroke-linecap="round" stroke-linejoin="round" d="M10 10.5V6a2 2 0 0 0-2-2 2 2 0 0 0-2 2v8"/><path stroke-linecap="round" stroke-linejoin="round" d="m7 15-1.76-1.76a2 2 0 0 0-2.83 2.82l3.6 3.6C7.5 21.14 9.2 22 12 22h2a8 8 0 0 0 8-8V7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v3"/>',
     callout:   '<circle cx="3.5" cy="20" r="2"/><path d="M4 19.5 8.5 14 21 14"/>',
     text:      '<path d="M5 6h14M12 6v12"/>',
     dimension: '<path d="M5 12h14M5 12l3-3M5 12l3 3M19 12l-3-3M19 12l-3 3"/>',
@@ -4090,6 +4095,7 @@
       if (self.paramsPopup) panel.appendChild(self.paramsPopup);
 
       self.handle.container.appendChild(panel);
+      self._applyPanelOffset();
       self.stylePanel = panel;
       self._buildStyleTrigger();
       self._buildPanelToggle();
@@ -4655,6 +4661,28 @@
     },
 
     // The panel is only meaningful while annotating, same as the tool bar.
+    // The panel + its chevron anchor to the container's top-right through
+    // two CSS custom properties. A host whose own chrome lives in that
+    // corner (phoenix_kit's media page keeps its details minimizer there)
+    // passes `panel_offset` on <Etcher.layer> and the whole cluster —
+    // chevron at the anchor, panel 40px below it — moves together.
+    _applyPanelOffset: function() {
+      if (!this.handle || !this.handle.container) return;
+      var raw = this.el && this.el.dataset && this.el.dataset.panelOffset;
+      if (!raw) return;
+      var offset;
+      try { offset = JSON.parse(raw); } catch (_e) { return; }
+      if (!offset || typeof offset !== "object") return;
+      if (typeof offset.top === "number") {
+        this.handle.container.style.setProperty(
+          "--etcher-panel-anchor-top", offset.top + "px");
+      }
+      if (typeof offset.right === "number") {
+        this.handle.container.style.setProperty(
+          "--etcher-panel-anchor-right", offset.right + "px");
+      }
+    },
+
     _syncStylePanel: function() {
       if (!this.stylePanel) return;
       // Adopt the params popup if it was built after the panel — unless the
@@ -4665,11 +4693,16 @@
       if (!borrowed && this.paramsPopup && this.paramsPopup.parentNode !== this.stylePanel) {
         this.stylePanel.appendChild(this.paramsPopup);
       }
-      this.stylePanel.classList.toggle("is-active", !!this.annotationMode);
-      // The chevron follows annotation mode with the panel — it is the
-      // panel's control, and outside annotation mode there is no panel.
+      // A `styleless` tool (the grabber) takes no stroke or fill, so the
+      // panel has nothing to offer while one is armed — showing it anyway
+      // reads as "these swatches apply to something".
+      var toolDef = this.activeTool != null ? TOOL_DEFS[this.activeTool] : null;
+      var wantsStyle = !!this.annotationMode && !(toolDef && toolDef.styleless);
+      this.stylePanel.classList.toggle("is-active", wantsStyle);
+      // The chevron follows the panel — it is the panel's control, and
+      // without a panel there is nothing to minimize.
       if (this.panelToggle) {
-        this.panelToggle.classList.toggle("is-active", !!this.annotationMode);
+        this.panelToggle.classList.toggle("is-active", wantsStyle);
       }
 
       // Docked on a roomy container, a popup on a narrow one. Re-evaluated
@@ -4695,7 +4728,7 @@
       if (this.styleTrigger) {
         this.styleTrigger.classList.toggle(
           "is-active",
-          compact && !!this.annotationMode
+          compact && wantsStyle
         );
         this._renderStyleTriggerIcon();
       }
@@ -9198,6 +9231,10 @@
       // so a drag does box-select instead of panning — the grabber tool is
       // now the way to pan.
       self._applyPanLock();
+
+      // The style panel is tool-aware (styleless tools hide it) — re-sync
+      // so arming/leaving the grabber shows and hides it immediately.
+      self._syncStylePanel();
 
       self._dispatch("etcher:tool-changed", { tool: toolKey });
     },

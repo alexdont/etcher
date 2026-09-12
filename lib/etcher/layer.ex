@@ -347,6 +347,19 @@ defmodule Etcher.Layer do
     """
   )
 
+  attr(:panel_offset, :map,
+    default: nil,
+    doc: """
+    Optional anchor for the style panel's top-right cluster, in pixels:
+    `%{top: 56}`, `%{top: 56, right: 12}`. The minimize chevron sits at
+    the anchor and the panel 40px below it, so the pair moves together.
+
+    Use it when the host's own chrome lives in that corner — a details
+    minimizer, a close button — and the default `top: 12` collides with
+    it. Omitted keys keep their defaults (`top: 12`, `right: 12`).
+    """
+  )
+
   attr(:colors, :list,
     default: nil,
     doc: """
@@ -465,11 +478,15 @@ defmodule Etcher.Layer do
     line_params_json =
       if assigns[:line_params], do: Jason.encode!(assigns.line_params), else: nil
 
+    panel_offset_json =
+      if assigns[:panel_offset], do: Jason.encode!(assigns.panel_offset), else: nil
+
     assigns =
       assigns
       |> assign(:tools_json, tools_json)
       |> assign(:layer_id, layer_id)
       |> assign(:nav_buttons_csv, nav_buttons_csv(assigns[:nav_buttons]))
+      |> assign(:panel_offset_json, panel_offset_json)
       |> assign(:colors_json, colors_json)
       |> assign(:line_params_json, line_params_json)
 
@@ -487,6 +504,7 @@ defmodule Etcher.Layer do
       data-paste-images={@paste_images == false && "false"}
       data-colors={@colors_json}
       data-line-params={@line_params_json}
+      data-panel-offset={@panel_offset_json}
       class="hidden"
       aria-hidden="true"
       {@rest}

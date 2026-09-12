@@ -720,6 +720,16 @@
       "  display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px;",
       "}",
       ".etcher-stylepanel .etcher-swatch { width: 100%; height: 24px; }",
+      // The label swatch: dark tile, "A" in the remembered label colour.
+      ".etcher-label-swatch {",
+      "  background: rgba(255, 255, 255, 0.08) !important;",
+      "  border: 1px dashed rgba(255, 255, 255, 0.35);",
+      "  display: inline-flex; align-items: center; justify-content: center;",
+      "}",
+      ".etcher-label-swatch-glyph {",
+      "  font: 700 14px/1 ui-sans-serif, system-ui, sans-serif;",
+      "  text-decoration: underline; text-underline-offset: 2px;",
+      "}",
       // The params block is the existing popup, re-parented and stripped of
       // its floating chrome so it reads as a section of the panel.
       // Beats `.etcher-popup[data-kind="params"]`'s own fixed width, which
@@ -5307,9 +5317,8 @@
           // ring pick) and persist, rather than spawning a new entry.
           // Keep the picker open (it only closes on an outside click) so
           // the user can keep adjusting.
-          self._setSlotColor(self._activeSlot, s.color);
-          self._selectColor(s.color);
-          self._emitColorsChanged();
+          self._applyPickedColor(s.color);
+          if (!self._labelPickTarget) self._emitColorsChanged();
         });
         presetRow.appendChild(b);
         return b;
@@ -6313,8 +6322,7 @@
         self._positionPickerKnobs();
         var hex = hslToHex(self._pickerHue, 100, self._pickerLightness);
         self._updatePickerPreview();
-        self._setSlotColor(self._activeSlot, hex);
-        self._selectColor(hex);
+        self._applyPickedColor(hex);
       }
 
       function sliderEvent(e) {
@@ -6326,8 +6334,7 @@
         self._positionPickerKnobs();
         var hex = hslToHex(self._pickerHue, 100, self._pickerLightness);
         self._updatePickerPreview();
-        self._setSlotColor(self._activeSlot, hex);
-        self._selectColor(hex);
+        self._applyPickedColor(hex);
       }
 
       function attachDrag(el, onMove) {
@@ -6343,7 +6350,9 @@
             el.removeEventListener("pointercancel", up);
             try { el.releasePointerCapture(ev.pointerId); } catch (_) {}
             // Commit the edited slot on release — persist via the hook.
-            self._emitColorsChanged();
+            // (A label-swatch pick persists through the prefs mechanism
+            // inside _applyPickedColor; the palette didn't change.)
+            if (!self._labelPickTarget) self._emitColorsChanged();
           }
           el.addEventListener("pointermove", move);
           el.addEventListener("pointerup", up);
@@ -6458,6 +6467,32 @@
       this._openPopup("colors");
     },
 
+    // Where a picker pick lands: the active slot (the normal case), or —
+    // while the picker was opened from the label swatch — the label_color
+    // pref, so the swatch edits "what colour new labels start in" without
+    // touching the palette.
+    _applyPickedColor: function(hex) {
+      if (this._labelPickTarget) {
+        this._setPref("label_color", hex);
+        this._refreshLabelSwatch();
+        return;
+      }
+      this._setSlotColor(this._activeSlot, hex);
+      this._selectColor(hex);
+    },
+
+    _refreshLabelSwatch: function() {
+      var el = this.labelSwatchEl;
+      if (!el) return;
+      var color = this._getPref("label_color") || "";
+      var glyph = el.querySelector(".etcher-label-swatch-glyph");
+      if (glyph) glyph.style.color = color || "#ffffff";
+      el.title = color
+        ? "Label color: " + color + " — new labels start in it"
+        : "Label color — pick one and new labels start in it";
+      el.setAttribute("aria-label", el.title);
+    },
+
     _selectSlot: function(i) {
       if (!this._colorSlots || !this._colorSlots.length) return;
       if (i < 0 || i >= this._colorSlots.length) i = 0;
@@ -6546,6 +6581,32 @@
         host.appendChild(b);
         return b;
       });
+
+      // The label swatch — bottom of the color menu. Shows the colour new
+      // labels start in (the label_color pref _commitTextEdit stamps at
+      // creation) and opens the picker targeted at it. An "A" glyph in the
+      // remembered colour, not a filled tile: it is a text-colour control,
+      // and reading it as a sixth palette slot would be the wrong idea.
+      var lb = document.createElement("button");
+      lb.type = "button";
+      lb.className = "etcher-swatch etcher-label-swatch";
+      lb.innerHTML = '<span class="etcher-label-swatch-glyph">A</span>';
+      lb.addEventListener("click", function(e) {
+        e.preventDefault();
+        if (self._openPopupKind === "colors" && self._labelPickTarget) {
+          self._closePopup();
+          return;
+        }
+        self._closePopup();
+        self._labelPickTarget = true;
+        self._colorsTrigger = lb;
+        self._openPopup("colors");
+        // _openPopup is target-agnostic; re-arm after the generic close.
+        self._labelPickTarget = true;
+      });
+      host.appendChild(lb);
+      self.labelSwatchEl = lb;
+      self._refreshLabelSwatch();
     },
 
     _togglePopup: function(kind) {
@@ -6670,6 +6731,7 @@
     },
 
     _closePopup: function() {
+      this._labelPickTarget = false;
       if (this.toolsPopup) this.toolsPopup.classList.remove("is-open");
       if (this.colorsPopup) this.colorsPopup.classList.remove("is-open");
       if (this.markerPopup) this.markerPopup.classList.remove("is-open");

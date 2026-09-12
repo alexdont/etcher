@@ -146,3 +146,43 @@ assert.ok(
   src.includes('".etcher-pencil-active, .etcher-pencil-active:hover {'),
   "the lit state has a stylesheet rule"
 );
+
+// ── the label swatch retargets the picker ───────────────────────────────────
+
+const applyPickedColor = lift("_applyPickedColor", "hex");
+
+{
+  // Label mode: the pick lands on the pref, never the palette.
+  const prefs = {};
+  const self = {
+    _labelPickTarget: true,
+    _setPref: (k, v) => (prefs[k] = v),
+    _refreshLabelSwatch: () => {},
+    _setSlotColor: () => assert.fail("must not touch the palette"),
+    _selectColor: () => assert.fail("must not change the stroke color"),
+  };
+  applyPickedColor.call(self, "#12ab34");
+  assert.strictEqual(prefs.label_color, "#12ab34");
+}
+
+{
+  // Normal mode: the pick edits the active slot, as before.
+  const calls = [];
+  const self = {
+    _labelPickTarget: false,
+    _activeSlot: 2,
+    _setSlotColor: (i, hex) => calls.push(["slot", i, hex]),
+    _selectColor: (hex) => calls.push(["select", hex]),
+  };
+  applyPickedColor.call(self, "#12ab34");
+  assert.deepStrictEqual(calls, [["slot", 2, "#12ab34"], ["select", "#12ab34"]]);
+}
+
+assert.ok(
+  src.includes('this._labelPickTarget = false;'),
+  "closing the picker ends label-targeting"
+);
+assert.ok(
+  /etcher-label-swatch-glyph/.test(src) && /"A"|>A</.test(src.slice(src.indexOf("etcher-label-swatch"))),
+  "the label swatch renders the A glyph"
+);

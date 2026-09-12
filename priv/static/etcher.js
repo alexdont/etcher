@@ -16621,6 +16621,16 @@
         // on an open shaft, and a dead key would still ride every payload.
         style = this._lineParamsForNewShape();
         delete style.fill;
+      } else if (kind === "text") {
+        // A text shape IS a label. It starts in the remembered label
+        // colour - the panel's label swatch (or recolouring a focused
+        // label) sets it - falling back to the stroke colour. This is
+        // the creation-time counterpart of _commitTextEdit's title_color
+        // stamp, which deliberately excludes text kinds because their
+        // text takes the shape's own colour.
+        var labelColor = this._getPref("label_color");
+        var textColor = labelColor || this.activeColor;
+        style = textColor ? { color: textColor } : null;
       } else {
         style = this.activeColor ? { color: this.activeColor } : null;
       }

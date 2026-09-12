@@ -235,6 +235,7 @@ function run(kind, afterCreate) {
     handleKind: "canvas",
     handle: {},
     _currentMarkerStyle: () => ({}),
+    _getPref: () => undefined,
     _isStrokeShape: (k) => ["rectangle", "circle", "polygon", "freehand"].indexOf(k) !== -1,
     _lineParamsForNewShape: () => ({ color: "#ff0000" }),
     _isShaftKind: (k) => ["line", "arrow", "dimension"].indexOf(k) !== -1,

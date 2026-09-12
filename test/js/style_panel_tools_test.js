@@ -116,3 +116,33 @@ assert.ok(
 }
 
 console.log("style panel anchor, styleless gating and grabber icon: ok");
+
+// ── the pencil lights while annotation mode is on ───────────────────────────
+
+const syncNavPencil = lift("_syncNavPencil", "");
+
+{
+  const classes = new Set();
+  const self = {
+    annotationMode: true,
+    removeNavBtn: {
+      el: {
+        classList: {
+          toggle: (cls, on) => (on ? classes.add(cls) : classes.delete(cls)),
+        },
+      },
+    },
+  };
+  syncNavPencil.call(self);
+  assert.ok(classes.has("etcher-pencil-active"), "lit while on");
+  self.annotationMode = false;
+  syncNavPencil.call(self);
+  assert.ok(!classes.has("etcher-pencil-active"), "unlit while off");
+  // No button (chrome disabled) must be inert.
+  syncNavPencil.call({ annotationMode: true, removeNavBtn: null });
+}
+
+assert.ok(
+  src.includes('".etcher-pencil-active, .etcher-pencil-active:hover {'),
+  "the lit state has a stylesheet rule"
+);

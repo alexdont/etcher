@@ -551,6 +551,11 @@
       // than attached to its edge so it stays exactly where it was when the
       // panel goes away — a control that moves when you use it is one you
       // have to hunt for the second time.
+      // The nav pencil while annotation mode is on. The button itself is
+      // Fresco's chrome; this class is Etcher's, toggled by _syncNavPencil.
+      ".etcher-pencil-active, .etcher-pencil-active:hover {",
+      "  background: #3b82f6 !important; color: #fff !important;",
+      "}",
       ".etcher-panel-toggle {",
       "  position: absolute; z-index: 12;",
       "  top: var(--etcher-panel-anchor-top, 12px);",
@@ -6762,6 +6767,17 @@
       self.removeNavBtn = self.handle.appendNavButton(ICONS.pencil, "Annotate", function() {
         self._setAnnotationMode(!self.annotationMode);
       });
+      self._syncNavPencil();
+    },
+
+    // The pencil says at a glance whether annotation mode is on: lit in
+    // the accent while active, ordinary nav chrome while not. Fresco's
+    // appendNavButton hands back the element on `.el` for exactly this
+    // kind of decoration.
+    _syncNavPencil: function() {
+      var btn = this.removeNavBtn && this.removeNavBtn.el;
+      if (!btn || !btn.classList) return;
+      btn.classList.toggle("etcher-pencil-active", !!this.annotationMode);
     },
 
     // Eye toggle — show/hide all annotations on the image. Lives
@@ -9080,6 +9096,7 @@
       var self = this;
       if (self.annotationMode === on) return;
       self.annotationMode = on;
+      self._syncNavPencil();
       if (self.toolbar) self.toolbar.classList.toggle("is-active", on);
       self._syncActionBar();
       self._syncStylePanel();

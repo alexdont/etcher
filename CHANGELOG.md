@@ -4,6 +4,51 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.13.2] — 2026-09-12
+
+The style panel learns whose corner it's in and which tool is armed,
+and labels get a visible colour of their own.
+
+### Added
+
+- **`panel_offset` on `<Etcher.layer>`** — hosts whose own chrome lives
+  in the container's top-right corner (phoenix_kit's media viewer keeps
+  its details-minimizer there) can anchor the style-panel cluster lower:
+  `panel_offset={%{top: 56}}`. The minimize chevron sits at the anchor
+  and the panel 40px below, moving as one; the values land as two CSS
+  custom properties on the viewer container. Omitted keys keep their
+  defaults.
+
+- **A label-colour row at the bottom of the colour menu.** The
+  label-colour memory existed (recolouring a focused label was
+  remembered and stamped onto new labels) but was invisible. A
+  full-width row under the palette — an "A" chip in the remembered
+  colour beside the words "Label color" — shows it and opens the picker
+  retargeted at it: picks land on the pref and leave the palette and
+  active stroke colour alone.
+
+### Fixed
+
+- **New text shapes start in the label colour.** The creation stamp
+  deliberately excluded text kinds (their text takes the shape's own
+  colour), so the tool people call the label tool ignored the label
+  colour entirely. Text shapes are now born in the remembered colour
+  (stroke colour as fallback), and the drag preview draws in the same
+  colour the commit will use.
+
+- **The style panel hides while the grabber is armed.** The grabber
+  pans and zooms — it takes no stroke or fill — yet the panel sat in
+  the corner advertising swatches that applied to nothing. Tools carry
+  a `styleless` flag now; the panel and its chevron follow it.
+
+- **The pencil says whether annotation mode is on.** It toggled the
+  whole editing surface with no state of its own; it now lights in the
+  accent while active.
+
+- **The grabber icon is a coherent hand.** The heroicons hand-raised
+  path reads as a hand missing a finger; replaced with a five-digit
+  open hand, in the toolbar and the cursor-glyph table both.
+
 ## [0.13.1] — 2026-08-18
 
 ### Fixed

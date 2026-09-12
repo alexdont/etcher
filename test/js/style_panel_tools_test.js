@@ -186,3 +186,18 @@ assert.ok(
   /etcher-label-swatch-glyph/.test(src) && /"A"|>A</.test(src.slice(src.indexOf("etcher-label-swatch"))),
   "the label swatch renders the A glyph"
 );
+
+// ── new text shapes start in the remembered label colour ────────────────────
+
+assert.ok(
+  /kind === "text"\) \{[\s\S]{0,700}_getPref\("label_color"\)/.test(src),
+  "_finalizeShape's text branch consults the label colour"
+);
+assert.ok(
+  src.includes('this._applyShapeColor(g, this._getPref("label_color") || this.activeColor);'),
+  "the text draft previews in the same colour the commit will use"
+);
+assert.ok(
+  src.includes('etcher-label-swatch-text'),
+  "the label swatch is a labelled row, not a bare tile"
+);

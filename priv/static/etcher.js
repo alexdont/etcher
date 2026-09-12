@@ -720,15 +720,29 @@
       "  display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px;",
       "}",
       ".etcher-stylepanel .etcher-swatch { width: 100%; height: 24px; }",
-      // The label swatch: dark tile, "A" in the remembered label colour.
+      // The label-colour row: full menu width under the palette - a colour
+      // chip (the "A" in the remembered colour) beside a text label, so it
+      // reads as "the colour labels get", not as a sixth palette slot.
       ".etcher-label-swatch {",
-      "  background: rgba(255, 255, 255, 0.08) !important;",
-      "  border: 1px dashed rgba(255, 255, 255, 0.35);",
+      "  grid-column: 1 / -1;",
+      "  display: flex; align-items: center; gap: 8px;",
+      "  height: 28px; padding: 0 6px;",
+      "  border: 0; border-radius: 8px; cursor: pointer;",
+      "  background: rgba(255, 255, 255, 0.08);",
+      "}",
+      ".etcher-label-swatch:hover { background: rgba(255, 255, 255, 0.16); }",
+      ".etcher-label-swatch-chip {",
       "  display: inline-flex; align-items: center; justify-content: center;",
+      "  width: 22px; height: 22px; border-radius: 6px;",
+      "  border: 1px dashed rgba(255, 255, 255, 0.35);",
       "}",
       ".etcher-label-swatch-glyph {",
-      "  font: 700 14px/1 ui-sans-serif, system-ui, sans-serif;",
+      "  font: 700 13px/1 ui-sans-serif, system-ui, sans-serif;",
       "  text-decoration: underline; text-underline-offset: 2px;",
+      "}",
+      ".etcher-label-swatch-text {",
+      "  font: 500 12px/1 ui-sans-serif, system-ui, sans-serif;",
+      "  color: rgba(255, 255, 255, 0.85);",
       "}",
       // The params block is the existing popup, re-parented and stripped of
       // its floating chrome so it reads as a section of the panel.
@@ -6589,8 +6603,11 @@
       // and reading it as a sixth palette slot would be the wrong idea.
       var lb = document.createElement("button");
       lb.type = "button";
-      lb.className = "etcher-swatch etcher-label-swatch";
-      lb.innerHTML = '<span class="etcher-label-swatch-glyph">A</span>';
+      lb.className = "etcher-label-swatch";
+      lb.innerHTML =
+        '<span class="etcher-label-swatch-chip">' +
+        '<span class="etcher-label-swatch-glyph">A</span></span>' +
+        '<span class="etcher-label-swatch-text">Label color</span>';
       lb.addEventListener("click", function(e) {
         e.preventDefault();
         if (self._openPopupKind === "colors" && self._labelPickTarget) {
@@ -15944,7 +15961,10 @@
       text.classList.add("etcher-text-content");
       g.appendChild(rect);
       g.appendChild(text);
-      this._applyShapeColor(g, this.activeColor);
+      // Preview in the colour the committed shape will get (see
+      // _finalizeShape's text branch) so the draft doesn't flash a
+      // different colour than the label it becomes.
+      this._applyShapeColor(g, this._getPref("label_color") || this.activeColor);
       this.svg.appendChild(g);
 
       var geom = { x: pt.x, y: pt.y, w: 0, h: 0 };

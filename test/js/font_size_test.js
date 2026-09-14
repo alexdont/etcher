@@ -2,8 +2,8 @@
 //
 // A label's size came from the box you dragged around it, and only from
 // there — so making a set of labels agree meant eyeballing every box, and
-// they never quite did. There is now a size box beside thickness and
-// opacity: type or step the number you want. No slider — a size is a
+// they never quite did. There is now a "Label size" box beside thickness
+// and opacity: type or step the number you want. No slider — a size is a
 // number you know, not a position you hunt for.
 //
 // Both ways stay: blank means "size it from the box", and dragging a box
@@ -359,6 +359,43 @@ assert.ok(!src.includes("_paramsFontInput"),
     assert.ok(!("font_size" in seeded({ font_size: bad })),
       `${String(bad)} must not pin a default`);
   }
+}
+
+
+// ── it is named after what it sizes, and it survives the compact strip ────
+
+{
+  const start = src.indexOf("      // Font size: a number you type or step");
+  const body = src.slice(start, src.indexOf("var dashRow = document.createElement", start));
+  assert.ok(body.includes('fontLabel.textContent = "Label size";'),
+    'the row says what it sizes — "Label size", not "Font size"');
+  assert.ok(/fontNum\.title = "Label size in px/.test(body),
+    "and the input's tooltip says it too, which is all there is to go on " +
+    "in the compact strip where the caption cannot be drawn");
+  assert.ok(body.includes('"etcher-marker-row etcher-font-row"'),
+    "the row is tagged so the compact strip can keep it");
+}
+
+{
+  // The compact strip hides every slider row. This row is a number box, it
+  // fits, and setting one size everywhere is most of the point of having it
+  // — so it is put back.
+  const hide = '".etcher-stylepanel[data-size=\\"compact\\"] .etcher-marker-row { display: none; }"';
+  const show = '".etcher-stylepanel[data-size=\\"compact\\"] .etcher-font-row {"';
+  assert.ok(src.includes(hide), "sliders still fold away in the strip");
+  assert.ok(src.indexOf(show) > src.indexOf(hide),
+    "and the font row is restored AFTER that rule, or it would lose to it");
+
+  const rule = src.slice(src.indexOf(show), src.indexOf('"}"', src.indexOf(show)));
+  assert.ok(rule.includes("display: flex;"), "shown in the strip");
+
+  // Its caption has nowhere to go at that width, and the spinners would
+  // leave too little room for the digits.
+  assert.ok(src.includes(
+    '".etcher-stylepanel[data-size=\\"compact\\"] .etcher-font-row .etcher-marker-row-head {"'),
+    "the caption folds away instead of wrapping");
+  assert.ok(src.includes('"  -moz-appearance: textfield; appearance: textfield;"'),
+    "and the spinners do too, so three digits fit");
 }
 
 console.log("font size: all checks passed");

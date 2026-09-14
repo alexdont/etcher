@@ -526,6 +526,29 @@
       // Sliders are set once and left; fills are a shape property rather than
       // something reached for mid-stroke. Both go.
       ".etcher-stylepanel[data-size=\"compact\"] .etcher-marker-row { display: none; }",
+      // …except the label size, which is a number you type rather than a
+      // slider you need room to aim along — it fits the strip, and being
+      // able to set one size everywhere is most of the point of having it.
+      ".etcher-stylepanel[data-size=\"compact\"] .etcher-font-row {",
+      "  display: flex;",
+      "}",
+      // The row's caption has nowhere to go at this width; the input's
+      // `title` carries the naming instead.
+      ".etcher-stylepanel[data-size=\"compact\"] .etcher-font-row .etcher-marker-row-head {",
+      "  display: none;",
+      "}",
+      ".etcher-stylepanel[data-size=\"compact\"] .etcher-num {",
+      "  width: 30px; padding: 0 2px; text-align: center; font-size: 11px;",
+      "}",
+      // Spinners would leave about 17px for the digits, which "200" does not
+      // fit in. Typing still works, and the full panel keeps its steppers.
+      ".etcher-stylepanel[data-size=\"compact\"] .etcher-num {",
+      "  -moz-appearance: textfield; appearance: textfield;",
+      "}",
+      ".etcher-stylepanel[data-size=\"compact\"] .etcher-num::-webkit-outer-spin-button,",
+      ".etcher-stylepanel[data-size=\"compact\"] .etcher-num::-webkit-inner-spin-button {",
+      "  -webkit-appearance: none; margin: 0;",
+      "}",
       ".etcher-stylepanel[data-size=\"compact\"] .etcher-stylepanel-divider { display: none; }",
       // Everything is off in compact, then the chosen parts are put back.
       // Written this way round so a part nobody asked for cannot appear
@@ -6155,11 +6178,15 @@
       // dragging the label does and what every existing label has been doing
       // all along.
       var fontRow = document.createElement("div");
-      fontRow.className = "etcher-marker-row";
+      // Its own class as well: the compact strip hides every slider row,
+      // and this row is a number box that still fits there.
+      fontRow.className = "etcher-marker-row etcher-font-row";
       var fontHead = document.createElement("div");
       fontHead.className = "etcher-marker-row-head";
       var fontLabel = document.createElement("span");
-      fontLabel.textContent = "Font size";
+      // "Label size", not "font size": what it sizes is the label, and the
+      // panel is otherwise named after the things it acts on.
+      fontLabel.textContent = "Label size";
       fontHead.appendChild(fontLabel);
       var fontNum = document.createElement("input");
       fontNum.type = "number";
@@ -6168,7 +6195,9 @@
       fontNum.max = String(FONT_SIZE_MAX);
       fontNum.step = "1";
       fontNum.placeholder = "auto";
-      fontNum.title = "Font size in px — leave empty to size it by the box";
+      // Carries the naming in the compact strip, where the row's own label
+      // has no room to be drawn.
+      fontNum.title = "Label size in px — leave empty to size it by the box";
       fontRow.appendChild(fontHead);
       fontRow.appendChild(fontNum);
       popup.appendChild(fontRow);

@@ -397,3 +397,72 @@ assert.strictEqual(
   2,
   "both persist guards (preset click, drag release) skip inspect-mode edits"
 );
+
+
+// ── the label colour pref survives peers, late loads, and compact mode ─────
+
+// Same-page peer layers hydrate from each other's saves — without this, a
+// second live layer kept serving its mount-time cache and the label colour
+// "didn't take" on it.
+assert.ok(
+  src.includes('document.addEventListener("etcher:prefs-changed", self._peerPrefsHandler);') &&
+    src.includes('document.removeEventListener("etcher:prefs-changed", this._peerPrefsHandler);'),
+  "peer pref saves are listened for on mount and unwired on destroy"
+);
+
+// A pick made in this instance outranks a slower prefs load.
+{
+  const setPref = lift("_setPref", "name, value");
+  const hydratePrefs = lift("_hydratePrefs", "stored");
+  const self = {
+    _prefs: { grid: true },
+    _loadPrefs() { return this._prefs; },
+    _defaultPrefs: () => ({}),
+    _savePrefs() {},
+    _applyPrefs() {},
+  };
+  setPref.call(self, "label_color", "#ffee00");
+  assert.strictEqual(self._prefs.label_color, "#ffee00");
+  // The late answer carries an old label colour — it must lose; its other
+  // keys must still land.
+  hydratePrefs.call(self, { label_color: "#000000", grid: false });
+  assert.strictEqual(self._prefs.label_color, "#ffee00",
+    "a user-set pref survives a late host/peer load");
+  assert.strictEqual(self._prefs.grid, false,
+    "untouched keys still take the loaded value");
+  // A key never touched here hydrates normally.
+  hydratePrefs.call(self, { panel: "compact" });
+  assert.strictEqual(self._prefs.panel, "compact");
+}
+
+// Hydrating repaints the label swatch glyph along with everything else.
+{
+  const applyPrefs = lift("_applyPrefs", "");
+  const calls = [];
+  applyPrefs.call({
+    _loadPrefs: () => ({}),
+    _applyGridPref() {}, _applyPanelPref() {}, _applyColorsPref() {},
+    _applyCompactParts() {}, _connectorsOn: () => true,
+    _removeConnectorDots() {}, _refreshToolbarTools() {},
+    _refreshLabelSwatch: () => calls.push("label"),
+  });
+  assert.deepStrictEqual(calls, ["label"], "_applyPrefs refreshes the label swatch");
+}
+
+// Compact mode keeps just the chip: the text is hidden and the button
+// squares off to the swatch size, so the one-column strip stays narrow.
+assert.ok(
+  src.includes('.etcher-stylepanel[data-size=\\"compact\\"] .etcher-label-swatch {') &&
+    src.includes('.etcher-stylepanel[data-size=\\"compact\\"] .etcher-label-swatch-text {'),
+  "compact mode restyles the label swatch and hides its text"
+);
+{
+  const rule = src.slice(
+    src.indexOf('.etcher-stylepanel[data-size=\\"compact\\"] .etcher-label-swatch {'),
+    src.indexOf('.etcher-stylepanel[data-size=\\"hidden\\"]')
+  );
+  assert.ok(
+    rule.includes("width: 30px; height: 30px;") && rule.includes("display: none;"),
+    "the compact label swatch is a 30px square and its text does not render"
+  );
+}

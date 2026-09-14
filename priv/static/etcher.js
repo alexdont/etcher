@@ -541,6 +541,14 @@
       ".etcher-stylepanel[data-size=\"compact\"] .etcher-swatch {",
       "  width: 30px; height: 30px;",
       "}",
+      // Compact is a one-column strip; the labelled row would set its width.
+      // Keep just the chip with the "A" in it, sized like the swatches above.
+      ".etcher-stylepanel[data-size=\"compact\"] .etcher-label-swatch {",
+      "  width: 30px; height: 30px; padding: 0; gap: 0; justify-content: center;",
+      "}",
+      ".etcher-stylepanel[data-size=\"compact\"] .etcher-label-swatch-text {",
+      "  display: none;",
+      "}",
       // `:not(.etcher-marker-fill)` because the fill row carries the dash
       // row's class too. Turning it off in a later rule does not work: the
       // dash selector has an extra attribute on it and therefore wins on
@@ -2289,6 +2297,18 @@
       var self = this;
       self.frescoId = self.el.dataset.frescoId;
 
+      // Another etcher layer on this page saving its prefs: take them. All
+      // instances share one store, but each caches it in memory, so without
+      // this a label colour picked on one layer never reached a second live
+      // layer (same-tab writes fire no 'storage' event). Peer events only —
+      // our own dispatch starts on our el, and hydrating from it would be a
+      // no-op that risks loops.
+      self._peerPrefsHandler = function(e) {
+        if (self.el && (e.target === self.el || self.el.contains(e.target))) return;
+        self._hydratePrefs(e.detail);
+      };
+      document.addEventListener("etcher:prefs-changed", self._peerPrefsHandler);
+
       try {
         self.tools = JSON.parse(self.el.dataset.tools || "[]");
       } catch (_) { self.tools = ["rectangle", "circle", "polygon", "freehand"]; }
@@ -2892,6 +2912,10 @@
       if (this._undoKeyHandler) {
         document.removeEventListener("keydown", this._undoKeyHandler);
         this._undoKeyHandler = null;
+      }
+      if (this._peerPrefsHandler) {
+        document.removeEventListener("etcher:prefs-changed", this._peerPrefsHandler);
+        this._peerPrefsHandler = null;
       }
       if (this.removeNavBtn) { try { this.removeNavBtn(); } catch (_) {} }
       if (this.visibilityBtn) { try { this.visibilityBtn(); } catch (_) {} }
@@ -11979,7 +12003,16 @@
     // already has, and echoing it would be a write per page load.
     _hydratePrefs: function(stored) {
       if (!stored || typeof stored !== "object") return false;
-      this._prefs = Object.assign(this._defaultPrefs(), this._prefs || {}, stored);
+      var current = this._prefs || {};
+      var merged = Object.assign(this._defaultPrefs(), current, stored);
+      // A key the user set in THIS instance outranks what a slow host load
+      // (or a peer layer) answers with: their pick already happened, and a
+      // late round trip must not silently revert it to yesterday's value.
+      var touched = this._touchedPrefs || {};
+      Object.keys(touched).forEach(function(k) {
+        if (k in current) merged[k] = current[k];
+      });
+      this._prefs = merged;
       this._applyPrefs();
       return true;
     },
@@ -11993,6 +12026,8 @@
       var prefs = this._loadPrefs();
       if (prefs[name] === value) return;
       prefs[name] = value;
+      // Mark it user-set so no late _hydratePrefs answer can revert it.
+      (this._touchedPrefs = this._touchedPrefs || {})[name] = true;
       this._savePrefs();
       this._applyPrefs();
     },
@@ -12048,6 +12083,7 @@
       // to push here. The dots currently on screen do have to go, though.
       if (!this._connectorsOn()) this._removeConnectorDots();
       this._refreshToolbarTools();
+      this._refreshLabelSwatch();
     },
 
     // A palette the user has chosen for themselves. Null means they have not,

@@ -118,6 +118,9 @@ function board(targets) {
     _pushUndo: (uuid, before, after) => undos.push([uuid, before, after]),
     _emitChanged() { this.emitted++; },
     _emitLineParamsChanged() { this.paramsEmitted++; },
+    // Setting the DEFAULT also repaints whatever is being drawn right now,
+    // so the preview follows the panel — see live_draft_style_test.js.
+    _restyleDrafts() { this.restyled = (this.restyled || 0) + 1; },
   };
 }
 
@@ -179,6 +182,8 @@ function board(targets) {
   self.selectedShapes = [];
   setFontSize.call(self, 22, true);
   assert.strictEqual(self.lineParams.font_size, 22);
+  assert.ok(self.restyled > 0,
+    "a live draft picks the new size up straight away rather than on release");
   assert.strictEqual(self.paramsEmitted, 1, "the host is told, so it can persist it");
   assert.strictEqual(self.emitted, 0, "no annotation changed");
 

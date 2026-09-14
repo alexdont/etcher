@@ -6040,6 +6040,7 @@
         // converted to canvas units when a shape is actually made.
         if (value == null) delete this.lineParams.font_size;
         else this.lineParams.font_size = value;
+        this._restyleDrafts();
       }
       if (!commit) return;
       if (this._fontSizeBefore && this._fontSizeBefore.length) {
@@ -6068,6 +6069,42 @@
       // "still 18px" while the user watches it grow past 18, and the point
       // of the box is that you can trust what it says.
       this._syncFontRow();
+    },
+
+    // Re-derive a live draft's style from the current params and repaint it.
+    //
+    // A draft takes its style once, when it is created. That was fine while
+    // a draft only existed for the length of a drag, but a click now ARMS
+    // one — it sits there following the cursor until the second click — and
+    // during that time the obvious thing to do is go and set the thickness
+    // or the line type you want before committing to it. Nothing happened
+    // until the placing click, at which point the shape appeared in the
+    // style you had chosen a moment ago: the right answer, arriving too
+    // late to be useful for judging it.
+    //
+    // So the draft follows the panel. `_styleForNewShape` is the same
+    // function the commit uses, so what you are looking at while you slide
+    // the slider is exactly what you will get.
+    _restyleDrafts: function() {
+      var self = this;
+      [self.draftState, self.draftCallout].forEach(function(d) {
+        if (!d || !d.el) return;
+        d.style = self._styleForNewShape(d.kind);
+        self._applyShapeColor(
+          d.el, (d.style && d.style.color) || self.activeColor, d.style
+        );
+        self._renderShape(d);
+      });
+      // The polygon preview is drawn by its own path rather than
+      // `_renderShape`, so it takes the params directly — as it does at
+      // creation.
+      var poly = self.draftPolygon;
+      if (poly && poly.el) {
+        var ps = self._styleForNewShape("polygon");
+        self._applyShapeColor(poly.el, ps.color || self.activeColor, ps);
+        self._applyLineParams(poly.el, ps, self._markerScale());
+        self._renderPolygonPreview(self._lastHover || null);
+      }
     },
 
     _lineParamsForNewShape: function() {
@@ -6753,6 +6790,9 @@
       } else {
         this.lineParams = this.lineParams || {};
         this.lineParams[prop] = value;
+        // Anything being drawn right now is drawn with these, so it changes
+        // under the slider rather than waiting for the release.
+        this._restyleDrafts();
       }
       if (commit) {
         if (this._lineParamBefore && this._lineParamBefore.length) {
@@ -10184,12 +10224,11 @@
 
       // Apply to the in-flight draft (if any) so the user sees the new
       // color while still drawing.
-      if (this.draftState) {
-        this._applyShapeColor(this.draftState.el, color);
-      }
-      if (this.draftPolygon) {
-        this._applyShapeColor(this.draftPolygon.el, color);
-      }
+      // Every live draft, through the one restyler — the colour is part of
+      // the same style the thickness and the line type come from, and a
+      // callout draft was being missed by the two special cases this
+      // replaces.
+      this._restyleDrafts();
 
       // Shape/label application lives in _applyColorToTargets; calling it
       // here keeps _selectColor's historical combined meaning for the

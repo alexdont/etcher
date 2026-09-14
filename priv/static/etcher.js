@@ -13419,6 +13419,70 @@
     // no timer changes — so it's cheap enough to call every animation
     // frame from `_renderAll`, which is what keeps the tooltip glued to
     // the shape during pan/zoom instead of floating in stale space.
+    // The point a tooltip should hang off for an open stroke: the middle of
+    // the LINE, measured along it — not the middle of the box it happens to
+    // occupy. On a diagonal those are nowhere near each other. A line drawn
+    // corner to corner has a bbox whose top-centre sits out in empty canvas,
+    // and that is exactly where the tooltip used to appear: floating far off
+    // the thing it describes.
+    //
+    // Closed shapes are unaffected. A rectangle's or a circle's bbox top IS
+    // its top, so they keep the anchor they have always had.
+    _strokeMidpointImage: function(shape) {
+      var g = shape && shape.geometry;
+      if (!g) return null;
+      var pts = null;
+      switch (shape.kind) {
+        case "line":
+        case "dimension":
+          if (!g.a || !g.b) return null;
+          pts = [{ x: g.a[0], y: g.a[1] }, { x: g.b[0], y: g.b[1] }];
+          break;
+        case "arrow":
+          // The routed path, so a bent arrow measures along its bends
+          // rather than across the chord it never occupies.
+          pts = this._arrowPath(g);
+          break;
+        case "marker":
+        case "freehand":
+          pts = (this._freehandFlatten(g) || []).map(function(p) {
+            return { x: p[0], y: p[1] };
+          });
+          break;
+        default:
+          return null;
+      }
+      if (!pts || !pts.length) return null;
+      if (pts.length === 1) return { x: pts[0].x, y: pts[0].y };
+
+      // Half way by ARC LENGTH, not by index. A stroke is sampled densely
+      // where the hand moved slowly and sparsely where it moved fast, so
+      // the middle sample is wherever the sampling bunched up — which on a
+      // hesitant stroke is not the middle of the line at all.
+      var seg = [], total = 0, i, dx, dy;
+      for (i = 0; i < pts.length - 1; i++) {
+        dx = pts[i + 1].x - pts[i].x;
+        dy = pts[i + 1].y - pts[i].y;
+        var len = Math.sqrt(dx * dx + dy * dy);
+        seg.push(len);
+        total += len;
+      }
+      if (!(total > 0)) return { x: pts[0].x, y: pts[0].y };
+
+      var half = total / 2, run = 0;
+      for (i = 0; i < seg.length; i++) {
+        if (run + seg[i] >= half) {
+          var t = seg[i] > 0 ? (half - run) / seg[i] : 0;
+          return {
+            x: pts[i].x + (pts[i + 1].x - pts[i].x) * t,
+            y: pts[i].y + (pts[i + 1].y - pts[i].y) * t
+          };
+        }
+        run += seg[i];
+      }
+      return { x: pts[pts.length - 1].x, y: pts[pts.length - 1].y };
+    },
+
     _positionTooltip: function(shape) {
       var tip = this.tooltipEl;
       if (!tip || !shape || !shape.el) return;
@@ -13487,8 +13551,49 @@
 
       var sx = this.handle.container.scrollLeft || 0;
       var sy = this.handle.container.scrollTop  || 0;
-      var x = shapeRect.left + shapeRect.width / 2 - containerRect.left + sx;
-      var aboveY = shapeRect.top - containerRect.top - 8 + sy;
+
+      // Where the tooltip hangs from: the top-centre of the annotation's
+      // box by default, the middle of the stroke for the open kinds.
+      var anchorX = shapeRect.left + shapeRect.width / 2 - containerRect.left;
+      var anchorTop = shapeRect.top - containerRect.top;
+      var anchorBottom = shapeRect.bottom - containerRect.top;
+
+      // Strip mode renders shapes in image-px user units inside a per-image
+      // overlay, so `_imageToContainer` is the identity there and cannot
+      // place this. Canvas mode — which is where diagonals are drawn and
+      // where the complaint came from — converts properly.
+      var mid = this.handleKind === "strip" ? null : this._strokeMidpointImage(shape);
+      if (mid) {
+        var midC = null;
+        try { midC = this._imageToContainer(mid); } catch (_) { midC = null; }
+        if (midC) {
+          anchorX = midC.x;
+          anchorTop = midC.y;
+          anchorBottom = midC.y;
+          // One thing can be sitting exactly there already: a label that
+          // rides ON the stroke, which is where a dimension's sits by
+          // default. Lift over it rather than landing on the very text the
+          // tooltip is describing — the same rule the box union enforces
+          // for every other kind.
+          if (shape.titleGroup && shape.titleGroup.getBoundingClientRect) {
+            var lr = shape.titleGroup.getBoundingClientRect();
+            if (lr.width || lr.height) {
+              var lLeft = lr.left - containerRect.left;
+              var lRight = lr.right - containerRect.left;
+              var lTop = lr.top - containerRect.top;
+              var lBottom = lr.bottom - containerRect.top;
+              if (anchorX >= lLeft - 4 && anchorX <= lRight + 4 &&
+                  lBottom >= anchorTop - 4 && lTop <= anchorBottom + 4) {
+                anchorTop = Math.min(anchorTop, lTop);
+                anchorBottom = Math.max(anchorBottom, lBottom);
+              }
+            }
+          }
+        }
+      }
+
+      var x = anchorX + sx;
+      var aboveY = anchorTop - 8 + sy;
       tip.style.left = x + "px";
       tip.style.top = aboveY + "px";
       tip.style.transform = "translate(-50%, -100%)";
@@ -13502,7 +13607,7 @@
       // height. 4px breathing room either way.
       var tipRect = tip.getBoundingClientRect();
       if (tipRect.top < containerRect.top + 4) {
-        var belowY = shapeRect.bottom - containerRect.top + 8 + sy;
+        var belowY = anchorBottom + 8 + sy;
         tip.style.top = belowY + "px";
         tip.style.transform = "translate(-50%, 0)";
         tipRect = tip.getBoundingClientRect();

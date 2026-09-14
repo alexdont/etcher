@@ -3,8 +3,13 @@
 // It anchored to the top-centre of the shape's bounding box, which is right
 // for a rectangle and wrong for anything diagonal: a line drawn corner to
 // corner has a bbox whose top-centre is out in empty canvas, so the tooltip
-// floated far off the line it was describing. Open strokes now anchor to
-// the middle of the LINE, measured along it.
+// floated far off the line it was describing.
+//
+// Two separate questions, answered separately. HORIZONTALLY an open stroke
+// centres on the middle of the line, measured along it. VERTICALLY it still
+// clears the whole annotation — sitting ON the line was tried and is worse
+// than being far away, because a big bubble lying across a shape hides the
+// thing you are trying to identify.
 //
 //   node test/js/tooltip_anchor_test.js
 
@@ -132,9 +137,10 @@ const diagonal = {
 
 {
   const style = tooltipFor(diagonal);
-  assert.strictEqual(style.left, "200px", "centred on the line's middle");
-  assert.strictEqual(style.top, (150 - 8) + "px",
-    "…and just above it, not 150px away at the top of the box");
+  assert.strictEqual(style.left, "200px",
+    "horizontally centred on the line's middle, not on the box's centre-top corner");
+  assert.strictEqual(style.top, "-8px",
+    "vertically clear of the shape — above the centre, not lying across it");
   assert.strictEqual(style.transform, "translate(-50%, -100%)");
 }
 
@@ -150,41 +156,48 @@ const diagonal = {
   assert.strictEqual(style.top, "-8px", "a rectangle still hangs off its top edge");
 }
 
+// A STRAIGHT line's midpoint x is its box centre x, so the case above
+// cannot tell the two anchors apart. A bent arrow can: this one routes
+// (0,0) → (0,100) → (100,0), whose box centre is x=50 while the middle of
+// the route — 120.7 along a 241.4 path — lands at x≈14.6.
+// (Placed away from the container edge so the horizontal clamp — which
+// keeps the bubble on screen — isn't what we end up measuring.)
+const bent = {
+  kind: "arrow",
+  geometry: { a: [400, 0], b: [500, 0], points: [[400, 100]] },
+  el: { getBoundingClientRect: () => ({ left: 400, top: 0, width: 100, height: 100 }) },
+};
+
 {
-  // Strip mode can't project image px to container px, so it keeps the
-  // box anchor rather than placing the tooltip somewhere invented.
-  const style = tooltipFor(diagonal, { handleKind: "strip" });
-  assert.strictEqual(style.top, "-8px", "strip mode falls back to the box");
+  const style = tooltipFor(bent);
+  const x = parseFloat(style.left);
+  assert.ok(Math.abs(x - 414.64) < 0.1,
+    `bent arrow should centre on its route's middle (~414.6), got ${x}`);
+  assert.notStrictEqual(style.left, "450px", "not the bounding box's centre");
+  assert.strictEqual(style.top, "-8px", "still clear of the shape");
 }
 
 {
-  // No room above → flips below the ANCHOR, not below the whole box.
+  // Strip mode can't project image px to container px, so it keeps the box
+  // anchor horizontally too rather than placing the tooltip somewhere
+  // invented.
+  const style = tooltipFor(bent, { handleKind: "strip" });
+  assert.strictEqual(style.left, "450px", "strip falls back to the box centre");
+  assert.strictEqual(style.top, "-8px");
+}
+
+{
+  // No room above → flips below the shape, still centred on the line.
   const style = tooltipFor(diagonal, { tipTop: -100 });
-  assert.strictEqual(style.top, (150 + 8) + "px",
-    "the flip measures from the same point the tooltip hangs from");
+  assert.strictEqual(style.left, "200px", "still centred on the line");
+  assert.strictEqual(style.top, (300 + 8) + "px",
+    "and below everything the annotation draws, not below its middle");
   assert.strictEqual(style.transform, "translate(-50%, 0)");
 }
 
 {
-  // A label riding ON the stroke — a dimension's sits at its midpoint by
-  // default — is the one thing that can already be where the tooltip wants
-  // to go. Lift over it instead of landing on the text being described.
-  const labelled = Object.assign({}, diagonal, {
-    kind: "dimension",
-    titleGroup: {
-      getBoundingClientRect: () => ({
-        left: 160, right: 240, top: 130, bottom: 170, width: 80, height: 40,
-      }),
-    },
-  });
-  const style = tooltipFor(labelled);
-  assert.strictEqual(style.top, (130 - 8) + "px",
-    "cleared the label sitting on the midpoint");
-}
-
-{
-  // A label that floats above the box, well clear of the stroke's middle,
-  // must NOT drag the tooltip back up there — that is the bug being fixed.
+  // The label is part of what has to be cleared: it floats above the box,
+  // so the tooltip goes above IT. Horizontal centring is unaffected.
   const labelled = Object.assign({}, diagonal, {
     titleGroup: {
       getBoundingClientRect: () => ({
@@ -193,8 +206,9 @@ const diagonal = {
     },
   });
   const style = tooltipFor(labelled);
-  assert.strictEqual(style.top, (150 - 8) + "px",
-    "a label that isn't in the way leaves the anchor on the line");
+  assert.strictEqual(style.left, "200px");
+  assert.strictEqual(style.top, (-30 - 8) + "px",
+    "above the label, so it never lands on the text it is describing");
 }
 
 console.log("tooltip anchor: all checks passed");

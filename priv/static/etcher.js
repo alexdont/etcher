@@ -13558,6 +13558,14 @@
       var anchorTop = shapeRect.top - containerRect.top;
       var anchorBottom = shapeRect.bottom - containerRect.top;
 
+      // The stroke's middle fixes the tooltip HORIZONTALLY; vertically it
+      // still clears the whole annotation. Those are two different
+      // questions and they were briefly answered with one point, which put
+      // the tooltip on top of the line: a big bubble lying across the
+      // middle of a shape is harder to read than one that is merely far
+      // away. Above the centre is both — over the middle of the line, clear
+      // of everything it draws.
+      //
       // Strip mode renders shapes in image-px user units inside a per-image
       // overlay, so `_imageToContainer` is the identity there and cannot
       // place this. Canvas mode — which is where diagonals are drawn and
@@ -13566,30 +13574,10 @@
       if (mid) {
         var midC = null;
         try { midC = this._imageToContainer(mid); } catch (_) { midC = null; }
-        if (midC) {
-          anchorX = midC.x;
-          anchorTop = midC.y;
-          anchorBottom = midC.y;
-          // One thing can be sitting exactly there already: a label that
-          // rides ON the stroke, which is where a dimension's sits by
-          // default. Lift over it rather than landing on the very text the
-          // tooltip is describing — the same rule the box union enforces
-          // for every other kind.
-          if (shape.titleGroup && shape.titleGroup.getBoundingClientRect) {
-            var lr = shape.titleGroup.getBoundingClientRect();
-            if (lr.width || lr.height) {
-              var lLeft = lr.left - containerRect.left;
-              var lRight = lr.right - containerRect.left;
-              var lTop = lr.top - containerRect.top;
-              var lBottom = lr.bottom - containerRect.top;
-              if (anchorX >= lLeft - 4 && anchorX <= lRight + 4 &&
-                  lBottom >= anchorTop - 4 && lTop <= anchorBottom + 4) {
-                anchorTop = Math.min(anchorTop, lTop);
-                anchorBottom = Math.max(anchorBottom, lBottom);
-              }
-            }
-          }
-        }
+        // `anchorTop` / `anchorBottom` are left alone: the box union above
+        // already spans the shape, its label and its badge, which is what
+        // "out of the way" has to mean.
+        if (midC) anchorX = midC.x;
       }
 
       var x = anchorX + sx;

@@ -22,13 +22,6 @@ const assert = require("assert");
 const SOURCE = path.join(__dirname, "..", "..", "priv", "static", "etcher.js");
 const src = fs.readFileSync(SOURCE, "utf8");
 
-// The rate constant the lifted handler closes over.
-{
-  const m = src.match(/var WHEEL_ZOOM_RATE = ([\d.]+);/);
-  assert.ok(m, "could not find WHEEL_ZOOM_RATE");
-  global.WHEEL_ZOOM_RATE = Number(m[1]);
-}
-
 // The overlay's wheel listener is built inline, so lift the handler out of
 // the builder by running the registration against a stand-in element.
 function wheelHandler(self) {
@@ -53,15 +46,22 @@ function wheelHandler(self) {
 }
 
 function board(over) {
+  const dispatched = [];
   const zooms = [];
   const self = Object.assign({
-    zooms,
+    dispatched, zooms,
     handle: {
-      zoomAt: (px, py, k) => zooms.push([px, py, k]),
-      container: { getBoundingClientRect: () => ({ left: 40, top: 10 }) },
+      container: { dispatchEvent: (ev) => dispatched.push(ev) },
+      zoomIn: () => zooms.push("in"),
+      zoomOut: () => zooms.push("out"),
     },
   }, over || {});
   return self;
+}
+
+// A stand-in for the browser's constructable WheelEvent.
+class FakeWheelEvent {
+  constructor(type, init) { Object.assign(this, { type }, init); }
 }
 
 function wheel(over) {
@@ -73,75 +73,94 @@ function wheel(over) {
   }, over || {});
 }
 
-// ── a scroll over the drawing overlay zooms ───────────────────────────────
+// ── a scroll over the drawing overlay reaches Fresco ──────────────────────
 
 {
+  global.WheelEvent = FakeWheelEvent;
   const self = board();
   const e = wheel();
   wheelHandler(self)(e);
 
-  assert.strictEqual(self.zooms.length, 1, "the scroll reaches Fresco's zoom");
-  const [px, py, k] = self.zooms[0];
-  // Anchored on the cursor, measured against the same rect Fresco measures
-  // against (`handle.container` IS Fresco's host element), so the zoom
-  // centres where the user is pointing rather than on the viewport middle.
-  assert.strictEqual(px, 100, "x is viewport-relative");
-  assert.strictEqual(py, 100, "y is viewport-relative");
-  assert.ok(k > 1, "scrolling up zooms in");
+  assert.strictEqual(self.dispatched.length, 1,
+    "the scroll is handed back to Fresco's host");
+  const ev = self.dispatched[0];
+  assert.strictEqual(ev.type, "wheel");
+  assert.strictEqual(ev.deltaY, e.deltaY, "carrying the scroll amount");
+  assert.strictEqual(ev.clientX, e.clientX, "…and where it happened, so the");
+  assert.strictEqual(ev.clientY, e.clientY, "   zoom anchors on the cursor");
+  assert.strictEqual(ev.deltaMode, e.deltaMode,
+    "…and its unit — a line-mode scroll means something different to a pixel one");
   assert.ok(e.prevented > 0,
-    "the default is prevented, or the page scrolls behind the zoom");
+    "the real event's default is prevented, or the page scrolls behind the zoom");
+
+  // Not reimplemented. Fresco's handler anchors on the cursor, honours its
+  // own gesture allowlist and cancels animations in flight; copying that
+  // here would mean copying its rate too, and a zoom that drifts out of
+  // step with the untooled one is worse than no zoom.
+  assert.deepStrictEqual(self.zooms, [],
+    "the handle's own zoom is not used when the event can be handed back");
 }
 
 {
-  // …and the other way.
+  // No loop: the synthetic event must not bubble. This listener sits on a
+  // DESCENDANT of the host, so a bubbling re-dispatch would be caught by
+  // Fresco AND leave the door open to anything else listening up the tree.
+  global.WheelEvent = FakeWheelEvent;
   const self = board();
-  wheelHandler(self)(wheel({ deltaY: 100 }));
-  assert.ok(self.zooms[0][2] < 1, "scrolling down zooms out");
+  wheelHandler(self)(wheel());
+  assert.strictEqual(self.dispatched[0].bubbles, false, "dispatched without bubbling");
+  assert.strictEqual(self.dispatched[0].cancelable, true,
+    "…but cancelable, since Fresco calls preventDefault on it");
 }
 
-// ── at exactly Fresco's rate ──────────────────────────────────────────────
-//
-// Mirrored rather than shared: there is no API to ask Fresco what its rate
-// is. If the two ever diverge, zoom would change speed depending on whether
-// a tool happened to be armed — so the constant is named, and this reads
-// the real number out of Fresco to compare.
+// ── fallback when there is no constructable WheelEvent ────────────────────
 
 {
-  const frescoSrc = fs.readFileSync(
-    path.join(__dirname, "..", "..", "..", "fresco", "priv", "static", "fresco.js"),
-    "utf8"
-  );
-  const theirs = frescoSrc.match(/Math\.exp\(-e\.deltaY \* ([\d.]+)\)/);
-  assert.ok(theirs, "could not find Fresco's wheel rate — did its handler change?");
-
-  const ours = src.match(/var WHEEL_ZOOM_RATE = ([\d.]+);/);
-  assert.ok(ours, "could not find WHEEL_ZOOM_RATE");
-  assert.strictEqual(ours[1], theirs[1],
-    "the overlay zooms at a different rate than bare canvas does");
-
-  // And the forwarded factor really is that formula.
+  delete global.WheelEvent;
   const self = board();
-  wheelHandler(self)(wheel({ deltaY: -200 }));
-  assert.ok(Math.abs(self.zooms[0][2] - Math.exp(200 * Number(theirs[1]))) < 1e-12);
+  const e = wheel({ deltaY: -100 });
+  wheelHandler(self)(e);
+  assert.deepStrictEqual(self.dispatched, [], "nothing to dispatch with");
+  assert.deepStrictEqual(self.zooms, ["in"], "so the handle's own zoom is used");
+  assert.ok(e.prevented > 0);
+
+  const out = board();
+  wheelHandler(out)(wheel({ deltaY: 100 }));
+  assert.deepStrictEqual(out.zooms, ["out"], "and the other direction");
 }
 
 // ── it stays out of the way when there is nothing to zoom ─────────────────
 
 {
-  // Strip mode and any other host without a canvas zoom: no handle, no
-  // zoomAt, no container. None of them may throw, and none may swallow the
-  // event — a host that scrolls its own container still needs the scroll.
+  // No handle, no container, no zoom API. None may throw, and none may
+  // swallow the event — a host that scrolls its own container still needs
+  // the scroll. (Strip mode has no overlay wrapper at all, so it never
+  // reaches this, but a handle can arrive half-built.)
+  delete global.WheelEvent;
   for (const broken of [
     { handle: null },
     { handle: {} },
-    { handle: { zoomAt: () => {} } },
-    { handle: { container: {} } },
+    { handle: { container: { dispatchEvent: () => {} } } },
   ]) {
     const e = wheel();
-    wheelHandler(board(broken))(e);
+    const self = board(broken);
+    wheelHandler(self)(e);
     assert.strictEqual(e.prevented, 0,
-      "an unzoomable host must let the scroll through untouched");
+      `an unzoomable host must let the scroll through untouched: ${JSON.stringify(Object.keys(broken.handle || {}))}`);
   }
+
+  // A host object that cannot receive events — the case the dispatchEvent
+  // guard exists for. Without it this throws on the way past, taking the
+  // scroll with it.
+  global.WheelEvent = FakeWheelEvent;
+  const noDispatch = board({
+    handle: { container: {}, zoomIn: () => {}, zoomOut: () => {} },
+  });
+  const e = wheel();
+  assert.doesNotThrow(() => wheelHandler(noDispatch)(e),
+    "a container that cannot receive events must not throw");
+  assert.strictEqual(e.prevented, 0, "…and must not swallow the scroll either");
+  delete global.WheelEvent;
 }
 
 // ── the attribute that caused it is still there ───────────────────────────
@@ -155,7 +174,25 @@ function wheel(over) {
   assert.ok(build.includes('wrapper.setAttribute("data-fresco-no-capture", "");'),
     "the overlay still claims pointer input");
   assert.ok(build.includes('wrapper.addEventListener("wheel"'),
-    "…and forwards the wheel it never meant to claim");
+    "…and hands back the wheel it never meant to claim");
+}
+
+// The public handle really does not have `zoomAt` — the first attempt at
+// this called it and silently did nothing, because the guard in front of it
+// was never satisfied. Pinned so nobody reaches for it again.
+{
+  const frescoSrc = fs.readFileSync(
+    path.join(__dirname, "..", "..", "..", "fresco", "priv", "static", "fresco.js"),
+    "utf8"
+  );
+  const handles = frescoSrc.split("container: el,").slice(1);
+  assert.ok(handles.length >= 1, "could not find Fresco's public handles");
+  for (const h of handles) {
+    const surface = h.slice(0, h.indexOf("\n    };"));
+    assert.ok(!/^\s*zoomAt:/m.test(surface),
+      "Fresco now exposes zoomAt on its handle — this could call it directly " +
+      "and anchor the zoom without a synthetic event");
+  }
 }
 
 console.log("wheel zoom: all checks passed");

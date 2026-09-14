@@ -1861,11 +1861,6 @@
   // whole connector or dimension scales as one object.
   var LINE_WEIGHT_PX = 2;
 
-  // Fresco's own wheel-zoom rate, mirrored so a scroll over the drawing
-  // overlay zooms by exactly as much as a scroll over bare canvas. If this
-  // and Fresco's ever diverge, zooming would change speed depending on
-  // whether a tool happened to be armed.
-  var WHEEL_ZOOM_RATE = 0.0015;
 
   // Connector dots are green rather than the shape's own colour: they're a
   // fixed piece of interface, like a cursor, and taking the shape's colour
@@ -3905,23 +3900,48 @@
       // the grabber hands it back deliberately), which is what made the
       // gap look like a quirk of drawing rather than a dead scroll wheel.
       //
-      // Forwarded rather than let through: Fresco's check is on the event
-      // target, so there is nothing to opt out of from here short of
-      // dropping the attribute and losing pan suppression with it. The
-      // maths is Fresco's own — same exponential factor, same
-      // viewport-relative anchor, and `container` IS the element Fresco
-      // measures against — so a scroll zooms about the cursor identically
-      // whether a tool is held or not.
+      // Fresco's check is on the event TARGET, so there is nothing to opt
+      // out of from here short of dropping the attribute and losing pan
+      // suppression with it. Instead the scroll is handed BACK to Fresco as
+      // if it had landed on its host element, which is what it would have
+      // done if the overlay weren't in the way.
+      //
+      // Re-dispatched rather than reimplemented. Fresco's wheel handler
+      // anchors the zoom on the cursor, honours its own gesture allowlist,
+      // and cancels any animation in flight — reproducing that here would
+      // mean copying its rate and its maths, and a zoom that drifts out of
+      // step with the untooled one is worse than no zoom at all. (An
+      // earlier version did exactly that, against a `zoomAt` the public
+      // handle does not expose. It silently did nothing.)
+      //
+      // No loop: the synthetic event is dispatched on the host with
+      // `bubbles: false`, and this listener is on a DESCENDANT of it, so
+      // only the host's own handler sees it.
       wrapper.addEventListener("wheel", function(e) {
+        var host = self.handle && self.handle.container;
+        if (!host || typeof host.dispatchEvent !== "function") return;
+
+        if (typeof WheelEvent === "function") {
+          e.preventDefault();
+          host.dispatchEvent(new WheelEvent("wheel", {
+            deltaX: e.deltaX, deltaY: e.deltaY, deltaZ: e.deltaZ,
+            deltaMode: e.deltaMode,
+            clientX: e.clientX, clientY: e.clientY,
+            ctrlKey: e.ctrlKey, shiftKey: e.shiftKey,
+            altKey: e.altKey, metaKey: e.metaKey,
+            bubbles: false, cancelable: true
+          }));
+          return;
+        }
+
+        // No constructable WheelEvent: fall back to the handle's own zoom.
+        // Centred on the viewport rather than the cursor, which is worse —
+        // but a scroll that zooms the wrong centre still beats one that
+        // does nothing.
         var h = self.handle;
-        if (!h || typeof h.zoomAt !== "function" || !h.container) return;
+        if (typeof h.zoomIn !== "function" || typeof h.zoomOut !== "function") return;
         e.preventDefault();
-        var rect = h.container.getBoundingClientRect();
-        h.zoomAt(
-          e.clientX - rect.left,
-          e.clientY - rect.top,
-          Math.exp(-e.deltaY * WHEEL_ZOOM_RATE)
-        );
+        if (e.deltaY < 0) h.zoomIn(); else h.zoomOut();
       }, { passive: false });
 
       wrapper.addEventListener("pointerdown", function(e) {

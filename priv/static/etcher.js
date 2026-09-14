@@ -12942,6 +12942,11 @@
       if (e.button !== 0) return;
       var pt = this._toImage(e);
 
+      // A draft left waiting for its second click owns this press: the
+      // gesture already in flight finishes rather than a new one starting
+      // on top of it.
+      if (this._placeArmedDraft(pt)) return;
+
       switch (this.activeTool) {
         case "rectangle": this._startRectangle(pt, e); break;
         case "circle":    this._startCircle(pt, e); break;
@@ -12954,6 +12959,43 @@
         case "line":      this._startLine(pt, e); break;
         case "eraser":    this._startErase(pt, e); break;
       }
+    },
+
+    // Dimensions, lines and callouts can be drawn either way.
+    //
+    // Press, drag, release draws one in a single gesture, previewing as you
+    // go. Or click once and click again where the far end goes — which is
+    // how you place one whose ends are further apart than a comfortable
+    // drag, and how you place one precisely without holding a button down.
+    //
+    // A click leaves the draft ARMED: it keeps following the cursor, so the
+    // first click has visible, obvious consequences. (Two-click was tried
+    // before without that preview and removed, because a first click that
+    // changes nothing on screen reads as the tool being broken. The preview
+    // is the difference.)
+    //
+    // Returns true when the press was consumed.
+    _placeArmedDraft: function(pt) {
+      var draft = null;
+      if (this.draftState && this.draftState.armed) draft = this.draftState;
+      else if (this.draftCallout && this.draftCallout.armed) draft = this.draftCallout;
+      if (!draft) return false;
+
+      var anchor = draft.kind === "callout"
+        ? { x: draft.geometry.anchor[0], y: draft.geometry.anchor[1] }
+        : draft.anchor;
+
+      // The second click landed on the first. Almost always a double-click
+      // — people double-click things — and there is no shape to make from
+      // one point. Consume it and change nothing: the draft stays armed and
+      // keeps following the cursor, so the next click still places the far
+      // end. Committing here is what used to leave a trail of zero-length
+      // arrows behind an impatient user.
+      if (this._isClickGesture(anchor, pt)) return true;
+
+      if (draft === this.draftCallout) this._commitCallout(pt, true);
+      else this._commitShaftDraft({ a: [anchor.x, anchor.y], b: [pt.x, pt.y] });
+      return true;
     },
 
     _onPointerMove: function(e) {
@@ -16300,8 +16342,9 @@
         this.svg.appendChild(g);
 
         // Default-sized text bbox up-and-right of the anchor (see
-        // `_calloutDefaultBox`) — what a bare click commits; a drag moves
-        // the box before release, and post-commit handle drags refine it.
+        // `_calloutDefaultBox`) — where the preview starts. A drag moves the
+        // box before release, a second click places it, and post-commit
+        // handle drags refine it.
         var defaultBox = this._calloutDefaultBox(pt);
 
         this.draftCallout = {
@@ -16331,41 +16374,35 @@
     // user still has to come back for. This replaced the two-click flow
     // (anchor click, rubber-band, placement click), which testers read as
     // the first click having done nothing.
-    _commitCallout: function(pt) {
+    _commitCallout: function(pt, second) {
       var draft = this.draftCallout;
       if (!draft) return;
       var anchor = draft.geometry.anchor;
       var box = draft.geometry.text_box;
-      var geom;
-      if (this._isClickGesture({ x: anchor[0], y: anchor[1] }, pt)) {
-        // Rebuilt from the anchor rather than read off the draft: ANY
-        // pointermove between press and release — including the move
-        // browsers synthesize at the click point itself — runs
-        // `_calloutHover`, which re-centers the draft box on the cursor.
-        // Trusting the draft here committed every clicked callout with
-        // its box sitting exactly on the anchor, leader collapsed to
-        // nothing. (Found live: the persisted text_box.x equaled
-        // anchor[0] to the last float digit.)
-        geom = {
-          anchor: anchor,
-          text_box: this._calloutDefaultBox({ x: anchor[0], y: anchor[1] })
-        };
-      } else {
-        geom = {
-          anchor: anchor,
-          text_box: { x: pt.x, y: pt.y - box.h / 2, w: box.w, h: box.h }
-        };
+      // Release without a drag arms the draft for a second click instead of
+      // committing where the label happens to be previewing. `second` is the
+      // placing click itself, which is past the threshold by the time it
+      // gets here — see `_placeArmedDraft`.
+      if (!second && this._isClickGesture({ x: anchor[0], y: anchor[1] }, pt)) {
+        draft.armed = true;
+        return;
       }
+      var geom = {
+        anchor: anchor,
+        text_box: { x: pt.x, y: pt.y - box.h / 2, w: box.w, h: box.h }
+      };
       var el = draft.el;
       el.classList.remove("is-draft");
       this.draftCallout = null;
       this._finalizeLabeled("callout", geom, el);
     },
 
-    // The text box a bare-click callout gets: up-and-right of the anchor,
-    // far enough that the leader reads as a real diagonal (≈40°) rather
-    // than a nudge — a callout IS "a line pointing at something", and a
-    // short hop draws a leader too short to read as one.
+    // Where a fresh callout draft's text box starts: up-and-right of the
+    // anchor, far enough that the leader reads as a real diagonal (≈40°)
+    // rather than a nudge — a callout IS "a line pointing at something",
+    // and a short hop draws a leader too short to read as one. It is what
+    // the preview shows before the pointer has moved; where the label ends
+    // up is wherever the drag or the second click puts it.
     _calloutDefaultBox: function(pt) {
       var basePx = this._textDefaultBoxImagePx();
       var h = basePx * 1.4;
@@ -16462,22 +16499,21 @@
     },
 
     _commitDimension: function(pt) {
-      // Click → a default-length horizontal placeholder centered on the
-      // point; drag → exactly the span that was dragged. This replaced the
-      // two-click rubberband (release armed the draft, the next click
-      // placed the far end): a mode with no visible affordance that
-      // testers read as the first click having done nothing. Judged by
-      // `_isClickGesture`, not the 3px `dragged` flag, so a hand-jitter
-      // "drag" still counts as a click, and no degenerate-length guard is
-      // needed — anything past the click threshold is a real span.
+      // Drag → exactly the span that was dragged. Click → ARM: the draft
+      // keeps following the cursor and the next click places the far end.
+      //
+      // A click used to commit a default-length horizontal stub. Nobody
+      // wants a stub — it is a shape you then have to drag into place — and
+      // it made a double-click produce two of them. Judged by
+      // `_isClickGesture`, not by a pixel count, so a hand-jitter "drag"
+      // still counts as a click at any zoom.
       var a = this.draftState.anchor;
       if (this._isClickGesture(a, pt)) {
-        var half = this._clickPlaceSizeImagePx() / 2;
-        this._commitShaftDraft({ a: [a.x - half, a.y], b: [a.x + half, a.y] });
-      } else {
-        if (this.draftState.shift) pt = this._constrainShaftPoint(a, pt);
-        this._commitShaftDraft({ a: [a.x, a.y], b: [pt.x, pt.y] });
+        this.draftState.armed = true;
+        return;
       }
+      if (this.draftState.shift) pt = this._constrainShaftPoint(a, pt);
+      this._commitShaftDraft({ a: [a.x, a.y], b: [pt.x, pt.y] });
     },
 
     // Finalize the dimension / line draft with the given endpoints.

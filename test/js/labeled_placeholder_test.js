@@ -1,17 +1,17 @@
-// Pins how the dimension and callout tools complete a gesture.
+// Pins what a COMPLETED dimension / callout gesture produces.
 //
-// Both used a two-click flow: release armed the draft, and only the NEXT
-// click placed the far end. A mode with no visible affordance — testers
-// read the first click as the tool having done nothing. Now pointerup ends
-// the gesture like every other tool: a bare click places a default-sized
-// placeholder centered on (dimension) or anchored at (callout) the point,
-// and a press-drag-release places exactly what was dragged. Both kinds
-// then drop straight into label editing — selected, inline input open,
-// waiting for text — because a dimension or callout without a label is a
-// shape the user still has to come back for. Lines share the machinery
-// but stay label-silent: consumers collect line titles via their own
-// composer on `etcher:shape-drawn`, and stacking two inputs confuses
-// where to type.
+// A press-drag-release places exactly what was dragged, and both kinds then
+// drop straight into label editing — selected, inline input open, waiting
+// for text — because a dimension or callout without a label is a shape the
+// user still has to come back for. Lines share the machinery but stay
+// label-silent: consumers collect line titles via their own composer on
+// `etcher:shape-drawn`, and stacking two inputs confuses where to type.
+//
+// What a CLICK does is two_click_place_test.js's subject: it arms the draft
+// for a second click rather than committing anything, so there is no
+// placeholder to assert here any more. (A click used to commit a
+// default-sized stub. Two-click before that had no live preview, which is
+// why it was removed and why it works now.)
 //
 //   node test/js/labeled_placeholder_test.js
 
@@ -75,19 +75,15 @@ function ctx(draft) {
   return c;
 }
 
-// ── dimension: click → centered placeholder, label editor open ──────────────
+// ── dimension: click → armed, nothing placed yet ────────────────────────────
 
 {
   const c = ctx({ state: { kind: "dimension", anchor: { x: 200, y: 100 } } });
   commitDimension.call(c, { x: 201, y: 100 }); // 1px of jitter
-  const f = c.out.finalized;
-  assert.ok(f, "a click should place a dimension, not arm a hidden mode");
-  assert.deepStrictEqual(f.geom, { a: [200 - SIZE / 2, 100], b: [200 + SIZE / 2, 100] },
-    `the placeholder must span the default length centered on the click, got ${JSON.stringify(f.geom)}`);
-  assert.deepStrictEqual(c.out.edit, [["edit", "u1"], ["label", "u1"]],
-    "a placed dimension must be selected and drop into label editing — edit mode first, editor on top");
-  assert.ok(c._suppressEditDismissUntil > Date.now(),
-    "the dismiss guard is not armed — the gesture's own click will tear the selection down");
+  assert.ok(!c.out.finalized,
+    "a click places nothing — it arms the draft for the click that sets the far end");
+  assert.strictEqual(c.draftState.armed, true);
+  assert.deepStrictEqual(c.out.edit, [], "and opens no label editor for a shape that isn't there");
 }
 
 // ── dimension: drag → exactly the dragged span, label editor open ───────────
@@ -106,9 +102,8 @@ function ctx(draft) {
 {
   const c = ctx({ state: { kind: "line", anchor: { x: 50, y: 50 } } });
   commitDimension.call(c, { x: 50, y: 50 });
-  assert.ok(c.out.finalized, "a click should place a line placeholder");
-  assert.deepStrictEqual(c.out.edit, [],
-    "a line must NOT auto-open the label editor — consumers collect line titles via their composer");
+  assert.ok(!c.out.finalized, "a clicked line arms too — same gesture, same rule");
+  assert.strictEqual(c.draftState.armed, true);
 }
 {
   const c = ctx({ state: { kind: "line", anchor: { x: 0, y: 0 } } });
@@ -117,31 +112,22 @@ function ctx(draft) {
   assert.deepStrictEqual(c.out.edit, [], "a dragged line stays label-silent too");
 }
 
-// ── callout: click → diagonal placeholder REBUILT from the anchor ───────────
+// ── callout: click → armed, nothing placed yet ──────────────────────────────
 
-// The draft's box cannot be trusted at commit: any pointermove between
-// press and release — including the move browsers synthesize at the click
-// point itself — runs `_calloutHover`, which re-centers the draft box on
-// the cursor. Committing the draft as-is shipped every clicked callout
-// with its box sitting exactly on the anchor, leader collapsed to nothing
-// (caught live: the persisted text_box.x equaled anchor[0] to the last
-// float digit). So the click branch must rebuild from the anchor.
+// This block used to pin a subtle bug in the click branch: the draft's box
+// could not be trusted at commit, because any pointermove between press and
+// release — including the move browsers synthesize at the click point
+// itself — runs `_calloutHover` and re-centers the box on the cursor, so a
+// clicked callout committed with its box on the anchor and its leader
+// collapsed to nothing. There is no click branch to get wrong now; a click
+// arms, and the placing click is somewhere the user actually pointed.
 {
-  // The clobbered state hover leaves behind: box centered on the cursor.
   const clobbered = { x: 200, y: 89, w: 96, h: 22.4 };
   const c = ctx({ callout: { kind: "callout", geometry: { anchor: [200, 100], text_box: clobbered } } });
   commitCallout.call(c, { x: 200, y: 101 });
-  const f = c.out.finalized;
-  assert.ok(f, "a click should commit the callout placeholder");
-  assert.deepStrictEqual(f.geom.text_box, calloutDefaultBox.call(c, { x: 200, y: 100 }),
-    "a bare click must rebuild the default-offset box from the anchor — the draft's box was re-centered onto the cursor by hover");
-  assert.ok(f.geom.text_box.x > 200 + 16 * 2,
-    "the rebuilt box does not clear the anchor to the right — the leader reads as a nudge");
-  assert.ok(f.geom.text_box.y + f.geom.text_box.h < 100 - 16 * 2,
-    "the rebuilt box's bottom does not clear the anchor upward — the leader is nearly horizontal");
-  assert.deepStrictEqual(c.out.edit, [["edit", "u1"], ["label", "u1"]],
-    "a placed callout must drop into label editing — a callout IS a label");
-  assert.strictEqual(c.draftCallout, null, "the draft must be cleared on commit");
+  assert.ok(!c.out.finalized, "a click places nothing");
+  assert.strictEqual(c.draftCallout.armed, true, "it arms for the placing click");
+  assert.deepStrictEqual(c.out.edit, []);
 }
 
 // ── callout: drag → box centered on the release point ───────────────────────

@@ -16697,21 +16697,36 @@
         return true;
       }
       var g = shape.geometry;
+      // A shape you can see through is grabbed by its EDGE, not its middle.
+      var edgeOnly = !this._bodyIsHittable(shape);
+      var edgeTol = edgeOnly ? this._edgeGrabTolerance(shape) : 0;
       switch (shape.kind) {
         case "image":
         case "rectangle":
         case "audio":
         case "video":
+          if (edgeOnly) return this._nearRectEdge(g, pt, edgeTol);
           return inRect(g);
         case "text":
           return inRect(shape._renderedBox || g);
         case "circle": {
+          if (edgeOnly) {
+            var er = Math.sqrt((pt.x - g.cx) * (pt.x - g.cx) +
+                               (pt.y - g.cy) * (pt.y - g.cy));
+            return Math.abs(er - g.r) <= edgeTol;
+          }
           var dx = pt.x - g.cx, dy = pt.y - g.cy;
           return dx * dx + dy * dy <= g.r * g.r;
         }
-        case "marker":
         case "polygon":
+          if (edgeOnly) return this._nearPolygonEdge(g.points || [], pt, true, edgeTol);
+          return this._shapeContainsImagePoint(shape, pt);
         case "freehand":
+          // Freehand's own test already tries the stroke first and only then
+          // the enclosed area, so edge-only is just the first half of it.
+          if (edgeOnly) return this._strokeNearPoint(shape, pt);
+          return this._shapeContainsImagePoint(shape, pt);
+        case "marker":
           return this._shapeContainsImagePoint(shape, pt);
         case "callout": {
           var box = shape._renderedBox || this._calloutTextBoxImage(g);
@@ -16772,6 +16787,67 @@
       var t = ((pt.x - p.x) * dx + (pt.y - p.y) * dy) / lenSq;
       t = Math.max(0, Math.min(1, t));
       return { x: p.x + t * dx, y: p.y + t * dy };
+    },
+
+    // Is this shape's BODY something to aim at?
+    //
+    // No, when you can see straight through it. The hatch fill is mostly
+    // gaps, so a region drawn with it is a window, not a surface — and
+    // making the window a click target means one big hatched annotation
+    // swallows every click inside it, including the shapes underneath that
+    // the user can plainly see and is trying to reach. Those shapes are
+    // grabbed by their outline instead, which is the part that is actually
+    // drawn.
+    //
+    // "none" deliberately still takes a body hit: it has been that way since
+    // the beginning, an outline-only shape is often a big empty box drawn
+    // around something, and quietly making those unclickable in the middle
+    // is a change nobody asked for.
+    _bodyIsHittable: function(shape) {
+      var fill = shape && shape.style && shape.style.fill;
+      return fill !== "pattern";
+    },
+
+    // How close to an edge counts as ON it. The same tolerance a line or an
+    // arrow is grabbed by, so aiming at a hatched shape's outline feels like
+    // aiming at any other stroke — and it scales with zoom for the same
+    // reason theirs does.
+    _edgeGrabTolerance: function(shape) {
+      var tol = this._textDefaultBoxImagePx() * 0.6;
+      // A fat outline is a bigger target than a hairline; half its width is
+      // already "on the line" before any grab pad is added.
+      var w = shape && shape.style && shape.style.width;
+      if (typeof w === "number" && isFinite(w)) {
+        var px = shape.style.width_units === "canvas" ? w : w / (this._markerScale() || 1);
+        tol = Math.max(tol, px / 2);
+      }
+      return tol;
+    },
+
+    _nearRectEdge: function(box, pt, tol) {
+      if (!box) return false;
+      var x1 = box.x, y1 = box.y, x2 = box.x + box.w, y2 = box.y + box.h;
+      return this._nearPolygonEdge(
+        [[x1, y1], [x2, y1], [x2, y2], [x1, y2]], pt, true, tol
+      );
+    },
+
+    // Within tolerance of any edge of the ring `pts`. `close` joins the last
+    // point back to the first, which is what makes a polygon's final side
+    // count as an edge like every other.
+    _nearPolygonEdge: function(pts, pt, close, tol) {
+      if (!pts || pts.length < 2) return false;
+      if (tol == null) tol = this._textDefaultBoxImagePx() * 0.6;
+      // Geometry stores vertices as `[x, y]` tuples; the segment maths works
+      // in `{x, y}`.
+      function at(i) { return { x: pts[i][0], y: pts[i][1] }; }
+      for (var i = 0; i < pts.length - 1; i++) {
+        if (this._nearSegment(pt, at(i), at(i + 1), tol)) return true;
+      }
+      if (close && pts.length > 2) {
+        if (this._nearSegment(pt, at(pts.length - 1), at(0), tol)) return true;
+      }
+      return false;
     },
 
     // Is `pt` within `tol` image px of the segment `p`→`q`?

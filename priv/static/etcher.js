@@ -1982,15 +1982,20 @@
   function grabberCursor() {
     if (grabberCursorCache) return grabberCursorCache;
     var hand = CURSOR_BADGES.grabber;
-    // Solid white hand, not a hollow outline: the fat white pass doubles
-    // as silhouette AND fill, the top pass re-fills white and draws the
-    // black contour (its finger-separator strokes read as black lines on
-    // the white glove). A hollow hand disappeared into light imagery.
+    // Solid white glove with a black contour. The glyph's own paths are
+    // OPEN (a fill closes each along a chord and leaves palm gaps), so a
+    // dedicated CLOSED silhouette underlay covers the whole hand —
+    // fingers block, pinky column, palm bowl, thumb heel — and the glyph
+    // passes draw silhouette edge + finger lines on top of it.
+    var silhouette =
+      '<path d="M5 3.5Q5 2 6.5 2H17Q19 2 19 4V6.5H20Q22 6.5 22 9V14' +
+      'Q22 22 14 22H12Q8.5 22 6.3 19.3L2.9 15.8Q1.6 14.4 3.1 13.2' +
+      'Q4.3 12.3 5 13Z"/>';
     var svg =
       '<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28">' +
       '<g transform="translate(2 2)">' +
-      '<g fill="#fff" stroke="#fff" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round">' + hand + '</g>' +
-      '<g fill="#fff" stroke="#000" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + hand + '</g>' +
+      '<g fill="#fff" stroke="#fff" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round">' + silhouette + hand + '</g>' +
+      '<g fill="none" stroke="#000" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + hand + '</g>' +
       '</g></svg>';
     grabberCursorCache =
       'url("data:image/svg+xml,' + encodeURIComponent(svg) + '") 14 14, grab';

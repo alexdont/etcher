@@ -247,10 +247,17 @@ assert.ok(
   // fill:none build disappeared into light imagery.
   const start = src.indexOf("function grabberCursor()");
   const body = src.slice(start, src.indexOf("var toolCursorCache", start));
-  assert.ok(!body.includes('fill="none"'), "no hollow passes in the cursor");
+  assert.ok(
+    body.includes("var silhouette =") && body.includes('Z"/>'),
+    "a CLOSED silhouette path backs the open glyph paths - their chord fills leave palm gaps"
+  );
+  assert.ok(
+    body.indexOf("silhouette + hand") < body.indexOf('stroke="#000"'),
+    "the filled silhouette renders under the black contour"
+  );
   assert.strictEqual(
     (body.match(/fill="#fff"/g) || []).length,
-    2,
-    "both passes fill white"
+    1,
+    "exactly the silhouette pass fills white; the contour pass stays fill:none or its chord-fills overpaint the finger lines"
   );
 }

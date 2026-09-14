@@ -1947,8 +1947,9 @@
   // drawn twice (wide white underlay, then black) so the cursor stays
   // legible over any imagery. Built lazily into data-URI cursor values;
   // plain `crosshair` remains the fallback for browsers that reject
-  // SVG cursors. The cursor tool keeps the native arrow and the grabber
-  // keeps `grab` — those are set elsewhere.
+  // SVG cursors. The cursor tool keeps the native arrow; the grabber gets
+  // its own full-size hand cursor below (`grabberCursor`), built from the
+  // same glyph as its toolbar button.
   // ===========================================================================
 
   var CURSOR_BADGES = {
@@ -1957,11 +1958,11 @@
     polygon:   '<path d="M12 3.5 21 9.5 18 20H6L3 9.5 12 3.5Z"/>',
     freehand:  '<g transform="rotate(-10 12 12)"><path d="M4.5 15.5A7.6 7.6 0 0 1 19.5 15.5"/><path stroke-dasharray="2.4 2" d="M4.5 15.5 19.5 15.5"/><circle cx="4.5" cy="15.5" r="1.5"/><circle cx="19.5" cy="15.5" r="1.5"/></g>',
     marker:    '<g transform="rotate(45 12 12)"><path d="M10 2h4a1 1 0 0 1 1 1v7h-6V3a1 1 0 0 1 1-1Z"/><path d="M9 10h6l-1 4h-4l-1-4Z"/><path d="M11.2 14h1.6v3h-1.6z"/></g><path d="M3 21c3-1.5 6-1.5 8-1"/>',
-    // The grabber never reaches `toolCursor` — panning gets the native `grab`
-    // hand, and `drawingNow` excludes it — so this is not the local cursor.
-    // It is here for hosts drawing OTHER people: without it, someone panning
-    // is the only tool that shows up as an anonymous arrow. Same hand as the
-    // toolbar button, so it reads as the tool they picked.
+    // Shared by two consumers: hosts drawing OTHER people (without it,
+    // someone panning is the only tool that shows as an anonymous arrow)
+    // and `grabberCursor` below, which builds the LOCAL pointer from it —
+    // so toolbar button, remote badge and cursor are one hand by
+    // construction.
     grabber:   '<path stroke-linecap="round" stroke-linejoin="round" d="M18 11V6a2 2 0 0 0-2-2 2 2 0 0 0-2 2"/><path stroke-linecap="round" stroke-linejoin="round" d="M14 10V4a2 2 0 0 0-2-2 2 2 0 0 0-2 2v2"/><path stroke-linecap="round" stroke-linejoin="round" d="M10 10.5V6a2 2 0 0 0-2-2 2 2 0 0 0-2 2v8"/><path stroke-linecap="round" stroke-linejoin="round" d="m7 15-1.76-1.76a2 2 0 0 0-2.83 2.82l3.6 3.6C7.5 21.14 9.2 22 12 22h2a8 8 0 0 0 8-8V7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v3"/>',
     callout:   '<circle cx="3.5" cy="20" r="2"/><path d="M4 19.5 8.5 14 21 14"/>',
     text:      '<path d="M5 6h14M12 6v12"/>',
@@ -1969,6 +1970,28 @@
     line:      '<path d="M5 19 19 5"/>',
     eraser:    '<path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/>'
   };
+
+  // The grabber's pointer is the toolbar hand itself — the parity every
+  // drawing app keeps, where arming the hand tool puts the same hand under
+  // your finger. Native `grab` draws the OS's hand, which matches nothing
+  // in the toolbar. Same white-underlay/black-stroke legibility trick as
+  // toolCursor, but full-size and hotspot-centered: a hand has no
+  // precision point, so its middle is the pointer's middle. `grab` stays
+  // as the fallback for browsers that reject SVG cursors.
+  var grabberCursorCache = null;
+  function grabberCursor() {
+    if (grabberCursorCache) return grabberCursorCache;
+    var hand = CURSOR_BADGES.grabber;
+    var svg =
+      '<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28">' +
+      '<g transform="translate(2 2)">' +
+      '<g fill="none" stroke="#fff" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round">' + hand + '</g>' +
+      '<g fill="none" stroke="#000" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + hand + '</g>' +
+      '</g></svg>';
+    grabberCursorCache =
+      'url("data:image/svg+xml,' + encodeURIComponent(svg) + '") 14 14, grab';
+    return grabberCursorCache;
+  }
 
   var toolCursorCache = {};
   function toolCursor(key) {
@@ -9307,7 +9330,7 @@
       // the click-through overlay to Fresco for panning. Cleared when leaving
       // the tool (strip mode already manages its own cursor above).
       if (self.handle && self.handle.container) {
-        if (grabbing) self.handle.container.style.cursor = "grab";
+        if (grabbing) self.handle.container.style.cursor = grabberCursor();
         else if (self.handleKind !== "strip") {
           // Cursor tool while annotating: drag-pan is locked (drag means
           // box-select / shape-move), so Fresco's `grab` affordance would

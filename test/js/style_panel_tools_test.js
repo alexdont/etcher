@@ -201,3 +201,43 @@ assert.ok(
   src.includes('etcher-label-swatch-text'),
   "the label swatch is a labelled row, not a bare tile"
 );
+
+// ── the grabber's cursor is the toolbar hand ────────────────────────────────
+
+// The parity every drawing app keeps: arming the hand tool puts the same
+// hand under your finger. Native `grab` drew the OS's hand, which matches
+// nothing in the toolbar.
+
+function pathData(fragment) {
+  return (fragment.match(/d="[^"]+"/g) || []).sort();
+}
+
+{
+  const iconStart = src.indexOf("grabber: '<svg");
+  const icon = src.slice(iconStart, src.indexOf("',", iconStart));
+  const badgeStart = src.indexOf("grabber:   '<path");
+  const badge = src.slice(badgeStart, src.indexOf("',", badgeStart));
+
+  assert.deepStrictEqual(
+    pathData(icon),
+    pathData(badge),
+    "toolbar icon and cursor glyph must be the same hand, path for path"
+  );
+}
+
+assert.ok(
+  src.includes("function grabberCursor()"),
+  "the grabber has its own cursor builder"
+);
+assert.ok(
+  src.includes("var hand = CURSOR_BADGES.grabber;"),
+  "the cursor is built FROM the shared glyph, not a copy"
+);
+assert.ok(
+  src.includes("self.handle.container.style.cursor = grabberCursor();"),
+  "arming the grabber applies the hand cursor"
+);
+assert.ok(
+  src.includes(" 14 14, grab"),
+  "hotspot centered, native grab kept as the fallback"
+);

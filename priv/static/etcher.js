@@ -13509,6 +13509,55 @@
       return Math.max(0.4, w);
     },
 
+    // Every point the tooltip has to stay clear of, in container px: the
+    // stroke's own path, plus the label and badge that travel with it.
+    //
+    // The path is the CENTRE line, so callers still have to allow for half
+    // the stroke width on top. And the fill needs no separate treatment: a
+    // body is bounded by its outline, so anything clear of the outline is
+    // clear of the body too.
+    _tooltipClearancePts: function(shape, containerRect) {
+      var self = this;
+      var g = shape && shape.geometry;
+      var pts = null;
+      switch (shape && shape.kind) {
+        case "line":
+        case "dimension":
+          if (g && g.a && g.b) {
+            pts = [{ x: g.a[0], y: g.a[1] }, { x: g.b[0], y: g.b[1] }];
+          }
+          break;
+        case "arrow":
+          pts = this._arrowPath(g);
+          break;
+        case "marker":
+        case "freehand":
+          // Flattened, so a curve is followed where it actually goes rather
+          // than between its sparse anchors — which is the whole point for a
+          // stroke that wanders back across itself.
+          pts = (this._freehandFlatten(g) || []).map(function(p) {
+            return { x: p[0], y: p[1] };
+          });
+          break;
+      }
+
+      var out = [];
+      (pts || []).forEach(function(p) {
+        var c;
+        try { c = self._imageToContainer(p); } catch (_) { return; }
+        if (c) out.push(c);
+      });
+      [shape.titleGroup, shape._badgeEl].forEach(function(extra) {
+        if (!extra || !extra.getBoundingClientRect) return;
+        var r = extra.getBoundingClientRect();
+        if (!r.width && !r.height) return;
+        var l = r.left - containerRect.left, t = r.top - containerRect.top;
+        var rr = r.right - containerRect.left, b = r.bottom - containerRect.top;
+        out.push({ x: l, y: t }, { x: rr, y: t }, { x: rr, y: b }, { x: l, y: b });
+      });
+      return out;
+    },
+
     // Park the tooltip beside the middle of a stroke: as near the middle as
     // it can be without lying across it.
     //
@@ -13552,24 +13601,58 @@
 
       var halfW = geom.width / 2, halfH = geom.height / 2;
       var clearance = this._renderedStrokePx(shape) / 2 + 6;
+      var clearPts = this._tooltipClearancePts(shape, geom.containerRect);
 
+      // How far along a normal the bubble's CENTRE has to sit.
+      //
+      // `support` — halfW·|nx| + halfH·|ny| — is how far the bubble's own box
+      // reaches in that direction, so offsetting a convex box by its support
+      // lands it exactly touching the line through the origin point.
+      //
+      // `reach` is how far the SHAPE gets in that direction: the largest
+      // projection of any of its points onto the normal. Clearing the
+      // tangent at the midpoint was enough for a straight line and not for
+      // anything that wanders — a freehand loop doubles back across its own
+      // middle, so the bubble sat on a different part of the same stroke.
+      // Going beyond the furthest point puts the bubble past the whole
+      // shape, body included, in that direction.
+      //
+      // For a straight line both are zero-reach, so this comes out at
+      // exactly the placement it had before: hugging the line.
       function offsetFor(sx2, sy2) {
         var support = halfW * Math.abs(sx2) + halfH * Math.abs(sy2);
-        return { x: midC.x + sx2 * (support + clearance),
-                 y: midC.y + sy2 * (support + clearance) };
+        var reach = 0;
+        for (var i = 0; i < clearPts.length; i++) {
+          var proj = (clearPts[i].x - midC.x) * sx2 + (clearPts[i].y - midC.y) * sy2;
+          if (proj > reach) reach = proj;
+        }
+        var d = reach + support + clearance;
+        return { x: midC.x + sx2 * d, y: midC.y + sy2 * d, d: d };
       }
 
-      var at = offsetFor(nx, ny);
-      // No room on that side — take the other one rather than hang off the
-      // top of the viewer, the same trade the bounding-box path makes.
-      if (at.y - halfH < 4) {
-        var flipped = offsetFor(-nx, -ny);
-        if (flipped.y + halfH <= geom.containerHeight - 4) at = flipped;
+      function fits(at) {
+        return at.x - halfW >= 4 && at.x + halfW <= geom.containerWidth - 4 &&
+               at.y - halfH >= 4 && at.y + halfH <= geom.containerHeight - 4;
       }
 
-      // Keep the whole bubble in view. Clamping slides it ALONG the line's
-      // side rather than back onto the line, so a stroke near an edge still
-      // gets a readable tooltip that isn't covering it.
+      // Both normals are candidates. A stroke can wander much further to one
+      // side than the other, and the near side is the one to use — "as close
+      // as it can be" is the whole ask. Ties go to the upward normal, which
+      // is what keeps a straight line's tooltip above it rather than below.
+      var up = offsetFor(nx, ny);
+      var down = offsetFor(-nx, -ny);
+      var at = down.d < up.d ? down : up;
+      // …unless the near side has no room in the viewer, in which case the
+      // far side beats a bubble hanging off the edge.
+      if (!fits(at)) {
+        var other = at === up ? down : up;
+        if (fits(other)) at = other;
+      }
+
+      // Last resort, when neither side fits: keep the bubble on screen. This
+      // is the one case that can put it back over the shape — a shape big
+      // enough to leave nowhere clear — and a tooltip you cannot read is
+      // worse than one that overlaps.
       var minX = halfW + 4, maxX = geom.containerWidth - halfW - 4;
       at.x = maxX < minX ? minX : Math.max(minX, Math.min(maxX, at.x));
       var minY = halfH + 4, maxY = geom.containerHeight - halfH - 4;
@@ -13660,6 +13743,7 @@
       var placed = this._placeTooltipBesideStroke(shape, tip, {
         width: measured.width,
         height: measured.height,
+        containerRect: containerRect,
         containerWidth: containerRect.width,
         containerHeight: containerRect.height,
         scrollLeft: sx,

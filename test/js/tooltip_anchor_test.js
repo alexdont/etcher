@@ -41,6 +41,7 @@ const arrowPath = extract("_arrowPath");
 const positionTooltip = extract("_positionTooltip");
 const placeBeside = extract("_placeTooltipBesideStroke");
 const renderedStrokePx = extract("_renderedStrokePx");
+const clearancePts = extract("_tooltipClearancePts");
 
 const ctx = {
   _arrowPath: arrowPath,
@@ -134,6 +135,7 @@ function tooltipFor(shape, opts) {
     _imageToContainer: (p) => ({ x: p.x, y: p.y }),
     _strokeMidpointImage: strokeMidpoint,
     _placeTooltipBesideStroke: placeBeside,
+    _tooltipClearancePts: clearancePts,
     _renderedStrokePx: renderedStrokePx,
     _isShaftKind: (k) => ["line", "arrow", "dimension"].indexOf(k) !== -1,
     _shaftStrokePx: () => opts.strokePx == null ? 2 : opts.strokePx,
@@ -277,10 +279,12 @@ const diagonal = {
 
 {
   const geom = { width: TIP_W, height: TIP_H, containerWidth: 2000,
-                 containerHeight: 2000, scrollLeft: 0, scrollTop: 0 };
+                 containerHeight: 2000, scrollLeft: 0, scrollTop: 0,
+                 containerRect: { left: 0, top: 0, width: 2000, height: 2000 } };
   const self = Object.assign({}, ctx, {
     handleKind: "canvas",
     _strokeMidpointImage: strokeMidpoint,
+    _tooltipClearancePts: clearancePts,
     _renderedStrokePx: renderedStrokePx,
     _isShaftKind: () => true,
     _shaftStrokePx: () => 2,
@@ -294,6 +298,147 @@ const diagonal = {
     placeBeside.call(self, { kind: "line", geometry: { a: [5, 5], b: [5, 5] } }, tip, geom),
     false, "a zero-length line has no direction to be perpendicular to");
   assert.deepStrictEqual(tip.style, {}, "and nothing was written on the way out");
+}
+
+// ── it clears the WHOLE shape, not just the tangent ───────────────────────
+//
+// Clearing the line through the midpoint is enough for a straight stroke
+// and not for anything that wanders: a freehand loop doubles back across
+// its own middle, so the bubble sat on a different part of the same stroke
+// — and on the body, for a filled one. The tooltip now goes beyond the
+// furthest the shape reaches in that direction.
+
+// Does the tooltip rect touch any part of the stroke? Segment-level, not
+// just vertices: a long segment can cross the bubble with both ends outside.
+function overlapsStroke(style, pts) {
+  const cx = parseFloat(style.left), cy = parseFloat(style.top);
+  const x1 = cx - TIP_W / 2, x2 = cx + TIP_W / 2;
+  const y1 = cy - TIP_H / 2, y2 = cy + TIP_H / 2;
+  const inside = (p) => p.x >= x1 && p.x <= x2 && p.y >= y1 && p.y <= y2;
+  const cross = (a, b, c, d) => {
+    const s = (p, q, r) => Math.sign((q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x));
+    return s(a, b, c) !== s(a, b, d) && s(c, d, a) !== s(c, d, b);
+  };
+  const edges = [
+    [{ x: x1, y: y1 }, { x: x2, y: y1 }], [{ x: x2, y: y1 }, { x: x2, y: y2 }],
+    [{ x: x2, y: y2 }, { x: x1, y: y2 }], [{ x: x1, y: y2 }, { x: x1, y: y1 }],
+  ];
+  for (let i = 0; i < pts.length; i++) {
+    if (inside(pts[i])) return true;
+    if (i === pts.length - 1) break;
+    for (const [e1, e2] of edges) {
+      if (cross(pts[i], pts[i + 1], e1, e2)) return true;
+    }
+  }
+  return false;
+}
+
+{
+  // A hairpin: out to the right and back, so the stroke passes above AND
+  // below its own arc-length middle. Clearing only the tangent there would
+  // drop the bubble straight onto the returning half.
+  const raw = [[400, 400], [700, 400], [700, 460], [400, 460]];
+  const hairpin = {
+    kind: "freehand",
+    geometry: { points: raw },
+    el: { getBoundingClientRect: () => ({ left: 400, top: 400, width: 300, height: 60 }) },
+  };
+  const style = tooltipFor(hairpin);
+  const pts = raw.map(([x, y]) => ({ x, y }));
+  assert.ok(!overlapsStroke(style, pts),
+    `the bubble is lying on the stroke: ${JSON.stringify(style)}`);
+}
+
+{
+  // A closed loop with a body. The midpoint is on the far side of the ring
+  // from the start, and the fill covers everything between — so the bubble
+  // has to end up outside the loop entirely.
+  const ring = [];
+  for (let a = 0; a <= 360; a += 15) {
+    ring.push([400 + 150 * Math.cos(a * Math.PI / 180),
+               400 + 150 * Math.sin(a * Math.PI / 180)]);
+  }
+  const loop = {
+    kind: "freehand",
+    geometry: { points: ring },
+    style: { fill: "semi", width: 4 },
+    el: { getBoundingClientRect: () => ({ left: 250, top: 250, width: 300, height: 300 }) },
+  };
+  const style = tooltipFor(loop);
+  const pts = ring.map(([x, y]) => ({ x, y }));
+  assert.ok(!overlapsStroke(style, pts), "the bubble is on the ring");
+
+  // Outside the loop, not floating in the hole in the middle — the fill is
+  // part of the shape and the tooltip must not sit on it.
+  const cx = parseFloat(style.left), cy = parseFloat(style.top);
+  const fromCentre = Math.sqrt((cx - 400) ** 2 + (cy - 400) ** 2);
+  assert.ok(fromCentre > 150, `tooltip is inside the filled loop (r=${fromCentre})`);
+}
+
+{
+  // As close as it can be: the bubble should hug the shape, not be flung to
+  // the far side of the canvas. Its nearest edge stays within a bubble's
+  // own height of the ring it is clearing.
+  const ring = [];
+  for (let a = 0; a <= 360; a += 15) {
+    ring.push([400 + 100 * Math.cos(a * Math.PI / 180),
+               400 + 100 * Math.sin(a * Math.PI / 180)]);
+  }
+  const loop = {
+    kind: "freehand",
+    geometry: { points: ring },
+    el: { getBoundingClientRect: () => ({ left: 300, top: 300, width: 200, height: 200 }) },
+  };
+  const style = tooltipFor(loop);
+  // Measured radially — the normal at a point on a circle points outward,
+  // so the bubble is offset along the radius, not straight up.
+  const cx = parseFloat(style.left), cy = parseFloat(style.top);
+  const nx = Math.max(cx - TIP_W / 2, Math.min(400, cx + TIP_W / 2));
+  const ny = Math.max(cy - TIP_H / 2, Math.min(400, cy + TIP_H / 2));
+  const gap = Math.sqrt((400 - nx) ** 2 + (400 - ny) ** 2) - 100;
+  assert.ok(gap >= 0 && gap < 40, `should hug the shape, gap was ${gap}`);
+}
+
+{
+  // The near side wins. This stroke runs along x and then shoots a long way
+  // UP from one end: going up would mean clearing all of that, so the
+  // tooltip should take the short way down instead.
+  const spike = {
+    kind: "freehand",
+    geometry: { points: [[300, 600], [700, 600], [700, 200]] },
+    el: { getBoundingClientRect: () => ({ left: 300, top: 200, width: 400, height: 400 }) },
+  };
+  const style = tooltipFor(spike);
+  const pts = [[300, 600], [700, 600], [700, 200]].map(([x, y]) => ({ x, y }));
+  assert.ok(!overlapsStroke(style, pts), "the bubble is on the stroke");
+}
+
+{
+  // The label travels with the shape, so it is something to clear too — a
+  // tooltip covering the label is covering the annotation.
+  const flat = {
+    kind: "line",
+    geometry: { a: [300, 400], b: [700, 400] },
+    el: { getBoundingClientRect: () => ({ left: 300, top: 390, width: 400, height: 20 }) },
+    titleGroup: {
+      getBoundingClientRect: () => ({
+        left: 450, right: 550, top: 330, bottom: 370, width: 100, height: 40,
+      }),
+    },
+  };
+  const style = tooltipFor(flat);
+  const cx = parseFloat(style.left), cy = parseFloat(style.top);
+  const x1 = cx - TIP_W / 2, x2 = cx + TIP_W / 2;
+  const y1 = cy - TIP_H / 2, y2 = cy + TIP_H / 2;
+  // Clear of the label's box…
+  assert.ok(x2 <= 450 || x1 >= 550 || y2 <= 330 || y1 >= 370,
+    `the tooltip overlaps the label: ${JSON.stringify(style)}`);
+  // …and of the line it belongs to.
+  assert.ok(!overlapsStroke(style, [{ x: 300, y: 400 }, { x: 700, y: 400 }]),
+    "the tooltip overlaps the line");
+  // With the label taking up the space above, below is the near side — and
+  // near is what this picks. It does not have to be above.
+  assert.ok(y1 > 400, "took the free side rather than reaching over the label");
 }
 
 console.log("tooltip anchor: all checks passed");

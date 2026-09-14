@@ -2,8 +2,9 @@
 //
 // A label's size came from the box you dragged around it, and only from
 // there — so making a set of labels agree meant eyeballing every box, and
-// they never quite did. There is now a size control beside thickness and
-// opacity: a slider to find a size, a number box to MATCH one.
+// they never quite did. There is now a size box beside thickness and
+// opacity: type or step the number you want. No slider — a size is a
+// number you know, not a position you hunt for.
 //
 // Both ways stay: blank means "size it from the box", and dragging a box
 // hands the size back to the box, so the drag can never be the gesture that
@@ -214,7 +215,6 @@ function fakeRow() {
   return {
     row: { style: {} },
     num: { value: "sentinel" },
-    slider: { value: "sentinel" },
   };
 }
 
@@ -224,7 +224,6 @@ function rowSelf(targets, paramTargets, lineParams) {
     els,
     _paramsFontRow: els.row,
     _paramsFontNum: els.num,
-    _paramsFontInput: els.slider,
     _fontTargetShapes: () => targets,
     _paramsTargetShapes: () => paramTargets || [],
     _hasPinnedFontSize: hasPinned,
@@ -239,7 +238,6 @@ function rowSelf(targets, paramTargets, lineParams) {
   syncFontRow.call(self);
   assert.strictEqual(self.els.row.style.display, "");
   assert.strictEqual(self.els.num.value, "18");
-  assert.strictEqual(self.els.slider.value, "18");
 }
 
 {
@@ -269,5 +267,36 @@ function rowSelf(targets, paramTargets, lineParams) {
 
 // A panel that was never built must not throw.
 syncFontRow.call({});
+
+
+// ── the row is a number box, nothing more ─────────────────────────────────
+//
+// It briefly had a slider beside the box. Nothing else in the panel pairs
+// a slider with a read-out you can type into, and a font size is a number
+// you already know rather than a position to hunt for.
+{
+  const start = src.indexOf("      // Font size: a number you type or step");
+  assert.notStrictEqual(start, -1, "could not find the font row");
+  const body = src.slice(start, src.indexOf("var dashRow = document.createElement", start));
+  assert.ok(!body.includes('type = "range"'), "no slider in the font row");
+  assert.ok(body.includes('fontNum.type = "number"'), "a number box");
+  assert.ok(body.includes('fontNum.step = "1"'),
+    "stepping it by one is the increase / decrease");
+  assert.ok(body.includes('fontNum.placeholder = "auto"'),
+    "and blank reads as auto rather than as an empty control");
+}
+assert.ok(!src.includes("_paramsFontInput"),
+  "the slider's reference is gone from the sync too, not just from the markup");
+
+// The box carries the same weight as the controls around it — full width
+// and the same height as the dash buttons, rather than a small field
+// tucked into the corner of a row.
+{
+  const start = src.indexOf('".etcher-num {"');
+  assert.notStrictEqual(start, -1, "could not find the number box styling");
+  const rule = src.slice(start, src.indexOf('"}"', start));
+  assert.ok(rule.includes("width: 100%"), "full width");
+  assert.ok(rule.includes("height: 30px"), "matching the dash buttons' height");
+}
 
 console.log("font size: all checks passed");

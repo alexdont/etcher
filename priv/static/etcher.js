@@ -827,18 +827,24 @@
       "  gap: 10px; padding: 10px;",
       "}",
       ".etcher-marker-row { display: flex; flex-direction: column; gap: 4px; }",
-      // The font row's number box. Sized to four digits, so 6 and 200 both
-      // sit where the other rows' read-outs do.
+      // The font row's number box. Full width and the same 30px height as
+      // the dash buttons below it, so the row carries the same weight as
+      // every other control rather than reading as an afterthought tucked
+      // into a corner. Its own spinners are the increase / decrease —
+      // Firefox draws them always, WebKit on hover.
       ".etcher-num {",
-      "  width: 52px; text-align: right;",
-      "  padding: 2px 4px; border-radius: 5px;",
-      "  border: 1px solid rgba(255, 255, 255, 0.22);",
-      "  background: rgba(255, 255, 255, 0.08); color: #fff;",
-      "  font: 500 12px ui-sans-serif, system-ui, sans-serif;",
+      "  width: 100%; box-sizing: border-box; height: 30px;",
+      "  padding: 0 8px; border-radius: 6px;",
+      "  border: 1px solid rgba(255, 255, 255, 0.25);",
+      "  background: transparent; color: #fff;",
+      "  font: 500 13px ui-sans-serif, system-ui, sans-serif;",
+      "  transition: background 120ms ease, border-color 120ms ease;",
       "}",
-      ".etcher-num:focus { outline: 1px solid rgba(255, 255, 255, 0.5); }",
-      // Firefox draws spinners always, WebKit on hover; either way they are
-      // the increase/decrease the control is meant to offer.
+      ".etcher-num:hover { background: rgba(255, 255, 255, 0.12); }",
+      ".etcher-num:focus {",
+      "  outline: none; background: rgba(255, 255, 255, 0.12);",
+      "  border-color: rgba(255, 255, 255, 0.6);",
+      "}",
       ".etcher-marker-row-head {",
       "  display: flex; justify-content: space-between; align-items: center;",
       "  color: #fff; font-size: 11px; opacity: 0.85;",
@@ -6142,18 +6148,19 @@
         self._setLineParam("opacity", parseInt(o.input.value, 10) / 100, true);
       });
 
-      // Font size. Two controls for one value on purpose: the slider is for
-      // finding a size, the number box is for MATCHING one — typing 18 into
-      // every label is the only way to make a set of them agree, which
-      // dragging boxes by eye cannot do. Blank means "size it from the box",
-      // which is what dragging the label does and what every existing label
-      // has been doing all along.
+      // Font size: a number you type or step, and nothing else. A size is a
+      // number you know — 18, to match the other labels — not a position you
+      // hunt for, and nothing else in this panel is a slider-plus-readout
+      // pair either. Blank means "size it from the box", which is what
+      // dragging the label does and what every existing label has been doing
+      // all along.
       var fontRow = document.createElement("div");
       fontRow.className = "etcher-marker-row";
       var fontHead = document.createElement("div");
       fontHead.className = "etcher-marker-row-head";
       var fontLabel = document.createElement("span");
       fontLabel.textContent = "Font size";
+      fontHead.appendChild(fontLabel);
       var fontNum = document.createElement("input");
       fontNum.type = "number";
       fontNum.className = "etcher-num";
@@ -6162,32 +6169,16 @@
       fontNum.step = "1";
       fontNum.placeholder = "auto";
       fontNum.title = "Font size in px — leave empty to size it by the box";
-      fontHead.appendChild(fontLabel);
-      fontHead.appendChild(fontNum);
-      var fontSlider = document.createElement("input");
-      fontSlider.type = "range";
-      fontSlider.min = String(FONT_SIZE_MIN);
-      fontSlider.max = String(FONT_SIZE_MAX);
-      fontSlider.step = "1";
       fontRow.appendChild(fontHead);
-      fontRow.appendChild(fontSlider);
+      fontRow.appendChild(fontNum);
       popup.appendChild(fontRow);
       self._paramsFontRow = fontRow;
-      self._paramsFontInput = fontSlider;
       self._paramsFontNum = fontNum;
 
       function clampFont(n) {
         return Math.max(FONT_SIZE_MIN, Math.min(FONT_SIZE_MAX, Math.round(n)));
       }
 
-      fontSlider.addEventListener("input", function() {
-        var v = clampFont(parseInt(fontSlider.value, 10) || FONT_SIZE_MIN);
-        fontNum.value = String(v);
-        self._setFontSize(v, false);
-      });
-      fontSlider.addEventListener("change", function() {
-        self._setFontSize(clampFont(parseInt(fontSlider.value, 10) || FONT_SIZE_MIN), true);
-      });
       // Typed, spun, or pasted. An empty box means auto — the one way back
       // to box-sizing once a size has been pinned, short of dragging.
       fontNum.addEventListener("input", function() {
@@ -6198,9 +6189,7 @@
         }
         var n = parseInt(raw, 10);
         if (!isFinite(n)) return;
-        var v = clampFont(n);
-        fontSlider.value = String(v);
-        self._setFontSize(v, true);
+        self._setFontSize(clampFont(n), true);
       });
       // Typing past the limit is corrected on the way out rather than while
       // the user is still mid-number: rewriting "2" to "6" as they type "20"
@@ -6570,13 +6559,6 @@
         // Empty, not zero: the box says "auto" through its placeholder, and
         // a 0 in it would read as a real size that happens to be invalid.
         this._paramsFontNum.value = px == null ? "" : String(px);
-      }
-      if (this._paramsFontInput) {
-        // The slider has no "unset" position, so an unpinned size parks it
-        // at whatever the label is currently drawn near. Moving it from
-        // there pins that value, which is the behaviour you want: the
-        // slider starts where the text already looks.
-        this._paramsFontInput.value = String(px == null ? 16 : px);
       }
     },
 

@@ -10,6 +10,11 @@
 // picture, were all in the overflow grid. The default bar was the grabber,
 // freehand, the eraser, text, callout and the red pointer.
 //
+// Which of the remaining tools belongs on a bar of eight is a judgement
+// about taste and audience, not something this test can settle — what it
+// can do is keep the two lists honest with each other, keep the bar
+// scannable, and make any change to it deliberate.
+//
 //   node test/js/default_tools_test.js
 
 const fs = require("fs");
@@ -61,10 +66,10 @@ for (const key of offered) {
 
 // ── the bar holds what a first-time user reaches for ──────────────────────
 
-// Marking up a picture: get around it, draw the three shapes people draw,
-// mark by hand, label, undo a mistake.
-for (const key of ["grabber", "rectangle", "circle", "arrow", "freehand",
-                   "text", "eraser"]) {
+// Marking up a picture: get around it, box and circle things, point at them
+// or rule a line between them, scribble by hand, label, undo a mistake.
+for (const key of ["grabber", "rectangle", "circle", "arrow", "line",
+                   "marker", "text", "eraser"]) {
   assert.ok(essentials.indexOf(key) !== -1,
     `"${key}" should be on the bar without customising`);
 }
@@ -74,8 +79,8 @@ for (const key of ["grabber", "rectangle", "circle", "arrow", "freehand",
 for (const [key, why] of [
   ["polygon", "precise work, reached for on purpose"],
   ["dimension", "measurement — a surveyor's tool on a photo annotator's bar"],
-  ["line", "an arrow without the end that says which way"],
-  ["marker", "the second hand-drawing tool; one is enough to meet"],
+  ["freehand", "the marker's exact cousin — an editable curve, graduated to"],
+  ["callout", "a leader and a label welded together; an arrow and a text label already are"],
   ["image", "needs host wiring, and a picture inside a picture is not the common job"],
   ["pointer", "draws nothing on its own — it is for presenting"],
 ]) {
@@ -91,10 +96,11 @@ assert.ok(essentials.length <= 8,
 
 const at = (k) => essentials.indexOf(k);
 assert.ok(at("grabber") === 0, "getting around comes first");
-assert.ok(at("rectangle") < at("freehand"), "the shapes group before the hand-drawn one");
-assert.ok(at("circle") < at("freehand"));
-assert.ok(at("arrow") < at("freehand"));
-assert.ok(at("text") > at("freehand"), "labelling after drawing");
+assert.ok(at("rectangle") < at("arrow"), "the closed shapes group before the lines");
+assert.ok(at("circle") < at("arrow"));
+assert.ok(Math.abs(at("arrow") - at("line")) === 1, "the two lines sit together");
+assert.ok(at("marker") > at("line"), "then the hand-drawn one");
+assert.ok(at("text") > at("marker"), "labelling after drawing");
 assert.ok(at("eraser") === essentials.length - 1,
   "the destructive one goes last, away from everything else");
 

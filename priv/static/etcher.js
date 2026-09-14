@@ -1835,18 +1835,23 @@
   // The test is "would a first-time user reach for this while marking up a
   // picture", not "is this a good tool" — the grid is not a demotion.
   //
-  // Read as a sentence: get around, draw the three shapes people actually
-  // draw, mark by hand, label, and undo a mistake. Eraser last because it
-  // is the destructive one and does not want to sit under the cursor.
+  // Read as a sentence: get around, box and circle things, point at them or
+  // rule a line between them, scribble by hand, label, and undo a mistake.
+  // Eraser last because it is the destructive one and does not want to sit
+  // under the cursor.
   //
   // What is NOT here, and why:
   //   polygon, dimension  — precise work. Real tools, reached for on
   //                         purpose, by someone who knows they want them.
-  //   line                — an arrow without the end that says which way.
-  //                         Wanting a plain line is the rarer case.
-  //   marker              — the second freehand. Two hand-drawing tools on
-  //                         one bar is a choice nobody asked to make; the
-  //                         editable one stays.
+  //   freehand            — the second hand-drawing tool, and the more
+  //                         specialised of the two: its stroke is an
+  //                         editable curve whose nodes you drag afterwards.
+  //                         The marker is the one you reach for to scribble
+  //                         on something; freehand is the one you graduate
+  //                         to when the scribble has to be exact.
+  //   callout             — a leader and a label welded together, which an
+  //                         arrow and a text label already are separately.
+  //                         Worth having, not worth meeting first.
   //   image               — needs host wiring to do anything, and inserting
   //                         a picture INTO a picture is not the common job.
   //   pointer             — draws nothing and stores nothing on its own: it
@@ -1859,9 +1864,10 @@
   //                         put it back in one line.
   var ESSENTIAL_TOOLS = [
     "grabber",
-    "rectangle", "circle", "arrow",
-    "freehand",
-    "text", "callout",
+    "rectangle", "circle",
+    "arrow", "line",
+    "marker",
+    "text",
     "eraser"
   ];
 

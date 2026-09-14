@@ -167,12 +167,13 @@ defmodule Etcher.Layer do
   `:image` — it is not offered by default because inserting a picture needs
   host wiring (see `:image_source`).
 
-  On the bar without customising: grabber, rectangle, circle, arrow,
-  freehand, text, callout, eraser. In the `⋯` grid: polygon and dimension
-  (precise work, reached for on purpose), line (an arrow without the end
-  that says which way), marker (the second hand-drawing tool), pointer
-  (draws nothing on its own — it is for presenting, and only does anything
-  where the host relays it), and image.
+  On the bar without customising: grabber, rectangle, circle, arrow, line,
+  marker, text, eraser. In the `⋯` grid: polygon and dimension (precise
+  work, reached for on purpose), freehand (the marker's exact cousin — an
+  editable curve whose nodes you drag afterwards), callout (a leader and a
+  label welded together, which an arrow and a text label already are
+  separately), pointer (draws nothing on its own — it is for presenting,
+  and only does anything where the host relays it), and image.
 
   That split is a judgement about a first-time user marking up a picture,
   not a ranking of the tools. A host with a different audience — a

@@ -37,6 +37,8 @@ const currentLabelBg = extract("_currentLabelBg");
 const toggleLabelBg = extract("_toggleLabelBg");
 const fontTargets = extract("_fontTargetShapes");
 const syncBgRow = extract("_syncLabelBgRow");
+const refreshSwatch = extract("_refreshLabelSwatch");
+const currentLabelColor = extract("_currentLabelColor");
 const styleForNewShape = extract("_styleForNewShape");
 
 // ── what counts as a plate ────────────────────────────────────────────────
@@ -223,6 +225,9 @@ function board(over) {
       _fontTargetShapes: () => targets,
       _paramsTargetShapes: () => paramTargets || [],
       _currentLabelBg: () => bg || null,
+      // The row sync repaints the swatches, since that is the hook that
+      // runs on every selection change.
+      _refreshLabelSwatch() { this.refreshed = (this.refreshed || 0) + 1; },
     };
   }
 
@@ -243,6 +248,11 @@ function board(over) {
   none._paramsBgRow = none.row;
   syncBgRow.call(none);
   assert.strictEqual(none.row.style.display, "none");
+  assert.ok(none.refreshed > 0,
+    "the swatches repaint even when this row hides — they live in the colour " +
+    "row, and a shape with no text still changes what 'the current label' means");
+
+  assert.ok(on.refreshed > 0, "and of course when it is shown");
 
   // Nothing selected: shown, setting the default.
   const global = rowSelf([], [], null);
@@ -277,16 +287,99 @@ function board(over) {
     "and stacked into one column when the panel narrows");
 }
 
-// The plate chip previews the PAIR — the label's colour on the plate colour
-// — since neither swatch can show contrast alone.
-{
-  const refresh = src.slice(src.indexOf("    _refreshLabelSwatch: function"),
-                            src.indexOf("\n    },", src.indexOf("    _refreshLabelSwatch: function")));
-  assert.ok(refresh.includes("bgChip.style.background = bg"), "the chip takes the plate colour");
-  assert.ok(refresh.includes("bgGlyph.style.color = textColor"),
-    "…and the glyph on it takes the label's colour");
-  assert.ok(refresh.includes('bgChip.classList.toggle("is-off", !bg)'),
-    "off reads as the same empty chip the other swatch uses");
+// (The chip previewing the PAIR — the label's colour drawn on the plate
+// colour — is asserted against the real thing in the swatch block below,
+// rather than by reading the source for variable names.)
+
+
+// ── the swatches follow the label you click ───────────────────────────────
+//
+// They were only ever repainted when something SET them, so clicking from
+// one label to another left both chips describing the one before — which
+// reads as the selected one's settings, and is the worst kind of wrong:
+// confidently.
+
+function swatchSelf(targets, prefs) {
+  const chip = { style: {}, classes: new Set(),
+                 classList: { toggle: (c, on) => chip.classes[on ? "add" : "delete"](c) } };
+  const glyph = { style: {} };
+  const q = (sel) => (sel.indexOf("bg-chip") !== -1 ? chip : glyph);
+  const mk = () => ({ querySelector: q, setAttribute() {}, title: "" });
+  const self = {
+    chip, glyph,
+    labelSwatchEl: mk(),
+    labelBgSwatchEl: mk(),
+    prefs: prefs || {},
+    _fontTargetShapes: () => targets,
+    _currentLabelBg: currentLabelBg,
+    _currentLabelColor: currentLabelColor,
+    _labelBgFor: labelBgFor,
+    _getPref(k) { return this.prefs[k]; },
+  };
+  return self;
 }
+
+{
+  // A label with a plate: the chip shows it.
+  const withPlate = { kind: "text", style: { color: "#ff0000", label_bg: "#00ff00" } };
+  const a = swatchSelf([withPlate]);
+  refreshSwatch.call(a);
+  assert.strictEqual(a.chip.style.background, "#00ff00", "the plate colour");
+  assert.ok(!a.chip.classes.has("is-off"));
+  assert.strictEqual(a.glyph.style.color, "#ff0000",
+    "…written in the label's own colour, which is the pair being judged");
+
+  // Click a label with NO plate: the chip must go transparent, not keep
+  // showing the last one. Whether there is a plate at all is the question
+  // the chip answers, and the remembered colour answers it wrong.
+  const bare = { kind: "text", style: { color: "#0000ff" } };
+  const b = swatchSelf([bare], { label_bg: "#00ff00", label_bg_last: "#00ff00" });
+  refreshSwatch.call(b);
+  assert.strictEqual(b.chip.style.background, "transparent",
+    "off reads as transparent even with a colour remembered");
+  assert.ok(b.chip.classes.has("is-off"), "and is marked off for the stylesheet");
+  assert.strictEqual(b.glyph.style.color, "#0000ff", "the text chip follows too");
+}
+
+{
+  // A label on a shape carries its colour in metadata; a text shape or a
+  // callout IS the label, so theirs is the shape's colour.
+  const onShape = { kind: "rectangle", metadata: { title: "x", title_color: "#abcdef" },
+                    style: { color: "#111111" } };
+  assert.strictEqual(currentLabelColor.call(swatchSelf([onShape]), onShape), "#abcdef");
+
+  const text = { kind: "text", style: { color: "#222222" } };
+  assert.strictEqual(currentLabelColor.call(swatchSelf([text]), text), "#222222");
+
+  // Nothing selected → the default new labels start in.
+  const none = swatchSelf([], { label_color: "#333333" });
+  assert.strictEqual(currentLabelColor.call(none), "#333333");
+  assert.strictEqual(currentLabelColor.call(swatchSelf([], {})), null, "and none set");
+}
+
+{
+  // The repaint hangs off the row sync, which runs on every selection
+  // change — and ABOVE its early return, since the swatches live in the
+  // colour row and still need repainting when this row is hidden.
+  const body = src.slice(src.indexOf("    _syncLabelBgRow: function"),
+                         src.indexOf("\n    },", src.indexOf("    _syncLabelBgRow: function")));
+  assert.ok(body.includes("this._refreshLabelSwatch();"),
+    "the swatches repaint when the panel re-reads the selection");
+  assert.ok(body.indexOf("this._refreshLabelSwatch();") < body.indexOf("if (!this._paramsBgBtn) return;"),
+    "…before the early return, or a shape with no text leaves them stale");
+
+  // And that sync is in the chain the selection drives.
+  const params = src.slice(src.indexOf("    _syncParamsPopup: function"),
+                           src.indexOf("\n    },", src.indexOf("    _syncParamsPopup: function")));
+  assert.ok(params.includes("this._syncLabelBgRow();"), "which _syncParamsPopup calls");
+}
+
+// A panel that was never built must not throw.
+assert.doesNotThrow(() => refreshSwatch.call({
+  _fontTargetShapes: () => [],
+  _currentLabelColor: currentLabelColor,
+  _currentLabelBg: currentLabelBg,
+  _getPref: () => null,
+}));
 
 console.log("label background: all checks passed");

@@ -6104,6 +6104,28 @@
       this._labelBgBefore = null;
     },
 
+    // The colour the current label is WRITTEN in — the twin of
+    // `_currentLabelBg`, so both halves of the swatch row answer about the
+    // same thing: the label you are on, or the default when you are on
+    // none. A label carries its own colour in metadata; a text shape and a
+    // callout ARE the label, so theirs is the shape's colour.
+    _currentLabelColor: function(shape) {
+      var target = shape;
+      if (!target) {
+        var targets = this._fontTargetShapes();
+        target = targets.length ? targets[0] : null;
+      }
+      if (target) {
+        var own = target.metadata && target.metadata.title_color;
+        if (own) return own;
+        if (target.kind === "text" || target.kind === "callout") {
+          return (target.style && target.style.color) || null;
+        }
+      }
+      var pref = this._getPref("label_color");
+      return (typeof pref === "string" && pref) ? pref : null;
+    },
+
     // What the toggle reads and writes: the plate on the current targets,
     // or the default when nothing is selected.
     _currentLabelBg: function() {
@@ -6896,6 +6918,11 @@
       var targets = this._fontTargetShapes();
       var global = !targets.length && !this._paramsTargetShapes().length;
       this._paramsBgRow.style.display = (targets.length || global) ? "" : "none";
+      // Before the early return below: the swatches live in the colour row,
+      // not in this one, so they need repainting even when this row is
+      // hidden — a shape with no text still changes what "the current
+      // label" means.
+      this._refreshLabelSwatch();
       if (!this._paramsBgBtn) return;
       var on = !!this._currentLabelBg();
       this._paramsBgBtn.textContent = on ? "On" : "Off";
@@ -7358,14 +7385,21 @@
     },
 
     _refreshLabelSwatch: function() {
+      // Whose settings these are. Clicking from one label to another has to
+      // move both chips with it, or the row goes on describing the last
+      // label you touched — which reads as the SELECTED one, and is the
+      // worst kind of wrong: confidently.
+      var onLabel = this._fontTargetShapes().length > 0;
+      var color = this._currentLabelColor();
+      var forWhat = onLabel ? "this label" : "new labels";
+
       var el = this.labelSwatchEl;
       if (el) {
-        var color = this._getPref("label_color") || "";
         var glyph = el.querySelector(".etcher-label-swatch-glyph");
         if (glyph) glyph.style.color = color || "#ffffff";
         el.title = color
-          ? "Label text color: " + color + " — new labels start in it"
-          : "Label text color — pick one and new labels start in it";
+          ? "Label text color (" + forWhat + "): " + color
+          : "Label text color — pick one for " + forWhat;
         el.setAttribute("aria-label", el.title);
       }
 
@@ -7373,16 +7407,23 @@
       if (!bgEl) return;
       // The chip IS the preview: the label's own colour, written on the
       // plate colour, which is the only way to see whether the pair works.
+      //
+      // OFF shows nothing behind the glyph rather than the colour it would
+      // use — the whole question the chip answers is "is there a plate", and
+      // showing the remembered colour answers it wrong. Toggling on is what
+      // reveals the colour.
       var bg = this._currentLabelBg();
-      var textColor = this._getPref("label_color") || "#ffffff";
       var bgChip = bgEl.querySelector(".etcher-label-bg-chip");
       var bgGlyph = bgEl.querySelector(".etcher-label-swatch-glyph");
-      if (bgChip) bgChip.style.background = bg || "";
-      if (bgChip) bgChip.classList.toggle("is-off", !bg);
-      if (bgGlyph) bgGlyph.style.color = textColor;
+      if (bgChip) {
+        bgChip.style.background = bg || "transparent";
+        bgChip.classList.toggle("is-off", !bg);
+      }
+      if (bgGlyph) bgGlyph.style.color = color || "#ffffff";
       bgEl.title = bg
-        ? "Label background: " + bg
-        : "Label background — off; pick a colour to put one behind labels";
+        ? "Label background (" + forWhat + "): " + bg
+        : "Label background — off for " + forWhat +
+          "; pick a colour, or use the toggle beside the label size";
       bgEl.setAttribute("aria-label", bgEl.title);
     },
 

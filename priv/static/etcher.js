@@ -238,6 +238,12 @@
     // geometry, title rendered via the standard sibling-above-shape
     // path (not inline on the line).
     line:     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 19 L19 5"/></svg>',
+    // The line tool's diagonal with one head on it, so the pair reads as
+    // what it is: the same stroke, pointed or not. The head's arms are the
+    // shaft direction turned +/-25 deg, which is what `_vArrowPoints` draws
+    // on the canvas — the button is a miniature of the shape, not a
+    // separate drawing of an arrow.
+    arrow:    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 19 L19 5 M19 5 L12.4 7.4 M19 5 L16.6 11.6"/></svg>',
     close:    '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>',
     // Three horizontal dots — overflow / "more" trigger in the
     // compact mobile toolbar. Heroicons solid `EllipsisHorizontal`.
@@ -2035,6 +2041,10 @@
     text:      { icon: ICONS.text,      title: "Text label (drag a box, then type)" },
     dimension: { icon: ICONS.dimension, title: "Dimension (line with arrows + slidable label)" },
     line:      { icon: ICONS.line,      title: "Line" },
+    // Distinct from `dimension`, which is a MEASUREMENT: two heads and a
+    // label it drops you into writing. This one points — one head, no
+    // label unless you double-click for one like any other shape.
+    arrow:     { icon: ICONS.arrow,     title: "Arrow (line with one head)" },
     eraser:    { icon: ICONS.eraser,    title: "Eraser (click and drag to wipe shapes)" },
     pointer:   { icon: ICONS.pointer,   title: "Red pointer (everyone on the board sees where you point)" },
     // `momentary` tools are one-shot actions, not persistent drawing modes:
@@ -2046,7 +2056,7 @@
 
   // Single-key tool shortcuts, tldraw/Figma dialect where the tools
   // overlap: V select, H hand, D draw, R rectangle, O circle, L line,
-  // T text, E eraser. The rest take the tool's initial (M marker,
+  // T text, E eraser, A arrow. The rest take the tool's initial (M marker,
   // P polygon, C callout) and N for dimensioN, D being taken. `null`
   // means the cursor. `image` has no key on purpose: it is a momentary
   // action that opens the OS file picker, which is a startling thing for
@@ -2061,6 +2071,7 @@
     o: "circle",
     p: "polygon",
     l: "line",
+    a: "arrow",
     n: "dimension",
     c: "callout",
     t: "text"
@@ -2101,6 +2112,7 @@
     text:      '<path d="M5 6h14M12 6v12"/>',
     dimension: '<path d="M5 12h14M5 12l3-3M5 12l3 3M19 12l-3-3M19 12l-3 3"/>',
     line:      '<path d="M5 19 19 5"/>',
+    arrow:     '<path d="M5 19 19 5M19 5 12.4 7.4M19 5 16.6 11.6"/>',
     eraser:    '<path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/>'
   };
 
@@ -13023,6 +13035,7 @@
         case "text":      this._startText(pt, e); break;
         case "dimension": this._startDimension(pt, e); break;
         case "line":      this._startLine(pt, e); break;
+        case "arrow":     this._startArrow(pt, e); break;
         case "eraser":    this._startErase(pt, e); break;
       }
     },
@@ -13063,7 +13076,7 @@
       }
 
       if (draft === this.draftCallout) this._commitCallout(pt, true);
-      else this._commitShaftDraft({ a: [anchor.x, anchor.y], b: [pt.x, pt.y] });
+      else this._commitShaftDraft(this._shaftGeometry(anchor, pt));
       return true;
     },
 
@@ -13118,6 +13131,7 @@
         case "text":      this._updateText(pt); break;
         case "dimension": this._updateDimension(pt); break;
         case "line":      this._updateDimension(pt); break;
+        case "arrow":     this._updateDimension(pt); break;
       }
     },
 
@@ -13146,6 +13160,7 @@
         case "text":      this._commitText(pt); break;
         case "dimension": this._commitDimension(pt); break;
         case "line":      this._commitDimension(pt); break;
+        case "arrow":     this._commitDimension(pt); break;
       }
     },
 
@@ -16557,10 +16572,14 @@
     _updateDimension: function(pt) {
       var a = this.draftState.anchor;
       if (this.draftState.shift) pt = this._constrainShaftPoint(a, pt);
-      this.draftState.geometry = {
+      // Merged rather than replaced: an arrow draft carries `points` /
+      // `from` / `to` as well, and rebuilding the object from a and b alone
+      // would drop them — leaving the render to read a routed path that no
+      // longer exists.
+      this.draftState.geometry = Object.assign({}, this.draftState.geometry, {
         a: [a.x, a.y],
         b: [pt.x, pt.y]
-      };
+      });
       // No drag bookkeeping — click vs drag is decided once, on
       // pointerup, by `_isClickGesture` in `_commitDimension`.
       this._renderShape(this.draftState);
@@ -16582,7 +16601,15 @@
         return;
       }
       if (this.draftState.shift) pt = this._constrainShaftPoint(a, pt);
-      this._commitShaftDraft({ a: [a.x, a.y], b: [pt.x, pt.y] });
+      this._commitShaftDraft(this._shaftGeometry(a, pt));
+    },
+
+    // The geometry a shaft draft commits with. Built off the draft's own so
+    // an arrow keeps its `points` / `from` / `to`; a line or a dimension has
+    // none and comes out as the plain pair it always did.
+    _shaftGeometry: function(a, b) {
+      var base = (this.draftState && this.draftState.geometry) || {};
+      return Object.assign({}, base, { a: [a.x, a.y], b: [b.x, b.y] });
     },
 
     // Finalize the dimension / line draft with the given endpoints.
@@ -16651,6 +16678,42 @@
         // Read by `_shaftStrokePx` / `_applyShaftStroke` on every render, so
         // the shaft previews at the weight and dash it will commit with.
         style: this._styleForNewShape("line")
+      };
+      this._renderShape(this.draftState);
+      this._syncDraftHandles();
+      try { e.target.setPointerCapture(e.pointerId); } catch (_) {}
+    },
+
+    // A free arrow: the same two-ended stroke a line is, with one head on
+    // the end you drag to. It reuses the `arrow` KIND that connectors are
+    // made of — same render, same handles, same bend-dropping, same
+    // params — with no bindings, which is all a connector's `from` / `to`
+    // ever were. Drawing it a second time as its own kind would have meant
+    // a second copy of all of that.
+    //
+    // Unlike a dimension it does NOT open a label editor on release. A
+    // dimension exists to carry a measurement and is unfinished without
+    // one; an arrow is finished the moment it points at something, and a
+    // label is available the way it is on every other shape — by
+    // double-clicking it.
+    _startArrow: function(pt, e) {
+      var el = this._makeArrowEl();
+      el.classList.add("etcher-shape", "is-draft");
+      var style = this._styleForNewShape("arrow");
+      this._applyShapeColor(el, this.activeColor);
+      this.svg.appendChild(el);
+      this.draftState = {
+        kind: "arrow",
+        anchor: pt,
+        geometry: {
+          a: [pt.x, pt.y], b: [pt.x, pt.y],
+          // Empty rather than absent: the render, the bbox and the hit test
+          // all read the routed path, and a free arrow is the no-bends case
+          // of one rather than a different shape.
+          points: [], from: null, to: null
+        },
+        el: el,
+        style: style
       };
       this._renderShape(this.draftState);
       this._syncDraftHandles();

@@ -309,13 +309,14 @@ defmodule Etcher.Layer do
       :callout,
       :text,
       :dimension,
+      :arrow,
       :eraser,
       :pointer
     ],
     doc: """
     Subset of tools to show in the toolbar. Drawing tools: `:grabber`,
     `:rectangle`, `:circle`, `:polygon`, `:freehand`, `:marker`, `:callout`,
-    `:text`, `:dimension`, `:line`, `:eraser`. Add `:image` for the image
+    `:text`, `:dimension`, `:arrow`, `:line`, `:eraser`. Add `:image` for the image
     tool — a one-shot action (not a drawing mode) that inserts an image via
     the OS file picker or a host uploader (see `:image_source`).
 

@@ -62,6 +62,9 @@ function ctx(draft) {
     _isClickGesture: isClickGesture,
     _clickPlaceSizeImagePx: clickPlaceSize,
     _calloutDefaultBox: calloutDefaultBox,
+    // A shaft draft commits the geometry it was carrying, so an arrow keeps
+    // its route — see arrow_tool_test.js.
+    _shaftGeometry: extract("_shaftGeometry"),
     _commitShaftDraft: commitShaftDraft,
     _finalizeLabeled: finalizeLabeled,
     _finalizeShape(kind, geom, el, afterCreate) {

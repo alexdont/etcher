@@ -74,6 +74,9 @@ function board(over) {
     _cancelDraft() { this.cancelled++; this.draftState = null; this.draftCallout = null; },
     _markerScale: () => 1,
     _constrainShaftPoint: (a, pt) => pt,
+    // The real one: a shaft draft commits the geometry it was carrying, so
+    // an arrow keeps its route. See arrow_tool_test.js.
+    _shaftGeometry: extract("_shaftGeometry"),
     _commitShaftDraft(geom) { this.committed.push(geom); },
     _commitCallout(pt, second) { this.calloutCommits.push([pt, second]); },
   }, over || {});

@@ -1315,6 +1315,20 @@
       "  background: rgba(59, 130, 246, 0.12);",
       "  border-radius: 1px;",
       "}",
+      // One box around everything the release would take, drawn while the
+      // marquee is still open. The shapes themselves light up in the normal
+      // selection blue, but a blue outline on a blue shape over a blue
+      // photograph is exactly where an outline gets lost — so the hull is
+      // white-dashed between two dark hairlines, which has contrast against
+      // anything underneath it, and its job is to be readable at a glance
+      // rather than to trace any one shape.
+      ".etcher-marquee-hull {",
+      "  position: absolute; pointer-events: none; z-index: 12;",
+      "  border: 1.5px dashed #fff;",
+      "  border-radius: 2px;",
+      "  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55),",
+      "              inset 0 0 0 1px rgba(0, 0, 0, 0.55);",
+      "}",
       ".etcher-handle {",
       // Stroke + interactive fills bind to `currentColor` so a handle
       // inherits the shape's painted color (set via `style.color`
@@ -12925,6 +12939,11 @@
           var bs = self._boxSelect;
           self._boxSelect = null;
           if (bs.el && bs.el.parentNode) bs.el.parentNode.removeChild(bs.el);
+          // Drop the preview styling first, then commit: the shapes that are
+          // really selected get the class back from `_addToSelection` in the
+          // same frame, and anything the marquee had merely been touching
+          // goes back to normal instead of keeping a selected look.
+          self._clearBoxSelectPreview(bs);
           // A real drag selects the enclosed shapes; a no-move press was
           // just a deselect click (already handled on pointerdown).
           if (bs.moved) self._commitBoxSelect(bs, e);
@@ -13007,6 +13026,11 @@
         document.removeEventListener("pointerup", this._docPointerUp);
       if (this._docDblClick)
         document.removeEventListener("dblclick", this._docDblClick);
+      this._clearBoxSelectPreview();
+      if (this._boxSelect && this._boxSelect.el && this._boxSelect.el.parentNode) {
+        this._boxSelect.el.parentNode.removeChild(this._boxSelect.el);
+      }
+      this._boxSelect = null;
       this._docMouseMove = this._docPointerDown = null;
       var dropTarget = this.handle && this.handle.container;
       if (dropTarget && this._dropHandler) {
@@ -14592,27 +14616,189 @@
       bs.el.style.top = Math.min(y1, y2) + "px";
       bs.el.style.width = Math.abs(x2 - x1) + "px";
       bs.el.style.height = Math.abs(y2 - y1) + "px";
+      // The rectangle itself is four style writes, so it tracks the pointer
+      // directly. The preview walks every shape, so it gets a frame.
+      this._scheduleBoxSelectPreview(bs, e);
     },
 
-    // Select every shape the marquee touches (bbox intersection, in image
-    // px). Non-additive box-selects already cleared the group on press.
-    _commitBoxSelect: function(bs, e) {
-      var self = this;
+    // The image-px rect the marquee currently covers.
+    _boxSelectRect: function(bs, e) {
+      var s0 = bs && bs.startImg;
+      if (!s0) return null;
       var endImg;
-      try { endImg = self._toImage(e); } catch (_) { return; }
-      var s0 = bs.startImg;
-      if (!s0) return;
-      var bx1 = Math.min(s0.x, endImg.x), by1 = Math.min(s0.y, endImg.y);
-      var bx2 = Math.max(s0.x, endImg.x), by2 = Math.max(s0.y, endImg.y);
-      (self.shapes || []).forEach(function(s) {
-        if (!s.uuid) return;
-        if (s.readonly) return; // locked shapes can't be selected/edited
+      try { endImg = this._toImage(e); } catch (_) { return null; }
+      return {
+        x1: Math.min(s0.x, endImg.x), y1: Math.min(s0.y, endImg.y),
+        x2: Math.max(s0.x, endImg.x), y2: Math.max(s0.y, endImg.y)
+      };
+    },
+
+    // Every selectable shape the marquee touches (bbox intersection, image
+    // px). ONE answer, asked by both the live preview and the commit — which
+    // is what makes the preview a promise rather than a good guess.
+    _shapesInBox: function(r) {
+      var self = this;
+      if (!r) return [];
+      return (self.shapes || []).filter(function(s) {
+        if (!s.uuid) return false;
+        if (s.readonly) return false; // locked shapes can't be selected/edited
+        var bb = self._shapeBBoxImagePx(s);
+        if (!bb) return false;
+        return bb.x <= r.x2 && bb.x + bb.w >= r.x1 &&
+               bb.y <= r.y2 && bb.y + bb.h >= r.y1;
+      });
+    },
+
+    // Coalesced to a frame: a pointermove can fire several times between
+    // paints, and the preview walks every shape on the board.
+    _scheduleBoxSelectPreview: function(bs, e) {
+      var self = this;
+      // Only the coordinates are kept — the event object itself is reused by
+      // the browser and must not be read a frame later.
+      bs.previewAt = { clientX: e.clientX, clientY: e.clientY };
+      if (typeof requestAnimationFrame !== "function") {
+        self._previewBoxSelect(bs);
+        return;
+      }
+      if (bs.previewFrame) return;
+      bs.previewFrame = requestAnimationFrame(function() {
+        bs.previewFrame = null;
+        // The drag ended (or another started) while the frame was pending.
+        if (self._boxSelect !== bs) return;
+        self._previewBoxSelect(bs);
+      });
+    },
+
+    // Light up what releasing right now would select, and draw one box
+    // around the lot. The shapes wear `is-multi-selected` — the very class
+    // the committed selection uses — so the preview IS what selection looks
+    // like, rather than a lookalike that can drift from it. Selection state
+    // itself (`selectedShapes`) is untouched until release.
+    _previewBoxSelect: function(bs) {
+      var self = this;
+      var next = self._shapesInBox(self._boxSelectRect(bs, bs.previewAt || {}));
+      // Shift-extending: shapes already in the group wear the class because
+      // they are selected, not because of this drag. Leave them to the
+      // selection — un-styling one when the marquee moves off it would be a
+      // lie about what release does.
+      next = next.filter(function(s) { return !self._isInSelection(s); });
+
+      var prev = bs.preview || [];
+      prev.forEach(function(s) {
+        if (next.indexOf(s) !== -1) return;
+        if (s.el) s.el.classList.remove("is-multi-selected");
+        self._refreshImageRing(s);
+      });
+      next.forEach(function(s) {
+        if (prev.indexOf(s) !== -1) return;
+        if (s.el) s.el.classList.add("is-multi-selected");
+        self._refreshImageRing(s);
+      });
+      bs.preview = next;
+      self._syncBoxSelectHull(next);
+    },
+
+    // The box around the whole prospective group, in container px. Grows as
+    // shapes join: one shape and it hugs that shape, a second and it spans
+    // both, and so on. Includes anything already selected on a shift-extend,
+    // since that is all going to end up in one group.
+    _syncBoxSelectHull: function(shapes) {
+      var self = this;
+      var all = (shapes || []).concat(
+        (self.selectedShapes || []).filter(function(s) {
+          return (shapes || []).indexOf(s) === -1;
+        })
+      );
+
+      var container = self.handle && self.handle.container;
+      if (!all.length || !container || !self.overlayWrapper) {
+        self._removeBoxSelectHull();
+        return;
+      }
+
+      // One rect read for the whole pass — `_imageToContainer` takes its own
+      // every call, which at four corners a shape is a forced layout per
+      // corner per frame.
+      var r = container.getBoundingClientRect();
+      var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      all.forEach(function(s) {
         var bb = self._shapeBBoxImagePx(s);
         if (!bb) return;
-        if (bb.x <= bx2 && bb.x + bb.w >= bx1 &&
-            bb.y <= by2 && bb.y + bb.h >= by1) {
-          self._addToSelection(s);
+        // All FOUR corners: on a rotated canvas an image-axis box maps to a
+        // rotated quad, and two opposite corners would describe a rectangle
+        // that is neither the shape's nor its enclosure.
+        var corners = [
+          [bb.x, bb.y], [bb.x + bb.w, bb.y],
+          [bb.x, bb.y + bb.h], [bb.x + bb.w, bb.y + bb.h]
+        ];
+        for (var i = 0; i < corners.length; i++) {
+          var page;
+          try {
+            page = self.handle.imageToScreen({ x: corners[i][0], y: corners[i][1] });
+          } catch (_) { return; }
+          var cx = page.x - r.left, cy = page.y - r.top;
+          if (cx < minX) minX = cx;
+          if (cy < minY) minY = cy;
+          if (cx > maxX) maxX = cx;
+          if (cy > maxY) maxY = cy;
         }
+      });
+      if (!isFinite(minX) || !isFinite(minY) || !isFinite(maxX) || !isFinite(maxY)) {
+        self._removeBoxSelectHull();
+        return;
+      }
+
+      var hull = self._marqueeHull;
+      if (!hull) {
+        hull = document.createElement("div");
+        hull.className = "etcher-marquee-hull";
+        self.overlayWrapper.appendChild(hull);
+        self._marqueeHull = hull;
+      }
+      // Stood off the shapes so it reads as a box AROUND the group rather
+      // than an outline fighting the shape edges it sits on.
+      var pad = 5;
+      hull.style.left = (minX - pad) + "px";
+      hull.style.top = (minY - pad) + "px";
+      hull.style.width = Math.max(0, maxX - minX + pad * 2) + "px";
+      hull.style.height = Math.max(0, maxY - minY + pad * 2) + "px";
+    },
+
+    _removeBoxSelectHull: function() {
+      var hull = this._marqueeHull;
+      if (hull && hull.parentNode) hull.parentNode.removeChild(hull);
+      this._marqueeHull = null;
+    },
+
+    // Take the preview back down. Every exit from a box-select runs through
+    // here — release, cancel, teardown — so a shape can't be left wearing
+    // the selected look without being selected.
+    _clearBoxSelectPreview: function(bs) {
+      var self = this;
+      bs = bs || self._boxSelect;
+      if (bs) {
+        if (bs.previewFrame && typeof cancelAnimationFrame === "function") {
+          try { cancelAnimationFrame(bs.previewFrame); } catch (_) {}
+        }
+        bs.previewFrame = null;
+        (bs.preview || []).forEach(function(s) {
+          if (s.el) s.el.classList.remove("is-multi-selected");
+          self._refreshImageRing(s);
+        });
+        bs.preview = null;
+      }
+      self._removeBoxSelectHull();
+    },
+
+    // Select every shape the marquee touches. Non-additive box-selects
+    // already cleared the group on press. Asks `_shapesInBox` the same
+    // question the preview did, so release commits what was lit up.
+    _commitBoxSelect: function(bs, e) {
+      var self = this;
+      var rect = self._boxSelectRect(bs, e);
+      if (!rect) return;
+      self._shapesInBox(rect).forEach(function(s) {
+        self._addToSelection(s);
       });
     },
 

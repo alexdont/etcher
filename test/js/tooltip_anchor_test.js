@@ -1,15 +1,15 @@
-// Pins where a tooltip hangs from.
+// Pins where a tooltip is placed.
 //
-// It anchored to the top-centre of the shape's bounding box, which is right
-// for a rectangle and wrong for anything diagonal: a line drawn corner to
-// corner has a bbox whose top-centre is out in empty canvas, so the tooltip
-// floated far off the line it was describing.
+// It hung off the top-centre of the shape's bounding box. Right for a
+// rectangle — its box top IS its top — and wrong for anything diagonal: a
+// line drawn corner to corner has a bbox whose top-centre is out in empty
+// canvas, so the tooltip floated far from the line it described.
 //
-// Two separate questions, answered separately. HORIZONTALLY an open stroke
-// centres on the middle of the line, measured along it. VERTICALLY it still
-// clears the whole annotation — sitting ON the line was tried and is worse
-// than being far away, because a big bubble lying across a shape hides the
-// thing you are trying to identify.
+// Hanging it ON the midpoint instead was worse: a big bubble lying across a
+// shape hides the thing you are trying to identify. An open stroke now
+// parks BESIDE the middle of its line — pushed off along the perpendicular
+// by exactly the bubble's own support in that direction, which is the
+// closest a rectangle can sit to a line without crossing it.
 //
 //   node test/js/tooltip_anchor_test.js
 
@@ -30,9 +30,17 @@ function extract(name) {
     .replace(`${name}: function`, "function") + ")");
 }
 
+{
+  const m = src.match(/var LINE_WEIGHT_PX = ([\d.]+);/);
+  assert.ok(m, "could not find LINE_WEIGHT_PX");
+  global.LINE_WEIGHT_PX = Number(m[1]);
+}
+
 const strokeMidpoint = extract("_strokeMidpointImage");
 const arrowPath = extract("_arrowPath");
 const positionTooltip = extract("_positionTooltip");
+const placeBeside = extract("_placeTooltipBesideStroke");
+const renderedStrokePx = extract("_renderedStrokePx");
 
 const ctx = {
   _arrowPath: arrowPath,
@@ -95,7 +103,9 @@ for (const kind of ["rectangle", "circle", "polygon", "text", "image", "callout"
     `${kind} is not an open stroke`);
 }
 
-// ── and the tooltip lands there ────────────────────────────────────────────
+// ── and the tooltip is placed beside it ───────────────────────────────────
+
+const TIP_W = 120, TIP_H = 40;
 
 function tooltipFor(shape, opts) {
   opts = opts || {};
@@ -103,7 +113,7 @@ function tooltipFor(shape, opts) {
     style: {},
     getBoundingClientRect: () => ({
       top: opts.tipTop == null ? 500 : opts.tipTop,
-      width: 120, height: 40,
+      width: TIP_W, height: TIP_H,
     }),
   };
   const self = {
@@ -112,7 +122,10 @@ function tooltipFor(shape, opts) {
     handle: {
       container: {
         scrollLeft: 0, scrollTop: 0,
-        getBoundingClientRect: () => ({ left: 0, top: 0, width: 1000, height: 800 }),
+        getBoundingClientRect: () => ({
+          left: 0, top: 0,
+          width: opts.cw || 2000, height: opts.ch || 2000,
+        }),
       },
     },
     _isMediaKind: () => false,
@@ -120,6 +133,11 @@ function tooltipFor(shape, opts) {
     // Identity projection, so container px == image px in these checks.
     _imageToContainer: (p) => ({ x: p.x, y: p.y }),
     _strokeMidpointImage: strokeMidpoint,
+    _placeTooltipBesideStroke: placeBeside,
+    _renderedStrokePx: renderedStrokePx,
+    _isShaftKind: (k) => ["line", "arrow", "dimension"].indexOf(k) !== -1,
+    _shaftStrokePx: () => opts.strokePx == null ? 2 : opts.strokePx,
+    _markerScale: () => 1,
     _arrowPath: arrowPath,
     _freehandFlatten: (g) => g.points || [],
   };
@@ -127,25 +145,96 @@ function tooltipFor(shape, opts) {
   return tip.style;
 }
 
-// The bbox of this diagonal spans (0,0)-(400,300); its top-centre is
-// (200, 0). The line's middle is (200, 150).
+// The report's case: a 45° line from (0,0) to (400,300)... use a true 45°
+// so the perpendicular maths is checkable by hand.
 const diagonal = {
   kind: "line",
-  geometry: { a: [0, 0], b: [400, 300] },
-  el: { getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 300 }) },
+  geometry: { a: [200, 200], b: [600, 600] },
+  el: { getBoundingClientRect: () => ({ left: 200, top: 200, width: 400, height: 400 }) },
 };
 
 {
   const style = tooltipFor(diagonal);
-  assert.strictEqual(style.left, "200px",
-    "horizontally centred on the line's middle, not on the box's centre-top corner");
-  assert.strictEqual(style.top, "-8px",
-    "vertically clear of the shape — above the centre, not lying across it");
-  assert.strictEqual(style.transform, "translate(-50%, -100%)");
+  const x = parseFloat(style.left), y = parseFloat(style.top);
+  assert.strictEqual(style.transform, "translate(-50%, -50%)",
+    "the bubble is centred on its placement point, not hung below it");
+
+  // Midpoint is (400,400). The stroke runs at 45° down-right, so the upward
+  // normal is (1,-1)/√2. Support of a 120×40 box in that direction is
+  // 60·0.707 + 20·0.707 = 56.57; clearance is half the 2px stroke + 6 = 7.
+  // So the centre lands 63.57 along (0.707, -0.707) from the midpoint.
+  const d = (60 + 20) / Math.SQRT2 + 7;
+  assert.ok(Math.abs(x - (400 + d / Math.SQRT2)) < 0.01, `x was ${x}`);
+  assert.ok(Math.abs(y - (400 - d / Math.SQRT2)) < 0.01, `y was ${y}`);
+
+  // The property that matters, stated directly: the bubble does not cross
+  // the line. Every corner must be on the same side of it.
+  const sides = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([sx, sy]) => {
+    const cx = x + sx * TIP_W / 2, cy = y + sy * TIP_H / 2;
+    // The line through (400,400) with direction (1,1): sign of the cross
+    // product says which side a point is on.
+    return Math.sign((cx - 400) * 1 - (cy - 400) * 1);
+  });
+  assert.ok(sides.every((s) => s === sides[0] && s !== 0),
+    `every corner of the tooltip should clear the line, got ${sides}`);
+
+  // And it is CLOSE — the whole point of using the support distance rather
+  // than a fixed stand-off. The nearest corner is within a stroke's width
+  // and the 6px gap of the line.
+  const dist = Math.abs((x - 400) - (y - 400)) / Math.SQRT2;
+  assert.ok(dist - (60 + 20) / Math.SQRT2 <= 7.001,
+    "no further from the line than clearance demands");
 }
 
 {
-  // A closed shape is unchanged: still the top of its box.
+  // A horizontal stroke reproduces the old placement exactly: straight up.
+  const flat = {
+    kind: "line",
+    geometry: { a: [200, 400], b: [600, 400] },
+    el: { getBoundingClientRect: () => ({ left: 200, top: 390, width: 400, height: 20 }) },
+  };
+  const style = tooltipFor(flat);
+  assert.strictEqual(parseFloat(style.left), 400, "centred on the middle");
+  assert.strictEqual(parseFloat(style.top), 400 - (20 + 7),
+    "directly above it, clear by its own half-height plus the gap");
+}
+
+{
+  // A vertical stroke goes to the SIDE — there is no "above" that is near.
+  const upright = {
+    kind: "line",
+    geometry: { a: [400, 200], b: [400, 600] },
+    el: { getBoundingClientRect: () => ({ left: 390, top: 200, width: 20, height: 400 }) },
+  };
+  const style = tooltipFor(upright);
+  assert.strictEqual(parseFloat(style.top), 400, "level with the middle of the line");
+  assert.strictEqual(Math.abs(parseFloat(style.left) - 400), 60 + 7,
+    "beside it by its own half-width plus the gap");
+}
+
+{
+  // A fat stroke is stood off further, so a heavy line isn't half-covered.
+  const style = tooltipFor(diagonal, { strokePx: 40 });
+  const x = parseFloat(style.left), y = parseFloat(style.top);
+  const d = (60 + 20) / Math.SQRT2 + 26;   // 40/2 + 6
+  assert.ok(Math.abs(x - (400 + d / Math.SQRT2)) < 0.01, `x was ${x}`);
+  assert.ok(Math.abs(y - (400 - d / Math.SQRT2)) < 0.01, `y was ${y}`);
+}
+
+{
+  // No room above → the other normal, rather than hanging off the top.
+  const highUp = {
+    kind: "line",
+    geometry: { a: [200, 5], b: [600, 5] },
+    el: { getBoundingClientRect: () => ({ left: 200, top: 0, width: 400, height: 10 }) },
+  };
+  const style = tooltipFor(highUp);
+  assert.strictEqual(parseFloat(style.top), 5 + 27, "flipped below the line");
+}
+
+{
+  // A closed shape is untouched: still above its box, hung by its bottom
+  // edge the way it always was.
   const rect = {
     kind: "rectangle",
     geometry: { x: 0, y: 0, w: 400, h: 300 },
@@ -153,62 +242,58 @@ const diagonal = {
   };
   const style = tooltipFor(rect);
   assert.strictEqual(style.left, "200px");
-  assert.strictEqual(style.top, "-8px", "a rectangle still hangs off its top edge");
-}
-
-// A STRAIGHT line's midpoint x is its box centre x, so the case above
-// cannot tell the two anchors apart. A bent arrow can: this one routes
-// (0,0) → (0,100) → (100,0), whose box centre is x=50 while the middle of
-// the route — 120.7 along a 241.4 path — lands at x≈14.6.
-// (Placed away from the container edge so the horizontal clamp — which
-// keeps the bubble on screen — isn't what we end up measuring.)
-const bent = {
-  kind: "arrow",
-  geometry: { a: [400, 0], b: [500, 0], points: [[400, 100]] },
-  el: { getBoundingClientRect: () => ({ left: 400, top: 0, width: 100, height: 100 }) },
-};
-
-{
-  const style = tooltipFor(bent);
-  const x = parseFloat(style.left);
-  assert.ok(Math.abs(x - 414.64) < 0.1,
-    `bent arrow should centre on its route's middle (~414.6), got ${x}`);
-  assert.notStrictEqual(style.left, "450px", "not the bounding box's centre");
-  assert.strictEqual(style.top, "-8px", "still clear of the shape");
-}
-
-{
-  // Strip mode can't project image px to container px, so it keeps the box
-  // anchor horizontally too rather than placing the tooltip somewhere
-  // invented.
-  const style = tooltipFor(bent, { handleKind: "strip" });
-  assert.strictEqual(style.left, "450px", "strip falls back to the box centre");
   assert.strictEqual(style.top, "-8px");
+  assert.strictEqual(style.transform, "translate(-50%, -100%)");
 }
 
 {
-  // No room above → flips below the shape, still centred on the line.
-  const style = tooltipFor(diagonal, { tipTop: -100 });
-  assert.strictEqual(style.left, "200px", "still centred on the line");
-  assert.strictEqual(style.top, (300 + 8) + "px",
-    "and below everything the annotation draws, not below its middle");
-  assert.strictEqual(style.transform, "translate(-50%, 0)");
+  // Strip mode renders in image-px user units inside per-image overlays, so
+  // the projection this needs is the identity there — it falls back to the
+  // box rather than placing the bubble somewhere invented.
+  const style = tooltipFor(diagonal, { handleKind: "strip" });
+  assert.strictEqual(style.transform, "translate(-50%, -100%)");
+  assert.strictEqual(style.left, "400px");
 }
 
+// ── the stroke width it stands clear of ────────────────────────────────────
+
 {
-  // The label is part of what has to be cleared: it floats above the box,
-  // so the tooltip goes above IT. Horizontal centring is unaffected.
-  const labelled = Object.assign({}, diagonal, {
-    titleGroup: {
-      getBoundingClientRect: () => ({
-        left: 160, right: 240, top: -30, bottom: -5, width: 80, height: 25,
-      }),
-    },
+  const scaled = { _isShaftKind: () => false, _markerScale: () => 3 };
+  // A marker's width is image px, so it scales with the zoom.
+  assert.strictEqual(
+    renderedStrokePx.call(scaled, { kind: "marker", style: { width: 5 } }), 15);
+  // So does any width stored in canvas units.
+  assert.strictEqual(
+    renderedStrokePx.call(scaled,
+      { kind: "freehand", style: { width: 5, width_units: "canvas" } }), 15);
+  // A plain screen-px width does not.
+  assert.strictEqual(
+    renderedStrokePx.call(scaled, { kind: "freehand", style: { width: 5 } }), 5);
+  // No style at all still answers.
+  assert.strictEqual(renderedStrokePx.call(scaled, { kind: "freehand" }), 2);
+}
+
+// ── nothing to work with → the caller falls back ──────────────────────────
+
+{
+  const geom = { width: TIP_W, height: TIP_H, containerWidth: 2000,
+                 containerHeight: 2000, scrollLeft: 0, scrollTop: 0 };
+  const self = Object.assign({}, ctx, {
+    handleKind: "canvas",
+    _strokeMidpointImage: strokeMidpoint,
+    _renderedStrokePx: renderedStrokePx,
+    _isShaftKind: () => true,
+    _shaftStrokePx: () => 2,
+    _imageToContainer: (p) => ({ x: p.x, y: p.y }),
   });
-  const style = tooltipFor(labelled);
-  assert.strictEqual(style.left, "200px");
-  assert.strictEqual(style.top, (-30 - 8) + "px",
-    "above the label, so it never lands on the text it is describing");
+  const tip = { style: {} };
+  assert.strictEqual(
+    placeBeside.call(self, { kind: "rectangle", geometry: {} }, tip, geom), false,
+    "a closed shape has no stroke to sit beside");
+  assert.strictEqual(
+    placeBeside.call(self, { kind: "line", geometry: { a: [5, 5], b: [5, 5] } }, tip, geom),
+    false, "a zero-length line has no direction to be perpendicular to");
+  assert.deepStrictEqual(tip.style, {}, "and nothing was written on the way out");
 }
 
 console.log("tooltip anchor: all checks passed");

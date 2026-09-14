@@ -13475,12 +13475,110 @@
           var t = seg[i] > 0 ? (half - run) / seg[i] : 0;
           return {
             x: pts[i].x + (pts[i + 1].x - pts[i].x) * t,
-            y: pts[i].y + (pts[i + 1].y - pts[i].y) * t
+            y: pts[i].y + (pts[i + 1].y - pts[i].y) * t,
+            // The segment the midpoint fell on. Callers need the direction
+            // the stroke RUNS IN there, and taking it from a pair of image
+            // points rather than an angle means the projection to the
+            // screen carries any rotation and zoom for free.
+            ax: pts[i].x, ay: pts[i].y,
+            bx: pts[i + 1].x, by: pts[i + 1].y
           };
         }
         run += seg[i];
       }
-      return { x: pts[pts.length - 1].x, y: pts[pts.length - 1].y };
+      var last = pts[pts.length - 1], prev = pts[pts.length - 2];
+      return {
+        x: last.x, y: last.y,
+        ax: prev.x, ay: prev.y, bx: last.x, by: last.y
+      };
+    },
+
+    // The stroke width a shape is actually drawn at, in container px — what
+    // the tooltip has to stand clear of.
+    _renderedStrokePx: function(shape) {
+      if (this._isShaftKind(shape && shape.kind)) {
+        return this._shaftStrokePx(shape, LINE_WEIGHT_PX);
+      }
+      var s = (shape && shape.style) || {};
+      var w = typeof s.width === "number" && isFinite(s.width) ? s.width : 2;
+      if ((shape && shape.kind === "marker") || s.width_units === "canvas") {
+        var scale = 1;
+        try { scale = this._markerScale() || 1; } catch (_) { scale = 1; }
+        w = w * scale;
+      }
+      return Math.max(0.4, w);
+    },
+
+    // Park the tooltip beside the middle of a stroke: as near the middle as
+    // it can be without lying across it.
+    //
+    // Hanging it above the bounding box put it out in empty canvas for a
+    // diagonal; hanging it ON the midpoint covered the very line it
+    // describes. Beside is both — pushed off the line along the PERPENDICULAR
+    // at the midpoint, by exactly far enough that the bubble's own box stops
+    // at the line and no further.
+    //
+    // That distance is the rectangle's support in the normal direction:
+    // halfW·|nx| + halfH·|ny|. Offset a convex box along a normal by its own
+    // support and it lands entirely on one side of the line through that
+    // point — touching, never crossing. Which is the closest it can sit and
+    // still not cover the stroke.
+    //
+    // Returns false when it has nothing to work with, so the caller falls
+    // back to the bounding box.
+    _placeTooltipBesideStroke: function(shape, tip, geom) {
+      if (this.handleKind === "strip") return false;
+      var mid = this._strokeMidpointImage(shape);
+      if (!mid) return false;
+
+      var midC, aC, bC;
+      try {
+        midC = this._imageToContainer({ x: mid.x, y: mid.y });
+        aC = this._imageToContainer({ x: mid.ax, y: mid.ay });
+        bC = this._imageToContainer({ x: mid.bx, y: mid.by });
+      } catch (_) { return false; }
+      if (!midC || !aC || !bC) return false;
+
+      var dx = bC.x - aC.x, dy = bC.y - aC.y;
+      var len = Math.sqrt(dx * dx + dy * dy);
+      // A zero-length segment has no direction to be perpendicular to.
+      if (!(len > 0.0001)) return false;
+
+      // Of the two normals, take the one pointing UP. A tooltip above what
+      // it labels is the convention everywhere else in this file, and for a
+      // horizontal stroke it reproduces exactly the old placement.
+      var nx = -dy / len, ny = dx / len;
+      if (ny > 0) { nx = -nx; ny = -ny; }
+
+      var halfW = geom.width / 2, halfH = geom.height / 2;
+      var clearance = this._renderedStrokePx(shape) / 2 + 6;
+
+      function offsetFor(sx2, sy2) {
+        var support = halfW * Math.abs(sx2) + halfH * Math.abs(sy2);
+        return { x: midC.x + sx2 * (support + clearance),
+                 y: midC.y + sy2 * (support + clearance) };
+      }
+
+      var at = offsetFor(nx, ny);
+      // No room on that side — take the other one rather than hang off the
+      // top of the viewer, the same trade the bounding-box path makes.
+      if (at.y - halfH < 4) {
+        var flipped = offsetFor(-nx, -ny);
+        if (flipped.y + halfH <= geom.containerHeight - 4) at = flipped;
+      }
+
+      // Keep the whole bubble in view. Clamping slides it ALONG the line's
+      // side rather than back onto the line, so a stroke near an edge still
+      // gets a readable tooltip that isn't covering it.
+      var minX = halfW + 4, maxX = geom.containerWidth - halfW - 4;
+      at.x = maxX < minX ? minX : Math.max(minX, Math.min(maxX, at.x));
+      var minY = halfH + 4, maxY = geom.containerHeight - halfH - 4;
+      at.y = maxY < minY ? minY : Math.max(minY, Math.min(maxY, at.y));
+
+      tip.style.left = (at.x + geom.scrollLeft) + "px";
+      tip.style.top = (at.y + geom.scrollTop) + "px";
+      tip.style.transform = "translate(-50%, -50%)";
+      return true;
     },
 
     _positionTooltip: function(shape) {
@@ -13552,40 +13650,32 @@
       var sx = this.handle.container.scrollLeft || 0;
       var sy = this.handle.container.scrollTop  || 0;
 
-      // Where the tooltip hangs from: the top-centre of the annotation's
-      // box by default, the middle of the stroke for the open kinds.
+      // Shown before measuring: `display: none` measures zero.
+      tip.style.display = "block";
+
+      // An open stroke parks the tooltip beside the middle of its line.
+      // A closed shape keeps the bounding box: a rectangle's box top IS its
+      // top, so "above it" is already both near and clear.
+      var measured = tip.getBoundingClientRect();
+      var placed = this._placeTooltipBesideStroke(shape, tip, {
+        width: measured.width,
+        height: measured.height,
+        containerWidth: containerRect.width,
+        containerHeight: containerRect.height,
+        scrollLeft: sx,
+        scrollTop: sy
+      });
+      if (placed) return;
+
       var anchorX = shapeRect.left + shapeRect.width / 2 - containerRect.left;
       var anchorTop = shapeRect.top - containerRect.top;
       var anchorBottom = shapeRect.bottom - containerRect.top;
-
-      // The stroke's middle fixes the tooltip HORIZONTALLY; vertically it
-      // still clears the whole annotation. Those are two different
-      // questions and they were briefly answered with one point, which put
-      // the tooltip on top of the line: a big bubble lying across the
-      // middle of a shape is harder to read than one that is merely far
-      // away. Above the centre is both — over the middle of the line, clear
-      // of everything it draws.
-      //
-      // Strip mode renders shapes in image-px user units inside a per-image
-      // overlay, so `_imageToContainer` is the identity there and cannot
-      // place this. Canvas mode — which is where diagonals are drawn and
-      // where the complaint came from — converts properly.
-      var mid = this.handleKind === "strip" ? null : this._strokeMidpointImage(shape);
-      if (mid) {
-        var midC = null;
-        try { midC = this._imageToContainer(mid); } catch (_) { midC = null; }
-        // `anchorTop` / `anchorBottom` are left alone: the box union above
-        // already spans the shape, its label and its badge, which is what
-        // "out of the way" has to mean.
-        if (midC) anchorX = midC.x;
-      }
 
       var x = anchorX + sx;
       var aboveY = anchorTop - 8 + sy;
       tip.style.left = x + "px";
       tip.style.top = aboveY + "px";
       tip.style.transform = "translate(-50%, -100%)";
-      tip.style.display = "block";
 
       // If the tooltip extends past the container's top edge (shape is
       // near the top), flip it to sit below the shape instead. Measure

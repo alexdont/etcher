@@ -29,6 +29,15 @@ function extract(name) {
     .replace(`${name}: function`, "function") + ")");
 }
 
+// The module-level constants the lifted functions close over. Lifted from
+// the source rather than restated, so the limits can only be checked
+// against what the library actually enforces.
+for (const name of ["DASH_MODES", "FILL_MODES", "FONT_SIZE_MIN", "FONT_SIZE_MAX"]) {
+  const m = src.match(new RegExp(`var ${name} = ([^;]+);`));
+  assert.ok(m, `could not find ${name}`);
+  global[name] = eval(m[1]);
+}
+
 const fontSizeFor = extract("_fontSizeFor");
 const hasPinned = extract("_hasPinnedFontSize");
 const fontTargets = extract("_fontTargetShapes");
@@ -297,6 +306,59 @@ assert.ok(!src.includes("_paramsFontInput"),
   const rule = src.slice(start, src.indexOf('"}"', start));
   assert.ok(rule.includes("width: 100%"), "full width");
   assert.ok(rule.includes("height: 30px"), "matching the dash buttons' height");
+}
+
+
+// ── the default survives a reload ─────────────────────────────────────────
+//
+// Per-shape sizes ride `style` and persist with the annotation. The DEFAULT
+// travels a different road: out through `etcher:line-params-changed`, into
+// the host's storage, and back in through the `line_params` attr on the
+// next mount. It was dropped at both ends.
+
+{
+  const emit = extract("_emitLineParamsChanged");
+  function payloadFor(lineParams) {
+    let sent = null;
+    const self = {
+      _currentLineParams: () => lineParams,
+      pushEventTo: (el, name, p) => { sent = p.line_params; },
+      _dispatch: () => {},
+      el: {},
+    };
+    emit.call(self);
+    return sent;
+  }
+
+  const pinned = payloadFor({ width: 2, opacity: 1, dash: "solid", fill: "semi", font_size: 18 });
+  assert.strictEqual(pinned.font_size, 18, "a pinned default reaches the host");
+
+  const auto = payloadFor({ width: 2, opacity: 1, dash: "solid", fill: "semi" });
+  assert.ok(!("font_size" in auto),
+    "…and its ABSENCE is how 'size labels by their box' travels: the host " +
+    "replaces this map wholesale, so an omitted key is a cleared key");
+}
+
+{
+  const seed = extract("_setLineParamsDirect");
+  function seeded(map) {
+    const self = { lineParams: {}, _syncParamsPopup: () => {} };
+    seed.call(self, map);
+    return self.lineParams;
+  }
+
+  assert.strictEqual(seeded({ font_size: 18 }).font_size, 18,
+    "a stored default comes back on the next mount");
+  // Clamped to the same limits the control offers, so a hand-edited or
+  // corrupted stored value can't produce an unreadable or absurd label.
+  assert.strictEqual(seeded({ font_size: 5000 }).font_size, 200);
+  assert.strictEqual(seeded({ font_size: 1 }).font_size, 6);
+  // Anything unusable leaves labels sized by their box — which is what
+  // every board did before there was a control for it.
+  for (const bad of [0, -3, NaN, "18", null, undefined]) {
+    assert.ok(!("font_size" in seeded({ font_size: bad })),
+      `${String(bad)} must not pin a default`);
+  }
 }
 
 console.log("font size: all checks passed");

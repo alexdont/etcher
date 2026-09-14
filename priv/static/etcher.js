@@ -6678,6 +6678,14 @@
       if (FILL_MODES.indexOf(map.fill) !== -1) {
         this.lineParams.fill = map.fill;
       }
+      // A seeded font size is a pinned default for new labels; anything
+      // that isn't a usable number leaves labels sized by their box, which
+      // is what every board did before there was a control for it.
+      if (typeof map.font_size === "number" && isFinite(map.font_size) &&
+          map.font_size > 0) {
+        this.lineParams.font_size =
+          Math.max(FONT_SIZE_MIN, Math.min(FONT_SIZE_MAX, map.font_size));
+      }
       // Reflect into an open popup if it's showing the global default.
       if (this.paramsPopup && this.paramsPopup.classList.contains("is-open")) {
         this._syncParamsPopup();
@@ -6694,6 +6702,12 @@
       var payload = {
         width: lp.width, opacity: lp.opacity, dash: lp.dash, fill: lp.fill
       };
+      // Only when one is pinned. Its ABSENCE is the "size labels by their
+      // box" default, and the host replaces this map wholesale rather than
+      // merging into the last one — so leaving the key out is how clearing
+      // it travels, and writing a null would make "auto" a value the host
+      // has to know about.
+      if (lp.font_size) payload.font_size = lp.font_size;
       if (this.pushEventTo) {
         this.pushEventTo(this.el, "etcher:line-params-changed", {
           fresco_id: this.frescoId || null,

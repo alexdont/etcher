@@ -136,13 +136,19 @@ defmodule Etcher.Layer do
             socket
           ) when is_map(lp) do
         # `lp` is %{"width" => n, "opacity" => n, "dash" => "solid"|"dashed"|
-        # "dotted"}. Persist it (e.g. in the current user's metadata) and feed
-        # it back through the `:line_params` attr on the next mount.
+        # "dotted"}, plus `"font_size" => n` when the user has pinned a label
+        # size. Persist it (e.g. in the current user's metadata) and feed it
+        # back through the `:line_params` attr on the next mount.
+        #
+        # Store the map WHOLESALE rather than merging into what you had: an
+        # absent `font_size` is how "size labels by their box" travels, so a
+        # merge would make a cleared size impossible to clear.
         {:noreply, socket}
       end
 
   Seed the default with the `:line_params` attr; missing keys fall back to
-  the built-ins (`width: 2`, `opacity: 1`, `dash: "solid"`). Editing a
+  the built-ins (`width: 2`, `opacity: 1`, `dash: "solid"`, and labels sized
+  by their own box). Editing a
   *selected* shape's style instead keeps flowing through
   `etcher:annotations-changed` (it's saved with the shape) and does **not**
   fire this event. Programmatic: `layer.getLineParams()` /
@@ -381,9 +387,10 @@ defmodule Etcher.Layer do
     doc: """
     Optional seed for the global stroke defaults new shapes inherit —
     `%{"width" => number, "opacity" => number, "dash" => "solid" | "dashed"
-    | "dotted"}`. Any missing key falls back to the built-in default
-    (`width: 2`, `opacity: 1`, `dash: "solid"`). Supply the signed-in user's
-    saved line params here for per-user ink.
+    | "dotted", "font_size" => number}`. Any missing key falls back to the
+    built-in default (`width: 2`, `opacity: 1`, `dash: "solid"`, and labels
+    sized by their own box rather than at a pinned size). Supply the
+    signed-in user's saved line params here for per-user ink.
 
     When omitted, the built-in defaults apply (identical to prior behavior).
     Edits made via the Parameters popup with no shape selected are reported

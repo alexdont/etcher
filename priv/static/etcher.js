@@ -17590,6 +17590,7 @@
           var day2 = g.b[1] - g.a[1];
           var lenSq = dax2 * dax2 + day2 * day2;
           if (lenSq <= 0.0001) return false;
+          var segLen = Math.sqrt(lenSq);
           var t = ((pt.x - g.a[0]) * dax2 + (pt.y - g.a[1]) * day2) / lenSq;
           t = Math.max(0, Math.min(1, t));
           var nearestX = g.a[0] + t * dax2;
@@ -17597,6 +17598,20 @@
           var ddx2 = pt.x - nearestX;
           var ddy2 = pt.y - nearestY;
           var tol = this._textDefaultBoxImagePx() * 0.6;
+          // A heavy line is a bigger target than a hairline: half its width
+          // is already ON it before any grab pad is added.
+          tol = Math.max(tol, this._shaftHalfWidthImagePx(shape));
+
+          // Near an end of a DIMENSION, the V-arrowhead is part of the
+          // shape and has to be part of the target. It reaches out
+          // perpendicular from the shaft, and on a heavy line it reaches a
+          // long way — the heads scale with the stroke — so aiming at the
+          // chevron, which is the most obvious thing to aim at, landed on
+          // empty canvas while only the thin shaft answered.
+          var head = this._dimHeadExtentImagePx(shape);
+          if (head && Math.min(t, 1 - t) * segLen <= head.len) {
+            tol = Math.max(tol, head.half);
+          }
           return ddx2 * ddx2 + ddy2 * ddy2 <= tol * tol;
         }
         default:
@@ -17607,6 +17622,32 @@
     // The point on segment `p`→`q` closest to `pt`. The parameter is clamped
     // to the segment, so the ends stop rather than extending into infinite
     // lines.
+    // Half the drawn stroke width of a shaft kind, in image px.
+    _shaftHalfWidthImagePx: function(shape) {
+      var px = this._shaftStrokePx(shape, LINE_WEIGHT_PX);
+      var scale = 1;
+      try { scale = this._markerScale() || 1; } catch (_) { scale = 1; }
+      return scale > 0 ? px / 2 / scale : px / 2;
+    },
+
+    // How far a dimension's V-arrowheads reach, in image px: `len` back
+    // along the shaft from each end, `half` out to each side. Null for
+    // anything that doesn't draw them.
+    //
+    // The numbers mirror the render's exactly — heads are drawn at 10 and 5
+    // times `stroke / LINE_WEIGHT_PX`, which is how they keep their
+    // proportion to a fattened shaft instead of staying hairlines on it. If
+    // the render's ever change, these have to change with them, which is
+    // what the test comparing the two is for.
+    _dimHeadExtentImagePx: function(shape) {
+      if (!shape || shape.kind !== "dimension") return null;
+      var k = this._shaftStrokePx(shape, LINE_WEIGHT_PX) / LINE_WEIGHT_PX;
+      var scale = 1;
+      try { scale = this._markerScale() || 1; } catch (_) { scale = 1; }
+      if (!(scale > 0)) scale = 1;
+      return { len: 10 * k / scale, half: 5 * k / scale };
+    },
+
     _nearestOnSegment: function(pt, p, q) {
       var dx = q.x - p.x, dy = q.y - p.y;
       var lenSq = dx * dx + dy * dy;

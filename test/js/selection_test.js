@@ -202,10 +202,14 @@ for (const child of ["line", "circle"]) {
 
 // ── what selection must NOT have broken ─────────────────────────────────────
 
-// Drafts keep the dashed in-progress look — that dash means "still being
-// drawn", which is a different statement from "selected".
-assert.ok(/stroke-dasharray/.test(ruleFor(".etcher-shape.is-draft")),
-  "the draft (mid-draw) dash went missing");
+// Drafts USED to keep a dashed in-progress look. They don't any more: a
+// draft is drawn with the style it is about to commit with, so a forced
+// dash here overrode the user's chosen line type for the whole drag (a
+// class rule outranks the presentation attribute `_applyLineParams`
+// writes) and the shape only snapped to its real look on release. See
+// draft_style_test.js.
+assert.ok(!/stroke-dasharray/.test(ruleFor(".etcher-shape.is-draft")),
+  "the draft rule is forcing a dash again — it overrides the chosen line type");
 // The edit-mode interaction plumbing rides the same class as the visuals.
 assert.ok(/visiblePainted/.test(ruleFor(".etcher-shape.is-editing")),
   "edit mode lost pointer-events: visiblePainted — the shape body can no longer be dragged");
@@ -226,6 +230,10 @@ function extract(name) {
 
 global.genUuidV7 = () => "uuid-test";
 const finalize = extract("_finalizeShape");
+// The real one: `_finalizeShape` asks it what a new shape of this kind looks
+// like, and so does every draft creator — that shared answer is what keeps
+// the preview and the committed shape identical.
+const styleForNewShape = extract("_styleForNewShape");
 
 function run(kind, afterCreate) {
   const calls = [];
@@ -235,6 +243,7 @@ function run(kind, afterCreate) {
     handleKind: "canvas",
     handle: {},
     _currentMarkerStyle: () => ({}),
+    _styleForNewShape: styleForNewShape,
     _getPref: () => undefined,
     _isStrokeShape: (k) => ["rectangle", "circle", "polygon", "freehand"].indexOf(k) !== -1,
     _lineParamsForNewShape: () => ({ color: "#ff0000" }),

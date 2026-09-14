@@ -1173,12 +1173,18 @@
       ".etcher-overlay.is-drawing .etcher-shape {",
       "  pointer-events: none; cursor: crosshair;",
       "}",
-      // Draft + edit share the same orange styling so the user has a
-      // single visual language for "this shape is currently mine".
+      // A draft looks like the shape it is about to become — it is drawn
+      // with the same style (`_styleForNewShape`), so this rule must not
+      // repaint any of it. It used to force orange + `stroke-dasharray: 5 4`
+      // + an orange body, back when draft and edit shared one "currently
+      // mine" look. The stroke and fill were already dead on any coloured
+      // shape (`_applyShapeColor` paints inline, which beats a class rule),
+      // but the dash LANDED: `_applyLineParams` writes dasharray as a
+      // presentation attribute, and any class rule outranks one. So every
+      // shape previewed dashed whatever the user had set, then snapped to
+      // its real style on release.
       ".etcher-shape.is-draft {",
       "  pointer-events: none;",
-      "  stroke: #f59e0b; stroke-dasharray: 5 4;",
-      "  fill: rgba(245, 158, 11, 0.15);",
       "}",
       // Hover / selected / editing / multi-selected leave the shape's own
       // paint completely alone. The old rules recolored the stroke orange
@@ -5746,6 +5752,40 @@
     // the shape keeps canvas units so the line holds its weight relative to
     // the drawing — the same conversion `_currentMarkerStyle` does, for the
     // same reason.
+    // What a brand-new shape of `kind` is styled with. The DRAFT is drawn
+    // with this too, which is the whole point of it being one function:
+    // what you see while dragging is what you get on release — same
+    // thickness, same dash, same opacity, same fill — instead of the draft
+    // having a look of its own that the committed shape then replaced.
+    //
+    // Markers persist their full appearance; stroke shapes (rect / circle /
+    // polygon / freehand) adopt the global line params (color + thickness /
+    // opacity / dash); every other kind just carries its color.
+    _styleForNewShape: function(kind) {
+      if (kind === "marker") return this._currentMarkerStyle();
+      if (this._isStrokeShape(kind)) return this._lineParamsForNewShape();
+      if (this._isShaftKind(kind)) {
+        // Shafts adopt the global stroke params like every other line the
+        // user draws — set the thickness once, and the next line, arrow and
+        // dimension all come out in it. No fill: there is nothing to fill
+        // on an open shaft, and a dead key would still ride every payload.
+        var shaft = this._lineParamsForNewShape();
+        delete shaft.fill;
+        return shaft;
+      }
+      if (kind === "text") {
+        // A text shape IS a label. It starts in the remembered label
+        // colour - the panel's label swatch (or recolouring a focused
+        // label) sets it - falling back to the stroke colour. This is
+        // the creation-time counterpart of _commitTextEdit's title_color
+        // stamp, which deliberately excludes text kinds because their
+        // text takes the shape's own colour.
+        var textColor = this._getPref("label_color") || this.activeColor;
+        return textColor ? { color: textColor } : null;
+      }
+      return this.activeColor ? { color: this.activeColor } : null;
+    },
+
     _lineParamsForNewShape: function() {
       var lp = this._currentLineParams();
       var scale = 0;
@@ -13976,7 +14016,8 @@
           from: { uuid: source.uuid, anchor: anchorId },
           to: null
         },
-        el: el
+        el: el,
+        style: self._styleForNewShape("arrow")
       };
       self._arrowDrag = draft;
       // The source's own hover dots would sit under the pointer for the
@@ -14998,10 +15039,15 @@
     _startRectangle: function(pt, e) {
       var rect = svgEl("rect", { "stroke-width": "2" });
       rect.classList.add("etcher-shape", "is-draft");
-      this._applyShapeColor(rect, this.activeColor);
+      var rectStyle = this._styleForNewShape("rectangle");
+      this._applyShapeColor(rect, this.activeColor, rectStyle);
       this.svg.appendChild(rect);
       var geom = { x: pt.x, y: pt.y, w: 0, h: 0 };
-      this.draftState = { kind: "rectangle", anchor: pt, geometry: geom, el: rect };
+      // `style` on the draft is what makes `_renderShape` paint the real
+      // thickness / dash / fill on every frame of the drag.
+      this.draftState = {
+        kind: "rectangle", anchor: pt, geometry: geom, el: rect, style: rectStyle
+      };
       this._renderShape(this.draftState);
       this._syncDraftHandles();
       try { e.target.setPointerCapture(e.pointerId); } catch (_) {}
@@ -15088,10 +15134,13 @@
     _startCircle: function(pt, e) {
       var circle = svgEl("circle", { "stroke-width": "2" });
       circle.classList.add("etcher-shape", "is-draft");
-      this._applyShapeColor(circle, this.activeColor);
+      var circleStyle = this._styleForNewShape("circle");
+      this._applyShapeColor(circle, this.activeColor, circleStyle);
       this.svg.appendChild(circle);
       var geom = { cx: pt.x, cy: pt.y, r: 0 };
-      this.draftState = { kind: "circle", center: pt, geometry: geom, el: circle };
+      this.draftState = {
+        kind: "circle", center: pt, geometry: geom, el: circle, style: circleStyle
+      };
       this._renderShape(this.draftState);
       this._syncDraftHandles();
       try { e.target.setPointerCapture(e.pointerId); } catch (_) {}
@@ -15133,9 +15182,12 @@
       if (!this.draftPolygon) {
         var poly = svgEl("polyline", { "stroke-width": "2", fill: "none" });
         poly.classList.add("etcher-shape", "is-draft");
-        // Polyline preview has fill: none; color only affects stroke,
-        // but use the same helper for consistency.
-        this._applyShapeColor(poly, this.activeColor);
+        // The polygon preview is drawn by `_renderPolygonPreview`, not
+        // `_renderShape`, so it takes the params directly — same thickness,
+        // dash and fill the finished polygon will have.
+        var polyStyle = this._styleForNewShape("polygon");
+        this._applyShapeColor(poly, this.activeColor, polyStyle);
+        this._applyLineParams(poly, polyStyle, this._markerScale());
         this.svg.appendChild(poly);
         this.draftPolygon = { points: [[pt.x, pt.y]], el: poly };
         this._lastHover = null;
@@ -15424,7 +15476,8 @@
         kind: "dimension",
         anchor: pt,
         geometry: { a: [pt.x, pt.y], b: [pt.x, pt.y] },
-        el: g
+        el: g,
+        style: this._styleForNewShape("dimension")
       };
       this._renderShape(this.draftState);
       this._syncDraftHandles();
@@ -15525,7 +15578,10 @@
         kind: "line",
         anchor: pt,
         geometry: { a: [pt.x, pt.y], b: [pt.x, pt.y] },
-        el: g
+        el: g,
+        // Read by `_shaftStrokePx` / `_applyShaftStroke` on every render, so
+        // the shaft previews at the weight and dash it will commit with.
+        style: this._styleForNewShape("line")
       };
       this._renderShape(this.draftState);
       this._syncDraftHandles();
@@ -15912,18 +15968,19 @@
         ? svgEl("path", { "stroke-width": "2", fill: "none" })
         : svgEl("polyline", { "stroke-width": "2", fill: "none" });
       path.classList.add("etcher-shape", "is-draft");
+      var strokeStyle = this._styleForNewShape(kind);
       if (kind === "marker") {
         path.classList.add("etcher-marker");
-        this._applyMarkerStyle(path, this._currentMarkerStyle());
+        this._applyMarkerStyle(path, strokeStyle, this._markerScale());
       } else {
-        this._applyShapeColor(path, this.activeColor);
-        // Freehand is a stroke shape — preview the global line params while
-        // drawing so the draft matches the committed thickness/dash.
-        this._applyLineParams(path, this._currentLineParams());
+        this._applyShapeColor(path, this.activeColor, strokeStyle);
+        this._applyLineParams(path, strokeStyle, this._markerScale());
       }
       this.svg.appendChild(path);
       var geom = { points: [[pt.x, pt.y]] };
-      this.draftState = { kind: kind, geometry: geom, el: path };
+      // Carrying the style means `_renderShape` re-applies it every frame at
+      // the current zoom, rather than the one-shot paint above going stale.
+      this.draftState = { kind: kind, geometry: geom, el: path, style: strokeStyle };
       this._renderShape(this.draftState);
       try { e.target.setPointerCapture(e.pointerId); } catch (_) {}
     },
@@ -16908,34 +16965,7 @@
       // hit-test that relied on the topmost-element heuristic; the
       // data attr is the explicit-opt-in path.
       el.setAttribute("data-fresco-suppress-tap", "");
-      // Markers persist their full appearance; stroke shapes (rect / circle /
-      // polygon / freehand) adopt the global line params (color + thickness /
-      // opacity / dash); every other kind just carries its color.
-      var style;
-      if (kind === "marker") {
-        style = this._currentMarkerStyle();
-      } else if (this._isStrokeShape(kind)) {
-        style = this._lineParamsForNewShape();
-      } else if (this._isShaftKind(kind)) {
-        // Shafts adopt the global stroke params like every other line the
-        // user draws — set the thickness once, and the next line, arrow and
-        // dimension all come out in it. No fill: there is nothing to fill
-        // on an open shaft, and a dead key would still ride every payload.
-        style = this._lineParamsForNewShape();
-        delete style.fill;
-      } else if (kind === "text") {
-        // A text shape IS a label. It starts in the remembered label
-        // colour - the panel's label swatch (or recolouring a focused
-        // label) sets it - falling back to the stroke colour. This is
-        // the creation-time counterpart of _commitTextEdit's title_color
-        // stamp, which deliberately excludes text kinds because their
-        // text takes the shape's own colour.
-        var labelColor = this._getPref("label_color");
-        var textColor = labelColor || this.activeColor;
-        style = textColor ? { color: textColor } : null;
-      } else {
-        style = this.activeColor ? { color: this.activeColor } : null;
-      }
+      var style = this._styleForNewShape(kind);
       var shape = {
         uuid: uuid,
         kind: kind,

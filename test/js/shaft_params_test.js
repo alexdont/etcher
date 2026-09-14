@@ -175,14 +175,16 @@ function fakeEl() {
 
 // Draw a line after setting thickness 8 → an 8px line, like every other
 // stroke tool. And no `fill` key rides along: nothing to fill on a shaft.
+// (The rules live in `_styleForNewShape`, which both `_finalizeShape` and
+// every draft creator take their answer from — so what a shaft previews as
+// and what it commits as cannot drift. See draft_style_test.js.)
 {
-  const needle = "      if (kind === \"marker\") {";
-  const start = src.indexOf(needle);
-  assert.notStrictEqual(start, -1, "could not find _finalizeShape's style branch");
-  const branch = src.slice(start, src.indexOf("var shape = {", start));
+  const start = src.indexOf("    _styleForNewShape: function(kind) {");
+  assert.notStrictEqual(start, -1, "could not find _styleForNewShape");
+  const branch = src.slice(start, src.indexOf("\n    },", start));
   assert.ok(branch.includes("_isShaftKind(kind)"),
     "new shafts no longer adopt the global stroke params at creation");
-  assert.ok(branch.includes("delete style.fill"),
+  assert.ok(branch.includes("delete shaft.fill"),
     "the dead fill key rides along on every shaft payload again");
 }
 

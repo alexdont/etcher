@@ -109,3 +109,53 @@ const FLOATING = { x: 102, y: 60, w: 96, h: 22 }; // the float-above default
 }
 
 console.log("label editor position: all checks passed");
+
+
+// ── click-away commits the label ────────────────────────────────────────────
+//
+// Enter and click-away are equal commits. The blur listener alone never
+// covered click-away: canvas pointer handlers preventDefault, which
+// suppresses the focus change, so a click on the board left the typed
+// label uncommitted. A capture-phase document pointerdown commits first;
+// the click then goes on to deselect / draw / select as usual.
+
+assert.ok(
+  src.includes('document.addEventListener("pointerdown", self._textEditOutsideDown, true);'),
+  "opening the editor wires a capture-phase outside-pointerdown"
+);
+assert.ok(
+  src.includes('document.removeEventListener("pointerdown", this._textEditOutsideDown, true);'),
+  "ending the edit unwires it (commit, cancel and restart all funnel through _endTextEdit)"
+);
+{
+  const handler = src.slice(
+    src.indexOf("self._textEditOutsideDown = function(e) {"),
+    src.indexOf('document.addEventListener("pointerdown", self._textEditOutsideDown, true);')
+  );
+  assert.ok(
+    handler.includes("self._commitTextEdit();") &&
+      handler.includes("e.target === input") &&
+      handler.includes("fo.contains(e.target)"),
+    "a pointerdown outside the input commits; inside the editor it does nothing"
+  );
+}
+{
+  // The teardown site is _endTextEdit itself, so no editor exit path can
+  // leave the document listener behind — including hook destroy.
+  const end = src.slice(
+    src.indexOf("_endTextEdit: function() {"),
+    src.indexOf("_textEditHost: function(shape)")
+  );
+  assert.ok(
+    end.includes("this._textEditOutsideDown = null;"),
+    "_endTextEdit clears the outside-pointerdown listener"
+  );
+  const destroyed = src.slice(
+    src.indexOf("destroyed: function() {"),
+    src.indexOf("_unwireImagePaste();", src.indexOf("destroyed: function() {"))
+  );
+  assert.ok(
+    destroyed.includes("this._endTextEdit();"),
+    "hook destroy ends an open edit so the listener can't leak"
+  );
+}

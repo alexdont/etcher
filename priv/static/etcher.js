@@ -2905,6 +2905,9 @@
       this.actionBar = null;
 
       this._exitEditMode();
+      // An editor left open at teardown holds a document-level pointerdown
+      // listener; _endTextEdit is where it is unwired.
+      this._endTextEdit();
       this._unwireImagePaste();
       this._removeTooltipOutsideClickHandler();
       this._clearCommentHighlights();
@@ -16701,6 +16704,18 @@
           }
         }, 0);
       });
+      // Blur alone cannot be trusted for click-away: the canvas's pointer
+      // handlers preventDefault, which suppresses the focus change, so a
+      // click on the board never blurred the input — the typed label sat
+      // uncommitted and could be discarded by a later teardown. A capture-
+      // phase pointerdown commits it first, and the click then goes on to
+      // do whatever it was for (deselect, draw, pick another shape).
+      self._textEditOutsideDown = function(e) {
+        if (!self._textEditor || self._textEditor.input !== input) return;
+        if (e.target === input || (fo.contains && fo.contains(e.target))) return;
+        self._commitTextEdit();
+      };
+      document.addEventListener("pointerdown", self._textEditOutsideDown, true);
       // Focus on next frame so the foreignObject is attached before
       // we yank the cursor in.
       setTimeout(function() { try { input.focus(); input.select(); } catch (_) {} }, 0);
@@ -16794,6 +16809,10 @@
     _endTextEdit: function() {
       var ed = this._textEditor;
       if (!ed) return;
+      if (this._textEditOutsideDown) {
+        document.removeEventListener("pointerdown", this._textEditOutsideDown, true);
+        this._textEditOutsideDown = null;
+      }
       if (ed.fo && ed.fo.parentNode) ed.fo.parentNode.removeChild(ed.fo);
       var hostEl = ed.shape && this._textEditHost(ed.shape);
       var existing = hostEl && hostEl.querySelector(".etcher-text-content");

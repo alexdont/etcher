@@ -3092,6 +3092,14 @@
         document.removeEventListener("keydown", this._undoKeyHandler);
         this._undoKeyHandler = null;
       }
+      if (this._spaceUpHandler) {
+        document.removeEventListener("keyup", this._spaceUpHandler);
+        this._spaceUpHandler = null;
+      }
+      if (this._spaceBlurHandler) {
+        window.removeEventListener("blur", this._spaceBlurHandler);
+        this._spaceBlurHandler = null;
+      }
       if (this._peerPrefsHandler) {
         document.removeEventListener("etcher:prefs-changed", this._peerPrefsHandler);
         this._peerPrefsHandler = null;
@@ -3792,6 +3800,27 @@
           return;
         }
 
+        // Space held = pan, then back to whatever you were using. The
+        // convention in every comparable tool, and worth having for the
+        // same reason they all do: reaching for the hand tool means losing
+        // your place in what you were drawing with.
+        //
+        // Bare space only — a modifier makes it a chord belonging to
+        // something else. Typing a space into a label is already safe: the
+        // INPUT / TEXTAREA / contentEditable gate at the top of this
+        // handler returns long before here.
+        if ((e.key === " " || e.code === "Space") &&
+            !e.metaKey && !e.ctrlKey && !e.altKey) {
+          // Held, not tapped: the key repeats while down, and every repeat
+          // after the first must do nothing.
+          if (!e.repeat && !self._spacePanning) self._beginSpacePan();
+          // Swallowed whether or not the pan engaged — space scrolls the
+          // page, which is never what someone holding it over a canvas
+          // meant.
+          if (self._spacePanning) e.preventDefault();
+          return;
+        }
+
         // Single-key tool shortcuts. Bare keys only — a modifier means
         // the keystroke is a chord that belongs to something else (⌘R is
         // reload, alt-drag is duplicate). Consumed only when the key maps
@@ -3849,6 +3878,16 @@
         }
       };
       document.addEventListener("keydown", self._undoKeyHandler);
+
+      self._spaceUpHandler = function(e) {
+        if (e.key === " " || e.code === "Space") self._endSpacePan();
+      };
+      document.addEventListener("keyup", self._spaceUpHandler);
+      // A keyup that never arrives: alt-tab away with space held and the
+      // browser hands the release to whatever has focus next, leaving the
+      // grabber armed with no way to know why.
+      self._spaceBlurHandler = function() { self._endSpacePan(); };
+      window.addEventListener("blur", self._spaceBlurHandler);
     },
 
     // -------------------------------------------------------------------------
@@ -15727,6 +15766,41 @@
     // allowlist offers that tool — a key silently arming a tool the
     // toolbar doesn't show would strand the user in a mode they can't
     // see, and the host page keeps the keystroke instead.
+    // Arm the grabber, remembering what to come back to.
+    //
+    // Refused while a shape is in flight. Changing tools cancels the draft
+    // (see `_selectTool`), so panning mid-shape would silently destroy the
+    // rectangle you were dragging out or the arrow waiting for its second
+    // click. Losing work to a key you pressed for a look around is a far
+    // worse trade than not panning for a moment.
+    _beginSpacePan: function() {
+      if (this._spacePanning) return;
+      if (this.draftState || this.draftPolygon || this.draftCallout ||
+          this._arrowDrag) {
+        return;
+      }
+      // A board that doesn't offer the grabber doesn't get space-pan
+      // either — `_selectToolByShortcut` is what knows that.
+      var from = this.activeTool;
+      if (!this._selectToolByShortcut("grabber")) return;
+      this._spacePanning = true;
+      this._spacePanFrom = from;
+    },
+
+    // …and back. `null` is the cursor, which is a real tool to return to,
+    // so the flag is what says whether a pan is in progress rather than
+    // the remembered value being empty.
+    _endSpacePan: function() {
+      if (!this._spacePanning) return;
+      var back = this._spacePanFrom;
+      this._spacePanning = false;
+      this._spacePanFrom = null;
+      // Only if space is still what is driving it. Someone who picked
+      // another tool mid-pan has said what they want, and yanking them back
+      // on keyup would undo a deliberate choice.
+      if (this.activeTool === "grabber") this._selectToolByShortcut(back);
+    },
+
     _selectToolByShortcut: function(toolKey) {
       if (toolKey === null) {
         this._selectTool(null);

@@ -11,10 +11,13 @@
 //      visible consequences — two-click was tried before without a preview
 //      and removed, because a first click that changes nothing on screen
 //      reads as the tool being broken.
-//   3. A second click landing on the first — i.e. a double-click, which
-//      people do — makes nothing. There is no shape to build from one
-//      point, and committing anyway left a trail of zero-length arrows
-//      behind an impatient user.
+//   3. A second click landing on the first, or near enough that there is no
+//      shape between them, CANCELS the whole draft. That is a double-click,
+//      which people do, and someone who double-clicks did not mean to start
+//      drawing — so the preview goes with it rather than trailing their
+//      cursor waiting to be dismissed. "Near enough" is its own threshold:
+//      hand jitter is 5px, but a 10px dimension is not a small measurement,
+//      it is an accident.
 //
 //   node test/js/two_click_place_test.js
 
@@ -35,13 +38,20 @@ function extract(name) {
     .replace(`${name}: function`, "function") + ")");
 }
 
-{
-  const m = src.match(/var CLICK_PLACE_THRESHOLD_PX = ([\d.]+);/);
-  assert.ok(m, "could not find CLICK_PLACE_THRESHOLD_PX");
-  global.CLICK_PLACE_THRESHOLD_PX = Number(m[1]);
+for (const name of ["CLICK_PLACE_THRESHOLD_PX", "MIN_SPAN_PX"]) {
+  const m = src.match(new RegExp(`var ${name} = ([\\d.]+);`));
+  assert.ok(m, `could not find ${name}`);
+  global[name] = Number(m[1]);
 }
 
+// They answer different questions and must not be collapsed into one: the
+// first is "was this press-and-release a drag at all" (hand jitter), the
+// second is "is there a shape between these two points".
+assert.ok(MIN_SPAN_PX > CLICK_PLACE_THRESHOLD_PX * 2,
+  "the placement minimum should be well clear of the jitter threshold");
+
 const placeArmed = extract("_placeArmedDraft");
+const isTooClose = extract("_isTooCloseToPlace");
 const commitDimension = extract("_commitDimension");
 const commitCallout = extract("_commitCallout");
 const isClickGesture = extract("_isClickGesture");
@@ -50,12 +60,18 @@ const FAR = { x: 400, y: 300 };
 const ORIGIN = { x: 100, y: 100 };
 // Inside the click threshold — a double-click with a pixel of hand jitter.
 const JITTER = { x: 101, y: 100 };
+// Past the jitter threshold but still far too close to be a shape: the
+// second click of a double-click that slid a little. Both must cancel.
+const NEAR = { x: 112, y: 100 };
 
 function board(over) {
   return Object.assign({
     committed: [],
     calloutCommits: [],
     _isClickGesture: isClickGesture,
+    _isTooCloseToPlace: isTooClose,
+    cancelled: 0,
+    _cancelDraft() { this.cancelled++; this.draftState = null; this.draftCallout = null; },
     _markerScale: () => 1,
     _constrainShaftPoint: (a, pt) => pt,
     _commitShaftDraft(geom) { this.committed.push(geom); },
@@ -97,21 +113,54 @@ function board(over) {
 
 // ── a double-click in one spot makes nothing ──────────────────────────────
 
-{
+for (const [where, what] of [[JITTER, "on the first click"], [NEAR, "near it"]]) {
   const self = board({
     draftState: { kind: "dimension", anchor: ORIGIN, armed: true },
   });
-  assert.strictEqual(placeArmed.call(self, JITTER), true,
-    "the stray press is swallowed rather than starting a second draft");
-  assert.deepStrictEqual(self.committed, [], "and builds nothing from one point");
-  assert.strictEqual(self.draftState.armed, true,
-    "the draft stays armed, so the NEXT click still places the far end");
+  assert.strictEqual(placeArmed.call(self, where), true,
+    `a second click ${what} is consumed, not passed to the tool`);
+  assert.deepStrictEqual(self.committed, [],
+    `a second click ${what} builds nothing`);
+  assert.strictEqual(self.cancelled, 1,
+    `a second click ${what} cancels the draft outright`);
+  assert.strictEqual(self.draftState, null,
+    "…so no preview is left trailing the cursor to be dismissed");
+}
 
-  // The release that follows that second press re-arms rather than
-  // committing — the whole double-click leaves no shape behind.
-  commitDimension.call(self, JITTER);
-  assert.deepStrictEqual(self.committed, []);
-  assert.strictEqual(self.draftState.armed, true);
+{
+  // Just past the minimum is a real, if short, span — the cancel must not
+  // swallow a deliberate one.
+  const self = board({
+    draftState: { kind: "dimension", anchor: ORIGIN, armed: true },
+  });
+  const justFarEnough = { x: ORIGIN.x + MIN_SPAN_PX + 1, y: ORIGIN.y };
+  placeArmed.call(self, justFarEnough);
+  assert.strictEqual(self.cancelled, 0, "not cancelled");
+  assert.deepStrictEqual(self.committed,
+    [{ a: [ORIGIN.x, ORIGIN.y], b: [justFarEnough.x, justFarEnough.y] }],
+    "a short but deliberate span is still placed");
+}
+
+// The screen/image distinction: the minimum is a SCREEN distance, so zooming
+// changes how many image px it covers. Two image points a hair apart are far
+// apart on screen at 40x, and placing between them is fine.
+{
+  const zoomedIn = board({
+    draftState: { kind: "dimension", anchor: ORIGIN, armed: true },
+    _markerScale: () => 40,
+  });
+  placeArmed.call(zoomedIn, { x: ORIGIN.x + 2, y: ORIGIN.y });
+  assert.strictEqual(zoomedIn.cancelled, 0,
+    "2 image px at 40x is 80 screen px — a real span");
+  assert.strictEqual(zoomedIn.committed.length, 1);
+
+  const zoomedOut = board({
+    draftState: { kind: "dimension", anchor: ORIGIN, armed: true },
+    _markerScale: () => 0.05,
+  });
+  placeArmed.call(zoomedOut, { x: ORIGIN.x + 300, y: ORIGIN.y });
+  assert.strictEqual(zoomedOut.cancelled, 1,
+    "300 image px at 0.05x is 15 screen px — the user cannot even see it");
 }
 
 // ── callouts behave the same way ──────────────────────────────────────────
@@ -164,7 +213,7 @@ function board(over) {
   assert.deepStrictEqual(self.calloutCommits, [[FAR, true]],
     "the second click commits the callout, marked as the placing click");
 
-  // And a double-click on the anchor still makes nothing.
+  // And a double-click on the anchor cancels the callout draft too.
   const dbl = board({
     draftCallout: {
       kind: "callout",
@@ -174,6 +223,8 @@ function board(over) {
   });
   assert.strictEqual(placeArmed.call(dbl, JITTER), true);
   assert.deepStrictEqual(dbl.calloutCommits, []);
+  assert.strictEqual(dbl.cancelled, 1);
+  assert.strictEqual(dbl.draftCallout, null);
 }
 
 // ── nothing armed → the press starts a new gesture ────────────────────────

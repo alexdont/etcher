@@ -1917,6 +1917,16 @@
   var CLICK_PLACE_THRESHOLD_PX = 5;
   var CLICK_PLACE_SIZE_PX = 120;
 
+  // The shortest two-ended shape worth making, in screen px. Placing the far
+  // end of a dimension, line or callout nearer than this is not a small
+  // measurement, it is an accident — a double-click, or a second click that
+  // landed about where the first did. Well clear of
+  // `CLICK_PLACE_THRESHOLD_PX`, which answers a different question: that one
+  // is hand jitter, "was this press-and-release a drag at all", and 5px of
+  // slop is all it takes to answer it. This is "is there a shape here", and
+  // a 10px dimension is not one however deliberately it was clicked.
+  var MIN_SPAN_PX = 24;
+
   // How close (screen px) a dragged shape's edge or center has to come to
   // another shape's before it magnetizes. Screen px so the pull feels the
   // same at every zoom.
@@ -12985,13 +12995,16 @@
         ? { x: draft.geometry.anchor[0], y: draft.geometry.anchor[1] }
         : draft.anchor;
 
-      // The second click landed on the first. Almost always a double-click
-      // — people double-click things — and there is no shape to make from
-      // one point. Consume it and change nothing: the draft stays armed and
-      // keeps following the cursor, so the next click still places the far
-      // end. Committing here is what used to leave a trail of zero-length
-      // arrows behind an impatient user.
-      if (this._isClickGesture(anchor, pt)) return true;
+      // The second click landed on the first, or near enough that there is
+      // no shape between them. Almost always a double-click — people
+      // double-click things — so the whole draft goes: someone who
+      // double-clicks did not mean to start drawing, and leaving the draft
+      // armed strands a preview trailing their cursor that they then have
+      // to notice and dismiss. Clicking again is the way to start one.
+      if (this._isTooCloseToPlace(anchor, pt)) {
+        this._cancelDraft();
+        return true;
+      }
 
       if (draft === this.draftCallout) this._commitCallout(pt, true);
       else this._commitShaftDraft({ a: [anchor.x, anchor.y], b: [pt.x, pt.y] });
@@ -17628,6 +17641,17 @@
     // Judged in SCREEN px so the answer doesn't change with zoom — the old
     // check compared image px, which at high zoom canceled deliberate small
     // drags and at low zoom accepted accidental jitter as a shape.
+    // Is the far end too close to the anchor to be a shape? Measured on
+    // SCREEN, like the click threshold, so it means the same thing at every
+    // zoom — zoom in far enough and any two image points are miles apart.
+    _isTooCloseToPlace: function(a, b) {
+      var scale = 1;
+      try { scale = this._markerScale() || 1; } catch (_) { scale = 1; }
+      var dx = (b.x - a.x) * scale;
+      var dy = (b.y - a.y) * scale;
+      return dx * dx + dy * dy < MIN_SPAN_PX * MIN_SPAN_PX;
+    },
+
     _isClickGesture: function(a, b) {
       var scale = 1;
       try { scale = this._markerScale() || 1; } catch (_) {}

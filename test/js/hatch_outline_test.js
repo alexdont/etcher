@@ -43,6 +43,7 @@ function extract(name) {
 const applyFill = extract("_applyFill");
 const isFillableEl = extract("_isFillableEl");
 const looksSelected = extract("_looksSelected");
+const isHatched = extract("_isHatched");
 const syncHatchOutline = extract("_syncHatchOutline");
 
 // ── a minimal SVG element ──────────────────────────────────────────────────
@@ -155,10 +156,38 @@ function hatchedShape(attrs) {
   node.style.strokeWidth = "4px";
   const p = parent();
   p.insertBefore(node, null);
-  return { shape: { kind: "rectangle", el: node }, el: node, parent: p };
+  return {
+    // Whether a shape is hatched is read off its STYLE, not off the class:
+    // `_applyFill` is reached through several paths, a couple of which pass
+    // no style and strip the class on the way past, so the DOM reports what
+    // the last painter did while the style says what the shape is.
+    shape: { kind: "rectangle", el: node, style: { fill: "pattern" } },
+    el: node,
+    parent: p,
+  };
 }
 
-const ctx = { _looksSelected: looksSelected };
+const ctx = { _looksSelected: looksSelected, _isHatched: isHatched };
+
+// ── the hatched test is on the data, not on the DOM ────────────────────────
+
+assert.strictEqual(isHatched({ style: { fill: "pattern" } }), true);
+for (const fill of ["semi", "solid", "none", undefined]) {
+  assert.strictEqual(isHatched({ style: { fill } }), false, `"${fill}" is not hatched`);
+}
+assert.strictEqual(isHatched(null), false);
+assert.strictEqual(isHatched({}), false, "a shape with no style is not hatched");
+
+{
+  // The class going missing must not bring the ringing back.
+  const h = hatchedShape();
+  h.el.classList.remove("etcher-hatched");
+  h.el.classList.add("is-selected");
+  syncHatchOutline.call(ctx, h.shape);
+  assert.strictEqual(h.el.style.filter, "none",
+    "the filter is killed off the style, so a stripped class cannot undo it");
+  assert.ok(h.shape._hatchOutline, "and the traced outline is still drawn");
+}
 
 {
   // Not selected → nothing drawn.
@@ -166,6 +195,11 @@ const ctx = { _looksSelected: looksSelected };
   syncHatchOutline.call(ctx, h.shape);
   assert.strictEqual(h.shape._hatchOutline, null);
   assert.strictEqual(h.parent.kids.length, 1);
+
+  // The ringing filter is killed inline whether or not it is selected: an
+  // inline style cannot be out-ranked by a stylesheet, which is the point.
+  assert.strictEqual(h.el.style.filter, "none",
+    "a hatched shape is never run through the pixel-ringing filter");
 
   // Selected → a traced copy appears BEHIND the shape.
   h.el.classList.add("is-multi-selected");
@@ -212,11 +246,13 @@ const ctx = { _looksSelected: looksSelected };
 {
   // A selected shape that is NOT hatched keeps the filter — no tracing.
   const h = hatchedShape();
-  h.el.classList.remove("etcher-hatched");
+  h.shape.style = { fill: "semi" };
   h.el.classList.add("is-selected");
   syncHatchOutline.call(ctx, h.shape);
   assert.strictEqual(h.shape._hatchOutline, null,
     "unhatched shapes are outlined by the filter, not by a traced copy");
+  assert.strictEqual(h.el.style.filter, "",
+    "…so their filter is left to the stylesheet");
 }
 
 {
@@ -226,10 +262,12 @@ const ctx = { _looksSelected: looksSelected };
   h.el.classList.add("is-selected");
   syncHatchOutline.call(ctx, h.shape);
   assert.ok(h.shape._hatchOutline);
-  h.el.classList.remove("etcher-hatched");
+  h.shape.style = { fill: "solid" };
   syncHatchOutline.call(ctx, h.shape);
   assert.strictEqual(h.shape._hatchOutline, null);
   assert.deepStrictEqual(h.parent.kids, [h.el]);
+  assert.strictEqual(h.el.style.filter, "",
+    "and the filter is handed back to the stylesheet");
 }
 
 // ── wiring ─────────────────────────────────────────────────────────────────

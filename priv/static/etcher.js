@@ -7888,10 +7888,30 @@
     // so the shape's own stroke covers the middle of the band and only the
     // edges show. Solid, whatever the shape's dash is: a dashed selection
     // outline reads as a property of the shape rather than as selection.
+    // Is this shape hatched? Asked of the STYLE, not of a class on the
+    // element. The class is set by `_applyFill`, which is reached through
+    // half a dozen paths — a couple of which pass no style at all and strip
+    // it on the way past — so the DOM is a report of what the last painter
+    // happened to do, while the style is what the shape IS.
+    _isHatched: function(shape) {
+      return !!(shape && shape.style && shape.style.fill === "pattern");
+    },
+
     _syncHatchOutline: function(shape) {
       var el = shape && shape.el;
-      var want = !!el && el.classList && el.classList.contains("etcher-hatched") &&
-        this._looksSelected(el) && !!el.parentNode;
+      var hatched = !!el && this._isHatched(shape);
+
+      // Kill the ringing filter INLINE rather than through a stylesheet
+      // rule. The rule is still there and still correct, but a filter is
+      // exactly the kind of thing a host's own CSS, a second copy of this
+      // library on the page, or a specificity surprise can put back; an
+      // inline style cannot be out-ranked by any of them. This is the line
+      // that stops each hatch stripe being outlined.
+      if (el && el.style) {
+        el.style.filter = hatched ? "none" : "";
+      }
+
+      var want = hatched && this._looksSelected(el) && !!el.parentNode;
 
       if (!want) {
         if (shape && shape._hatchOutline && shape._hatchOutline.parentNode) {

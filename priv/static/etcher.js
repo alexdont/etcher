@@ -1257,6 +1257,25 @@
       "image.etcher-shape.is-hovered {",
       "  filter: none;",
       "}",
+      // A hatch fill is PAINTED PIXELS, and the outline filter rings every
+      // one of them — so selecting a hatched shape drew a blue ring around
+      // each diagonal stripe inside it. Dozens of rings where one was meant:
+      // noise, not selection. Hatched shapes opt out here and get a traced
+      // perimeter instead (`_syncHatchOutline`), which is the outline the
+      // filter was standing in for all along.
+      ".etcher-shape.etcher-hatched.is-multi-selected,",
+      ".etcher-shape.etcher-hatched.is-selected,",
+      ".etcher-shape.etcher-hatched.is-editing,",
+      ".etcher-shape.etcher-hatched.is-hovered {",
+      "  filter: none;",
+      "}",
+      // The traced perimeter itself: the shape's own geometry, stroked, sat
+      // behind the shape so its own stroke covers the middle of the band and
+      // what shows is an edge on either side — the same read as the filter's
+      // ring. Never a hit target; the shape it copies owns that.
+      ".etcher-hatch-outline {",
+      "  pointer-events: none;",
+      "}",
       // Text (and callout text boxes) opt out of the outline filter too —
       // they already show selection via the solid blue bbox stroke above,
       // and outlining every glyph reads as bolding the type, not as
@@ -1867,6 +1886,21 @@
   // payload can't drift apart.
   var DASH_MODES = ["solid", "dashed", "dotted", "none"];
   var FILL_MODES = ["none", "semi", "solid", "pattern"];
+
+  // The blue every selected thing is outlined in, and how far the outline
+  // stands proud of the shape's own stroke on each side — matched to the
+  // `feMorphology` dilate radius the silhouette filter uses, so a hatched
+  // shape and a plain one read as equally selected.
+  var SELECTION_BLUE = "#3b82f6";
+  var OUTLINE_BAND_PX = 1.6;
+  // Copied from the shape onto its traced outline — except these. The dash
+  // and width are the shape's own look, `class`/`style` are the outline's
+  // own, `filter` would ring the tracing itself, and a second element
+  // answering to the same uuid would confuse every lookup that goes by it.
+  var SKIP_OUTLINE_ATTRS = {
+    "class": 1, style: 1, filter: 1,
+    "stroke-dasharray": 1, "stroke-width": 1, "data-uuid": 1
+  };
 
   // A pasted image is persisted immediately as a reduced copy, so the shape
   // has something to draw before its upload finishes — on a reload
@@ -7804,11 +7838,16 @@
     // undo of a create), sweep: a ring no live shape claims is orphaned.
     _sweepImageRings: function() {
       if (!this.svg) return;
-      var rings = this.svg.querySelectorAll(".etcher-image-ring");
+      // Hatch outlines are siblings of their shape for the same reason and
+      // are orphaned the same way, so they sweep together.
+      var rings = this.svg.querySelectorAll(
+        ".etcher-image-ring, .etcher-hatch-outline"
+      );
       if (!rings.length) return;
       var owned = [];
       (this.shapes || []).forEach(function(s) {
         if (s && s._imageRing) owned.push(s._imageRing);
+        if (s && s._hatchOutline) owned.push(s._hatchOutline);
       });
       for (var i = 0; i < rings.length; i++) {
         if (owned.indexOf(rings[i]) === -1 && rings[i].parentNode) {
@@ -7818,10 +7857,86 @@
     },
 
     // Selection and hover are class toggles that don't re-render anything,
-    // so an image's ring has to be asked for explicitly when they change.
-    // No-op for every other kind — they paint their own selected state.
+    // so the two kinds of selected-state paint that DON'T come from CSS have
+    // to be asked for explicitly when they change: an image's ring, and a
+    // hatched shape's traced perimeter. Every other kind paints its own
+    // selected state through the filter, which the class toggle is enough
+    // for on its own.
     _refreshImageRing: function(shape) {
-      if (shape && shape.kind === "image" && shape.el) this._renderShape(shape);
+      if (!shape || !shape.el) return;
+      if (shape.kind === "image") { this._renderShape(shape); return; }
+      this._syncHatchOutline(shape);
+    },
+
+    // The states a shape is outlined in. Hover is included: a hatched shape
+    // hovering under the cursor should answer the same way every other shape
+    // does, just without the stripe-by-stripe ringing.
+    _looksSelected: function(el) {
+      if (!el || !el.classList) return false;
+      return el.classList.contains("is-selected") ||
+             el.classList.contains("is-editing") ||
+             el.classList.contains("is-multi-selected") ||
+             el.classList.contains("is-hovered");
+    },
+
+    // A hatched shape's selection outline, traced rather than filtered.
+    //
+    // The silhouette filter rings every painted pixel, which for a hatch
+    // means every stripe — so these shapes opt out of it (`.etcher-hatched`)
+    // and get a copy of their own geometry instead: same element type, same
+    // geometry attributes, no fill, stroked blue, sitting BEHIND the shape
+    // so the shape's own stroke covers the middle of the band and only the
+    // edges show. Solid, whatever the shape's dash is: a dashed selection
+    // outline reads as a property of the shape rather than as selection.
+    _syncHatchOutline: function(shape) {
+      var el = shape && shape.el;
+      var want = !!el && el.classList && el.classList.contains("etcher-hatched") &&
+        this._looksSelected(el) && !!el.parentNode;
+
+      if (!want) {
+        if (shape && shape._hatchOutline && shape._hatchOutline.parentNode) {
+          shape._hatchOutline.parentNode.removeChild(shape._hatchOutline);
+        }
+        if (shape) shape._hatchOutline = null;
+        return;
+      }
+
+      var outline = shape._hatchOutline;
+      if (!outline || outline.tagName !== el.tagName) {
+        // Shallow: every hatchable kind (rect / circle / polygon / path /
+        // polyline) carries its whole geometry in its own attributes.
+        outline = el.cloneNode(false);
+        outline.setAttribute("class", "etcher-hatch-outline");
+        shape._hatchOutline = outline;
+      } else {
+        // Geometry moves every frame under a pan, zoom or drag; copy it
+        // across rather than rebuilding the node.
+        for (var i = 0; i < el.attributes.length; i++) {
+          var a = el.attributes[i];
+          if (SKIP_OUTLINE_ATTRS[a.name]) continue;
+          outline.setAttribute(a.name, a.value);
+        }
+      }
+      for (var k in SKIP_OUTLINE_ATTRS) {
+        if (SKIP_OUTLINE_ATTRS.hasOwnProperty(k)) outline.removeAttribute(k);
+      }
+      outline.setAttribute("class", "etcher-hatch-outline");
+
+      // Wide enough that the band clears the shape's own stroke on both
+      // sides by about what the filter's dilate radius gave.
+      var own = parseFloat(el.style.strokeWidth) || 2;
+      outline.style.fill = "none";
+      outline.style.stroke = SELECTION_BLUE;
+      outline.style.strokeWidth = (own + OUTLINE_BAND_PX * 2) + "px";
+      outline.style.strokeOpacity = "1";
+      outline.style.filter = "none";
+
+      // Behind the shape, and re-seated every sync: `_syncShapeOrder`
+      // rearranges shape elements for layering, and an outline left where it
+      // was would end up tracing whatever moved into its place.
+      if (outline.nextSibling !== el || !outline.parentNode) {
+        el.parentNode.insertBefore(outline, el);
+      }
     },
 
     // Keep an image's selection ring in step with its box, or drop it when
@@ -9839,6 +9954,7 @@
       if (!this._isFillableEl(el)) {
         el.style.fill = "none";
         el.style.fillOpacity = "";
+        el.classList.remove("etcher-hatched");
         return;
       }
       var s = style || {};
@@ -9848,6 +9964,7 @@
       if (mode === "none") {
         el.style.fill = "none";
         el.style.fillOpacity = "";
+        el.classList.remove("etcher-hatched");
         return;
       }
 
@@ -9861,6 +9978,10 @@
         if (hatch) {
           el.style.fill = "url(#" + hatch + ")";
           el.style.fillOpacity = String(opacity);
+          // Tells the stylesheet (and `_syncHatchOutline`) that this shape's
+          // painted pixels include the hatch — which changes what selecting
+          // it has to look like. See `.etcher-hatched` below.
+          el.classList.add("etcher-hatched");
           return;
         }
         // No SVG to hang the def on yet (a draft painted before init
@@ -9872,6 +9993,7 @@
       // the mode gets flipped — never touches the colour otherwise.
       el.style.fill = color;
       el.style.fillOpacity = String((mode === "solid" ? 1 : 0.18) * opacity);
+      el.classList.remove("etcher-hatched");
     },
 
     // Whether "no line" actually takes effect for this element. A shape
@@ -10743,6 +10865,9 @@
       // this is the one place that catches them all without a call bolted
       // onto each gesture. See `_noteLiveMove`.
       if (self._liveMoveHandler && shape.uuid) self._noteLiveMove(shape);
+
+      // Same reason as the badge: it traces the geometry this render wrote.
+      self._syncHatchOutline(shape);
 
       // Badge last, so it reads the geometry this render just wrote.
       self._renderBadge(shape);

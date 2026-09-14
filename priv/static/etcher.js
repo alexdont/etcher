@@ -827,6 +827,18 @@
       "  gap: 10px; padding: 10px;",
       "}",
       ".etcher-marker-row { display: flex; flex-direction: column; gap: 4px; }",
+      // The font row's number box. Sized to four digits, so 6 and 200 both
+      // sit where the other rows' read-outs do.
+      ".etcher-num {",
+      "  width: 52px; text-align: right;",
+      "  padding: 2px 4px; border-radius: 5px;",
+      "  border: 1px solid rgba(255, 255, 255, 0.22);",
+      "  background: rgba(255, 255, 255, 0.08); color: #fff;",
+      "  font: 500 12px ui-sans-serif, system-ui, sans-serif;",
+      "}",
+      ".etcher-num:focus { outline: 1px solid rgba(255, 255, 255, 0.5); }",
+      // Firefox draws spinners always, WebKit on hover; either way they are
+      // the increase/decrease the control is meant to offer.
       ".etcher-marker-row-head {",
       "  display: flex; justify-content: space-between; align-items: center;",
       "  color: #fff; font-size: 11px; opacity: 0.85;",
@@ -1886,6 +1898,11 @@
   // payload can't drift apart.
   var DASH_MODES = ["solid", "dashed", "dotted", "none"];
   var FILL_MODES = ["none", "semi", "solid", "pattern"];
+
+  // Font size limits, in screen px. The floor is where text stops being
+  // readable at 1:1; the ceiling is a label the size of a small shape.
+  var FONT_SIZE_MIN = 6;
+  var FONT_SIZE_MAX = 200;
 
   // The blue every selected thing is outlined in, and how far the outline
   // stands proud of the shape's own stroke on each side — matched to the
@@ -5830,9 +5847,108 @@
         // stamp, which deliberately excludes text kinds because their
         // text takes the shape's own colour.
         var textColor = this._getPref("label_color") || this.activeColor;
-        return textColor ? { color: textColor } : null;
+        var textStyle = textColor ? { color: textColor } : {};
+        var lp = this._currentLineParams();
+        if (lp.font_size) {
+          var tScale = 1;
+          try { tScale = this._markerScale() || 1; } catch (_) { tScale = 1; }
+          textStyle.font_size = lp.font_size / tScale;
+        }
+        return Object.keys(textStyle).length ? textStyle : null;
       }
       return this.activeColor ? { color: this.activeColor } : null;
+    },
+
+    // The size a shape's text is drawn at, in container px.
+    //
+    // Two ways to set it, and this is where they meet. Drag the label's box
+    // and the size follows the box — the original behaviour, still the way
+    // to eyeball one. Type or slide a number in the panel and it is pinned,
+    // so every label can be given the SAME size instead of each ending up
+    // wherever its box happened to land.
+    //
+    // Stored in canvas units like a stroke width, so a pinned size zooms
+    // with the board rather than staying a fixed number of screen pixels
+    // and swamping the drawing when you zoom out.
+    _fontSizeFor: function(shape, derivedPx) {
+      if (!this._hasPinnedFontSize(shape)) return derivedPx;
+      var scale = 1;
+      try { scale = this._markerScale() || 1; } catch (_) { scale = 1; }
+      return Math.max(1, shape.style.font_size * scale);
+    },
+
+    _hasPinnedFontSize: function(shape) {
+      var fs = shape && shape.style && shape.style.font_size;
+      return typeof fs === "number" && isFinite(fs) && fs > 0;
+    },
+
+    // The shapes a font size applies to: the ones that draw text. Distinct
+    // from `_paramsTargetShapes` — a rectangle with a label takes a font
+    // size and a text shape takes no stroke width, so neither set contains
+    // the other.
+    _fontTargetShapes: function() {
+      function draws(s) {
+        if (!s) return false;
+        if (s.kind === "text" || s.kind === "callout") return true;
+        return !!(s.metadata && String(s.metadata.title || "").trim() !== "");
+      }
+      if (this.selectedShapes && this.selectedShapes.length) {
+        return this.selectedShapes.filter(draws);
+      }
+      if (draws(this.editingShape)) return [this.editingShape];
+      if (draws(this.editingTitleShape)) return [this.editingTitleShape];
+      return [];
+    },
+
+    // Pin a font size on the current targets, or `null` to hand the size
+    // back to the box. With nothing selected it sets the default new labels
+    // start at, the same way the thickness slider does.
+    _setFontSize: function(value, commit) {
+      var self = this;
+      var shapes = this._fontTargetShapes();
+      if (shapes.length) {
+        if (!this._fontSizeBefore) {
+          this._fontSizeBefore = shapes.map(function(s) {
+            return { uuid: s.uuid, before: self._snapshotShape(s) };
+          });
+        }
+        var scale = 1;
+        try { scale = self._markerScale() || 1; } catch (_) { scale = 1; }
+        shapes.forEach(function(shape) {
+          shape.style = Object.assign({}, shape.style || {});
+          if (value == null) delete shape.style.font_size;
+          else shape.style.font_size = value / scale;
+          self._renderShape(shape);
+        });
+      } else {
+        this.lineParams = this.lineParams || {};
+        // The default is in screen px, like the thickness slider's: it is
+        // converted to canvas units when a shape is actually made.
+        if (value == null) delete this.lineParams.font_size;
+        else this.lineParams.font_size = value;
+      }
+      if (!commit) return;
+      if (this._fontSizeBefore && this._fontSizeBefore.length) {
+        this._emitChanged();
+        this._fontSizeBefore.forEach(function(rec) {
+          if (!rec.uuid) return;
+          var shape = self.shapes.find(function(s) { return s.uuid === rec.uuid; });
+          if (shape) self._pushUndo(rec.uuid, rec.before, self._snapshotShape(shape));
+        });
+      } else {
+        this._emitLineParamsChanged();
+      }
+      this._fontSizeBefore = null;
+    },
+
+    // Dragging a label's box is the OTHER way to set its size, so it has to
+    // win: a pinned size would otherwise ignore the drag and the box would
+    // resize around text that refused to change, which reads as the drag
+    // being broken.
+    _unpinFontSize: function(shape) {
+      if (!this._hasPinnedFontSize(shape)) return;
+      shape.style = Object.assign({}, shape.style || {});
+      delete shape.style.font_size;
     },
 
     _lineParamsForNewShape: function() {
@@ -5840,21 +5956,32 @@
       var scale = 0;
       try { scale = this._markerScale() || 0; } catch (_) {}
       if (!(scale > 0)) return lp;
-      return Object.assign({}, lp, {
+      var out = Object.assign({}, lp, {
         width: (lp.width || 2) / scale,
         width_units: "canvas"
       });
+      // Same conversion as the width, for the same reason: stored in canvas
+      // units so it holds its size against the drawing, not against the
+      // screen.
+      if (out.font_size) out.font_size = out.font_size / scale;
+      return out;
     },
 
     _currentLineParams: function() {
       var lp = this.lineParams || {};
-      return {
+      var out = {
         color: this.activeColor || null,
         width: lp.width || 2,
         opacity: lp.opacity == null ? 1 : lp.opacity,
         dash: lp.dash || "solid",
         fill: lp.fill || "semi"
       };
+      // Only when the user has actually pinned one: absent means "size it
+      // from the box", which is the default and must not become a number.
+      if (typeof lp.font_size === "number" && isFinite(lp.font_size) && lp.font_size > 0) {
+        out.font_size = lp.font_size;
+      }
+      return out;
     },
 
     // Paint thickness / opacity / dash onto a stroke shape's element. Width is
@@ -6013,6 +6140,77 @@
       });
       o.input.addEventListener("change", function() {
         self._setLineParam("opacity", parseInt(o.input.value, 10) / 100, true);
+      });
+
+      // Font size. Two controls for one value on purpose: the slider is for
+      // finding a size, the number box is for MATCHING one — typing 18 into
+      // every label is the only way to make a set of them agree, which
+      // dragging boxes by eye cannot do. Blank means "size it from the box",
+      // which is what dragging the label does and what every existing label
+      // has been doing all along.
+      var fontRow = document.createElement("div");
+      fontRow.className = "etcher-marker-row";
+      var fontHead = document.createElement("div");
+      fontHead.className = "etcher-marker-row-head";
+      var fontLabel = document.createElement("span");
+      fontLabel.textContent = "Font size";
+      var fontNum = document.createElement("input");
+      fontNum.type = "number";
+      fontNum.className = "etcher-num";
+      fontNum.min = String(FONT_SIZE_MIN);
+      fontNum.max = String(FONT_SIZE_MAX);
+      fontNum.step = "1";
+      fontNum.placeholder = "auto";
+      fontNum.title = "Font size in px — leave empty to size it by the box";
+      fontHead.appendChild(fontLabel);
+      fontHead.appendChild(fontNum);
+      var fontSlider = document.createElement("input");
+      fontSlider.type = "range";
+      fontSlider.min = String(FONT_SIZE_MIN);
+      fontSlider.max = String(FONT_SIZE_MAX);
+      fontSlider.step = "1";
+      fontRow.appendChild(fontHead);
+      fontRow.appendChild(fontSlider);
+      popup.appendChild(fontRow);
+      self._paramsFontRow = fontRow;
+      self._paramsFontInput = fontSlider;
+      self._paramsFontNum = fontNum;
+
+      function clampFont(n) {
+        return Math.max(FONT_SIZE_MIN, Math.min(FONT_SIZE_MAX, Math.round(n)));
+      }
+
+      fontSlider.addEventListener("input", function() {
+        var v = clampFont(parseInt(fontSlider.value, 10) || FONT_SIZE_MIN);
+        fontNum.value = String(v);
+        self._setFontSize(v, false);
+      });
+      fontSlider.addEventListener("change", function() {
+        self._setFontSize(clampFont(parseInt(fontSlider.value, 10) || FONT_SIZE_MIN), true);
+      });
+      // Typed, spun, or pasted. An empty box means auto — the one way back
+      // to box-sizing once a size has been pinned, short of dragging.
+      fontNum.addEventListener("input", function() {
+        var raw = fontNum.value.trim();
+        if (raw === "") {
+          self._setFontSize(null, true);
+          return;
+        }
+        var n = parseInt(raw, 10);
+        if (!isFinite(n)) return;
+        var v = clampFont(n);
+        fontSlider.value = String(v);
+        self._setFontSize(v, true);
+      });
+      // Typing past the limit is corrected on the way out rather than while
+      // the user is still mid-number: rewriting "2" to "6" as they type "20"
+      // makes the box unusable.
+      fontNum.addEventListener("blur", function() {
+        var raw = fontNum.value.trim();
+        if (raw === "") return;
+        var n = parseInt(raw, 10);
+        if (!isFinite(n)) { self._syncParamsPopup(); return; }
+        fontNum.value = String(clampFont(n));
       });
 
       var dashRow = document.createElement("div");
@@ -6338,7 +6536,48 @@
           targets.some(function(s) { return self._isStrokeShape(s.kind); });
         this._paramsFillRow.style.display = fillable ? "" : "none";
       }
+      this._syncFontRow();
       this._syncLabelSection();
+    },
+
+    // The font row shows when there is text for it to act on — the shapes
+    // that draw some, or nothing selected at all, which is the case where it
+    // sets what NEW labels start at. A rectangle with no label hides it:
+    // a control that cannot do anything is worse than a missing one.
+    _syncFontRow: function() {
+      if (!this._paramsFontRow) return;
+      var targets = this._fontTargetShapes();
+      var global = !targets.length && !this._paramsTargetShapes().length;
+      this._paramsFontRow.style.display = (targets.length || global) ? "" : "none";
+      if (!targets.length && !global) return;
+
+      var px = null;
+      if (targets.length) {
+        var first = targets[0];
+        if (this._hasPinnedFontSize(first)) {
+          var scale = 1;
+          try { scale = this._markerScale() || 1; } catch (_) { scale = 1; }
+          px = Math.round(first.style.font_size * scale);
+        }
+      } else {
+        var lp = this.lineParams || {};
+        if (typeof lp.font_size === "number" && lp.font_size > 0) {
+          px = Math.round(lp.font_size);
+        }
+      }
+
+      if (this._paramsFontNum) {
+        // Empty, not zero: the box says "auto" through its placeholder, and
+        // a 0 in it would read as a real size that happens to be invalid.
+        this._paramsFontNum.value = px == null ? "" : String(px);
+      }
+      if (this._paramsFontInput) {
+        // The slider has no "unset" position, so an unpinned size parks it
+        // at whatever the label is currently drawn near. Moving it from
+        // there pins that value, which is the behaviour you want: the
+        // slider starts where the text already looks.
+        this._paramsFontInput.value = String(px == null ? 16 : px);
+      }
     },
 
     // Show the label controls only when there's a label to place, and mark
@@ -10501,7 +10740,9 @@
             var coPad = bh * 0.13;
             var coFontFamily = "ui-sans-serif, system-ui, -apple-system, sans-serif";
             var coFontWeight = "500";
-            var coFontSizeByHeight = Math.max(self._zoomPx(10), bh * 0.65);
+            var coFontSizeByHeight = self._fontSizeFor(
+              shape, Math.max(self._zoomPx(10), bh * 0.65)
+            );
 
             // Width-fit cap: same fix `_renderTitleSibling` got in
             // 0.2.3 — without it, callout text that overflows the box
@@ -10518,7 +10759,12 @@
             );
             var coAvailWidth = Math.max(1, bw - coPad * 2);
             var coFontSize = coFontSizeByHeight;
-            if (coWidthAtHeightFont > coAvailWidth) {
+            // The cap exists to break a feedback loop: box height drives the
+            // font, the font drives the measured height, and the measured
+            // height gets written back to the box. A PINNED size is not in
+            // that loop — it comes from the user, not from the box — so it
+            // is honoured as given and the box grows to hold it instead.
+            if (!self._hasPinnedFontSize(shape) && coWidthAtHeightFont > coAvailWidth) {
               coFontSize = Math.max(self._zoomPx(10), coFontSizeByHeight * coAvailWidth / coWidthAtHeightFont);
             }
 
@@ -10681,7 +10927,7 @@
             // against the edge on a zoomed-out board and balloon on a zoomed-in
             // one. 0.13 reproduces the original 4px at a typical label height.
             var pad = th * 0.13;
-            var fontSize = Math.max(self._zoomPx(10), th * 0.65);
+            var fontSize = self._fontSizeFor(shape, Math.max(self._zoomPx(10), th * 0.65));
             ttext.setAttribute("x", tx + pad);
             ttext.setAttribute("y", ty + pad);
             ttext.setAttribute("font-size", fontSize);
@@ -11244,7 +11490,9 @@
         var pad = th * 0.13;
         var fontFamily = "ui-sans-serif, system-ui, -apple-system, sans-serif";
         var fontWeight = "500";
-        var fontSizeByHeight = Math.max(this._zoomPx(10), th * 0.65);
+        var fontSizeByHeight = this._fontSizeFor(
+          shape, Math.max(this._zoomPx(10), th * 0.65)
+        );
 
         // Width-fit cap: scale the font down so the title fits the box
         // width on a single line. Critical for stability — without it,
@@ -11259,7 +11507,9 @@
         );
         var availWidth = Math.max(1, tw - pad * 2);
         var fontSize = fontSizeByHeight;
-        if (widthAtHeightFont > availWidth) {
+        // Same reasoning as the callout's: the cap breaks a box→font→box
+        // feedback loop, and a pinned size isn't in that loop.
+        if (!this._hasPinnedFontSize(shape) && widthAtHeightFont > availWidth) {
           // Floor of 10 keeps the title legible in pathologically
           // narrow boxes — at that point we let the rect grow past
           // `tw` to fit the text rather than render unreadable glyphs.
@@ -11871,6 +12121,10 @@
         shape.metadata = Object.assign({}, shape.metadata || {}, {
           title_box: { x: nx, y: ny, w: nw, h: nh }, title_align: null
         });
+        // Dragging the box IS setting the size, so it takes over from a
+        // pinned one — otherwise the box would resize around text that
+        // refused to change, which reads as a broken drag.
+        self._unpinFontSize(shape);
         self._renderShape(shape);
         self._positionAllTitleHandles(shape);
       }
@@ -19932,6 +20186,9 @@
           if (nw < 0) { nx += nw; nw = -nw; }
           if (nh < 0) { ny += nh; nh = -nh; }
           shape.geometry = { x: nx, y: ny, w: nw, h: nh };
+          // A text shape IS its box, so resizing it is the drag-to-size
+          // gesture and takes over from a pinned font size.
+          if (shape.kind === "text") this._unpinFontSize(shape);
           break;
         }
         case "circle": {
@@ -20047,6 +20304,9 @@
               anchor: startGeom.anchor,
               text_box: { x: nx, y: ny, w: nw, h: nh }
             };
+            // Same gesture, same rule as a text shape's box: dragging it
+            // hands the size back to the box.
+            this._unpinFontSize(shape);
           }
           break;
         }

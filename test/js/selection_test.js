@@ -244,6 +244,8 @@ function run(kind, afterCreate) {
     handle: {},
     _currentMarkerStyle: () => ({}),
     _styleForNewShape: styleForNewShape,
+    // A text shape now consults the global params for a pinned font size.
+    _currentLineParams: () => ({ color: "#ff0000" }),
     _getPref: () => undefined,
     _isStrokeShape: (k) => ["rectangle", "circle", "polygon", "freehand"].indexOf(k) !== -1,
     _lineParamsForNewShape: () => ({ color: "#ff0000" }),

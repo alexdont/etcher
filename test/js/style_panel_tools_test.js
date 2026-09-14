@@ -170,12 +170,29 @@ const applyPickedColor = lift("_applyPickedColor", "hex");
   const calls = [];
   const self = {
     _labelPickTarget: false,
+    _inspectedShape: () => null,
     _activeSlot: 2,
     _setSlotColor: (i, hex) => calls.push(["slot", i, hex]),
     _selectColor: (hex) => calls.push(["select", hex]),
   };
   applyPickedColor.call(self, "#12ab34");
   assert.deepStrictEqual(calls, [["slot", 2, "#12ab34"], ["select", "#12ab34"]]);
+}
+
+{
+  // Inspect mode: the pick recolors the shape; the palette and the
+  // drawing default survive untouched.
+  const calls = [];
+  const self = {
+    _labelPickTarget: false,
+    _inspectedShape: () => ({ style: { color: "#000000" } }),
+    _applyColorToTargets: (hex) => calls.push(["targets", hex]),
+    _syncStyleInspector: () => calls.push(["sync"]),
+    _setSlotColor: () => assert.fail("must not touch the palette while inspecting"),
+    _selectColor: () => assert.fail("must not change the drawing default while inspecting"),
+  };
+  applyPickedColor.call(self, "#12ab34");
+  assert.deepStrictEqual(calls, [["targets", "#12ab34"], ["sync"]]);
 }
 
 assert.ok(
@@ -309,4 +326,74 @@ assert.ok(
     src.includes("if (!c || !c.contains(e.target)) return;") &&
     (src.match(/grabberCursor\(false\)/g) || []).length >= 2,
   "pointer down curls the hand, release and tool-arm relax it"
+);
+
+
+// ── the style panel inspects the selected shape without touching defaults ──
+
+// Selecting a shape must never eyedrop its colour into the palette: the
+// old sync mutated _colorSlots/_activeSlot/activeColor; the new one only
+// re-renders the panel.
+{
+  const gut = src.slice(
+    src.indexOf("_syncToolbarColorToShape: function"),
+    src.indexOf("},", src.indexOf("_syncToolbarColorToShape: function"))
+  );
+  assert.ok(
+    gut.includes("this._syncStyleInspector();") &&
+      !gut.includes("_setSlotColor") &&
+      !gut.includes("_selectColor") &&
+      !gut.includes("_activeSlot ="),
+    "shape select re-renders the inspector instead of eyedropping into the palette"
+  );
+}
+
+assert.ok(
+  src.includes("_inspectedShape: function()") &&
+    src.includes("_syncStyleInspector: function()"),
+  "the inspector helpers exist"
+);
+
+// The inspector re-renders on every selection change: _syncActionBar is the
+// sync already wired to all of them.
+{
+  const bar = src.slice(
+    src.indexOf("_syncActionBar: function()"),
+    src.indexOf("_computeToolbarOverflow", src.indexOf("_syncActionBar: function()"))
+  );
+  assert.ok(
+    bar.includes("this._syncStyleInspector();"),
+    "every selection change re-renders the style inspector"
+  );
+}
+
+// Colour edits while inspecting go to the shape, not the defaults — the
+// shared applier exists and both picker paths route through it.
+assert.ok(
+  src.includes("_applyColorToTargets: function(color)"),
+  "the target-only colour applier exists"
+);
+{
+  const picked = src.slice(
+    src.indexOf("_applyPickedColor: function(hex)"),
+    src.indexOf("_refreshLabelSwatch: function", src.indexOf("_applyPickedColor: function(hex)"))
+  );
+  assert.ok(
+    picked.indexOf("this._inspectedShape()") !== -1 &&
+      picked.indexOf("this._applyColorToTargets(hex);") !== -1 &&
+      picked.indexOf("this._inspectedShape()") < picked.indexOf("_setSlotColor"),
+    "a picker pick recolors the inspected shape before it can touch the active slot"
+  );
+}
+assert.ok(
+  (src.match(/self\._applyColorToTargets\(slotColor\);|self\._applyColorToTargets\(color\);/g) || []).length >= 2,
+  "toolbar and overflow swatch clicks recolor the inspected shape via the applier"
+);
+
+// The palette-persist hook must not fire for inspect-mode edits: nothing
+// in the palette changed.
+assert.strictEqual(
+  (src.match(/!self\._labelPickTarget && !self\._inspectedShape\(\)\) self\._emitColorsChanged\(\);/g) || []).length,
+  2,
+  "both persist guards (preset click, drag release) skip inspect-mode edits"
 );

@@ -4989,6 +4989,7 @@
       // Whether a label is in the selection changes with the selection, and
       // this is the one sync already wired to every selection change.
       this._syncLabelSection();
+      this._syncStyleInspector();
     },
 
     _computeToolbarOverflow: function() {
@@ -5190,6 +5191,14 @@
         b.style.background = color;
         b.addEventListener("click", function(e) {
           e.preventDefault();
+          // Inspecting a shape: recolor the selection, leave the slot
+          // selection and drawing default alone (same rule as the main
+          // toolbar swatches).
+          if (self._inspectedShape()) {
+            self._applyColorToTargets(color);
+            self._syncStyleInspector();
+            return;
+          }
           // Select the slot but keep the picker open so the user can
           // immediately tweak it on the wheel; re-aim the wheel at the
           // freshly-selected color.
@@ -5416,7 +5425,7 @@
           // Keep the picker open (it only closes on an outside click) so
           // the user can keep adjusting.
           self._applyPickedColor(s.color);
-          if (!self._labelPickTarget) self._emitColorsChanged();
+          if (!self._labelPickTarget && !self._inspectedShape()) self._emitColorsChanged();
         });
         presetRow.appendChild(b);
         return b;
@@ -6095,6 +6104,37 @@
       return [];
     },
 
+    // The shape whose style the panel is showing: the selection's first
+    // shape, else the edit-mode shape, else nothing (defaults).
+    _inspectedShape: function() {
+      if (this.selectedShapes && this.selectedShapes.length) {
+        return this.selectedShapes[0];
+      }
+      return this.editingShape || null;
+    },
+
+    // Inspector sync: while a shape is selected the panel SHOWS its style
+    // — thickness, opacity, dash, fill through _syncParamsPopup's target
+    // branch, its colour as the highlighted swatch (no highlight when the
+    // colour matches no slot) — and falls back to the authoring defaults
+    // the moment nothing is selected. Display only: the defaults survive
+    // inspection untouched, so clicking around shapes to compare them
+    // never changes what the next drawn shape looks like.
+    _syncStyleInspector: function() {
+      this._syncParamsPopup();
+      var shape = this._inspectedShape();
+      var color = shape && shape.style && shape.style.color;
+      var highlight = color
+        ? (this._colorSlots || []).indexOf(color)
+        : this._activeSlot;
+      (this.swatchEls || []).forEach(function(el, i) {
+        el.classList.toggle("is-selected", i === highlight);
+      });
+      if (this._pickerPreview) {
+        this._pickerPreview.style.background = color || this.activeColor || "";
+      }
+    },
+
     _syncParamsPopup: function() {
       // Reflect the first target shape (the group shares one set of controls).
       var targets = this._paramsTargetShapes();
@@ -6299,10 +6339,15 @@
     // color), so we don't touch it here.
     _syncPickerToActiveColor: function() {
       if (!this._pickerRing) return;
+      // While inspecting, the picker edits the inspected shape, so start
+      // the knobs on ITS colour, not the drawing default.
+      var inspected = this._inspectedShape();
+      var color = (inspected && inspected.style && inspected.style.color) ||
+        this.activeColor;
       var presets = this._presetColors || [];
-      if (!this.activeColor || presets.indexOf(this.activeColor) !== -1) return;
-      if (!/^#[0-9a-f]{6}$/i.test(this.activeColor)) return;
-      var hsl = hexToHsl(this.activeColor);
+      if (!color || presets.indexOf(color) !== -1) return;
+      if (!/^#[0-9a-f]{6}$/i.test(color)) return;
+      var hsl = hexToHsl(color);
       this._pickerHue = hsl.h;
       this._pickerLightness = hsl.l;
       this._drawLightnessSlider();
@@ -6450,7 +6495,7 @@
             // Commit the edited slot on release — persist via the hook.
             // (A label-swatch pick persists through the prefs mechanism
             // inside _applyPickedColor; the palette didn't change.)
-            if (!self._labelPickTarget) self._emitColorsChanged();
+            if (!self._labelPickTarget && !self._inspectedShape()) self._emitColorsChanged();
           }
           el.addEventListener("pointermove", move);
           el.addEventListener("pointerup", up);
@@ -6526,31 +6571,13 @@
     // Select slot `i` — make it the active draw color. Pure selection:
     // no palette mutation and no persist (editing the hue picker is what
     // mutates a slot). Clamps out-of-range indices defensively.
-    // Pick up a selected shape's color into the toolbar so the active swatch
-    // (and the color new shapes draw with) matches what you just clicked. If
-    // a slot already holds that color, activate it; otherwise eyedrop it into
-    // the active slot. `_syncingColor` keeps `_selectColor` from re-applying
-    // the color back onto the shape (no spurious undo).
-    _syncToolbarColorToShape: function(shape) {
-      if (!shape || !shape.style || !shape.style.color) return;
-      if (!this._colorSlots || !this._colorSlots.length) return;
-      var color = shape.style.color;
-      if (this.activeColor === color &&
-          this._colorSlots[this._activeSlot] === color) {
-        return;
-      }
-      this._syncingColor = true;
-      try {
-        var idx = this._colorSlots.indexOf(color);
-        if (idx !== -1) {
-          this._selectSlot(idx);
-        } else {
-          this._setSlotColor(this._activeSlot, color);
-          this._selectColor(color);
-        }
-      } finally {
-        this._syncingColor = false;
-      }
+    // HISTORY: this used to EYEDROP the clicked shape's colour into the
+    // active slot — the palette and the colour new shapes draw with
+    // changed just by selecting something, and deselecting did not bring
+    // the old colour back. Inspection is display-only now; edits go
+    // through _applyColorToTargets, which leaves the defaults alone.
+    _syncToolbarColorToShape: function(_shape) {
+      this._syncStyleInspector();
     },
 
     // Toggle the hue picker (colors popup) anchored to a swatch — the new
@@ -6573,6 +6600,14 @@
       if (this._labelPickTarget) {
         this._setPref("label_color", hex);
         this._refreshLabelSwatch();
+        return;
+      }
+      // Inspecting a shape: the pick recolors IT and the palette stays as
+      // it was — deselect and the colours you were drawing with are still
+      // there (the display half lives in _syncStyleInspector).
+      if (this._inspectedShape()) {
+        this._applyColorToTargets(hex);
+        this._syncStyleInspector();
         return;
       }
       this._setSlotColor(this._activeSlot, hex);
@@ -6666,6 +6701,22 @@
         if (i === self._activeSlot) b.classList.add("is-selected");
         b.addEventListener("click", function(e) {
           e.preventDefault();
+          // Inspecting a shape: a swatch click recolors the SELECTION and
+          // the palette/active slot stay put — clicking the slot whose
+          // colour the shape already has opens the picker to fine-tune it
+          // (the picker edits the shape too while inspecting).
+          var inspected = self._inspectedShape();
+          if (inspected) {
+            var slotColor = self._colorSlots[i];
+            if (inspected.style && inspected.style.color === slotColor) {
+              self._openColorsForSwatch(i, b);
+            } else {
+              self._closePopup();
+              self._applyColorToTargets(slotColor);
+              self._syncStyleInspector();
+            }
+            return;
+          }
           // Click an inactive swatch → select it. Click the already-active
           // swatch again (or double-tap any swatch, whose 2nd click lands on
           // the now-active one) → open the hue picker to edit that color.
@@ -9523,13 +9574,22 @@
         this._applyShapeColor(this.draftPolygon.el, color);
       }
 
-      // Apply to the currently-edited shape and commit upstream so the
-      // server's `style` field reflects the change.
-      // Recolor the whole selection: a box/shift multi-selection if present,
-      // else the single edit-mode shape. Each gets its own undo entry.
-      // When syncing the toolbar color FROM a just-selected shape, skip this
-      // — re-applying the same color would spuriously push an undo entry.
+      // Shape/label application lives in _applyColorToTargets; calling it
+      // here keeps _selectColor's historical combined meaning for the
+      // non-inspect paths (in that state it can only mean a focused label
+      // or the empty set). Inspect-mode edits skip _selectColor entirely,
+      // which is what keeps the authoring defaults untouched.
+      this._applyColorToTargets(color);
+    },
+
+    // Recolor the current targets — the multi-selection, the edit-mode
+    // shape, or a focused label — WITHOUT touching the authoring defaults
+    // (activeColor, the slots): this is the edit half of the inspector.
+    // Each shape gets its own undo entry; a focused label takes the colour
+    // itself and refreshes the label_color pref, leaving its shape alone.
+    _applyColorToTargets: function(color) {
       var self = this;
+
       // A focused LABEL takes the colour itself, leaving its shape alone.
       // Clicking a label puts you in title-edit mode (which clears
       // `editingShape` on the way in), so this is unambiguous: the label is
@@ -9537,7 +9597,7 @@
       // Colouring the shape from here would drag the dimension's line along
       // with its measurement, which is the opposite of being able to pick
       // them out from each other.
-      var titleTarget = !this._syncingColor &&
+      var titleTarget =
         !(this.selectedShapes && this.selectedShapes.length) &&
         !this.editingShape && this.editingTitleShape
           ? this.editingTitleShape
@@ -9559,7 +9619,7 @@
         self._emitChanged();
       }
 
-      var colorTargets = (this._syncingColor || titleTarget)
+      var colorTargets = titleTarget
         ? []
         : (this.selectedShapes && this.selectedShapes.length)
           ? this.selectedShapes.slice()

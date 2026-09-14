@@ -382,4 +382,33 @@ assert.doesNotThrow(() => refreshSwatch.call({
   _getPref: () => null,
 }));
 
+
+// ── focusing a label tells the panel ──────────────────────────────────────
+//
+// Entering and leaving edit mode on a SHAPE both sync the panel. The label
+// path did neither, so the panel went on describing whatever was there
+// before and only caught up when clicking away happened to trigger a sync
+// elsewhere — which meant a label's settings were readable only after you
+// stopped editing it. Backwards, and the kind of thing you assume is your
+// own mistake.
+{
+  for (const [fn, what] of [
+    ["_enterTitleEditMode", "focusing a label"],
+    ["_exitTitleEditMode", "leaving one"],
+  ]) {
+    const start = src.indexOf(`    ${fn}: function`);
+    assert.notStrictEqual(start, -1, `could not find ${fn}`);
+    const body = src.slice(start, src.indexOf("\n    },", start));
+    assert.ok(body.includes("this._syncActionBar();"),
+      `${what} must re-read the panel — it is a selection change for it`);
+  }
+
+  // That is the same hook every other selection change goes through, and
+  // it reaches the label controls.
+  const bar = src.slice(src.indexOf("    _syncActionBar: function"),
+                        src.indexOf("\n    },", src.indexOf("    _syncActionBar: function")));
+  assert.ok(bar.includes("this._scheduleStyleInspectorSync();"),
+    "…which is what carries it to the style panel");
+}
+
 console.log("label background: all checks passed");

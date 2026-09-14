@@ -12466,6 +12466,15 @@
         self._exitTitleEditMode();
       };
       document.addEventListener("click", this._titleOutsideClickHandler, true);
+
+      // Focusing a label is a selection change as far as the panel is
+      // concerned — it is now the thing the size, the plate and the two
+      // colour swatches are describing. Entering and leaving edit mode on a
+      // SHAPE both sync; the label path did neither, so the panel went on
+      // showing whatever was there before, and only caught up when clicking
+      // away happened to trigger a sync elsewhere. Which meant you could
+      // only read a label's settings after you had stopped editing it.
+      this._syncActionBar();
     },
 
     _exitTitleEditMode: function() {
@@ -12479,6 +12488,9 @@
         document.removeEventListener("click", this._titleOutsideClickHandler, true);
         this._titleOutsideClickHandler = null;
       }
+      // …and stops being it. Without this the panel keeps describing a
+      // label nobody is on any more.
+      this._syncActionBar();
     },
 
     _renderTitleHandles: function(shape) {

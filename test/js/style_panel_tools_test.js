@@ -494,3 +494,55 @@ assert.ok(
   src.includes("cancelAnimationFrame(this._styleInspectorFrame)"),
   "a pending frame is cancelled on destroy"
 );
+
+
+// ── the armed tool's cursor is just the cross ───────────────────────────────
+//
+// It used to carry the tool's glyph as a badge at bottom-right; that read
+// as clutter hanging off the pointer, and the toolbar already says which
+// tool is held. The glyphs themselves stay — collaborative hosts draw them
+// beside a PEER's cursor, where the question is real.
+
+{
+  // Run the real builder against a stub glyph table.
+  const start = src.indexOf("  var toolCursorCache = null;");
+  assert.notStrictEqual(start, -1, "toolCursor should cache a single value");
+  const end = src.indexOf("\n  }", src.indexOf("return toolCursorCache;"));
+  const body = src.slice(start, end + 4);
+  const toolCursor = eval(
+    "(function(){ var CURSOR_BADGES = {rectangle:'<rect/>', marker:'<path/>'};" +
+      body + " return toolCursor; })()"
+  );
+
+  const rect = toolCursor("rectangle");
+  assert.ok(rect.includes("data:image/svg+xml,"), "a data-URI cursor is produced");
+  assert.ok(rect.endsWith(") 6 6, crosshair"),
+    "hotspot stays on the cross centre, native crosshair still the fallback");
+  assert.strictEqual(toolCursor("marker"), rect,
+    "every drawing tool shares one cursor value");
+  assert.strictEqual(toolCursor("nope"), null,
+    "a tool with no glyph still falls back to the stylesheet crosshair");
+
+  const svg = decodeURIComponent(
+    rect.slice(rect.indexOf("data:image/svg+xml,") + 19, rect.lastIndexOf('")'))
+  );
+  assert.strictEqual((svg.match(/<path/g) || []).length, 2,
+    "two passes of the cross (white underlay + black) and nothing else");
+  assert.ok(!svg.includes("<rect") && !svg.includes("translate(14 14)"),
+    "no glyph badge rides the cursor any more");
+  assert.strictEqual((svg.match(/<g /g) || []).length, (svg.match(/<\/g>/g) || []).length,
+    "the markup balances — removing the badge left no stray group");
+  assert.ok(svg.includes('d="M6 1.5v9M1.5 6h9"'), "the cross itself is unchanged");
+}
+
+// The glyph table survives for peers' cursors, and the two tools whose
+// pointer IS their glyph keep theirs.
+assert.ok(
+  src.includes("return (key && CURSOR_BADGES[key]) || null;"),
+  "toolBadge still hands hosts the glyph for drawing a peer's tool"
+);
+assert.ok(
+  src.includes("var hand = closed ? GRAB_CLOSED : CURSOR_BADGES.grabber;") &&
+    src.includes("cursorToolCursor() : \"\""),
+  "grabber and cursor tool keep their own full-size pointers"
+);

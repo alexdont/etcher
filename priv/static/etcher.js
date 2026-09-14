@@ -1956,15 +1956,21 @@
   };
 
   // ===========================================================================
-  // Per-tool mouse cursors — a small crosshair (the hotspot) with the tool's
-  // glyph as a badge at bottom-right, so the pointer itself says which tool
-  // is armed instead of every tool sharing one crosshair. Each layer is
-  // drawn twice (wide white underlay, then black) so the cursor stays
-  // legible over any imagery. Built lazily into data-URI cursor values;
-  // plain `crosshair` remains the fallback for browsers that reject
-  // SVG cursors. The cursor tool keeps the native arrow; the grabber gets
-  // its own full-size hand cursor below (`grabberCursor`), built from the
-  // same glyph as its toolbar button.
+  // Tool glyphs and the cursors built from them.
+  //
+  // Every drawing tool shares ONE cursor: a small crosshair, drawn twice
+  // (wide white underlay, then black) so it stays legible over any imagery.
+  // It used to carry the armed tool's glyph as a badge at bottom-right;
+  // that read as clutter hanging off the pointer, and the toolbar already
+  // says which tool is held. The glyphs stay — `toolBadge(key)` hands them
+  // to collaborative hosts for drawing what a PEER is holding, where the
+  // question is real because that toolbar is on someone else's screen.
+  //
+  // Built lazily into data-URI cursor values; plain `crosshair` remains the
+  // fallback for browsers that reject SVG cursors. The cursor tool and the
+  // grabber are the two exceptions, each taking its own full-size glyph as
+  // its pointer (`cursorToolCursor` / `grabberCursor`) — for those two the
+  // cursor IS the tool, rather than a badge hung off a crosshair.
   // ===========================================================================
 
   var CURSOR_BADGES = {
@@ -1977,7 +1983,8 @@
     // someone panning is the only tool that shows as an anonymous arrow)
     // and `grabberCursor` below, which builds the LOCAL pointer from it —
     // so toolbar button, remote badge and cursor are one hand by
-    // construction.
+    // construction. The grabber keeps its hand cursor: it is the whole
+    // pointer, not a badge on a crosshair.
     grabber:   '<path stroke-linecap="round" stroke-linejoin="round" d="M18 11V6a2 2 0 0 0-2-2 2 2 0 0 0-2 2"/><path stroke-linecap="round" stroke-linejoin="round" d="M14 10V4a2 2 0 0 0-2-2 2 2 0 0 0-2 2v2"/><path stroke-linecap="round" stroke-linejoin="round" d="M10 10.5V6a2 2 0 0 0-2-2 2 2 0 0 0-2 2v8"/><path stroke-linecap="round" stroke-linejoin="round" d="m7 15-1.76-1.76a2 2 0 0 0-2.83 2.82l3.6 3.6C7.5 21.14 9.2 22 12 22h2a8 8 0 0 0 8-8V7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v3"/>',
     callout:   '<circle cx="3.5" cy="20" r="2"/><path d="M4 19.5 8.5 14 21 14"/>',
     text:      '<path d="M5 6h14M12 6v12"/>',
@@ -2052,24 +2059,26 @@
     return cursorToolCursorCache;
   }
 
-  var toolCursorCache = {};
+  // One value for every tool that gets one, so it is built once. The
+  // `CURSOR_BADGES` lookup is kept purely as the "is this a tool we draw a
+  // cursor for" test — a tool with no glyph still answers `null` here and
+  // falls back to the stylesheet's crosshair, exactly as before.
+  var toolCursorCache = null;
   function toolCursor(key) {
     if (!key || !CURSOR_BADGES[key]) return null;
-    if (toolCursorCache[key]) return toolCursorCache[key];
-    var badge = CURSOR_BADGES[key];
+    if (toolCursorCache) return toolCursorCache;
     var cross = '<path d="M6 1.5v9M1.5 6h9"/>';
+    // The 30x30 canvas is inherited from the badged version, where the
+    // glyph sat at (14,14). Only the top-left corner is inked now, which
+    // costs nothing and keeps the 6,6 hotspot exactly where it was.
     var svg =
       '<svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 30 30">' +
       '<g fill="none" stroke="#fff" stroke-width="3.5" stroke-linecap="round">' + cross + '</g>' +
       '<g fill="none" stroke="#000" stroke-width="1.5" stroke-linecap="round">' + cross + '</g>' +
-      '<g transform="translate(14 14) scale(0.65)">' +
-      '<g fill="none" stroke="#fff" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round">' + badge + '</g>' +
-      '<g fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + badge + '</g>' +
-      '</g></svg>';
-    var value =
+      '</svg>';
+    toolCursorCache =
       'url("data:image/svg+xml,' + encodeURIComponent(svg) + '") 6 6, crosshair';
-    toolCursorCache[key] = value;
-    return value;
+    return toolCursorCache;
   }
 
   // Default color palette — pastel rainbow plus monochrome bookends.

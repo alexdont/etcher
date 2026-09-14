@@ -1986,6 +1986,11 @@
 
   // Font size limits, in screen px. The floor is where text stops being
   // readable at 1:1; the ceiling is a label the size of a small shape.
+  // Corner radius of a label's background plate, as a fraction of its
+  // height. Well under 0.5, so it reads as a rounded card rather than a
+  // pill however tall the label is set.
+  var LABEL_BG_RADIUS_RATIO = 0.18;
+
   var FONT_SIZE_MIN = 6;
   var FONT_SIZE_MAX = 200;
 
@@ -6060,7 +6065,29 @@
     // the rule goes back to owning it.
     _applyLabelBg: function(rectEl, shape) {
       if (!rectEl || !rectEl.style) return;
-      rectEl.style.fill = this._labelBgFor(shape) || "";
+      var bg = this._labelBgFor(shape);
+      rectEl.style.fill = bg || "";
+
+      // Rounded corners, as a fraction of the plate's own height rather
+      // than a fixed number of pixels: a constant radius is a different
+      // look at every size, barely visible on a big label and a lozenge on
+      // a small one. Proportional keeps the same shape at any size and in
+      // either coordinate space (this rect is container px on a canvas and
+      // image px in a strip).
+      //
+      // Only while there IS a plate. Without one this rect is the invisible
+      // hit box, and the dashed outline it shows on hover is a different
+      // thing that nobody asked to reshape.
+      if (!bg) {
+        rectEl.removeAttribute("rx");
+        return;
+      }
+      var h = parseFloat(rectEl.getAttribute("height"));
+      if (!isFinite(h) || h <= 0) {
+        rectEl.removeAttribute("rx");
+        return;
+      }
+      rectEl.setAttribute("rx", h * LABEL_BG_RADIUS_RATIO);
     },
 
     // Set the label plate on the selected text-bearing shapes, or — with

@@ -30,6 +30,13 @@ function extract(name) {
     .replace(`${name}: function`, "function") + ")");
 }
 
+// The constant the plate painter closes over.
+{
+  const m = src.match(/var LABEL_BG_RADIUS_RATIO = ([\d.]+);/);
+  assert.ok(m, "could not find LABEL_BG_RADIUS_RATIO");
+  global.LABEL_BG_RADIUS_RATIO = Number(m[1]);
+}
+
 const labelBgFor = extract("_labelBgFor");
 const applyLabelBg = extract("_applyLabelBg");
 const setLabelBg = extract("_setLabelBg");
@@ -54,19 +61,53 @@ assert.strictEqual(labelBgFor(null), null, "no shape");
 // ── it paints the rect every label already has behind it ──────────────────
 
 {
-  // Inline, because the stylesheet pins that rect to `fill: transparent`.
-  const rect = { style: {} };
-  applyLabelBg.call({ _labelBgFor: labelBgFor }, rect, { style: { label_bg: "#112233" } });
+  const m = src.match(/var LABEL_BG_RADIUS_RATIO = ([\d.]+);/);
+  assert.ok(m, "could not find LABEL_BG_RADIUS_RATIO");
+  const RATIO = Number(m[1]);
+  // A rounded CARD, not a pill, however tall the label is set.
+  assert.ok(RATIO > 0 && RATIO < 0.5, "the radius ratio should stay well under half");
+
+  function fakeRect(height) {
+    const attrs = height == null ? {} : { height: String(height) };
+    return {
+      style: {}, attrs,
+      getAttribute: (k) => (k in attrs ? attrs[k] : null),
+      setAttribute: (k, v) => (attrs[k] = v),
+      removeAttribute: (k) => delete attrs[k],
+    };
+  }
+  const ctx = { _labelBgFor: labelBgFor };
+
+  // Inline fill, because the stylesheet pins that rect to `fill: transparent`.
+  const rect = fakeRect(40);
+  applyLabelBg.call(ctx, rect, { style: { label_bg: "#112233" } });
   assert.strictEqual(rect.style.fill, "#112233");
+  assert.strictEqual(Number(rect.attrs.rx), 40 * RATIO,
+    "the plate's corners round in proportion to its height");
+
+  // Twice the height, twice the radius — the same shape at any size, which
+  // a fixed radius would not be.
+  const big = fakeRect(80);
+  applyLabelBg.call(ctx, big, { style: { label_bg: "#112233" } });
+  assert.strictEqual(Number(big.attrs.rx), 2 * Number(rect.attrs.rx));
 
   // Back to "" rather than "transparent" when there is no plate, so the
-  // stylesheet rule goes back to owning it.
-  applyLabelBg.call({ _labelBgFor: labelBgFor }, rect, { style: {} });
+  // stylesheet rule goes back to owning it — and the rounding goes with it:
+  // without a plate this rect is the invisible hit box, and its dashed
+  // hover outline is a different thing nobody asked to reshape.
+  applyLabelBg.call(ctx, rect, { style: {} });
   assert.strictEqual(rect.style.fill, "");
+  assert.ok(!("rx" in rect.attrs), "no plate, no rounding");
+
+  // A rect that has no height yet gets a fill but no nonsense radius.
+  const unsized = fakeRect(null);
+  applyLabelBg.call(ctx, unsized, { style: { label_bg: "#112233" } });
+  assert.strictEqual(unsized.style.fill, "#112233");
+  assert.ok(!("rx" in unsized.attrs));
 
   // A rect that isn't there yet must not throw.
-  assert.doesNotThrow(() => applyLabelBg.call({ _labelBgFor: labelBgFor }, null, {}));
-  assert.doesNotThrow(() => applyLabelBg.call({ _labelBgFor: labelBgFor }, {}, {}));
+  assert.doesNotThrow(() => applyLabelBg.call(ctx, null, {}));
+  assert.doesNotThrow(() => applyLabelBg.call(ctx, {}, {}));
 }
 
 // All three things that draw a label paint it — a plate that appeared on

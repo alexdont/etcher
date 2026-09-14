@@ -226,26 +226,26 @@ function pathData(fragment) {
 }
 
 assert.ok(
-  src.includes("function grabberCursor()"),
+  src.includes("function grabberCursor(closed)"),
   "the grabber has its own cursor builder"
 );
 assert.ok(
-  src.includes("var hand = CURSOR_BADGES.grabber;"),
-  "the cursor is built FROM the shared glyph, not a copy"
+  src.includes("var hand = closed ? GRAB_CLOSED : CURSOR_BADGES.grabber;"),
+  "the open cursor is built FROM the shared glyph, not a copy"
 );
 assert.ok(
-  src.includes("self.handle.container.style.cursor = grabberCursor();"),
+  src.includes("self.handle.container.style.cursor = grabberCursor(false);"),
   "arming the grabber applies the hand cursor"
 );
 assert.ok(
-  src.includes(" 14 14, grab"),
-  "hotspot centered, native grab kept as the fallback"
+  src.includes("\") 14 14, '"),
+  "hotspot centered for both hand states"
 );
 
 {
   // The cursor hand is a solid white glove with a black contour — a
   // fill:none build disappeared into light imagery.
-  const start = src.indexOf("function grabberCursor()");
+  const start = src.indexOf("function grabberCursor(closed)");
   const body = src.slice(start, src.indexOf("var cursorToolCursorCache", start));
   assert.ok(
     body.includes("var silhouette =") && body.includes('Z"/>'),
@@ -277,4 +277,34 @@ assert.ok(
 assert.ok(
   src.includes("\") 6 6, default'"),
   "hotspot on the arrow tip, native default kept as the fallback"
+);
+
+// ── the grab closes while holding the canvas ────────────────────────────────
+
+assert.ok(
+  src.includes("var GRAB_CLOSED =") &&
+    src.includes("var hand = closed ? GRAB_CLOSED : CURSOR_BADGES.grabber;"),
+  "the builder has a closed-fist variant of the same hand"
+);
+{
+  // The closed hand keeps the open hand's palm verbatim — only the
+  // fingers move, so the cursor doesn't jump on state change.
+  const open = src.slice(src.indexOf("grabber:   '<path"), src.indexOf("',", src.indexOf("grabber:   '<path")));
+  const closed = src.slice(src.indexOf("var GRAB_CLOSED"), src.indexOf(";", src.indexOf("var GRAB_CLOSED")));
+  const heel = "m7 15-1.76-1.76a2 2 0 0 0-2.83 2.82l3.6 3.6C7.5 21.14 9.2 22 12 22h2a8 8 0 0 0 8-8";
+  assert.ok(open.includes(heel) && closed.includes(heel), "shared palm");
+}
+assert.ok(
+  src.includes('(closed ? "grabbing" : "grab")'),
+  "native grab/grabbing stay as the per-state fallbacks"
+);
+assert.ok(
+  src.includes("_wireGrabberCursor: function(on)") &&
+    src.includes("self._wireGrabberCursor(grabbing);"),
+  "arming the grabber wires the press-to-curl listeners, leaving it unwires them"
+);
+assert.ok(
+  src.includes("self.handle.container.style.cursor = grabberCursor(true);") &&
+    (src.match(/grabberCursor\(false\)/g) || []).length >= 2,
+  "pointer down curls the hand, release and tool-arm relax it"
 );

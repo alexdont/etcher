@@ -1985,10 +1985,21 @@
   // toolCursor, but full-size and hotspot-centered: a hand has no
   // precision point, so its middle is the pointer's middle. `grab` stays
   // as the fallback for browsers that reject SVG cursors.
-  var grabberCursorCache = null;
-  function grabberCursor() {
-    if (grabberCursorCache) return grabberCursorCache;
-    var hand = CURSOR_BADGES.grabber;
+  // The grabbing fist: the open hand's palm verbatim, fingers curled to
+  // knuckle loops (tops pulled from y2-4 down to y8-10). Shown while a
+  // grabber drag is actually panning — a grab cursor that never closes
+  // reads as a static picture, not a hand holding the canvas.
+  var GRAB_CLOSED =
+    '<path stroke-linecap="round" stroke-linejoin="round" d="M18 12v-2a2 2 0 0 0-2-2 2 2 0 0 0-2 2"/>' +
+    '<path stroke-linecap="round" stroke-linejoin="round" d="M14 11v-1a2 2 0 0 0-2-2 2 2 0 0 0-2 2v1"/>' +
+    '<path stroke-linecap="round" stroke-linejoin="round" d="M10 11v-1a2 2 0 0 0-2-2 2 2 0 0 0-2 2v4"/>' +
+    '<path stroke-linecap="round" stroke-linejoin="round" d="m7 15-1.76-1.76a2 2 0 0 0-2.83 2.82l3.6 3.6C7.5 21.14 9.2 22 12 22h2a8 8 0 0 0 8-8v-3a2 2 0 0 0-2-2 2 2 0 0 0-2 2v1"/>';
+
+  var grabberCursorCache = {};
+  function grabberCursor(closed) {
+    var key = closed ? "closed" : "open";
+    if (grabberCursorCache[key]) return grabberCursorCache[key];
+    var hand = closed ? GRAB_CLOSED : CURSOR_BADGES.grabber;
     // Solid white glove with a black contour. The glyph's own paths are
     // OPEN (a fill closes each along a chord and leaves palm gaps), so a
     // dedicated CLOSED silhouette underlay covers the whole hand —
@@ -2008,9 +2019,10 @@
       '<g fill="#fff" stroke="#fff" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round">' + silhouette + hand + '</g>' +
       '<g fill="none" stroke="#000" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + hand + '</g>' +
       '</g></svg>';
-    grabberCursorCache =
-      'url("data:image/svg+xml,' + encodeURIComponent(svg) + '") 14 14, grab';
-    return grabberCursorCache;
+    grabberCursorCache[key] =
+      'url("data:image/svg+xml,' + encodeURIComponent(svg) + '") 14 14, ' +
+      (closed ? "grabbing" : "grab");
+    return grabberCursorCache[key];
   }
 
   // The armed cursor tool shows its own toolbar arrow, not the OS one —
@@ -2868,6 +2880,7 @@
         this.stylePanel.parentNode.removeChild(this.stylePanel);
       }
       this.stylePanel = null;
+      this._wireGrabberCursor(false);
       this.swatchHost = null;
       this.actionBar = null;
 
@@ -9369,7 +9382,7 @@
       // the click-through overlay to Fresco for panning. Cleared when leaving
       // the tool (strip mode already manages its own cursor above).
       if (self.handle && self.handle.container) {
-        if (grabbing) self.handle.container.style.cursor = grabberCursor();
+        if (grabbing) self.handle.container.style.cursor = grabberCursor(false);
         else if (self.handleKind !== "strip") {
           // Cursor tool while annotating: drag-pan is locked (drag means
           // box-select / shape-move), so Fresco's `grab` affordance would
@@ -9390,6 +9403,9 @@
       // now the way to pan.
       self._applyPanLock();
 
+      // The grab closes while it is actually holding the canvas.
+      self._wireGrabberCursor(grabbing);
+
       // The style panel is tool-aware (styleless tools hide it) — re-sync
       // so arming/leaving the grabber shows and hides it immediately.
       self._syncStylePanel();
@@ -9401,6 +9417,40 @@
     // annotation mode on a canvas, freeing the drag for marquee box-select.
     // Pinch + wheel zoom are unaffected (setPanLocked only gates drag-pan).
     // Strip mode keeps native scroll; the grabber + browse mode keep pan.
+    // While the grabber is armed, a pressed pointer curls the hand and
+    // release relaxes it — the pair every native grab cursor shows. The
+    // down listener rides capture on the container (the grabber's events
+    // deliberately pass through Etcher's overlay to Fresco, so nothing of
+    // Etcher's sees them otherwise); the up/cancel pair rides the window,
+    // because a drag routinely ends outside the container.
+    _wireGrabberCursor: function(on) {
+      var self = this;
+      if (on && !self._grabberDownHandler && self.handle && self.handle.container) {
+        self._grabberDownHandler = function(e) {
+          if (e.button !== 0 && e.button !== 1) return;
+          if (self.activeTool !== "grabber") return;
+          self.handle.container.style.cursor = grabberCursor(true);
+        };
+        self._grabberUpHandler = function() {
+          if (self.activeTool !== "grabber") return;
+          if (self.handle && self.handle.container) {
+            self.handle.container.style.cursor = grabberCursor(false);
+          }
+        };
+        self.handle.container.addEventListener("pointerdown", self._grabberDownHandler, true);
+        window.addEventListener("pointerup", self._grabberUpHandler, true);
+        window.addEventListener("pointercancel", self._grabberUpHandler, true);
+      } else if (!on && self._grabberDownHandler) {
+        if (self.handle && self.handle.container) {
+          self.handle.container.removeEventListener("pointerdown", self._grabberDownHandler, true);
+        }
+        window.removeEventListener("pointerup", self._grabberUpHandler, true);
+        window.removeEventListener("pointercancel", self._grabberUpHandler, true);
+        self._grabberDownHandler = null;
+        self._grabberUpHandler = null;
+      }
+    },
+
     _applyPanLock: function() {
       if (this.handleKind !== "canvas") return;
       if (!this.handle || typeof this.handle.setPanLocked !== "function") return;

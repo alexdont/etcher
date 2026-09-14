@@ -2920,6 +2920,10 @@
         document.removeEventListener("etcher:prefs-changed", this._peerPrefsHandler);
         this._peerPrefsHandler = null;
       }
+      if (this._styleInspectorFrame) {
+        try { cancelAnimationFrame(this._styleInspectorFrame); } catch (_) {}
+        this._styleInspectorFrame = null;
+      }
       if (this.removeNavBtn) { try { this.removeNavBtn(); } catch (_) {} }
       if (this.visibilityBtn) { try { this.visibilityBtn(); } catch (_) {} }
       if (this.toolbar && this.toolbar.parentNode) {
@@ -5016,7 +5020,27 @@
       // Whether a label is in the selection changes with the selection, and
       // this is the one sync already wired to every selection change.
       this._syncLabelSection();
-      this._syncStyleInspector();
+      this._scheduleStyleInspectorSync();
+    },
+
+    // Coalesced inspector sync. _syncActionBar fires once per shape during a
+    // marquee or a select-all, and _syncStyleInspector reads the live zoom
+    // (_markerScale -> imageToScreen + getBoundingClientRect) — inline, that
+    // is a forced layout per shape swept. The panel only has to show what the
+    // burst SETTLES on, so fold the whole burst into one frame. Direct
+    // callers (a swatch click, the picker) stay synchronous: those are single
+    // events, and the panel should answer them immediately.
+    _scheduleStyleInspectorSync: function() {
+      var self = this;
+      if (typeof requestAnimationFrame !== "function") {
+        self._syncStyleInspector();
+        return;
+      }
+      if (self._styleInspectorFrame) return;
+      self._styleInspectorFrame = requestAnimationFrame(function() {
+        self._styleInspectorFrame = null;
+        self._syncStyleInspector();
+      });
     },
 
     _computeToolbarOverflow: function() {

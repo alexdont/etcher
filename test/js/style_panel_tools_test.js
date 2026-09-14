@@ -362,7 +362,7 @@ assert.ok(
     src.indexOf("_computeToolbarOverflow", src.indexOf("_syncActionBar: function()"))
   );
   assert.ok(
-    bar.includes("this._syncStyleInspector();"),
+    bar.includes("this._scheduleStyleInspectorSync();"),
     "every selection change re-renders the style inspector"
   );
 }
@@ -466,3 +466,31 @@ assert.ok(
     "the compact label swatch is a 30px square and its text does not render"
   );
 }
+
+
+// A marquee calls _addToSelection once per shape swept; the inspector reads
+// the live zoom, so syncing inline forced a layout per shape. The burst
+// folds into one frame — and a frame pending at teardown is cancelled.
+{
+  const schedule = lift("_scheduleStyleInspectorSync", "");
+  const frames = [];
+  global.requestAnimationFrame = (fn) => { frames.push(fn); return frames.length; };
+  const self = { syncs: 0, _syncStyleInspector() { this.syncs++; } };
+  for (let i = 0; i < 25; i++) schedule.call(self);
+  assert.strictEqual(frames.length, 1, "25 selection changes schedule one frame");
+  assert.strictEqual(self.syncs, 0, "nothing syncs until the frame runs");
+  frames[0]();
+  assert.strictEqual(self.syncs, 1, "the frame syncs once");
+  schedule.call(self);
+  assert.strictEqual(frames.length, 2, "a later burst schedules again");
+  delete global.requestAnimationFrame;
+
+  // No rAF (headless, SSR): fall back to syncing inline rather than never.
+  const bare = { syncs: 0, _syncStyleInspector() { this.syncs++; } };
+  schedule.call(bare);
+  assert.strictEqual(bare.syncs, 1, "without rAF the sync still happens");
+}
+assert.ok(
+  src.includes("cancelAnimationFrame(this._styleInspectorFrame)"),
+  "a pending frame is cancelled on destroy"
+);

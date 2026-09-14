@@ -1982,11 +1982,15 @@
   function grabberCursor() {
     if (grabberCursorCache) return grabberCursorCache;
     var hand = CURSOR_BADGES.grabber;
+    // Solid white hand, not a hollow outline: the fat white pass doubles
+    // as silhouette AND fill, the top pass re-fills white and draws the
+    // black contour (its finger-separator strokes read as black lines on
+    // the white glove). A hollow hand disappeared into light imagery.
     var svg =
       '<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28">' +
       '<g transform="translate(2 2)">' +
-      '<g fill="none" stroke="#fff" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round">' + hand + '</g>' +
-      '<g fill="none" stroke="#000" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + hand + '</g>' +
+      '<g fill="#fff" stroke="#fff" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round">' + hand + '</g>' +
+      '<g fill="#fff" stroke="#000" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + hand + '</g>' +
       '</g></svg>';
     grabberCursorCache =
       'url("data:image/svg+xml,' + encodeURIComponent(svg) + '") 14 14, grab';

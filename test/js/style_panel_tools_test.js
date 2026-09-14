@@ -241,3 +241,16 @@ assert.ok(
   src.includes(" 14 14, grab"),
   "hotspot centered, native grab kept as the fallback"
 );
+
+{
+  // The cursor hand is a solid white glove with a black contour — a
+  // fill:none build disappeared into light imagery.
+  const start = src.indexOf("function grabberCursor()");
+  const body = src.slice(start, src.indexOf("var toolCursorCache", start));
+  assert.ok(!body.includes('fill="none"'), "no hollow passes in the cursor");
+  assert.strictEqual(
+    (body.match(/fill="#fff"/g) || []).length,
+    2,
+    "both passes fill white"
+  );
+}

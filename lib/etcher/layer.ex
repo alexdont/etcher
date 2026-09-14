@@ -156,14 +156,28 @@ defmodule Etcher.Layer do
 
   ## Tools
 
-  Configure which drawing tools appear in the bottom toolbar. The default
-  exposes the navigation grabber, all drawing kinds, and the eraser:
+  `:tools` says which tools the board OFFERS. Everything in the list is
+  reachable; the bar shows the common ones and keeps the rest one press of
+  `⋯` away, where the user can drag any of them onto the bar for good.
 
-      tools={[:grabber, :rectangle, :circle, :polygon, :freehand, :marker, :callout, :text, :dimension, :line, :eraser]}
+  The default offers every drawing kind plus the grabber, the eraser and
+  the red pointer. Subsetting hides specific tools (e.g. only
+  `:rectangle, :freehand`). Drop `:eraser` if you don't want users deleting
+  from the toolbar, or `:grabber` if pan-only mode isn't needed. Add
+  `:image` — it is not offered by default because inserting a picture needs
+  host wiring (see `:image_source`).
 
-  Subsetting hides specific tools (e.g. only `:rectangle, :freehand`).
-  Drop `:eraser` if you don't want users deleting from the toolbar, or
-  `:grabber` if pan-only mode isn't needed.
+  On the bar without customising: grabber, rectangle, circle, arrow,
+  freehand, text, callout, eraser. In the `⋯` grid: polygon and dimension
+  (precise work, reached for on purpose), line (an arrow without the end
+  that says which way), marker (the second hand-drawing tool), pointer
+  (draws nothing on its own — it is for presenting, and only does anything
+  where the host relays it), and image.
+
+  That split is a judgement about a first-time user marking up a picture,
+  not a ranking of the tools. A host with a different audience — a
+  presentation tool wanting the pointer to hand, a survey tool wanting
+  dimension — should expect to reorder it, and their users can too.
 
   ## Annotation hydration
 
@@ -310,11 +324,14 @@ defmodule Etcher.Layer do
       :text,
       :dimension,
       :arrow,
+      :line,
       :eraser,
       :pointer
     ],
     doc: """
-    Subset of tools to show in the toolbar. Drawing tools: `:grabber`,
+    Which tools the board OFFERS. The toolbar shows the common ones and
+    keeps the rest one press of `⋯` away — see "Toolbar" below for which,
+    and why. Drawing tools: `:grabber`,
     `:rectangle`, `:circle`, `:polygon`, `:freehand`, `:marker`, `:callout`,
     `:text`, `:dimension`, `:arrow`, `:line`, `:eraser`. Add `:image` for the image
     tool — a one-shot action (not a drawing mode) that inserts an image via

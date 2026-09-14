@@ -1829,13 +1829,40 @@
   // a closed tab doesn't leave a dot stuck on everyone else's board.
   var POINTER_STALE_MS = 4000;
 
+  // What the bar shows, and in what order, before anyone customises it.
+  // Everything else the host offers is still there, one press of `⋯` away.
+  //
+  // The test is "would a first-time user reach for this while marking up a
+  // picture", not "is this a good tool" — the grid is not a demotion.
+  //
+  // Read as a sentence: get around, draw the three shapes people actually
+  // draw, mark by hand, label, and undo a mistake. Eraser last because it
+  // is the destructive one and does not want to sit under the cursor.
+  //
+  // What is NOT here, and why:
+  //   polygon, dimension  — precise work. Real tools, reached for on
+  //                         purpose, by someone who knows they want them.
+  //   line                — an arrow without the end that says which way.
+  //                         Wanting a plain line is the rarer case.
+  //   marker              — the second freehand. Two hand-drawing tools on
+  //                         one bar is a choice nobody asked to make; the
+  //                         editable one stays.
+  //   image               — needs host wiring to do anything, and inserting
+  //                         a picture INTO a picture is not the common job.
+  //   pointer             — draws nothing and stores nothing on its own: it
+  //                         is for presenting, and only does something when
+  //                         the host relays it to other people. It used to
+  //                         be here on the argument that a presenter cannot
+  //                         hunt for it mid-sentence, which is true — and
+  //                         still leaves it dead weight on every board that
+  //                         is not being presented. A host that presents can
+  //                         put it back in one line.
   var ESSENTIAL_TOOLS = [
-    "grabber", "freehand", "eraser", "line", "text", "callout", "image",
-    // The red pointer earns a place in the narrow bar because of WHEN it is
-    // reached for: mid-sentence, while presenting to people who are watching
-    // you look for it. A tool you hunt for in an overflow menu is one you
-    // stop using.
-    "pointer"
+    "grabber",
+    "rectangle", "circle", "arrow",
+    "freehand",
+    "text", "callout",
+    "eraser"
   ];
 
   // Corner radius on image shapes, as a fraction of the shorter rendered

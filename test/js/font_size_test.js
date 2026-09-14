@@ -111,6 +111,10 @@ function board(targets) {
     _markerScale: () => 2,
     _snapshotShape: (s) => ({ was: s.style && s.style.font_size }),
     _renderShape: (s) => rendered.push(s),
+    placedTitle: [],
+    placedShape: [],
+    _positionAllTitleHandles(s) { this.placedTitle.push(s); },
+    _positionAllHandles(s) { this.placedShape.push(s); },
     _pushUndo: (uuid, before, after) => undos.push([uuid, before, after]),
     _emitChanged() { this.emitted++; },
     _emitLineParamsChanged() { this.paramsEmitted++; },
@@ -127,6 +131,20 @@ function board(targets) {
   assert.strictEqual(label.style.color, "#fff", "the rest of the style is left alone");
   assert.deepStrictEqual(self.rendered, [label], "and it redraws");
   assert.strictEqual(self.emitted, 0, "nothing persisted mid-drag");
+
+  // The resize handles sit on the label's corners, and the label just
+  // changed size under them — they have to be re-placed or they hang in the
+  // air where the label used to end.
+  self.editingShape = label;
+  setFontSize.call(self, 20, false);
+  assert.deepStrictEqual(self.placedShape, [label],
+    "the corner dots follow the label as it resizes");
+  self.editingShape = null;
+  self.editingTitleShape = label;
+  setFontSize.call(self, 21, false);
+  assert.deepStrictEqual(self.placedTitle, [label],
+    "…and so do a label's own handles, when it is the label being edited");
+  self.editingTitleShape = null;
 
   setFontSize.call(self, 30, true);
   assert.strictEqual(label.style.font_size, 15);
@@ -171,16 +189,25 @@ function board(targets) {
 // ── dragging the box takes over ────────────────────────────────────────────
 
 {
+  let synced = 0;
+  const self = { _hasPinnedFontSize: hasPinned, _syncFontRow() { synced++; } };
+
   const shape = { style: { font_size: 10, color: "#fff" } };
-  unpin.call({ _hasPinnedFontSize: hasPinned }, shape);
+  unpin.call(self, shape);
   assert.ok(!("font_size" in shape.style), "the pin is released");
   assert.strictEqual(shape.style.color, "#fff", "without disturbing the rest");
+  // The panel is told on the very first frame of the drag: the number in
+  // the box is no longer what the label is, and leaving it there reads as
+  // "still 10px" while the user watches it grow past 10.
+  assert.strictEqual(synced, 1, "the panel is re-read as soon as the pin goes");
 
   // A shape with nothing pinned is left exactly as it was — no style object
-  // conjured onto a shape that had none.
+  // conjured onto a shape that had none, and no pointless resync on every
+  // frame of a drag that already released it.
   const bare = {};
-  unpin.call({ _hasPinnedFontSize: hasPinned }, bare);
+  unpin.call(self, bare);
   assert.deepStrictEqual(bare, {});
+  assert.strictEqual(synced, 1, "…and nothing happens on later frames");
 }
 
 // All three box-drag gestures release the pin, or the drag would resize the
@@ -291,8 +318,9 @@ syncFontRow.call({});
   assert.ok(body.includes('fontNum.type = "number"'), "a number box");
   assert.ok(body.includes('fontNum.step = "1"'),
     "stepping it by one is the increase / decrease");
-  assert.ok(body.includes('fontNum.placeholder = "auto"'),
-    "and blank reads as auto rather than as an empty control");
+  assert.ok(body.includes('fontNum.placeholder = "custom"'),
+    'blank reads as "custom" — the size you dragged the box to, not a ' +
+    "size chosen for you, and not an empty control");
 }
 assert.ok(!src.includes("_paramsFontInput"),
   "the slider's reference is gone from the sync too, not just from the markup");
@@ -369,7 +397,7 @@ assert.ok(!src.includes("_paramsFontInput"),
   const body = src.slice(start, src.indexOf("var dashRow = document.createElement", start));
   assert.ok(body.includes('fontLabel.textContent = "Label size";'),
     'the row says what it sizes — "Label size", not "Font size"');
-  assert.ok(/fontNum\.title = "Label size in px/.test(body),
+  assert.ok(/fontNum\.title =\s*\n?\s*"Label size in px/.test(body),
     "and the input's tooltip says it too, which is all there is to go on " +
     "in the compact strip where the caption cannot be drawn");
   assert.ok(body.includes('"etcher-marker-row etcher-font-row"'),

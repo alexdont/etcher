@@ -5948,6 +5948,13 @@
           if (value == null) delete shape.style.font_size;
           else shape.style.font_size = value / scale;
           self._renderShape(shape);
+          // The resize handles sit on the label's corners, and the label
+          // just changed size under them — so they have to be re-placed,
+          // the same as after an align or a drag. Without this they hang in
+          // the air where the label used to end, until something unrelated
+          // re-renders them.
+          if (self.editingTitleShape === shape) self._positionAllTitleHandles(shape);
+          if (self.editingShape === shape) self._positionAllHandles(shape);
         });
       } else {
         this.lineParams = this.lineParams || {};
@@ -5978,6 +5985,11 @@
       if (!this._hasPinnedFontSize(shape)) return;
       shape.style = Object.assign({}, shape.style || {});
       delete shape.style.font_size;
+      // Say so in the panel on the very first frame of the drag. The number
+      // in the box is no longer what the label is: leaving it there reads as
+      // "still 18px" while the user watches it grow past 18, and the point
+      // of the box is that you can trust what it says.
+      this._syncFontRow();
     },
 
     _lineParamsForNewShape: function() {
@@ -6194,10 +6206,16 @@
       fontNum.min = String(FONT_SIZE_MIN);
       fontNum.max = String(FONT_SIZE_MAX);
       fontNum.step = "1";
-      fontNum.placeholder = "auto";
+      // "custom", not "auto": the size isn't being chosen for you, it is
+      // the one you dragged the box to. Shown through the placeholder
+      // because the value really is empty — a number input cannot hold a
+      // word, and a sentinel number would be a size you could accidentally
+      // commit.
+      fontNum.placeholder = "custom";
       // Carries the naming in the compact strip, where the row's own label
       // has no room to be drawn.
-      fontNum.title = "Label size in px — leave empty to size it by the box";
+      fontNum.title =
+        "Label size in px — empty means custom, sized by dragging the box";
       fontRow.appendChild(fontHead);
       fontRow.appendChild(fontNum);
       popup.appendChild(fontRow);
@@ -6585,8 +6603,9 @@
       }
 
       if (this._paramsFontNum) {
-        // Empty, not zero: the box says "auto" through its placeholder, and
-        // a 0 in it would read as a real size that happens to be invalid.
+        // Empty, not zero: the box says "custom" through its placeholder,
+        // and a 0 in it would read as a real size that happens to be
+        // invalid — one the user could then commit by pressing a spinner.
         this._paramsFontNum.value = px == null ? "" : String(px);
       }
     },

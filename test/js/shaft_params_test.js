@@ -184,7 +184,7 @@ function fakeEl() {
   const branch = src.slice(start, src.indexOf("\n    },", start));
   assert.ok(branch.includes("_isShaftKind(kind)"),
     "new shafts no longer adopt the global stroke params at creation");
-  assert.ok(branch.includes("delete shaft.fill"),
+  assert.ok(branch.includes("delete style.fill"),
     "the dead fill key rides along on every shaft payload again");
 }
 

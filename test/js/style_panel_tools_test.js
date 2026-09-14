@@ -392,10 +392,12 @@ assert.ok(
 
 // The palette-persist hook must not fire for inspect-mode edits: nothing
 // in the palette changed.
+// Also skipped for a label-plate pick: that swatch sets the plate, not the
+// palette, so there is nothing about the palette to persist.
 assert.strictEqual(
-  (src.match(/!self\._labelPickTarget && !self\._inspectedShape\(\)\) self\._emitColorsChanged\(\);/g) || []).length,
+  (src.match(/!self\._labelPickTarget && !self\._labelBgPickTarget && !self\._inspectedShape\(\)\) self\._emitColorsChanged\(\);/g) || []).length,
   2,
-  "both persist guards (preset click, drag release) skip inspect-mode edits"
+  "both persist guards (preset click, drag release) skip inspect-mode and label-plate edits"
 );
 
 

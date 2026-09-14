@@ -572,7 +572,13 @@
       "}",
       // Compact is a one-column strip; the labelled row would set its width.
       // Keep just the chip with the "A" in it, sized like the swatches above.
+      // One column, so the pair stacks: a square for the label's colour and
+      // a square for what sits behind it.
+      ".etcher-stylepanel[data-size=\"compact\"] .etcher-label-row {",
+      "  flex-direction: column; gap: 6px;",
+      "}",
       ".etcher-stylepanel[data-size=\"compact\"] .etcher-label-swatch {",
+      "  flex: 0 0 auto;",
       "  width: 30px; height: 30px; padding: 0; gap: 0; justify-content: center;",
       "}",
       ".etcher-stylepanel[data-size=\"compact\"] .etcher-label-swatch-text {",
@@ -767,12 +773,31 @@
       // The label-colour row: full menu width under the palette - a colour
       // chip (the "A" in the remembered colour) beside a text label, so it
       // reads as "the colour labels get", not as a sixth palette slot.
-      ".etcher-label-swatch {",
+      // The two label colours share one row: what the label is written in,
+      // and what it is written ON. A flex row inside the swatch grid rather
+      // than two grid cells, because the grid is five columns wide and
+      // halves of five are not columns.
+      ".etcher-label-row {",
       "  grid-column: 1 / -1;",
+      "  display: flex; gap: 6px;",
+      "}",
+      ".etcher-label-swatch {",
+      "  flex: 1 1 0; min-width: 0;",
       "  display: flex; align-items: center; gap: 8px;",
       "  height: 28px; padding: 0 6px;",
       "  border: 0; border-radius: 8px; cursor: pointer;",
       "  background: rgba(255, 255, 255, 0.08);",
+      "}",
+      // The plate chip previews the PAIR — the label's own colour written
+      // on the plate colour — since contrast is a property of the two
+      // together and neither swatch can show it alone.
+      ".etcher-label-bg-chip {",
+      "  border-style: solid; border-color: rgba(255, 255, 255, 0.35);",
+      "}",
+      // Off: back to the dashed empty chip the text swatch uses for \"none
+      // picked\", so the two read the same way when neither is set.
+      ".etcher-label-bg-chip.is-off {",
+      "  border-style: dashed; background: none;",
       "}",
       ".etcher-label-swatch:hover { background: rgba(255, 255, 255, 0.16); }",
       ".etcher-label-swatch-chip {",
@@ -870,6 +895,20 @@
       "  transition: background 120ms ease, border-color 120ms ease;",
       "}",
       ".etcher-num:hover { background: rgba(255, 255, 255, 0.12); }",
+      // On/off for the label plate. Sits where the other rows' read-outs
+      // sit, so the row reads as \"setting: value\" like the ones above it.
+      ".etcher-toggle {",
+      "  min-width: 42px; height: 20px; padding: 0 8px;",
+      "  border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 10px;",
+      "  background: transparent; color: #fff; cursor: pointer;",
+      "  font: 500 11px ui-sans-serif, system-ui, sans-serif;",
+      "  transition: background 120ms ease, border-color 120ms ease;",
+      "}",
+      ".etcher-toggle:hover { background: rgba(255, 255, 255, 0.12); }",
+      ".etcher-toggle.is-on {",
+      "  background: rgba(255, 255, 255, 0.22);",
+      "  border-color: rgba(255, 255, 255, 0.6);",
+      "}",
       ".etcher-num:focus {",
       "  outline: none; background: rgba(255, 255, 255, 0.12);",
       "  border-color: rgba(255, 255, 255, 0.6);",
@@ -5663,7 +5702,7 @@
           // Keep the picker open (it only closes on an outside click) so
           // the user can keep adjusting.
           self._applyPickedColor(s.color);
-          if (!self._labelPickTarget && !self._inspectedShape()) self._emitColorsChanged();
+          if (!self._labelPickTarget && !self._labelBgPickTarget && !self._inspectedShape()) self._emitColorsChanged();
         });
         presetRow.appendChild(b);
         return b;
@@ -5934,19 +5973,20 @@
     // polygon / freehand) adopt the global line params (color + thickness /
     // opacity / dash); every other kind just carries its color.
     _styleForNewShape: function(kind) {
-      if (kind === "marker") return this._currentMarkerStyle();
-      if (this._isStrokeShape(kind)) return this._lineParamsForNewShape();
-      if (this._isShaftKind(kind) || kind === "callout") {
+      var style;
+      if (kind === "marker") {
+        style = this._currentMarkerStyle();
+      } else if (this._isStrokeShape(kind)) {
+        style = this._lineParamsForNewShape();
+      } else if (this._isShaftKind(kind) || kind === "callout") {
         // Shafts adopt the global stroke params like every other line the
         // user draws — set the thickness once, and the next line, arrow and
         // dimension all come out in it. No fill: there is nothing to fill
         // on an open shaft, and a dead key would still ride every payload.
         // A callout's leader is a line in exactly this sense.
-        var shaft = this._lineParamsForNewShape();
-        delete shaft.fill;
-        return shaft;
-      }
-      if (kind === "text") {
+        style = this._lineParamsForNewShape();
+        delete style.fill;
+      } else if (kind === "text") {
         // A text shape IS a label. It starts in the remembered label
         // colour - the panel's label swatch (or recolouring a focused
         // label) sets it - falling back to the stroke colour. This is
@@ -5961,10 +6001,23 @@
           try { tScale = this._markerScale() || 1; } catch (_) { tScale = 1; }
           textStyle.font_size = lp.font_size / tScale;
         }
-        return Object.keys(textStyle).length ? textStyle : null;
+        style = Object.keys(textStyle).length ? textStyle : null;
+      } else {
+        style = this.activeColor ? { color: this.activeColor } : null;
       }
-      return this.activeColor ? { color: this.activeColor } : null;
+
+      // The label plate rides EVERY kind, because any shape can carry a
+      // label — so it is folded in here, once, rather than repeated in each
+      // branch above. Kept to one function on purpose: this is what a new
+      // shape is given, and splitting it in two put half the answer
+      // somewhere a caller could reach without the other half.
+      var bg = this._getPref("label_bg");
+      if (typeof bg === "string" && bg) {
+        style = Object.assign({}, style || {}, { label_bg: bg });
+      }
+      return style;
     },
+
 
     // The size a shape's text is drawn at, in container px.
     //
@@ -5987,6 +6040,90 @@
     _hasPinnedFontSize: function(shape) {
       var fs = shape && shape.style && shape.style.font_size;
       return typeof fs === "number" && isFinite(fs) && fs > 0;
+    },
+
+    // The plate a label sits on, so it can be read over a busy photograph.
+    //
+    // Absent means no plate — the label floats on whatever is behind it,
+    // which is what every label did before this and is still right over
+    // plain or empty canvas. Black and white are what the panel offers
+    // first because they are what contrast needs 95% of the time, but it
+    // is an ordinary colour: the picker is right there.
+    _labelBgFor: function(shape) {
+      var bg = shape && shape.style && shape.style.label_bg;
+      return typeof bg === "string" && bg ? bg : null;
+    },
+
+    // Paint it onto the rect every label kind already has behind its text.
+    // Inline, because the stylesheet pins that rect to `fill: transparent`
+    // — and back to "" rather than "transparent" when there is no plate, so
+    // the rule goes back to owning it.
+    _applyLabelBg: function(rectEl, shape) {
+      if (!rectEl || !rectEl.style) return;
+      rectEl.style.fill = this._labelBgFor(shape) || "";
+    },
+
+    // Set the label plate on the selected text-bearing shapes, or — with
+    // nothing selected — the colour new labels start with. `null` removes
+    // it. Same targeting as the size control beside it, so the two behave
+    // alike: what you can size, you can plate.
+    _setLabelBg: function(color, commit) {
+      var self = this;
+      var shapes = this._fontTargetShapes();
+      if (shapes.length) {
+        if (!this._labelBgBefore) {
+          this._labelBgBefore = shapes.map(function(s) {
+            return { uuid: s.uuid, before: self._snapshotShape(s) };
+          });
+        }
+        shapes.forEach(function(shape) {
+          shape.style = Object.assign({}, shape.style || {});
+          if (color == null) delete shape.style.label_bg;
+          else shape.style.label_bg = color;
+          self._renderShape(shape);
+        });
+      } else {
+        // Remembered even while off, so the toggle has something to turn
+        // back ON — otherwise switching it off would lose the colour and
+        // switching it back on would guess.
+        if (color) this._setPref("label_bg_last", color);
+        this._setPref("label_bg", color == null ? null : color);
+        this._restyleDrafts();
+      }
+      this._syncLabelBgRow();
+      this._refreshLabelSwatch();
+      if (!commit) return;
+      if (this._labelBgBefore && this._labelBgBefore.length) {
+        this._emitChanged();
+        this._labelBgBefore.forEach(function(rec) {
+          if (!rec.uuid) return;
+          var shape = self.shapes.find(function(s) { return s.uuid === rec.uuid; });
+          if (shape) self._pushUndo(rec.uuid, rec.before, self._snapshotShape(shape));
+        });
+      }
+      this._labelBgBefore = null;
+    },
+
+    // What the toggle reads and writes: the plate on the current targets,
+    // or the default when nothing is selected.
+    _currentLabelBg: function() {
+      var targets = this._fontTargetShapes();
+      if (targets.length) return this._labelBgFor(targets[0]);
+      var pref = this._getPref("label_bg");
+      return typeof pref === "string" && pref ? pref : null;
+    },
+
+    _toggleLabelBg: function() {
+      if (this._currentLabelBg()) {
+        this._setLabelBg(null, true);
+        return;
+      }
+      // Back to the last colour used, black the first time — the colour a
+      // label needs behind it more often than not.
+      var last = this._getPref("label_bg_last");
+      this._setLabelBg(
+        (typeof last === "string" && last) ? last : "#000000", true
+      );
     },
 
     // The shapes a font size applies to: the ones that draw text. Distinct
@@ -6364,6 +6501,31 @@
         fontNum.value = String(clampFont(n));
       });
 
+      // The plate behind a label, next to the size of the label it sits
+      // behind. On/off only: WHICH colour is the swatch's job, beside the
+      // label's own colour where the two can be compared.
+      var bgRow = document.createElement("div");
+      bgRow.className = "etcher-marker-row etcher-bg-row";
+      var bgHead = document.createElement("div");
+      bgHead.className = "etcher-marker-row-head";
+      var bgLabel = document.createElement("span");
+      bgLabel.textContent = "Label background";
+      var bgBtn = document.createElement("button");
+      bgBtn.type = "button";
+      bgBtn.className = "etcher-toggle";
+      bgHead.appendChild(bgLabel);
+      bgHead.appendChild(bgBtn);
+      bgRow.appendChild(bgHead);
+      popup.appendChild(bgRow);
+      self._paramsBgRow = bgRow;
+      self._paramsBgBtn = bgBtn;
+      bgBtn.addEventListener("click", function(e) {
+        e.preventDefault();
+        self._toggleLabelBg();
+      });
+
+
+
       var dashRow = document.createElement("div");
       dashRow.className = "etcher-marker-dash";
       function dashIcon(dash) {
@@ -6688,6 +6850,7 @@
         this._paramsFillRow.style.display = fillable ? "" : "none";
       }
       this._syncFontRow();
+      this._syncLabelBgRow();
       this._syncLabelSection();
     },
 
@@ -6723,6 +6886,24 @@
         // invalid — one the user could then commit by pressing a spinner.
         this._paramsFontNum.value = px == null ? "" : String(px);
       }
+    },
+
+    // The toggle shows wherever the size does — they are two settings for
+    // the same thing, and a panel that offers one without the other reads
+    // as a missing control rather than a deliberate one.
+    _syncLabelBgRow: function() {
+      if (!this._paramsBgRow) return;
+      var targets = this._fontTargetShapes();
+      var global = !targets.length && !this._paramsTargetShapes().length;
+      this._paramsBgRow.style.display = (targets.length || global) ? "" : "none";
+      if (!this._paramsBgBtn) return;
+      var on = !!this._currentLabelBg();
+      this._paramsBgBtn.textContent = on ? "On" : "Off";
+      this._paramsBgBtn.classList.toggle("is-on", on);
+      this._paramsBgBtn.setAttribute("aria-pressed", on ? "true" : "false");
+      this._paramsBgBtn.title = on
+        ? "Label background on — pick its colour beside the label colour"
+        : "Label background off — labels sit straight on the image";
     },
 
     // Show the label controls only when there's a label to place, and mark
@@ -7051,7 +7232,7 @@
             // Commit the edited slot on release — persist via the hook.
             // (A label-swatch pick persists through the prefs mechanism
             // inside _applyPickedColor; the palette didn't change.)
-            if (!self._labelPickTarget && !self._inspectedShape()) self._emitColorsChanged();
+            if (!self._labelPickTarget && !self._labelBgPickTarget && !self._inspectedShape()) self._emitColorsChanged();
           }
           el.addEventListener("pointermove", move);
           el.addEventListener("pointerup", up);
@@ -7153,6 +7334,12 @@
     // pref, so the swatch edits "what colour new labels start in" without
     // touching the palette.
     _applyPickedColor: function(hex) {
+      // The plate behind labels. Ahead of the label-colour branch because
+      // both are "label" targets and only one can be armed at a time.
+      if (this._labelBgPickTarget) {
+        this._setLabelBg(hex, true);
+        return;
+      }
       if (this._labelPickTarget) {
         this._setPref("label_color", hex);
         this._refreshLabelSwatch();
@@ -7172,14 +7359,31 @@
 
     _refreshLabelSwatch: function() {
       var el = this.labelSwatchEl;
-      if (!el) return;
-      var color = this._getPref("label_color") || "";
-      var glyph = el.querySelector(".etcher-label-swatch-glyph");
-      if (glyph) glyph.style.color = color || "#ffffff";
-      el.title = color
-        ? "Label color: " + color + " — new labels start in it"
-        : "Label color — pick one and new labels start in it";
-      el.setAttribute("aria-label", el.title);
+      if (el) {
+        var color = this._getPref("label_color") || "";
+        var glyph = el.querySelector(".etcher-label-swatch-glyph");
+        if (glyph) glyph.style.color = color || "#ffffff";
+        el.title = color
+          ? "Label text color: " + color + " — new labels start in it"
+          : "Label text color — pick one and new labels start in it";
+        el.setAttribute("aria-label", el.title);
+      }
+
+      var bgEl = this.labelBgSwatchEl;
+      if (!bgEl) return;
+      // The chip IS the preview: the label's own colour, written on the
+      // plate colour, which is the only way to see whether the pair works.
+      var bg = this._currentLabelBg();
+      var textColor = this._getPref("label_color") || "#ffffff";
+      var bgChip = bgEl.querySelector(".etcher-label-bg-chip");
+      var bgGlyph = bgEl.querySelector(".etcher-label-swatch-glyph");
+      if (bgChip) bgChip.style.background = bg || "";
+      if (bgChip) bgChip.classList.toggle("is-off", !bg);
+      if (bgGlyph) bgGlyph.style.color = textColor;
+      bgEl.title = bg
+        ? "Label background: " + bg
+        : "Label background — off; pick a colour to put one behind labels";
+      bgEl.setAttribute("aria-label", bgEl.title);
     },
 
     _selectSlot: function(i) {
@@ -7292,13 +7496,19 @@
       // creation) and opens the picker targeted at it. An "A" glyph in the
       // remembered colour, not a filled tile: it is a text-colour control,
       // and reading it as a sixth palette slot would be the wrong idea.
+      // Two halves of one row: the colour the label is written in, and the
+      // colour it is written ON. Side by side because that is how you judge
+      // them — contrast is a property of the pair, not of either one.
+      var labelRow = document.createElement("div");
+      labelRow.className = "etcher-label-row";
+
       var lb = document.createElement("button");
       lb.type = "button";
       lb.className = "etcher-label-swatch";
       lb.innerHTML =
         '<span class="etcher-label-swatch-chip">' +
         '<span class="etcher-label-swatch-glyph">A</span></span>' +
-        '<span class="etcher-label-swatch-text">Label color</span>';
+        '<span class="etcher-label-swatch-text">Text</span>';
       lb.addEventListener("click", function(e) {
         e.preventDefault();
         if (self._openPopupKind === "colors" && self._labelPickTarget) {
@@ -7312,8 +7522,33 @@
         // _openPopup is target-agnostic; re-arm after the generic close.
         self._labelPickTarget = true;
       });
-      host.appendChild(lb);
+      labelRow.appendChild(lb);
+
+      var bgSwatch = document.createElement("button");
+      bgSwatch.type = "button";
+      bgSwatch.className = "etcher-label-swatch";
+      bgSwatch.innerHTML =
+        '<span class="etcher-label-swatch-chip etcher-label-bg-chip">' +
+        '<span class="etcher-label-swatch-glyph">A</span></span>' +
+        '<span class="etcher-label-swatch-text">Behind</span>';
+      bgSwatch.addEventListener("click", function(e) {
+        e.preventDefault();
+        if (self._openPopupKind === "colors" && self._labelBgPickTarget) {
+          self._closePopup();
+          return;
+        }
+        self._closePopup();
+        self._labelBgPickTarget = true;
+        self._colorsTrigger = bgSwatch;
+        self._openPopup("colors");
+        // _openPopup is target-agnostic; re-arm after the generic close.
+        self._labelBgPickTarget = true;
+      });
+      labelRow.appendChild(bgSwatch);
+
+      host.appendChild(labelRow);
       self.labelSwatchEl = lb;
+      self.labelBgSwatchEl = bgSwatch;
       self._refreshLabelSwatch();
     },
 
@@ -7440,6 +7675,7 @@
 
     _closePopup: function() {
       this._labelPickTarget = false;
+      this._labelBgPickTarget = false;
       if (this.toolsPopup) this.toolsPopup.classList.remove("is-open");
       if (this.colorsPopup) this.colorsPopup.classList.remove("is-open");
       if (this.markerPopup) this.markerPopup.classList.remove("is-open");
@@ -10970,6 +11206,7 @@
               coRect.setAttribute("width",  coActualW);
               coRect.setAttribute("height", coActualH);
             }
+            self._applyLabelBg(coRect, shape);
             var cosx = bw > 0 ? bw / box.w : 1;
             var cosy = bh > 0 ? bh / box.h : cosx;
             shape._renderedBox = {
@@ -11125,6 +11362,7 @@
               trect.setAttribute("width",  actualW);
               trect.setAttribute("height", actualH);
             }
+            self._applyLabelBg(trect, shape);
             var sx = tw > 0 ? tw / g.w : 1;
             var sy = th > 0 ? th / g.h : sx;
             shape._renderedBox = {
@@ -11763,6 +12001,7 @@
           // positions + drag math operate on the real (visible) rect.
           var centeredY = ty + Math.max(pad, (th - measured.height) / 2);
           textEl.setAttribute("y", centeredY);
+          this._applyLabelBg(rectEl, shape);
           shape._renderedTitleImage = {
             x: titleBox.x,
             y: titleBox.y,
@@ -11779,6 +12018,7 @@
             rectEl.setAttribute("width",  actualW);
             rectEl.setAttribute("height", actualH);
           }
+          this._applyLabelBg(rectEl, shape);
           // Convert the container-px shrink back to image px so handles
           // + drag math operate on the visible rect. Falls back to the
           // input bbox if the scale degenerates.

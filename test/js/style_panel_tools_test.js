@@ -246,7 +246,7 @@ assert.ok(
   // The cursor hand is a solid white glove with a black contour — a
   // fill:none build disappeared into light imagery.
   const start = src.indexOf("function grabberCursor()");
-  const body = src.slice(start, src.indexOf("var toolCursorCache", start));
+  const body = src.slice(start, src.indexOf("var cursorToolCursorCache", start));
   assert.ok(
     body.includes("var silhouette =") && body.includes('Z"/>'),
     "a CLOSED silhouette path backs the open glyph paths - their chord fills leave palm gaps"
@@ -261,3 +261,20 @@ assert.ok(
     "exactly the silhouette pass fills white; the contour pass stays fill:none or its chord-fills overpaint the finger lines"
   );
 }
+
+// ── the cursor tool's pointer is its toolbar arrow ──────────────────────────
+
+assert.ok(
+  src.includes("var ARROW_PATH =") &&
+    src.includes("aria-hidden=\"true\">' + ARROW_PATH + '</svg>'") &&
+    (src.match(/ARROW_PATH \+ '<\/g>'/g) || []).length === 2,
+  "one arrow path feeds the toolbar icon and both cursor passes - parity by construction"
+);
+assert.ok(
+  src.includes('cursorToolCursor() : ""'),
+  "the armed cursor tool applies its own arrow instead of the OS default"
+);
+assert.ok(
+  src.includes("\") 6 6, default'"),
+  "hotspot on the arrow tip, native default kept as the fallback"
+);

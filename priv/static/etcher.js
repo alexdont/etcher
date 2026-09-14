@@ -156,11 +156,18 @@
   // Icons (Heroicons, outline, 24×24, stroke="currentColor")
   // ===========================================================================
 
+  // The select arrow, shared by the toolbar's cursor button and
+  // `cursorToolCursor` below — one path, so the button and the pointer
+  // cannot drift apart. Closed (Z), so it fills solid without a
+  // silhouette underlay.
+  var ARROW_PATH =
+    '<path stroke-linecap="round" stroke-linejoin="round" d="M4 4 11.07 21l2.51-7.39L20.97 11.1 4 4Z"/>';
+
   var ICONS = {
     pencil:   '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125"/></svg>',
     trash:    '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/></svg>',
     paperclip:'<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m18.375 12.739-7.693 7.693a4.5 4.5 0 0 1-6.364-6.364l10.94-10.94A3 3 0 1 1 19.5 7.372L8.552 18.32m.009-.01-.01.01m5.699-9.941-7.81 7.81a1.5 1.5 0 0 0 2.112 2.13"/></svg>',
-    cursor:   '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4 11.07 21l2.51-7.39L20.97 11.1 4 4Z"/></svg>',
+    cursor:   '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true">' + ARROW_PATH + '</svg>',
     undo:     '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 15 4 10l5-5"/><path d="M4 10h11a5 5 0 0 1 0 10h-4"/></svg>',
     redo:     '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 15l5-5-5-5"/><path d="M20 10H9a5 5 0 0 0 0 10h4"/></svg>',
     // Arrange (z-order). One metaphor across all four: the tinted square is
@@ -2004,6 +2011,25 @@
     grabberCursorCache =
       'url("data:image/svg+xml,' + encodeURIComponent(svg) + '") 14 14, grab';
     return grabberCursorCache;
+  }
+
+  // The armed cursor tool shows its own toolbar arrow, not the OS one —
+  // the same parity the grabber got. Solid white with a black contour
+  // (the path is closed, so it fills without a silhouette), hotspot on
+  // the arrow's TIP at glyph (4,4) → svg (6,6): unlike the hand, the
+  // select arrow has a precision point and it must be where clicks land.
+  var cursorToolCursorCache = null;
+  function cursorToolCursor() {
+    if (cursorToolCursorCache) return cursorToolCursorCache;
+    var svg =
+      '<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28">' +
+      '<g transform="translate(2 2)">' +
+      '<g fill="#fff" stroke="#fff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">' + ARROW_PATH + '</g>' +
+      '<g fill="#fff" stroke="#000" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">' + ARROW_PATH + '</g>' +
+      '</g></svg>';
+    cursorToolCursorCache =
+      'url("data:image/svg+xml,' + encodeURIComponent(svg) + '") 6 6, default';
+    return cursorToolCursorCache;
   }
 
   var toolCursorCache = {};
@@ -9350,7 +9376,7 @@
           // lie — show the plain arrow. Outside annotation mode, defer to
           // Fresco's own cursor CSS.
           self.handle.container.style.cursor =
-            self.annotationMode && toolKey == null ? "default" : "";
+            self.annotationMode && toolKey == null ? cursorToolCursor() : "";
         }
       }
       if (drawingNow || grabbing) self._hideTooltip();

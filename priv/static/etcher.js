@@ -5812,11 +5812,12 @@
     _styleForNewShape: function(kind) {
       if (kind === "marker") return this._currentMarkerStyle();
       if (this._isStrokeShape(kind)) return this._lineParamsForNewShape();
-      if (this._isShaftKind(kind)) {
+      if (this._isShaftKind(kind) || kind === "callout") {
         // Shafts adopt the global stroke params like every other line the
         // user draws — set the thickness once, and the next line, arrow and
         // dimension all come out in it. No fill: there is nothing to fill
         // on an open shaft, and a dead key would still ride every payload.
+        // A callout's leader is a line in exactly this sense.
         var shaft = this._lineParamsForNewShape();
         delete shaft.fill;
         return shaft;
@@ -6242,8 +6243,13 @@
     _paramsTargetShapes: function() {
       var self = this;
       function eligible(s) {
-        return !!s && (s.kind === "marker" || self._isStrokeShape(s.kind) ||
-                       self._isShaftKind(s.kind));
+        // Callouts are in: they are a leader, an underline and a dot, which
+        // are strokes like any other and were silently editing the global
+        // default instead of themselves. They are NOT a shaft kind — that
+        // flag drives arrowheads and endpoint drags — so they are named
+        // here rather than folded in there.
+        return !!s && (s.kind === "marker" || s.kind === "callout" ||
+                       self._isStrokeShape(s.kind) || self._isShaftKind(s.kind));
       }
       if (this.selectedShapes && this.selectedShapes.length) {
         return this.selectedShapes.filter(eligible);
@@ -6380,8 +6386,8 @@
           shape.style = Object.assign({}, shape.style || {});
           // Slider thickness is on-screen px; shapes store canvas units.
           if (prop === "width" &&
-              (shape.kind === "marker" || self._isStrokeShape(shape.kind) ||
-               self._isShaftKind(shape.kind))) {
+              (shape.kind === "marker" || shape.kind === "callout" ||
+               self._isStrokeShape(shape.kind) || self._isShaftKind(shape.kind))) {
             shape.style.width = value / self._markerScale();
             if (shape.kind !== "marker") shape.style.width_units = "canvas";
           } else {
@@ -6390,7 +6396,8 @@
           // Markers and shafts restyle inside `_renderShape` (a shaft's
           // arrowheads are sized off the stroke, and only the render case
           // has the endpoints); outline shapes take the params directly.
-          if (shape.kind === "marker" || self._isShaftKind(shape.kind)) {
+          if (shape.kind === "marker" || shape.kind === "callout" ||
+              self._isShaftKind(shape.kind)) {
             self._renderShape(shape);
           } else {
             self._applyLineParams(shape.el, shape.style, self._markerScale());
@@ -10584,6 +10591,24 @@
           self._setRotateTransform(coText, coTurn);
           self._setRotateTransform(coUnderline, coTurn);
 
+          // Thickness / line type / opacity, on the parts that are lines.
+          // A callout's leader and underline are strokes like any other and
+          // took none of it before: the sliders moved and nothing happened.
+          // The dot scales with the weight so a heavy callout doesn't end up
+          // with a pinhead on the end of a fat line, and the text takes the
+          // opacity so the whole thing fades together rather than leaving
+          // the label at full strength over a ghosted leader.
+          var coStrokePx = self._shaftStrokePx(shape, 2);
+          self._applyShaftStroke(coLine, shape, coStrokePx, true);
+          self._applyShaftStroke(coUnderline, shape, coStrokePx, true);
+          var coOpacity = (shape.style && shape.style.opacity == null)
+            ? 1 : (shape.style ? shape.style.opacity : 1);
+          if (coDot) {
+            coDot.setAttribute("r", Math.max(2, coStrokePx * 1.5));
+            coDot.setAttribute("fill-opacity", String(coOpacity));
+          }
+          if (coText) coText.setAttribute("fill-opacity", String(coOpacity));
+
           if (coLine) {
             // Leader attaches to whichever bottom corner sits closer
             // to the anchor. Blueprint-style: anchor on the left →
@@ -10604,6 +10629,20 @@
             coLine.setAttribute("y1", anchor.y);
             coLine.setAttribute("x2", attach.x);
             coLine.setAttribute("y2", attach.y);
+            // Kept for the hit-test. The leader's endpoints are only known
+            // here — the attach corner depends on which side the anchor is
+            // on and on how the label turned — and clicking the leader used
+            // to do nothing at all, because the hit-test knew about the text
+            // box and the dot and nothing in between. Container px, which is
+            // the space they were computed in; `_shapeContainsPoint` converts
+            // its point rather than trying to invert the projection.
+            shape._leaderContainer = {
+              a: { x: anchor.x, y: anchor.y },
+              b: { x: attach.x, y: attach.y },
+              w: coStrokePx
+            };
+          } else {
+            shape._leaderContainer = null;
           }
           if (coDot) {
             coDot.setAttribute("cx", anchor.x);
@@ -17133,7 +17172,24 @@
           // Small radius around the anchor dot so the user can erase
           // by clicking the leader endpoint as well as the label.
           var r = this._textDefaultBoxImagePx() * 0.6;
-          return dax * dax + day * day <= r * r;
+          if (dax * dax + day * day <= r * r) return true;
+          // The leader itself. Without this the line joining the dot to the
+          // label was not a thing you could click — the callout answered
+          // only at its two ends, and the part you naturally aim at did
+          // nothing. Tested in container px, the space the render computed
+          // the leader in.
+          var lead = shape._leaderContainer;
+          if (lead) {
+            var here;
+            try { here = this._imageToContainer(pt); } catch (_) { here = null; }
+            if (here) {
+              // Half the stroke is already on the line; the rest is the same
+              // grab pad every other stroke gets.
+              var leadTol = Math.max(9.6, (lead.w || 2) / 2 + 4);
+              if (this._nearSegment(here, lead.a, lead.b, leadTol)) return true;
+            }
+          }
+          return false;
         }
         // Hit if the point is near ANY segment of the routed path — the
         // two-point case covers a straight arrow.

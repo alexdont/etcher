@@ -122,8 +122,16 @@ for (const kind of ["line", "arrow", "dimension"]) {
     { color: "#fde68a" });
   assert.deepStrictEqual(styleForNewShape.call(board(), "text"),
     { color: "#93c5fd" });
-  // Anything else just carries the colour.
-  assert.deepStrictEqual(styleForNewShape.call(board(), "callout"),
+  // A callout's leader is a line, so it adopts the stroke params too —
+  // see callout_params_test.js.
+  {
+    const s = styleForNewShape.call(board(), "callout");
+    assert.strictEqual(s.dash, "dotted");
+    assert.strictEqual(s.width, 4);
+    assert.ok(!("fill" in s), "an open leader carries no fill key");
+  }
+  // A kind with neither a stroke nor a body just carries the colour.
+  assert.deepStrictEqual(styleForNewShape.call(board(), "image"),
     { color: "#93c5fd" });
 }
 

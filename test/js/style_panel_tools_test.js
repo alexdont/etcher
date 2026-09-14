@@ -304,7 +304,9 @@ assert.ok(
   "arming the grabber wires the press-to-curl listeners, leaving it unwires them"
 );
 assert.ok(
-  src.includes("self.handle.container.style.cursor = grabberCursor(true);") &&
+  src.includes('document.addEventListener("pointerdown", self._grabberDownHandler, true);') &&
+    src.includes("c.style.cursor = grabberCursor(true);") &&
+    src.includes("if (!c || !c.contains(e.target)) return;") &&
     (src.match(/grabberCursor\(false\)/g) || []).length >= 2,
   "pointer down curls the hand, release and tool-arm relax it"
 );

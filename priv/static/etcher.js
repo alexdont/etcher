@@ -3000,6 +3000,15 @@
       // drawing (independent of the handle type).
       self._seedLineParams();
 
+      // Re-init on a fresh handle (the media viewer remounts Fresco per
+      // file switch) with the grabber still armed: the new container has
+      // no inline cursor yet, so Fresco's native `cursor: grab` class
+      // would show the OS hand until the next press or re-arm. Re-seat
+      // the relaxed hand immediately.
+      if (self.activeTool === "grabber" && handle && handle.container) {
+        handle.container.style.cursor = grabberCursor(false);
+      }
+
       // Handle-type dispatch (added in 0.4 with Fresco 0.5.3).
       //
       // Fresco's `<Fresco.canvas>` and `<Fresco.scroll_strip>` both publish
@@ -9423,27 +9432,39 @@
     // deliberately pass through Etcher's overlay to Fresco, so nothing of
     // Etcher's sees them otherwise); the up/cancel pair rides the window,
     // because a drag routinely ends outside the container.
+    // While the grabber is armed, a pressed pointer curls the hand and
+    // release relaxes it — the pair every native grab cursor shows. Both
+    // listeners ride the DOCUMENT (capture for the press), resolving
+    // `handle.container` at event time: the media viewer remounts Fresco
+    // on every file switch, handing this layer a NEW container, and a
+    // listener bound to the old element silently died — the curl worked
+    // until the first prev/next and never again (the once-only wiring
+    // guard saw the stale handler and refused to rewire). Document-level
+    // + late binding is immune to the swap. Capture also fires before
+    // any of Fresco's own handling, so the curl is immediate on press —
+    // the grabber's events deliberately pass through Etcher's overlay,
+    // and nothing of Etcher's would see them otherwise; up/cancel ride
+    // the window because drags routinely end outside the container.
     _wireGrabberCursor: function(on) {
       var self = this;
-      if (on && !self._grabberDownHandler && self.handle && self.handle.container) {
+      if (on && !self._grabberDownHandler) {
         self._grabberDownHandler = function(e) {
           if (e.button !== 0 && e.button !== 1) return;
           if (self.activeTool !== "grabber") return;
-          self.handle.container.style.cursor = grabberCursor(true);
+          var c = self.handle && self.handle.container;
+          if (!c || !c.contains(e.target)) return;
+          c.style.cursor = grabberCursor(true);
         };
         self._grabberUpHandler = function() {
           if (self.activeTool !== "grabber") return;
-          if (self.handle && self.handle.container) {
-            self.handle.container.style.cursor = grabberCursor(false);
-          }
+          var c = self.handle && self.handle.container;
+          if (c) c.style.cursor = grabberCursor(false);
         };
-        self.handle.container.addEventListener("pointerdown", self._grabberDownHandler, true);
+        document.addEventListener("pointerdown", self._grabberDownHandler, true);
         window.addEventListener("pointerup", self._grabberUpHandler, true);
         window.addEventListener("pointercancel", self._grabberUpHandler, true);
       } else if (!on && self._grabberDownHandler) {
-        if (self.handle && self.handle.container) {
-          self.handle.container.removeEventListener("pointerdown", self._grabberDownHandler, true);
-        }
+        document.removeEventListener("pointerdown", self._grabberDownHandler, true);
         window.removeEventListener("pointerup", self._grabberUpHandler, true);
         window.removeEventListener("pointercancel", self._grabberUpHandler, true);
         self._grabberDownHandler = null;

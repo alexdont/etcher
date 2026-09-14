@@ -1861,6 +1861,12 @@
   // whole connector or dimension scales as one object.
   var LINE_WEIGHT_PX = 2;
 
+  // Fresco's own wheel-zoom rate, mirrored so a scroll over the drawing
+  // overlay zooms by exactly as much as a scroll over bare canvas. If this
+  // and Fresco's ever diverge, zooming would change speed depending on
+  // whether a tool happened to be armed.
+  var WHEEL_ZOOM_RATE = 0.0015;
+
   // Connector dots are green rather than the shape's own colour: they're a
   // fixed piece of interface, like a cursor, and taking the shape's colour
   // made them read as part of the drawing. Matches yEd's palette — a pale
@@ -3888,6 +3894,36 @@
       // triggers Fresco's pan/zoom even though the wrapper sits inside
       // the Fresco host's event tree.
       wrapper.setAttribute("data-fresco-no-capture", "");
+
+      // …but that attribute is read by Fresco's WHEEL handler too, and the
+      // wheel was never ours to claim. Arming a drawing tool switches the
+      // overlay to `pointer-events: auto`, which makes it the target of
+      // wheel events as well as presses — so Fresco saw every scroll as
+      // coming from a no-capture overlay and bailed, and zoom silently
+      // stopped working for as long as a tool was held. Panning kept
+      // working (it is a drag, which the overlay genuinely does claim, and
+      // the grabber hands it back deliberately), which is what made the
+      // gap look like a quirk of drawing rather than a dead scroll wheel.
+      //
+      // Forwarded rather than let through: Fresco's check is on the event
+      // target, so there is nothing to opt out of from here short of
+      // dropping the attribute and losing pan suppression with it. The
+      // maths is Fresco's own — same exponential factor, same
+      // viewport-relative anchor, and `container` IS the element Fresco
+      // measures against — so a scroll zooms about the cursor identically
+      // whether a tool is held or not.
+      wrapper.addEventListener("wheel", function(e) {
+        var h = self.handle;
+        if (!h || typeof h.zoomAt !== "function" || !h.container) return;
+        e.preventDefault();
+        var rect = h.container.getBoundingClientRect();
+        h.zoomAt(
+          e.clientX - rect.left,
+          e.clientY - rect.top,
+          Math.exp(-e.deltaY * WHEEL_ZOOM_RATE)
+        );
+      }, { passive: false });
+
       wrapper.addEventListener("pointerdown", function(e) {
         // Non-primary buttons are not ours. The `stopPropagation` below is
         // there so a left-press that's drawing or grabbing a handle doesn't

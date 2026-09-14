@@ -12670,25 +12670,20 @@
           if (self._hoveredShape) self._setHoveredShape(null, false);
           return;
         }
-        // Grabber (hand) tool: pan only — never hover or highlight shapes.
-        if (self.activeTool === "grabber") {
+        // Any armed tool: no hover, and no hit-test to find one. The board
+        // should not light up under a press that is going to the tool —
+        // whether that is a pan (grabber), a stroke (marker and every other
+        // drawing tool), or a presenter's laser (pointer, whose audience
+        // cannot see the highlights anyway). `_setHoveredShape` enforces
+        // the same rule for callers that don't come through here; this is
+        // where the wasted work is skipped.
+        if (self.activeTool != null) {
           if (self._hoveredShape) self._setHoveredShape(null, false);
-          return;
-        }
-        // Marker tool: suppress shape hover + tooltips so they don't pop up
-        // over what you're drawing.
-        if (self.activeTool === "marker") {
-          if (self._hoveredShape) self._setHoveredShape(null, false);
-          return;
-        }
-        // Red pointer: the whole tool is a pointer move, so it is handled
-        // here rather than as a press-and-drag gesture — there is nothing to
-        // press. Hover is suppressed for the same reason it is for the
-        // marker: the board should not light up under someone who is
-        // presenting, and the audience cannot see the highlights anyway.
-        if (self.activeTool === "pointer") {
-          if (self._hoveredShape) self._setHoveredShape(null, false);
-          if (overContainer(e)) self._movePointer(e);
+          // The red pointer is the one tool whose whole gesture IS the
+          // move — there is nothing to press — so it still wants this.
+          if (self.activeTool === "pointer" && overContainer(e)) {
+            self._movePointer(e);
+          }
           return;
         }
         // Over Etcher's own chrome (toolbar / popup / tooltip): no shape hover.
@@ -12988,6 +12983,13 @@
     // sit on top of the very label the user is trying to grab.
     _setHoveredShape: function(next, onTitle) {
       onTitle = !!onTitle;
+      // Nothing is hoverable while a tool is armed — see `_hoverAllowed`.
+      // Coerced here rather than refused so a hover already on screen when
+      // the tool is armed still gets cleaned up by the transition below.
+      if (next && !this._hoverAllowed()) {
+        next = null;
+        onTitle = false;
+      }
       var prev = this._hoveredShape;
       var prevOnTitle = this._hoveredOnTitle === true;
 
@@ -13000,10 +13002,10 @@
       // Show the tooltip when:
       // 1. We just moved onto a NEW shape's body.
       // 2. We moved off the title back onto the body of the same shape.
-      // ...and only while a tool that SELECTS is armed — see
-      // `_hoverTooltipsAllowed`.
+      // (`next` is already null if hover isn't allowed, so an armed tool
+      // never reaches either case.)
       var showTooltip =
-        next && !onTitle && this._hoverTooltipsAllowed() &&
+        next && !onTitle &&
         (next !== prev || (next === prev && prevOnTitle));
 
       // `_hoveredShape` is assigned FIRST, before anything re-renders. A
@@ -13036,19 +13038,20 @@
       this._syncConnectorDots(onTitle ? null : next);
     },
 
-    // Hover tooltips belong to the cursor tool. With a drawing tool armed
-    // the pointer is aiming at where the next shape GOES, not at what is
-    // already there, so a tooltip popping up under it just covers the
-    // canvas mid-stroke. (The grabber, marker and red pointer suppress
-    // hover wholesale in `_docMouseMove`; every other tool needs its
-    // hover STYLING and its connector dots — those are the affordance for
-    // binding an arrow to the shape you are drawing toward — so only the
-    // tooltip is withheld here.)
+    // Hover belongs to the cursor tool. Hover says "this shape is what a
+    // press would act on" — and with a tool armed it isn't: the press goes
+    // to the tool. So with anything armed the blue hover outline, the
+    // tooltip and a video's hover transport all stay off, and the pointer
+    // is aiming at where the next shape GOES rather than at what is
+    // already there. (Connector dots were never on in this state —
+    // `_connectorsAvailableFor` already requires `activeTool == null`.)
     //
     // Deliberate paths are untouched: the host's `selectShape(uuid)` pin,
     // and the re-show after a handle drag, are things someone asked for
-    // rather than something the pointer wandered into.
-    _hoverTooltipsAllowed: function() {
+    // rather than something the pointer wandered into. Tap-to-select is
+    // unaffected too — it falls back to a fresh hit-test when the hover
+    // cache is empty.
+    _hoverAllowed: function() {
       return !(this.annotationMode && this.activeTool != null);
     },
 

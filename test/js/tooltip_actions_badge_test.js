@@ -137,18 +137,18 @@ assert.ok(src.includes("[shape.titleGroup, shape._badgeEl].forEach(function(extr
 console.log("tooltip actions + badge: all checks passed");
 
 
-// ── hover tooltips are a cursor-tool affordance ─────────────────────────────
+// ── hover belongs to the cursor tool ───────────────────────────────────────
 //
-// The doc-level hover detector hit-tests geometrically whatever the armed
-// tool is (only grabber / marker / pointer were special-cased), so moving
-// over an existing shape while a drawing tool was armed popped its tooltip
-// up over the canvas mid-stroke. Hover STYLING and connector dots must
-// survive — they are how you aim an arrow at a shape you are drawing
-// toward — so only the tooltip is withheld.
+// The doc-level hover detector hit-tests geometrically whatever tool is
+// armed (only grabber / marker / pointer were special-cased), so moving
+// over a shape with a drawing tool armed lit it up: blue hover outline
+// AND its tooltip, on top of the canvas you are drawing on. Hover means
+// "a press acts on this shape", which is false while a tool is armed —
+// the press goes to the tool — so none of it shows.
 
 {
   const setHoveredShape = extract("_setHoveredShape");
-  const hoverTooltipsAllowed = extract("_hoverTooltipsAllowed");
+  const hoverAllowed = extract("_hoverAllowed");
 
   function hoverSelf(tool) {
     return {
@@ -159,7 +159,8 @@ console.log("tooltip actions + badge: all checks passed");
       tooltipPinned: false,
       shown: [],
       dots: [],
-      _hoverTooltipsAllowed: hoverTooltipsAllowed,
+      classed: [],
+      _hoverAllowed: hoverAllowed,
       _showTooltipFor(s) { this.shown.push(s); },
       _scheduleHideTooltip() {},
       _refreshImageRing() {},
@@ -168,27 +169,74 @@ console.log("tooltip actions + badge: all checks passed");
     };
   }
 
-  const shape = { uuid: "u1", el: { classList: { add() {}, remove() {} } } };
-
-  // Cursor tool (no tool armed): hovering a shape shows its tooltip.
-  const cursor = hoverSelf(null);
-  setHoveredShape.call(cursor, shape, false);
-  assert.deepStrictEqual(cursor.shown, [shape], "cursor tool still gets tooltips");
-
-  // Drawing tools: no tooltip, but hover state and connector dots stay.
-  for (const tool of ["rectangle", "circle", "arrow", "polygon", "freehand", "text"]) {
-    const drawing = hoverSelf(tool);
-    setHoveredShape.call(drawing, shape, false);
-    assert.deepStrictEqual(drawing.shown, [], `${tool} must not raise a tooltip`);
-    assert.strictEqual(drawing._hoveredShape, shape, `${tool} keeps hover state`);
-    assert.deepStrictEqual(drawing.dots, [shape], `${tool} keeps connector dots`);
+  function fakeShape(self) {
+    return {
+      uuid: "u1",
+      el: {
+        classList: {
+          add: (c) => self.classed.push(["add", c]),
+          remove: (c) => self.classed.push(["remove", c]),
+        },
+      },
+    };
   }
 
-  // Outside annotation mode nothing is armed, so browsing still gets them.
+  // Cursor tool (nothing armed): hover lights the shape and shows its
+  // tooltip, exactly as before.
+  const cursor = hoverSelf(null);
+  const cursorShape = fakeShape(cursor);
+  setHoveredShape.call(cursor, cursorShape, false);
+  assert.deepStrictEqual(cursor.shown, [cursorShape], "cursor tool still gets tooltips");
+  assert.strictEqual(cursor._hoveredShape, cursorShape, "cursor tool still hovers");
+  assert.deepStrictEqual(cursor.classed, [["add", "is-hovered"]], "and gets the outline");
+
+  // Every armed tool: no tooltip, no hover state, no outline, no dots.
+  for (const tool of ["rectangle", "circle", "arrow", "polygon", "freehand",
+                      "text", "marker", "grabber", "pointer"]) {
+    const armed = hoverSelf(tool);
+    setHoveredShape.call(armed, fakeShape(armed), false);
+    assert.deepStrictEqual(armed.shown, [], `${tool} must not raise a tooltip`);
+    assert.strictEqual(armed._hoveredShape, null, `${tool} must not hover`);
+    assert.deepStrictEqual(armed.classed, [], `${tool} must not paint the outline`);
+    assert.deepStrictEqual(armed.dots, [null], `${tool} clears connector dots`);
+  }
+
+  // A hover already on screen when a tool is armed gets cleaned up rather
+  // than stranded with its outline still painted.
+  const stranded = hoverSelf(null);
+  const old = fakeShape(stranded);
+  setHoveredShape.call(stranded, old, false);
+  stranded.classed.length = 0;
+  stranded.activeTool = "rectangle";
+  setHoveredShape.call(stranded, fakeShape(stranded), false);
+  assert.deepStrictEqual(stranded.classed, [["remove", "is-hovered"]],
+    "arming a tool strips the outline left on the previously-hovered shape");
+
+  // Outside annotation mode nothing is armed, so browsing is unaffected.
   const browsing = hoverSelf("rectangle");
   browsing.annotationMode = false;
-  setHoveredShape.call(browsing, shape, false);
-  assert.deepStrictEqual(browsing.shown, [shape], "browse mode is unaffected");
+  const browseShape = fakeShape(browsing);
+  setHoveredShape.call(browsing, browseShape, false);
+  assert.deepStrictEqual(browsing.shown, [browseShape], "browse mode is unaffected");
+}
+
+// The move handler skips the hit-test entirely for an armed tool, and the
+// red pointer — whose whole gesture IS the move — still gets it.
+{
+  const move = src.slice(
+    src.indexOf("self._docMouseMove = function(e) {"),
+    src.indexOf("var hit = self._shapeAt(pt);")
+  );
+  assert.ok(
+    move.includes("if (self.activeTool != null) {") &&
+      move.includes('if (self.activeTool === "pointer" && overContainer(e)) {'),
+    "one armed-tool early-out, with the pointer tool's move preserved"
+  );
+  assert.ok(
+    !move.includes('if (self.activeTool === "marker") {') &&
+      !move.includes('if (self.activeTool === "grabber") {'),
+    "the per-tool copies are gone — one rule, not a list to keep adding to"
+  );
 }
 
 // Deliberate shows must NOT be gated — the host's selectShape pin and the
@@ -200,7 +248,7 @@ console.log("tooltip actions + badge: all checks passed");
   );
   assert.ok(
     pin.includes("this._showTooltipFor(shape);") &&
-      !pin.includes("_hoverTooltipsAllowed"),
+      !pin.includes("_hoverAllowed"),
     "pinning a shape (api.selectShape) is not subject to the hover gate"
   );
 }

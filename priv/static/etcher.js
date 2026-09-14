@@ -17572,10 +17572,23 @@
         case "arrow": {
           var arPath = this._arrowPath(g);
           var arTol = this._textDefaultBoxImagePx() * 0.6;
+          // Half a heavy shaft is already on the line before any pad.
+          arTol = Math.max(arTol, this._shaftHalfWidthImagePx(shape));
           for (var ai = 0; ai < arPath.length - 1; ai++) {
             if (this._nearSegment(pt, arPath[ai], arPath[ai + 1], arTol)) {
               return true;
             }
+          }
+          // The head, at the last point of the route. Measured as a disc
+          // rather than along the segment the way a dimension's is: the
+          // route can bend right at the head, so "how far back along the
+          // shaft" is not a single direction here.
+          var arHeadExt = this._dimHeadExtentImagePx(shape);
+          if (arHeadExt && arPath.length) {
+            var tip = arPath[arPath.length - 1];
+            var htx = pt.x - tip.x, hty = pt.y - tip.y;
+            var reach = Math.max(arHeadExt.len, arHeadExt.half);
+            if (htx * htx + hty * hty <= reach * reach) return true;
           }
           return false;
         }
@@ -17640,12 +17653,24 @@
     // the render's ever change, these have to change with them, which is
     // what the test comparing the two is for.
     _dimHeadExtentImagePx: function(shape) {
-      if (!shape || shape.kind !== "dimension") return null;
+      if (!shape) return null;
+      var len, half;
+      if (shape.kind === "dimension") {
+        len = 10; half = 5;
+      } else if (shape.kind === "arrow") {
+        // An arrow's head is bigger than a dimension's and sits at ONE end,
+        // but it is the same shape with the same problem: scaled off the
+        // shaft, so on a heavy connector it reaches well past the line and
+        // the most obvious thing to aim at was not a target.
+        len = ARROW_HEAD_LEN; half = ARROW_HEAD_HALF_WIDTH;
+      } else {
+        return null;
+      }
       var k = this._shaftStrokePx(shape, LINE_WEIGHT_PX) / LINE_WEIGHT_PX;
       var scale = 1;
       try { scale = this._markerScale() || 1; } catch (_) { scale = 1; }
       if (!(scale > 0)) scale = 1;
-      return { len: 10 * k / scale, half: 5 * k / scale };
+      return { len: len * k / scale, half: half * k / scale };
     },
 
     _nearestOnSegment: function(pt, p, q) {

@@ -1,11 +1,16 @@
-// Pins that a dimension's arrowheads are part of the shape you can click.
+// Pins that a dimension's and an arrow's heads are part of the shape you
+// can hover and click.
 //
 // The hit-test measured distance to the SHAFT and nothing else, so only the
-// thin line answered. The V-arrowheads at each end scale with the stroke —
-// that is what stops them being hairlines on a heavy line — so on a fat
-// dimension they reach well outside the shaft's grab pad, and aiming at the
+// thin line answered. The V-heads scale with the stroke — that is what
+// stops them being hairlines on a heavy line — so on a fat dimension or
+// connector they reach well outside the shaft's grab pad, and aiming at the
 // chevron, which is the most obvious thing to aim at, landed on empty
 // canvas.
+//
+// None of this is mode-dependent: the same `_shapeContainsPoint` answers
+// for hover, for tap, and for the eraser, in browse mode and with the
+// cursor tool alike.
 //
 //   node test/js/dim_head_hit_test.js
 
@@ -26,10 +31,10 @@ function extract(name) {
     .replace(`${name}: function`, "function") + ")");
 }
 
-{
-  const m = src.match(/var LINE_WEIGHT_PX = ([\d.]+);/);
-  assert.ok(m, "could not find LINE_WEIGHT_PX");
-  global.LINE_WEIGHT_PX = Number(m[1]);
+for (const name of ["LINE_WEIGHT_PX", "ARROW_HEAD_LEN", "ARROW_HEAD_HALF_WIDTH"]) {
+  const m = src.match(new RegExp(`var ${name} = ([\\d.]+);`));
+  assert.ok(m, `could not find ${name}`);
+  global[name] = Number(m[1]);
 }
 
 const containsPoint = extract("_shapeContainsPoint");
@@ -150,10 +155,44 @@ function heavy(kind) {
 
   const hit = src.slice(src.indexOf("    _dimHeadExtentImagePx: function"),
                         src.indexOf("\n    },", src.indexOf("    _dimHeadExtentImagePx: function")));
-  assert.ok(hit.includes("10 * k / scale") && hit.includes("5 * k / scale"),
-    "the hit-test uses the same 10 and 5");
+  assert.ok(/len = 10; half = 5;/.test(hit), "the hit-test uses the same 10 and 5");
   assert.ok(hit.includes("_shaftStrokePx(shape, LINE_WEIGHT_PX) / LINE_WEIGHT_PX"),
     "off the same stroke width the render uses");
+
+  // An arrow's head is bigger and sits at one end, but it is the same
+  // shape with the same problem — and its numbers are the render's own
+  // constants rather than a second copy.
+  assert.ok(hit.includes("len = ARROW_HEAD_LEN; half = ARROW_HEAD_HALF_WIDTH;"),
+    "an arrow's head extent comes from the constants the render draws it with");
+}
+
+// ── an arrow's head is clickable too ──────────────────────────────────────
+//
+// Same defect, same shape: the head is scaled off the shaft, so on a heavy
+// connector it reaches past the line and only the thin route answered.
+
+{
+  const arrowPath = extract("_arrowPath");
+  const self = Object.assign(board(), { _arrowPath: arrowPath, _nearSegment: extract("_nearSegment"), _nearestOnSegment: extract("_nearestOnSegment") });
+  const arrow = {
+    kind: "arrow",
+    geometry: { a: [100, 200], b: [700, 200], points: [] },
+    style: { width: 24 },
+  };
+  const k = 24 / LINE_WEIGHT_PX;
+  const ext = headExtent.call(self, arrow);
+  assert.strictEqual(ext.half, ARROW_HEAD_HALF_WIDTH * k);
+  assert.strictEqual(ext.len, ARROW_HEAD_LEN * k);
+
+  // Beside the tip, on the head, well outside the shaft's pad.
+  assert.strictEqual(containsPoint.call(self, arrow, { x: 700, y: 240 }), true,
+    "the head at the arrow's tip is part of the shape");
+  // The TAIL has no head, so it stays as thin as the shaft.
+  assert.strictEqual(containsPoint.call(self, arrow, { x: 100, y: 240 }), false,
+    "the tail is not widened — there is nothing drawn out there");
+  // And the shaft still answers.
+  assert.strictEqual(containsPoint.call(self, arrow, { x: 400, y: 200 }), true);
+  assert.strictEqual(containsPoint.call(self, arrow, { x: 400, y: 260 }), false);
 }
 
 console.log("dimension head hit: all checks passed");

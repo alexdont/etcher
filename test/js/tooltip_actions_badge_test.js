@@ -135,3 +135,72 @@ assert.ok(src.includes("[shape.titleGroup, shape._badgeEl].forEach(function(extr
   "tooltip positioning no longer unions the label/badge into its anchor box");
 
 console.log("tooltip actions + badge: all checks passed");
+
+
+// ── hover tooltips are a cursor-tool affordance ─────────────────────────────
+//
+// The doc-level hover detector hit-tests geometrically whatever the armed
+// tool is (only grabber / marker / pointer were special-cased), so moving
+// over an existing shape while a drawing tool was armed popped its tooltip
+// up over the canvas mid-stroke. Hover STYLING and connector dots must
+// survive — they are how you aim an arrow at a shape you are drawing
+// toward — so only the tooltip is withheld.
+
+{
+  const setHoveredShape = extract("_setHoveredShape");
+  const hoverTooltipsAllowed = extract("_hoverTooltipsAllowed");
+
+  function hoverSelf(tool) {
+    return {
+      annotationMode: true,
+      activeTool: tool,
+      _hoveredShape: null,
+      _hoveredOnTitle: false,
+      tooltipPinned: false,
+      shown: [],
+      dots: [],
+      _hoverTooltipsAllowed: hoverTooltipsAllowed,
+      _showTooltipFor(s) { this.shown.push(s); },
+      _scheduleHideTooltip() {},
+      _refreshImageRing() {},
+      _refreshMediaChrome() {},
+      _syncConnectorDots(s) { this.dots.push(s); },
+    };
+  }
+
+  const shape = { uuid: "u1", el: { classList: { add() {}, remove() {} } } };
+
+  // Cursor tool (no tool armed): hovering a shape shows its tooltip.
+  const cursor = hoverSelf(null);
+  setHoveredShape.call(cursor, shape, false);
+  assert.deepStrictEqual(cursor.shown, [shape], "cursor tool still gets tooltips");
+
+  // Drawing tools: no tooltip, but hover state and connector dots stay.
+  for (const tool of ["rectangle", "circle", "arrow", "polygon", "freehand", "text"]) {
+    const drawing = hoverSelf(tool);
+    setHoveredShape.call(drawing, shape, false);
+    assert.deepStrictEqual(drawing.shown, [], `${tool} must not raise a tooltip`);
+    assert.strictEqual(drawing._hoveredShape, shape, `${tool} keeps hover state`);
+    assert.deepStrictEqual(drawing.dots, [shape], `${tool} keeps connector dots`);
+  }
+
+  // Outside annotation mode nothing is armed, so browsing still gets them.
+  const browsing = hoverSelf("rectangle");
+  browsing.annotationMode = false;
+  setHoveredShape.call(browsing, shape, false);
+  assert.deepStrictEqual(browsing.shown, [shape], "browse mode is unaffected");
+}
+
+// Deliberate shows must NOT be gated — the host's selectShape pin and the
+// re-show after a handle drag go straight to _showTooltipFor.
+{
+  const pin = src.slice(
+    src.indexOf("_pinTooltipFor: function(shape) {"),
+    src.indexOf("_unpinTooltip: function()")
+  );
+  assert.ok(
+    pin.includes("this._showTooltipFor(shape);") &&
+      !pin.includes("_hoverTooltipsAllowed"),
+    "pinning a shape (api.selectShape) is not subject to the hover gate"
+  );
+}

@@ -12976,8 +12976,10 @@
       // Show the tooltip when:
       // 1. We just moved onto a NEW shape's body.
       // 2. We moved off the title back onto the body of the same shape.
+      // ...and only while a tool that SELECTS is armed — see
+      // `_hoverTooltipsAllowed`.
       var showTooltip =
-        next && !onTitle &&
+        next && !onTitle && this._hoverTooltipsAllowed() &&
         (next !== prev || (next === prev && prevOnTitle));
 
       // `_hoveredShape` is assigned FIRST, before anything re-renders. A
@@ -13008,6 +13010,22 @@
       // satellite — the user is reaching for the label there, and dots
       // under the pointer would take the grab.
       this._syncConnectorDots(onTitle ? null : next);
+    },
+
+    // Hover tooltips belong to the cursor tool. With a drawing tool armed
+    // the pointer is aiming at where the next shape GOES, not at what is
+    // already there, so a tooltip popping up under it just covers the
+    // canvas mid-stroke. (The grabber, marker and red pointer suppress
+    // hover wholesale in `_docMouseMove`; every other tool needs its
+    // hover STYLING and its connector dots — those are the affordance for
+    // binding an arrow to the shape you are drawing toward — so only the
+    // tooltip is withheld here.)
+    //
+    // Deliberate paths are untouched: the host's `selectShape(uuid)` pin,
+    // and the re-show after a handle drag, are things someone asked for
+    // rather than something the pointer wandered into.
+    _hoverTooltipsAllowed: function() {
+      return !(this.annotationMode && this.activeTool != null);
     },
 
     // True iff `pt` (image-px) lies inside `shape`'s title satellite

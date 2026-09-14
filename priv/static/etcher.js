@@ -10787,6 +10787,13 @@
             var coFontSizeByHeight = self._fontSizeFor(
               shape, Math.max(self._zoomPx(10), bh * 0.65)
             );
+            // Padding is a fraction of the BOX while the box drives the
+            // font. A pinned size inverts that — the text drives the box —
+            // so it comes off the font instead, or a small size in a box
+            // that was dragged large keeps the big box's padding. The 0.2
+            // is the same proportion: pad was 0.13 of the height, the font
+            // 0.65 of it, and 0.13 / 0.65 = 0.2.
+            if (self._hasPinnedFontSize(shape)) coPad = coFontSizeByHeight * 0.2;
 
             // Width-fit cap: same fix `_renderTitleSibling` got in
             // 0.2.3 — without it, callout text that overflows the box
@@ -10972,6 +10979,13 @@
             // one. 0.13 reproduces the original 4px at a typical label height.
             var pad = th * 0.13;
             var fontSize = self._fontSizeFor(shape, Math.max(self._zoomPx(10), th * 0.65));
+            // Padding is a fraction of the BOX while the box drives the
+            // font. A pinned size inverts that — the text drives the box —
+            // so it comes off the font instead, or a small size in a box
+            // that was dragged large keeps the big box's padding. The 0.2
+            // is the same proportion: pad was 0.13 of the height, the font
+            // 0.65 of it, and 0.13 / 0.65 = 0.2.
+            if (self._hasPinnedFontSize(shape)) pad = fontSize * 0.2;
             ttext.setAttribute("x", tx + pad);
             ttext.setAttribute("y", ty + pad);
             ttext.setAttribute("font-size", fontSize);
@@ -11537,6 +11551,13 @@
         var fontSizeByHeight = this._fontSizeFor(
           shape, Math.max(this._zoomPx(10), th * 0.65)
         );
+        // Padding is a fraction of the BOX while the box drives the
+        // font. A pinned size inverts that — the text drives the box —
+        // so it comes off the font instead, or a small size in a box
+        // that was dragged large keeps the big box's padding. The 0.2
+        // is the same proportion: pad was 0.13 of the height, the font
+        // 0.65 of it, and 0.13 / 0.65 = 0.2.
+        if (this._hasPinnedFontSize(shape)) pad = fontSizeByHeight * 0.2;
 
         // Width-fit cap: scale the font down so the title fits the box
         // width on a single line. Critical for stability — without it,
@@ -11609,7 +11630,15 @@
         // wider than its text puts the shape's right edge next to empty
         // space, not next to the words.
         var titleAlign = normalizeTitleAlign(shape.metadata && shape.metadata.title_align);
-        var hasExplicitBox = !titleAlign && !!(shape.metadata && shape.metadata.title_box);
+        // A PINNED size sizes the box too, dragged or not. The stored box is
+        // the record of a drag, and a drag is the other way of setting the
+        // size — so once a number has been typed instead, honouring the old
+        // box leaves the text shrinking inside a rectangle that stays put,
+        // with the corner dots out at the edges of a box nothing fills. The
+        // box's POSITION is still the dragged one; only its extent follows
+        // the text.
+        var hasExplicitBox = !titleAlign && !this._hasPinnedFontSize(shape) &&
+          !!(shape.metadata && shape.metadata.title_box);
         if (hasExplicitBox) {
           // Honor the dragged box. The rect is already at tx/ty/tw/th
           // from above; just vertically center the text line in it and

@@ -426,4 +426,58 @@ assert.ok(!src.includes("_paramsFontInput"),
     "and the spinners do too, so three digits fit");
 }
 
+
+// ── a pinned size sizes the box, not just the glyphs ──────────────────────
+//
+// Once a label's box has been dragged, `metadata.title_box` is stored and
+// every render honours those exact dimensions — that is what makes a resize
+// stick instead of collapsing back to the text. But a pinned size is the
+// OTHER way of setting the size, and it has to win the same way dragging
+// does: without this, typing a smaller number shrank the text inside a
+// rectangle that stayed put, with the corner dots out at the edges of a box
+// nothing filled.
+
+{
+  const start = src.indexOf("        var hasExplicitBox =");
+  assert.notStrictEqual(start, -1, "could not find the stored-box branch");
+  const line = src.slice(start, src.indexOf(";", start));
+  assert.ok(line.includes("!this._hasPinnedFontSize(shape)"),
+    "a pinned size must fall through to the shrink-wrap, dragged box or not");
+
+  // Only the EXTENT follows the text — the position stays where it was
+  // dragged to, or pinning a size would also move the label.
+  const wrap = src.slice(src.indexOf("} else {", start),
+                         src.indexOf("// Re-anchor now that", start));
+  assert.ok(/x: titleBox\.x/.test(wrap) && /y: titleBox\.y/.test(wrap),
+    "the shrink-wrap keeps the dragged position");
+  assert.ok(/w: sx > 0 \? actualW/.test(wrap) && /h: sy > 0 \? actualH/.test(wrap),
+    "…and takes its extent from the rendered text");
+}
+
+// Padding follows the font once the font stops following the box. All three
+// places that draw text do it, or a small size sitting in a box that was
+// dragged large keeps the big box's generous padding and never hugs.
+{
+  const sites = [
+    ["coPad = coFontSizeByHeight * 0.2", "a callout"],
+    ["pad = fontSize * 0.2", "a text shape"],
+    ["pad = fontSizeByHeight * 0.2", "a label"],
+  ];
+  for (const [needle, what] of sites) {
+    assert.ok(src.includes(`_hasPinnedFontSize(shape)) ${needle};`),
+      `${what} must take its padding off the pinned font`);
+  }
+
+  // 0.2 is not a new look, it is the SAME proportion stated against the
+  // font instead of against the box: padding was 0.13 of the height and the
+  // font 0.65 of it. If either of those is ever retuned, this catches the
+  // one that was forgotten.
+  const padOfBox = 0.13, fontOfBox = 0.65;
+  assert.ok(Math.abs(padOfBox / fontOfBox - 0.2) < 0.0005,
+    "the pinned padding no longer matches the proportion it is copying");
+  for (const [n, d] of [[padOfBox, "th * 0.13"], [fontOfBox, "th * 0.65"]]) {
+    assert.ok(src.includes(d), `${d} changed — the 0.2 above has to change with it`);
+  }
+}
+
 console.log("font size: all checks passed");

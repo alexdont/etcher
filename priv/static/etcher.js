@@ -1987,10 +1987,14 @@
     // dedicated CLOSED silhouette underlay covers the whole hand —
     // fingers block, pinky column, palm bowl, thumb heel — and the glyph
     // passes draw silhouette edge + finger lines on top of it.
+    // Palm-only, tucked INSIDE the glyph: the 4.5 white understrokes are
+    // wide enough that adjacent finger strokes overlap and fill the
+    // fingers themselves — the palm pocket is the one true hole. A full
+    // outer silhouette was tried first and its top slab stuck out past
+    // the shorter fingers, whose tips step at different heights.
     var silhouette =
-      '<path d="M5 3.5Q5 2 6.5 2H17Q19 2 19 4V6.5H20Q22 6.5 22 9V14' +
-      'Q22 22 14 22H12Q8.5 22 6.3 19.3L2.9 15.8Q1.6 14.4 3.1 13.2' +
-      'Q4.3 12.3 5 13Z"/>';
+      '<path d="M5 11.5H20.5V14Q20.5 20.5 14 20.5H12' +
+      'Q9 20.5 7.2 18.2L4.2 15Z"/>';
     var svg =
       '<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28">' +
       '<g transform="translate(2 2)">' +

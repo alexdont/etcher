@@ -3803,6 +3803,32 @@
         if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" ||
                   (t.isContentEditable === true))) return;
 
+        // An OPEN inline text editor owns the keyboard, focused or not.
+        // The flow this serves: place a text box, style it from the panel
+        // (focus is now on a panel control or nowhere), start typing — the
+        // first letter used to fall through HERE and arm a tool by
+        // shortcut ("d" switched to dimension mid-sentence). A printable
+        // key or Backspace refocuses the editor mid-keydown, so the
+        // default action types into the textarea it was meant for; Enter
+        // and Escape do what they do inside it; and nothing falls through
+        // to shortcuts, delete, or space-pan while the editor is up.
+        if (self._textEditor && self._textEditor.input) {
+          if (e.key === "Escape") {
+            e.preventDefault();
+            self._cancelTextEdit();
+          } else if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            self._commitTextEdit();
+          } else if (e.key === "Backspace" ||
+              (e.key && e.key.length === 1 &&
+               !e.ctrlKey && !e.metaKey && !e.altKey)) {
+            try { self._textEditor.input.focus(); } catch (_) {}
+            // No preventDefault: the default action now lands in the
+            // just-focused textarea.
+          }
+          return;
+        }
+
         // Backspace / Delete deletes the currently-selected shape(s).
         // Multi-selection wins when present (one batched delete +
         // single bulk-undo entry); otherwise falls back to the

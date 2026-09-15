@@ -97,6 +97,78 @@ const refresh = extract("_refreshTextEditorStyle");
     "commit skips it");
 }
 
+// ── stray keys belong to the open editor, not the hotkeys ─────────────────
+
+{
+  // The flow: style the box from the panel (focus now on a panel control
+  // or nowhere), start typing — the first letter used to arm a tool by
+  // shortcut ("d" switched to dimension mid-sentence).
+  const wire = extract("_wireUndoKeyboard");
+  function keyboard(editorOpen) {
+    const focusCalls = [];
+    const self = {
+      annotationMode: true,
+      _textEditor: editorOpen
+        ? { shape: { kind: "text" }, input: { focus() { focusCalls.push(1); } } }
+        : null,
+      armed: [],
+      committed: 0,
+      cancelled: 0,
+      _selectToolByShortcut(t) { this.armed.push(t); return true; },
+      _commitTextEdit() { this.committed++; },
+      _cancelTextEdit() { this.cancelled++; },
+      _canArrange: () => false,
+      _deleteSelectedShapes() {}, _deleteShape() {},
+      _deleteSelectedVertex: () => false,
+      selectedShapes: [], editingShape: null, editingTitleShape: null,
+      _isTextKind: (k) => k === "text",
+      _exitTitleEditMode() {}, _snapshotShape: () => ({}),
+      _renderShape() {}, _pushUndo() {}, _emitChanged() {},
+    };
+    global.document = { addEventListener: () => {} };
+    global.window = { addEventListener: () => {} };
+    global.TOOL_SHORTCUTS = { d: "dimension" };
+    wire.call(self);
+    delete global.document; delete global.window;
+    const key = (k, target) => {
+      const e = { key: k, target: target || null, prevented: 0,
+        preventDefault() { this.prevented++; } };
+      self._undoKeyHandler(e);
+      return e;
+    };
+    return { self, key, focusCalls };
+  }
+
+  {
+    const { self, key, focusCalls } = keyboard(true);
+    key("d");
+    assert.deepStrictEqual(self.armed, [],
+      "a letter with the editor open must not arm a tool");
+    assert.strictEqual(focusCalls.length, 1,
+      "…it refocuses the editor so the default action types it there");
+    key("Backspace");
+    assert.strictEqual(focusCalls.length, 2, "Backspace comes home too");
+    key("Enter");
+    assert.strictEqual(self.committed, 1, "Enter commits from anywhere");
+    key("Escape");
+    assert.strictEqual(self.cancelled, 1, "Escape cancels from anywhere");
+  }
+  {
+    // Typing IN a panel field stays in the panel field.
+    const { self, key, focusCalls } = keyboard(true);
+    key("3", { tagName: "INPUT" });
+    assert.strictEqual(focusCalls.length, 0,
+      "a keystroke inside a panel input is the panel's, not the editor's");
+  }
+  {
+    // No editor open: shortcuts arm exactly as before.
+    const { self, key } = keyboard(false);
+    key("d");
+    assert.ok(self.armed.length === 1,
+      "hotkeys still work when nothing is being typed");
+  }
+}
+
 // ── the editor itself is clickable ────────────────────────────────────────
 
 {

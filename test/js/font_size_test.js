@@ -236,16 +236,17 @@ function board(targets) {
     .test(applyBody), "dragging a callout's label box must release the pin");
 }
 
-// ── the pinned size is not capped to the box ───────────────────────────────
+// ── nothing caps a label's font to its box any more ───────────────────────
 //
-// Both the callout and the label cap the font so the text fits the box
-// width. That cap breaks a feedback loop — box height drives the font, the
-// font drives the measured height, the height is written back to the box —
-// and a pinned size is not in that loop, so it must be honoured as given
-// and the box allowed to grow.
+// The callout still caps (its text box is fixed geometry), and its pinned
+// sizes still bypass the cap. The TITLE cap is gone by design (head dev's
+// call): a longer label gets a longer box at the chosen size — never a
+// smaller font, never auto-wrapped lines. The box is derived from the
+// text, so the box->font->box feedback loop the cap guarded is gone too.
+assert.ok(!src.includes("widthAtHeightFont > availWidth"),
+  "the title render must not cap the font to the box width");
 for (const guard of [
   "if (!self._hasPinnedFontSize(shape) && coWidthAtHeightFont > coAvailWidth) {",
-  "if (!this._hasPinnedFontSize(shape) && widthAtHeightFont > availWidth) {",
 ]) {
   assert.ok(src.includes(guard), `missing cap bypass: ${guard}`);
 }
@@ -432,27 +433,21 @@ assert.ok(!src.includes("_paramsFontInput"),
 }
 
 
-// ── a pinned size sizes the box, not just the glyphs ──────────────────────
+// ── the text sizes the box, always ────────────────────────────────────────
 //
-// Once a label's box has been dragged, `metadata.title_box` is stored and
-// every render honours those exact dimensions — that is what makes a resize
-// stick instead of collapsing back to the text. But a pinned size is the
-// OTHER way of setting the size, and it has to win the same way dragging
-// does: without this, typing a smaller number shrank the text inside a
-// rectangle that stayed put, with the corner dots out at the edges of a box
-// nothing filled.
+// There used to be a stored-box branch that honoured a dragged box's exact
+// dimensions, with the pinned size falling through it. Both are gone the
+// same way (head dev's call): the rect always shrink-wraps the text at the
+// chosen font, so a longer label is a longer label. The stored box still
+// anchors the POSITION — pinning a size or typing more must not move the
+// label — and its height still drives an un-pinned font.
 
 {
-  const start = src.indexOf("        var hasExplicitBox =");
-  assert.notStrictEqual(start, -1, "could not find the stored-box branch");
-  const line = src.slice(start, src.indexOf(";", start));
-  assert.ok(line.includes("!this._hasPinnedFontSize(shape)"),
-    "a pinned size must fall through to the shrink-wrap, dragged box or not");
-
-  // Only the EXTENT follows the text — the position stays where it was
-  // dragged to, or pinning a size would also move the label.
-  const wrap = src.slice(src.indexOf("} else {", start),
-                         src.indexOf("// Re-anchor now that", start));
+  assert.ok(!src.includes("var hasExplicitBox ="),
+    "no branch honours a stored box's drawn extent any more");
+  const start = src.indexOf("// The rect always hugs the text now");
+  assert.notStrictEqual(start, -1, "could not find the hug doc");
+  const wrap = src.slice(start, src.indexOf("// Re-anchor now that", start));
   assert.ok(/x: titleBox\.x/.test(wrap) && /y: titleBox\.y/.test(wrap),
     "the shrink-wrap keeps the dragged position");
   assert.ok(/w: sx > 0 \? actualW/.test(wrap) && /h: sy > 0 \? actualH/.test(wrap),

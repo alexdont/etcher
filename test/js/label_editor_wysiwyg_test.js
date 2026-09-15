@@ -140,7 +140,7 @@ function edit(shape, opts) {
     "a stored-box label renders left-anchored, so it edits left-anchored");
 }
 
-// ── the box hugs the text, live ───────────────────────────────────────────
+// ── the box hugs the text, live — no caps, no wrap ────────────────────────
 
 {
   // Short text: the box shrink-wraps to text + the render's padding and
@@ -149,47 +149,54 @@ function edit(shape, opts) {
   assert.ok(input.listeners.input, "the editor re-fits as the user types");
   input.value = "hi";
   input.listeners.input();
-  // measure stub: 2 chars × 20 × 0.5 = 20px wide; pad = box h 40 × 0.13
   const hugW = parseFloat(input.fo.attrs.width);
   assert.ok(hugW < 200, "the box hugs short text instead of gaping around it");
-  assert.ok(hugW >= 20, "…but never collapses below the text");
   const x = parseFloat(input.fo.attrs.x);
   assert.ok(Math.abs((x + hugW / 2) - 200) < 1,
     "and resizes about its centre anchor (box centre stays put)");
 
-  // Long text: the width-fit cap gives font, the box stops at the full
-  // box width — exactly the committed result at every keystroke.
-  input.value = "a very long label that cannot fit the box at full size";
+  // Long text: the box GROWS and the font HOLDS. The old cap shrank the
+  // font to fit the box — "more text, smaller text", which read as crazy.
+  input.value = "a very long label that would once have shrunk the font";
   input.listeners.input();
-  assert.ok(parseFloat(input.style.fontSize) < 20,
-    "past the box, the font gives — as commit will");
-  assert.ok(parseFloat(input.fo.attrs.width) <= 200 + 0.001,
-    "the box never outgrows what commit would draw");
-}
-
-{
-  // Pinned: the font holds and the BOX grows — the render's rule.
-  const pinned = edit({ kind: "rectangle", metadata: null },
-    { renderedFontSize: 20, pinned: true });
-  pinned.value = "a very long label at a size the user chose deliberately";
-  pinned.listeners.input();
-  assert.strictEqual(parseFloat(pinned.style.fontSize), 20,
-    "a pinned size never shrinks — same exemption as the render");
-  assert.ok(parseFloat(pinned.fo.attrs.width) > 200,
+  assert.strictEqual(parseFloat(input.style.fontSize) || 20, 20,
+    "the chosen size is the size — more text never means smaller text");
+  assert.ok(parseFloat(input.fo.attrs.width) > 200,
     "…the box grows to hold it instead");
 }
 
 {
-  // A stored, un-aligned, un-pinned box is honoured at full size by the
-  // render — so the editor keeps it too; hugging here would show a
-  // tighter label than Enter draws.
-  const boxed = edit({ kind: "rectangle",
-    metadata: { title: "x", title_box: { x: 0, y: 0, w: 40, h: 20 } } },
-    { renderedFontSize: 18 });
-  boxed.value = "x";
-  boxed.listeners.input();
-  assert.strictEqual(boxed.fo.attrs.width, undefined,
-    "commit honours the stored box, so the editor never resizes it");
+  // Shift+Enter lines: each one adds exactly one line of height, and the
+  // width follows the WIDEST line — multi-line is the author's lines,
+  // never a wrap's.
+  const input = edit({ kind: "rectangle", metadata: null }, { renderedFontSize: 20 });
+  input.value = "first";
+  input.listeners.input();
+  const oneLineH = parseFloat(input.fo.attrs.height);
+  input.value = "first\nsecond line is wider";
+  input.listeners.input();
+  const twoLineH = parseFloat(input.fo.attrs.height);
+  assert.ok(Math.abs((twoLineH - oneLineH) - 20 * 1.1) < 0.001,
+    "a second line adds exactly one 1.1em line, matching the render");
+  const wWide = parseFloat(input.fo.attrs.width);
+  input.value = "second line is wider";
+  input.listeners.input();
+  assert.strictEqual(parseFloat(input.fo.attrs.width), wWide,
+    "the box width is the widest line's width");
+}
+
+// ── the source keeps the contracts the fakes can't reach ──────────────────
+
+{
+  assert.ok(src.includes('document.createElement("textarea")'),
+    "the editor is a textarea — an input cannot hold the author's newline");
+  assert.ok(/if \(e\.shiftKey\) return;/.test(src),
+    "Shift+Enter falls through to insert the line; Enter alone commits");
+  const titleRender = src.slice(src.indexOf("_renderTitleSibling: function"));
+  assert.ok(titleRender.includes("textEl, trimmed, Infinity, fontSize"),
+    "the title render never wraps — multi-line is the author's newlines");
+  assert.ok(!src.includes("widthAtHeightFont > availWidth"),
+    "and never caps the font to the box");
 }
 
 console.log("label editor wysiwyg: all checks passed");

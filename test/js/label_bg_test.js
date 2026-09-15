@@ -121,10 +121,10 @@ assert.strictEqual(labelBgFor(null), null, "no shape");
   ]) {
     assert.ok(src.includes(marker), `${what} must paint the plate`);
   }
-  // The label path sizes its rect in two branches (dragged box vs
-  // shrink-wrapped) and both need it.
-  assert.strictEqual((src.match(/this\._applyLabelBg\(rectEl, shape\);/g) || []).length, 2,
-    "both label-sizing branches paint the plate");
+  // The label rect always shrink-wraps now (text drives the box), so
+  // there is exactly one sizing branch to paint.
+  assert.strictEqual((src.match(/this\._applyLabelBg\(rectEl, shape\);/g) || []).length, 1,
+    "the label's single sizing branch paints the plate");
 }
 
 // ── setting one ───────────────────────────────────────────────────────────

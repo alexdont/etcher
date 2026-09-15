@@ -12160,34 +12160,14 @@
         // 0.65 of it, and 0.13 / 0.65 = 0.2.
         if (this._hasPinnedFontSize(shape)) pad = fontSizeByHeight * 0.2;
 
-        // Width-fit cap: scale the font down so the title fits the box
-        // width on a single line. Critical for stability — without it,
-        // an overflowing title wraps onto multiple lines, `actualH`
-        // exceeds `th`, that taller height gets persisted back into
-        // `title_box` on release, the next render derives an even
-        // larger font, more lines wrap, and the title grows
-        // exponentially per interaction. With the cap, font-size is
-        // bounded by both axes and the system has a fixed point.
-        var widthAtHeightFont = this._measureTextWidth(
-          trimmed, fontSizeByHeight, fontFamily, fontWeight
-        );
-        var availWidth = Math.max(1, tw - pad * 2);
+        // No width cap and no auto-wrap (head dev's call): a longer label
+        // gets a LONGER box at the size the user chose, never a smaller
+        // font and never folded onto lines nobody asked for. Multi-line
+        // exists, but only where the author put a newline (Shift+Enter in
+        // the editor). The old cap/wrap pair existed to break a
+        // box->font->box feedback loop; with the box always derived from
+        // the text (below), the loop it guarded against is gone.
         var fontSize = fontSizeByHeight;
-        // Same reasoning as the callout's: the cap breaks a box→font→box
-        // feedback loop, and a pinned size isn't in that loop.
-        if (!this._hasPinnedFontSize(shape) && widthAtHeightFont > availWidth) {
-          // Floor of 10 keeps the title legible in pathologically
-          // narrow boxes — at that point we let the rect grow past
-          // `tw` to fit the text rather than render unreadable glyphs.
-          //
-          // The 0.99 is a safety margin, not a fudge: this scales the font
-          // as if text width were linear in font-size, and hinting and
-          // kerning make it very slightly not. Landing a hair over
-          // `availWidth` makes the wrap helper break the line — so a
-          // dragged one-line label came back as two lines, at a size that
-          // would have fit on one.
-          fontSize = Math.max(this._zoomPx(10), fontSizeByHeight * availWidth / widthAtHeightFont * 0.99);
-        }
 
         textEl.setAttribute("x", tx + pad);
         textEl.setAttribute("y", ty + pad);
@@ -12207,29 +12187,16 @@
         // the wrap helper produces a single tspan — no multi-line
         // growth path.
         var measured = this._fillTextWithWrappedTspans(
-          textEl, trimmed, availWidth, fontSize
+          textEl, trimmed, Infinity, fontSize
         );
 
-        // How we size the rect splits on whether the user has manually
-        // sized the title. A freshly-created title carries no
-        // `metadata.title_box`, so we shrink-wrap the rect to the text
-        // for a tidy label that hugs its content. The moment the user
-        // grabs a handle, `metadata.title_box` is written and from then
-        // on we honor those exact dimensions every render: resizing
-        // sticks instead of collapsing back to the text, and the
-        // release-snap in the drag handlers becomes a faithful no-op.
-        //
-        // (The old code shrink-wrapped unconditionally, then snapped
-        // `title_box` to the shrunk box on release. Because the font is
-        // `th * 0.65` but the wrapped height lands at `fontSize * 1.2`
-        // ≈ `0.78 * th`, every resize persisted a box ~22% shorter and
-        // collapsed to the text width — so each grab visibly "scaled
-        // the title down again." Honoring the box fixes that.)
-        // An aligned label auto-sizes even though a stored box exists: the
-        // box is a leftover from before it was aligned, and an anchored
-        // label reads wrong at any size but its own — a right-anchored box
-        // wider than its text puts the shape's right edge next to empty
-        // space, not next to the words.
+        // The rect always hugs the text now (head dev's call: text drives
+        // the box). The stored `title_box` still matters twice — its
+        // position anchors an un-aligned label, and its HEIGHT is the knob
+        // the corner handles turn to size an un-pinned font — but its
+        // drawn extent is derived from the words, so a longer label is a
+        // longer label and a resize reads as a font change, never as a
+        // box for lines nobody asked for.
         // Alignment is meaningless on a shaft-riding label — its position
         // IS the offset along the line. _commitTextEdit used to stamp
         // center/middle on every fresh non-text label, arrow included, and
@@ -12241,30 +12208,7 @@
         var titleAlign = this._labelRidesShaft(shape.kind)
           ? null
           : normalizeTitleAlign(shape.metadata && shape.metadata.title_align);
-        // A PINNED size sizes the box too, dragged or not. The stored box is
-        // the record of a drag, and a drag is the other way of setting the
-        // size — so once a number has been typed instead, honouring the old
-        // box leaves the text shrinking inside a rectangle that stays put,
-        // with the corner dots out at the edges of a box nothing fills. The
-        // box's POSITION is still the dragged one; only its extent follows
-        // the text.
-        var hasExplicitBox = !titleAlign && !this._hasPinnedFontSize(shape) &&
-          !!(shape.metadata && shape.metadata.title_box);
-        if (hasExplicitBox) {
-          // Honor the dragged box. The rect is already at tx/ty/tw/th
-          // from above; just vertically center the text line in it and
-          // mirror the box into `_renderedTitleImage` so handle
-          // positions + drag math operate on the real (visible) rect.
-          var centeredY = ty + Math.max(pad, (th - measured.height) / 2);
-          textEl.setAttribute("y", centeredY);
-          this._applyLabelBg(rectEl, shape);
-          shape._renderedTitleImage = {
-            x: titleBox.x,
-            y: titleBox.y,
-            w: titleBox.w,
-            h: titleBox.h
-          };
-        } else {
+        {
           // Shrink-wrap the rect to the rendered text dimensions so
           // handles + the underline sit right at the text edge instead
           // of leaving empty space inside the default bbox.
@@ -13035,9 +12979,6 @@
       while (textEl.firstChild) textEl.removeChild(textEl.firstChild);
       if (!content) return { width: 0, height: 0 };
 
-      var words = String(content).split(/\s+/).filter(Boolean);
-      if (words.length === 0) return { width: 0, height: 0 };
-
       var fontFamily = textEl.getAttribute("font-family") ||
         "ui-sans-serif, system-ui, -apple-system, sans-serif";
       var fontWeight = textEl.getAttribute("font-weight") || "500";
@@ -13047,19 +12988,35 @@
         return self._measureTextWidth(s, fontSize, fontFamily, fontWeight);
       }
 
+      // A newline in the content is a HARD break — the author's own line,
+      // put there with Shift+Enter, kept exactly where they put it.
+      // `maxWidth` wraps only within a hard line; Infinity means "never
+      // wrap", which is how titles render — a longer label gets longer,
+      // not folded (see the title render for why).
       var lines = [];
-      var current = "";
-      var maxLine = 0;
-      for (var i = 0; i < words.length; i++) {
-        var attempt = current ? current + " " + words[i] : words[i];
-        if (measure(attempt) <= maxWidth || !current) {
-          current = attempt;
-        } else {
-          lines.push(current);
-          current = words[i];
+      String(content).split("\n").forEach(function(hard) {
+        var words = hard.split(/\s+/).filter(Boolean);
+        if (!words.length) {
+          // A deliberately blank line holds its height.
+          lines.push("\u00A0");
+          return;
         }
-      }
-      if (current) lines.push(current);
+        var current = "";
+        for (var i = 0; i < words.length; i++) {
+          var attempt = current ? current + " " + words[i] : words[i];
+          if (measure(attempt) <= maxWidth || !current) {
+            current = attempt;
+          } else {
+            lines.push(current);
+            current = words[i];
+          }
+        }
+        if (current) lines.push(current);
+      });
+      // Trailing blank lines carry no intent worth drawing.
+      while (lines.length && lines[lines.length - 1] === "\u00A0") lines.pop();
+      if (!lines.length) return { width: 0, height: 0 };
+      var maxLine = 0;
 
       for (var k = 0; k < lines.length; k++) {
         var w = measure(lines[k]);
@@ -18677,14 +18634,22 @@
         height: h
       });
       fo.classList.add("etcher-text-editor");
-      var input = document.createElement("input");
-      input.type = "text";
+      // A textarea, not an input: Shift+Enter puts a real newline in the
+      // label (Enter alone still commits), and multi-line is exactly the
+      // lines the author broke — never lines a wrap invented.
+      var input = document.createElement("textarea");
+      input.rows = 1;
+      input.wrap = "off";
       input.maxLength = 200;
       input.placeholder = "Type your label…";
       input.value = (shape.metadata && shape.metadata.title) || "";
       input.style.width = "100%";
       input.style.height = "100%";
       input.style.boxSizing = "border-box";
+      input.style.resize = "none";
+      input.style.overflow = "hidden";
+      input.style.whiteSpace = "pre";
+      input.style.lineHeight = "1.1";
 
       // The editor IS the label. It used to be a white box with a dashed
       // border and 14px black text — nothing like what commit would draw,
@@ -18726,7 +18691,9 @@
       var edPad = this._hasPinnedFontSize(shape)
         ? edFontSize * 0.2
         : h * 0.13;
-      input.style.padding = "0 " + Math.round(edPad) + "px";
+      // Padding on all sides now — the textarea top-aligns its text, so
+      // the vertical pad is what centres a single line in the box.
+      input.style.padding = Math.round(edPad) + "px";
       var edFamily = "ui-sans-serif, system-ui, -apple-system, sans-serif";
       input.style.font = "500 " + edFontSize + "px " + edFamily;
       input.style.outline = "none";
@@ -18741,51 +18708,32 @@
           ? "center"
           : "left";
 
-      // The box hugs the text, live — the render's own rules replayed on
+      // The box hugs the text, live — the render's own layout replayed on
       // every keystroke, so the editor is not "a field the label goes
-      // into" but the label itself with a caret in it.
-      //
-      // Which rule depends on what commit will do, and the split mirrors
-      // the render's `hasExplicitBox` exactly: a stored, un-aligned,
-      // un-pinned box is honoured at its full size (so the editor keeps
-      // it — hugging here would show a tighter label than Enter draws),
-      // and everything else shrink-wraps (so the editor does too: width
-      // tracks the text plus the render's padding, the font shrinks at
-      // the width-fit cap once the text outgrows the box, and a pinned
-      // size grows the box instead, cap-exempt — all exactly as commit).
-      // The anchor holds while the box breathes: centre-anchored text
-      // resizes about its centre, left-anchored about its left edge.
+      // into" but the label itself with a caret in it. No caps anywhere:
+      // a longer label gets a WIDER box at exactly the font the label
+      // renders in (never a smaller font — the size the user chose is the
+      // size they get), and a Shift+Enter line makes it taller by exactly
+      // one line. The anchor holds while the box breathes: centre-anchored
+      // text resizes about its centre, left-anchored about its left edge.
       var selfEd = this;
-      var edPinned = this._hasPinnedFontSize(shape);
-      var edAlignForBox = this._labelRidesShaft(shape.kind)
-        ? null
-        : normalizeTitleAlign(shape.metadata && shape.metadata.title_align);
-      var edExplicitBox = !edAlignForBox && !edPinned &&
-        !!(shape.metadata && shape.metadata.title_box);
       var edCx = (Math.min(tl.x, br.x) + Math.max(tl.x, br.x)) / 2;
       var edCy = (Math.min(tl.y, br.y) + Math.max(tl.y, br.y)) / 2;
       var edLeft = Math.min(tl.x, br.x);
       var edFit = function() {
-        var t = input.value || "";
-        var size = edFontSize;
-        var textW = t
-          ? selfEd._measureTextWidth(t, edFontSize, edFamily, "500")
-          : 0;
-        if (!edPinned && textW + edPad * 2 > w) {
-          // The render's width-fit cap: past the box, the font gives.
-          size = Math.max(
-            selfEd._zoomPx(10),
-            edFontSize * Math.max(1, w - edPad * 2) / textW * 0.99
-          );
-          textW = t ? selfEd._measureTextWidth(t, size, edFamily, "500") : 0;
+        var linesEd = String(input.value || "").split("\n");
+        var maxW = 0;
+        for (var li = 0; li < linesEd.length; li++) {
+          var lw = linesEd[li]
+            ? selfEd._measureTextWidth(linesEd[li], edFontSize, edFamily, "500")
+            : 0;
+          if (lw > maxW) maxW = lw;
         }
-        input.style.fontSize = size + "px";
-        if (edExplicitBox) return; // commit honours the stored box; so do we
-        // Shrink-wrap, with a floor so an empty label still shows a caret
-        // box worth aiming at (~2 characters).
-        var boxW = Math.max(size * 2, textW + edPad * 2);
-        if (!edPinned && boxW > w) boxW = w;
-        var boxH = size * 1.2 + edPad * 2;
+        // Floor of ~2 characters so an empty label still shows a caret
+        // box worth aiming at. Height mirrors the render's line layout:
+        // one font-height plus 1.1em per further line, plus the pads.
+        var boxW = Math.max(edFontSize * 2, maxW + edPad * 2);
+        var boxH = edFontSize * (1 + (linesEd.length - 1) * 1.1) + edPad * 2;
         fo.setAttribute("width", boxW);
         fo.setAttribute("height", boxH);
         fo.setAttribute("y", edCy - boxH / 2);
@@ -18814,6 +18762,9 @@
 
       input.addEventListener("keydown", function(e) {
         if (e.key === "Enter") {
+          // Shift+Enter is the author's line break — let the textarea
+          // take it; plain Enter commits, as it always has.
+          if (e.shiftKey) return;
           e.preventDefault();
           self._commitTextEdit();
         } else if (e.key === "Escape") {

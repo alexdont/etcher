@@ -6513,6 +6513,18 @@
       return kind === "line" || kind === "arrow" || kind === "dimension";
     },
 
+    // Kinds whose label rides the shaft: centred on the line at
+    // `metadata.title_offset` (a 0-1 fraction along a->b), dragged ALONG
+    // the line rather than freely, no leader (it would be a stub pointing
+    // at the line the label already sits on). The dimension has always
+    // worked this way — its label is the measurement. The arrow joined it
+    // (head dev's call): an arrow's label names the pointing, so a label
+    // that can wander off the line reads as a separate note, not a name.
+    // NOT the plain line: its label stays the ordinary float-above kind.
+    _labelRidesShaft: function(kind) {
+      return kind === "dimension" || kind === "arrow";
+    },
+
     // A shaft's stroke width in on-screen px. A styled width lives in canvas
     // units like every other stroke, so the shaft thins with the drawing on
     // zoom-out. No styled width → `fallbackPx`, which each kind supplies as
@@ -12252,12 +12264,12 @@
             }
           }
 
-          // Same re-anchor for a dimension, whose label is CENTRED on its
-          // shaft rather than anchored by a corner. Shrink-wrapping narrows
-          // the box from its left edge, so without this the drawn label sits
-          // half the shrink off the line — which reads as the label having
-          // come unstuck from the dimension it belongs to.
-          if (shape.kind === "dimension") {
+          // Same re-anchor for the shaft-riding labels (dimension, arrow),
+          // which are CENTRED on their line rather than anchored by a
+          // corner. Shrink-wrapping narrows the box from its left edge, so
+          // without this the drawn label sits half the shrink off the line
+          // — which reads as the label having come unstuck from it.
+          if (this._labelRidesShaft(shape.kind)) {
             var cShiftX = (tw - actualW) / 2;
             var cShiftY = (th - actualH) / 2;
             if (cShiftX || cShiftY) {
@@ -12291,11 +12303,11 @@
           x: titleBox.x + titleBox.w / 2,
           y: titleBox.y + titleBox.h / 2
         };
-        // A dimension's label is centred ON its shaft, so a leader would be
+        // A shaft-riding label is centred ON its line, so a leader would be
         // a stub pointing from the label at the line it is already sitting
         // on. Same reasoning as the containment case below, but containment
         // can't see it: a line has no interior to be inside of.
-        if (shape.kind === "dimension") {
+        if (this._labelRidesShaft(shape.kind)) {
           lineEl.setAttribute("visibility", "hidden");
         } else if (this._shapeContainsImagePoint(shape, titleCenterImage)) {
           lineEl.setAttribute("visibility", "hidden");
@@ -12417,13 +12429,14 @@
         ? { w: stored.w, h: stored.h }
         : { w: basePx * 6, h: basePx * 1.4 };
 
-      // A dimension's label rides its own line. The stored box supplies the
-      // SIZE — that is what makes it resizable like any other label — but
-      // never the position: that comes from `title_offset` along the shaft,
-      // which is what keeps it magnetic to the dimension instead of drifting
-      // off it. Checked before `title_align` and before the stored box, both
-      // of which would otherwise put it somewhere the line isn't.
-      if (shape && shape.kind === "dimension") {
+      // A shaft-riding label (dimension, arrow) rides its own line. The
+      // stored box supplies the SIZE — that is what makes it resizable like
+      // any other label — but never the position: that comes from
+      // `title_offset` along the shaft, which is what keeps it magnetic to
+      // the line instead of drifting off it. Checked before `title_align`
+      // and before the stored box, both of which would otherwise put it
+      // somewhere the line isn't.
+      if (shape && this._labelRidesShaft(shape.kind)) {
         var dg = shape.geometry;
         if (dg && dg.a && dg.b) {
           var dt = 0.5;
@@ -12840,11 +12853,12 @@
           if ((bC.x - aC.x) * (bC.x - aC.x) + (bC.y - aC.y) * (bC.y - aC.y) < 9) return;
           dragged = true;
         }
-        // A dimension's label slides ALONG its line rather than moving
+        // A shaft-riding label slides ALONG its line rather than moving
         // freely: the pointer is projected onto the shaft and the position
         // stored as a 0–1 offset. Free positioning would let the label drift
-        // away from the thing it measures, and the label is the measurement.
-        if (shape.kind === "dimension") {
+        // away from the thing it rides — and a dimension's label is the
+        // measurement, an arrow's is the name of the pointing.
+        if (self._labelRidesShaft(shape.kind)) {
           var dgg = shape.geometry;
           var dxL = dgg.b[0] - dgg.a[0];
           var dyL = dgg.b[1] - dgg.a[1];
@@ -18467,11 +18481,13 @@
         g = shape.geometry;
       } else if (shape.kind === "callout") {
         g = this._calloutTextBoxImage(shape.geometry);
-      } else if (shape.kind === "dimension") {
+      } else if (this._labelRidesShaft(shape.kind)) {
         // Small box centered on the label's lerp position along the
         // shaft so the inline editor pops up exactly where the text
         // will land. Sized off `_textDefaultBoxImagePx` so it scales
-        // with the current zoom.
+        // with the current zoom. The arrow takes this branch too — its
+        // label is a metadata title, but it LANDS on the shaft, so the
+        // editor has to open there or the typed text jumps on commit.
         var dimA = shape.geometry.a;
         var dimB = shape.geometry.b;
         var dimT = (shape.metadata && typeof shape.metadata.title_offset === "number")

@@ -38,6 +38,7 @@ function extract(name) {
 }
 
 const startTextEdit = extract("_startTextEdit");
+const ridesShaft = extract("_labelRidesShaft");
 
 // Drive _startTextEdit far enough to capture the editor box: the
 // foreignObject is created from `g` via _imageToContainer — record the
@@ -57,6 +58,7 @@ function editorBoxFor(shape, floatingBox) {
     })
   };
   const ctx = {
+    _labelRidesShaft: ridesShaft,
     _endTextEdit: noop,
     _calloutTextBoxImage: (g) => g.text_box,
     _textDefaultBoxImagePx: () => 16,

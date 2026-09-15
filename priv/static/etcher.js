@@ -1962,6 +1962,10 @@
   // (loops on sharp corners), 1 is chordal (slack on tight ones), 0.5 is
   // centripetal — the one that's provably cusp-free.
   var CATMULL_ALPHA = 0.5;
+  // Dense samples per bend segment when flattening an arrow's curve for
+  // geometry (hit test, label arc-length, bbox). Eight is plenty: bends
+  // are sparse and the tolerances that consume this are generous.
+  var ROUTE_SAMPLES = 8;
 
   // How much of a marker's incoming pointer position is carried over from the
   // previous smoothed one: `smoothed += (raw - smoothed) * (1 - STREAMLINE)`.
@@ -11765,9 +11769,15 @@
           var arC = arImg.map(function(p) { return self._imageToContainer(p); });
           var arK = self._boardLineScale();
           if (arShaft) {
-            arShaft.setAttribute("points", arC.map(function(p) {
-              return p.x + "," + p.y;
-            }).join(" "));
+            // Two points draw straight; bends draw the same smooth curve
+            // the geometry helpers sample (_arrowRoute), so what is hit,
+            // labelled and measured is what is seen.
+            arShaft.setAttribute("d", arImg.length > 2
+              ? self._catmullRomPathD(arImg, function(p) {
+                  return self._imageToContainer(p);
+                })
+              : "M " + arC[0].x + " " + arC[0].y +
+                " L " + arC[1].x + " " + arC[1].y);
           }
           // A styled width (canvas units) wins; without one this is exactly
           // the old `LINE_WEIGHT_PX * arK`, floored the same way every other
@@ -11786,7 +11796,13 @@
             // with a fattened shaft instead of staying a hairline V on it.
             var arHeadK = arW / LINE_WEIGHT_PX;
             var tip = arC[arC.length - 1];
-            var prev = arC[arC.length - 2] || tip;
+            // The V lines up with the CURVE's final approach, not the last
+            // chord — on a strong bend those differ visibly, and it is the
+            // drawn line the head has to cap.
+            var prevImg = arImg.length > 2
+              ? self._crSample(arImg, arImg.length - 2, 1 - 1 / ROUTE_SAMPLES)
+              : arImg[arImg.length - 2] || arImg[arImg.length - 1];
+            var prev = self._imageToContainer(prevImg);
             arHead.setAttribute(
               "points",
               self._vArrowPoints(
@@ -14478,9 +14494,9 @@
           pts = [{ x: g.a[0], y: g.a[1] }, { x: g.b[0], y: g.b[1] }];
           break;
         case "arrow":
-          // The routed path, so a bent arrow measures along its bends
-          // rather than across the chord it never occupies.
-          pts = this._arrowPath(g);
+          // The drawn route — the curve through the bends — so a bent
+          // arrow measures along the line it actually shows.
+          pts = this._arrowRoute(g);
           break;
         case "marker":
         case "freehand":
@@ -14567,7 +14583,7 @@
           }
           break;
         case "arrow":
-          pts = this._arrowPath(g);
+          pts = this._arrowRoute(g);
           break;
         case "marker":
         case "freehand":
@@ -15101,7 +15117,10 @@
         // outside the box its two ends describe, and a bbox that missed
         // them would break reveal-into-view and box-select.
         case "arrow":
-          return fromPoints(this._arrowPath(g));
+          // The route, not the raw bends: the curve can bow outside the
+          // hull of its control points, and the bbox has to contain what
+          // is drawn.
+          return fromPoints(this._arrowRoute(g));
         case "callout": {
           var box = g.text_box;
           var anchorX = g.anchor ? g.anchor[0] : 0;
@@ -15184,6 +15203,69 @@
       return pts;
     },
 
+    // The DRAWN route of a shaft, as dense points. A two-point shaft
+    // (every dimension, an unbent arrow) is its own route; a bent arrow is
+    // drawn as a centripetal Catmull-Rom curve through its bends (same
+    // parameterization as `_catmullRomPathD`, evaluated Barry-Goldman
+    // style), so everything that follows the line — hit test, bbox, label
+    // position, label drag, tooltip anchor — samples the CURVE the user
+    // sees, not the chords it no longer follows.
+    //
+    // Invariant: ROUTE_SAMPLES points per raw segment, then the head —
+    // `_arrowSegMidImage` indexes on it.
+    _arrowRoute: function(g) {
+      var raw = this._arrowPath(g);
+      if (raw.length <= 2) return raw;
+      var out = [];
+      for (var i = 0; i < raw.length - 1; i++) {
+        for (var s = 0; s < ROUTE_SAMPLES; s++) {
+          out.push(this._crSample(raw, i, s / ROUTE_SAMPLES));
+        }
+      }
+      out.push(raw[raw.length - 1]);
+      return out;
+    },
+
+    // The centripetal Catmull-Rom point at parameter `f` (0-1) along the
+    // segment raw[i] -> raw[i+1], via the Barry-Goldman pyramid. Knot
+    // spacing matches `_catmullRomPathD`'s (distance^CATMULL_ALPHA), so
+    // the sampled geometry sits on the drawn stroke.
+    _crSample: function(raw, i, f) {
+      var p0 = raw[i - 1] || raw[i];
+      var p1 = raw[i];
+      var p2 = raw[i + 1];
+      var p3 = raw[i + 2] || p2;
+      function knot(a, b) {
+        var dx = b.x - a.x, dy = b.y - a.y;
+        return Math.max(Math.pow(dx * dx + dy * dy, CATMULL_ALPHA / 2), 1e-6);
+      }
+      var t0 = 0;
+      var t1 = t0 + knot(p0, p1);
+      var t2 = t1 + knot(p1, p2);
+      var t3 = t2 + knot(p2, p3);
+      var t = t1 + (t2 - t1) * f;
+      function lerp(a, b, u) { return { x: a.x + (b.x - a.x) * u, y: a.y + (b.y - a.y) * u }; }
+      function ratio(t, ta, tb) { return tb - ta > 1e-9 ? (t - ta) / (tb - ta) : 0; }
+      var A1 = lerp(p0, p1, ratio(t, t0, t1));
+      var A2 = lerp(p1, p2, ratio(t, t1, t2));
+      var A3 = lerp(p2, p3, ratio(t, t2, t3));
+      var B1 = lerp(A1, A2, ratio(t, t0, t2));
+      var B2 = lerp(A2, A3, ratio(t, t1, t3));
+      return lerp(B1, B2, ratio(t, t1, t2));
+    },
+
+    // Curve point half way along raw segment `i` — where the add-bend dot
+    // sits, ON the drawn line rather than on the chord it may have bowed
+    // away from. Route index per the invariant above.
+    _arrowSegMidImage: function(g, i) {
+      var raw = this._arrowPath(g);
+      if (raw.length <= 2 || !raw[i + 1]) {
+        var a = raw[i], b = raw[i + 1] || raw[i];
+        return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      }
+      return this._crSample(raw, i, 0.5);
+    },
+
     // The point at arc-length fraction `t` (0-1) along the ROUTED shaft —
     // tail, bends, head — not along the a->b chord. A label whose offset
     // lerps the chord stays put when the middle of the arrow is dragged
@@ -15192,7 +15274,7 @@
     // the drawn line, wherever its bends take it; a two-point shaft (every
     // dimension, an unbent arrow) reduces to the plain lerp.
     _shaftPointAt: function(g, t) {
-      var pts = this._arrowPath(g);
+      var pts = this._arrowRoute(g);
       if (pts.length < 2) return null;
       var lens = [], total = 0, i;
       for (i = 1; i < pts.length; i++) {
@@ -15220,7 +15302,7 @@
     // right — the pointer is projected onto whichever segment it is
     // actually near, not onto the chord between the endpoints.
     _shaftOffsetFor: function(g, pt) {
-      var pts = this._arrowPath(g);
+      var pts = this._arrowRoute(g);
       if (pts.length < 2) return null;
       var lens = [], total = 0, i;
       for (i = 1; i < pts.length; i++) {
@@ -15305,10 +15387,10 @@
     _makeArrowEl: function() {
       var g = svgEl("g");
       g.classList.add("etcher-arrow");
-      // A polyline, not a line: an arrow can be routed through any number of
-      // bends dropped while the user snakes it across the canvas. A straight
-      // one is just the two-point case.
-      var shaft = svgEl("polyline", {
+      // A <path>, not a polyline: a routed arrow draws its bends as a
+      // smooth centripetal Catmull-Rom curve (like the marker's stroke),
+      // and a straight one is just the two-point M/L case.
+      var shaft = svgEl("path", {
         "stroke-width": "2",
         stroke: "currentColor",
         fill: "none",
@@ -18367,7 +18449,8 @@
         // Hit if the point is near ANY segment of the routed path — the
         // two-point case covers a straight arrow.
         case "arrow": {
-          var arPath = this._arrowPath(g);
+          // The drawn curve, so clicking the middle of a bow hits it.
+          var arPath = this._arrowRoute(g);
           var arTol = this._textDefaultBoxImagePx() * 0.6;
           // Half a heavy shaft is already on the line before any pad.
           arTol = Math.max(arTol, this._shaftHalfWidthImagePx(shape));
@@ -19995,10 +20078,10 @@
         var path = this._arrowPath(shape.geometry);
         var mids = [];
         for (var j = 0; j < path.length - 1; j++) {
-          mids.push({
-            x: (path[j].x + path[j + 1].x) / 2,
-            y: (path[j].y + path[j + 1].y) / 2
-          });
+          // ON the drawn curve, which may bow away from the chord — a dot
+          // floating beside the line reads as broken. One per raw segment,
+          // same indexing the insertion math relies on.
+          mids.push(this._arrowSegMidImage(shape.geometry, j));
         }
         return mids;
       }

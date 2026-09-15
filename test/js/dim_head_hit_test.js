@@ -173,7 +173,12 @@ function heavy(kind) {
 
 {
   const arrowPath = extract("_arrowPath");
-  const self = Object.assign(board(), { _arrowPath: arrowPath, _nearSegment: extract("_nearSegment"), _nearestOnSegment: extract("_nearestOnSegment") });
+{ const m = src.match(/var CATMULL_ALPHA = ([\d.]+);/); global.CATMULL_ALPHA = Number(m[1]); }
+{ const m = src.match(/var ROUTE_SAMPLES = (\d+);/); global.ROUTE_SAMPLES = Number(m[1]); }
+const crSample = extract("_crSample");
+const arrowRoute = extract("_arrowRoute");
+
+  const self = Object.assign(board(), { _arrowPath: arrowPath, _crSample: crSample, _arrowRoute: arrowRoute, _nearSegment: extract("_nearSegment"), _nearestOnSegment: extract("_nearestOnSegment") });
   const arrow = {
     kind: "arrow",
     geometry: { a: [100, 200], b: [700, 200], points: [] },

@@ -29,6 +29,11 @@ function extract(name) {
 const ridesShaft = extract("_labelRidesShaft");
 const titleBox = extract("_shapeTitleBoxImage");
 const arrowPath = extract("_arrowPath");
+{ const m = src.match(/var CATMULL_ALPHA = ([\d.]+);/); global.CATMULL_ALPHA = Number(m[1]); }
+{ const m = src.match(/var ROUTE_SAMPLES = (\d+);/); global.ROUTE_SAMPLES = Number(m[1]); }
+const crSample = extract("_crSample");
+const arrowRoute = extract("_arrowRoute");
+
 const shaftPointAt = extract("_shaftPointAt");
 const shaftOffsetFor = extract("_shaftOffsetFor");
 
@@ -52,6 +57,8 @@ const board = {
   _labelRidesShaft: ridesShaft,
   _textDefaultBoxImagePx: () => 10,
   _arrowPath: arrowPath,
+  _crSample: crSample,
+  _arrowRoute: arrowRoute,
   _shaftPointAt: shaftPointAt,
   _shaftOffsetFor: shaftOffsetFor,
 };
@@ -95,12 +102,22 @@ const board = {
   // touches. The label must sit on the LINE: t=0.5 is the bend itself.
   const bent = { a: [0, 0], b: [100, 100], points: [[100, 0]] };
 
-  assert.deepStrictEqual(shaftPointAt.call(board, bent, 0.5), { x: 100, y: 0 },
-    "half way by arc length is the bend, not the chord's midpoint");
-  assert.deepStrictEqual(shaftPointAt.call(board, bent, 0.25), { x: 50, y: 0 },
-    "a quarter of the way is half along the first leg");
-  assert.deepStrictEqual(shaftPointAt.call(board, bent, 0.75), { x: 100, y: 50 },
-    "three quarters is half down the second leg");
+  // The bent arrow now DRAWS as a smooth curve, so points are near the
+  // control polygon rather than exactly on it — a small tolerance is the
+  // point, not a concession. What must stay categorically true: t=0.5 is
+  // in the bend's neighbourhood and nowhere near the chord's midpoint.
+  const near = (p, x, y, tol, what) => {
+    assert.ok(p && Math.hypot(p.x - x, p.y - y) <= tol,
+      `${what}: expected within ${tol} of (${x},${y}), got (${p && p.x},${p && p.y})`);
+  };
+  const half = shaftPointAt.call(board, bent, 0.5);
+  near(half, 100, 0, 15, "half way by arc length rides the bend's curve");
+  assert.ok(Math.hypot(half.x - 50, half.y - 50) > 40,
+    "…and is nowhere near the chord's midpoint the line never touches");
+  near(shaftPointAt.call(board, bent, 0.25), 50, 0, 12,
+    "a quarter of the way is about half along the first leg");
+  near(shaftPointAt.call(board, bent, 0.75), 100, 50, 12,
+    "three quarters is about half down the second leg");
 
   const arrow = {
     kind: "arrow",
@@ -108,15 +125,19 @@ const board = {
     metadata: { title: "x", title_offset: 0.5, title_box: { x: 0, y: 0, w: 40, h: 20 } },
   };
   const box = titleBox.call(board, arrow, null);
-  assert.deepStrictEqual(box, { x: 100 - 20, y: 0 - 10, w: 40, h: 20 },
+  near({ x: box.x + box.w / 2, y: box.y + box.h / 2 }, 100, 0, 15,
     "the label box is centred on the routed line — the bug was it hovering " +
     "over the phantom straight chord after the arrow was bent");
+  assert.deepStrictEqual({ w: box.w, h: box.h }, { w: 40, h: 20 },
+    "sized by the stored box, as ever");
 
   // Dragging projects onto the nearest SEGMENT, so the offset lands where
   // the pointer is, not where the chord thinks it is.
-  assert.strictEqual(shaftOffsetFor.call(board, bent, { x: 50, y: -30 }), 0.25,
+  const nearT = (t, want, what) => assert.ok(Math.abs(t - want) < 0.06,
+    `${what}: expected ~${want}, got ${t}`);
+  nearT(shaftOffsetFor.call(board, bent, { x: 50, y: -30 }), 0.25,
     "a point above the first leg projects onto it");
-  assert.strictEqual(shaftOffsetFor.call(board, bent, { x: 140, y: 50 }), 0.75,
+  nearT(shaftOffsetFor.call(board, bent, { x: 140, y: 50 }), 0.75,
     "a point beside the second leg projects onto it");
 
   // And the two-point case — every dimension, an unbent arrow — reduces to

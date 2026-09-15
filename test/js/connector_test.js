@@ -48,6 +48,10 @@ const anchorPointImage = lift("_anchorPointImage", "shape, anchorId");
 const vArrowPoints = lift("_vArrowPoints", "tip, toward, len, halfWidth");
 const connectorHitRadius = lift("_connectorHitRadius", "shape");
 const arrowPath = lift("_arrowPath", "g");
+{ const m = src.match(/var CATMULL_ALPHA = ([\d.]+);/); global.CATMULL_ALPHA = Number(m[1]); }
+{ const m = src.match(/var ROUTE_SAMPLES = (\d+);/); global.ROUTE_SAMPLES = Number(m[1]); }
+const crSample = lift("_crSample", "raw, i, f");
+const arrowSegMid = lift("_arrowSegMidImage", "g, i");
 const nearestOnSegment = lift("_nearestOnSegment", "pt, p, q");
 const nearSegmentRaw = lift("_nearSegment", "pt, p, q, tol");
 
@@ -192,7 +196,7 @@ const midpointPositions = lift("_midpointPositionsForShape", "shape");
 
 // The layer method dispatches by kind and reaches back for `_arrowPath`, so
 // the stand-in has to carry it.
-const midLayer = { _arrowPath: arrowPath };
+const midLayer = { _arrowPath: arrowPath, _crSample: crSample, _arrowSegMidImage: arrowSegMid };
 
 // One ghost per segment — an arrow is an open path, so a straight one has a
 // single midpoint and there is no wrap from head back round to tail. (A
@@ -205,12 +209,18 @@ assert.deepStrictEqual(
   [{ x: 50, y: 0 }],
   "a straight arrow offers one bend point, at its middle");
 
-assert.deepStrictEqual(
-  midpointPositions.call(midLayer, {
+{
+  // A routed arrow draws a smooth curve now, and the add-bend dots sit ON
+  // it — near each leg's middle, not necessarily on the chord.
+  const mids = midpointPositions.call(midLayer, {
     kind: "arrow", geometry: { a: [0, 0], points: [[100, 0]], b: [100, 100] }
-  }),
-  [{ x: 50, y: 0 }, { x: 100, y: 50 }],
-  "each leg of a routed arrow gets its own");
+  });
+  assert.strictEqual(mids.length, 2, "each leg of a routed arrow gets its own");
+  assert.ok(Math.hypot(mids[0].x - 50, mids[0].y - 0) < 12,
+    "the first dot rides the curve near its leg's middle");
+  assert.ok(Math.hypot(mids[1].x - 100, mids[1].y - 50) < 12,
+    "so does the second");
+}
 
 // The count is what ties the ghosts to `_startMidpointDrag`'s `edgeIdx`:
 // segment N runs from path point N to N+1, so inserting into segment N makes
@@ -229,7 +239,7 @@ assert.strictEqual(
 // segment's middle either way, so it can't wander onto the bend handles at
 // either end and cover the points the user is reaching for.
 const segmentsFor = lift("_midpointSegmentsForShape", "shape");
-const segLayer2 = { _arrowPath: arrowPath };
+const segLayer2 = { _arrowPath: arrowPath, _crSample: crSample, _arrowSegMidImage: arrowSegMid };
 
 assert.strictEqual(
   segmentsFor.call(segLayer2, { kind: "arrow", geometry: routed }).length,

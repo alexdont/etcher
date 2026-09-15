@@ -38,6 +38,10 @@ function extract(name) {
 
 const strokeMidpoint = extract("_strokeMidpointImage");
 const arrowPath = extract("_arrowPath");
+{ const m = src.match(/var CATMULL_ALPHA = ([\d.]+);/); global.CATMULL_ALPHA = Number(m[1]); }
+{ const m = src.match(/var ROUTE_SAMPLES = (\d+);/); global.ROUTE_SAMPLES = Number(m[1]); }
+const crSample = extract("_crSample");
+const arrowRoute = extract("_arrowRoute");
 const positionTooltip = extract("_positionTooltip");
 const placeBeside = extract("_placeTooltipBesideStroke");
 const renderedStrokePx = extract("_renderedStrokePx");
@@ -45,6 +49,8 @@ const clearancePts = extract("_tooltipClearancePts");
 
 const ctx = {
   _arrowPath: arrowPath,
+  _crSample: crSample,
+  _arrowRoute: arrowRoute,
   _freehandFlatten: (g) => g.points || [],
 };
 
@@ -142,6 +148,8 @@ function tooltipFor(shape, opts) {
     _shaftStrokePx: () => opts.strokePx == null ? 2 : opts.strokePx,
     _markerScale: () => 1,
     _arrowPath: arrowPath,
+  _crSample: crSample,
+  _arrowRoute: arrowRoute,
     _freehandFlatten: (g) => g.points || [],
   };
   positionTooltip.call(self, shape);

@@ -18288,6 +18288,9 @@
       // single click. The minimum is computed from the current zoom so
       // it looks roughly the same on screen across zoom levels.
       var minImagePx = this._textDefaultBoxImagePx();
+      // Read BEFORE the clamps: whether the user actually drew a box, as
+      // opposed to clicking — the clamped defaults are ours, not theirs.
+      var drewBox = geom.h >= minImagePx;
       if (geom.w < minImagePx) geom.w = minImagePx * 4;
       if (geom.h < minImagePx) geom.h = minImagePx * 1.2;
 
@@ -18295,6 +18298,25 @@
       el.classList.remove("is-draft");
       var self = this;
       this._finalizeShape("text", geom, el, function(shape) {
+        // A DRAWN box is a size request: small box, small text; big box,
+        // big text — the way every drawing program's text tool works. The
+        // drawn height pins the font (the same 0.65 the box-drives-font
+        // rule uses, stored in image units like every pinned size), and
+        // that pin beats the remembered label-size default, which
+        // otherwise made every new text the same size no matter what was
+        // dragged. A plain CLICK keeps the default: nothing was asked.
+        if (drewBox) {
+          var scale = 1;
+          try { scale = self._markerScale() || 1; } catch (_) { scale = 1; }
+          if (!(scale > 0)) scale = 1;
+          var target = geom.h * 0.65; // image units
+          target = Math.max(FONT_SIZE_MIN / scale,
+            Math.min(FONT_SIZE_MAX / scale, target));
+          shape.style = Object.assign({}, shape.style || {}, {
+            font_size: target
+          });
+          self._renderShape(shape);
+        }
         // Drop straight into inline-edit mode so the user can type
         // immediately. `_startTextEdit` waits for the server-assigned
         // uuid (via `etcher:annotation-saved`) before flushing the

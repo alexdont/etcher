@@ -1835,12 +1835,17 @@
   // The test is "would a first-time user reach for this while marking up a
   // picture", not "is this a good tool" — the grid is not a demotion.
   //
-  // Read as a sentence: get around, box and circle things, point at them or
-  // rule a line between them, scribble by hand, label, and undo a mistake.
-  // Eraser last because it is the destructive one and does not want to sit
-  // under the cursor.
+  // Read as a sentence: get around, scribble on things and rub the scribble
+  // out, point at them or rule a line between them, label. The marker and
+  // the eraser lead (right after the grabber) because scribble-and-correct
+  // is the loop a first-time user actually lives in — this order is the
+  // head dev's spec, replacing the rectangle/circle pair that used to hold
+  // those two slots.
   //
   // What is NOT here, and why:
+  //   rectangle, circle   — real shapes, but drawn on purpose; the marker
+  //                         covers the "ring around the thing" job they
+  //                         were on the bar for.
   //   polygon, dimension  — precise work. Real tools, reached for on
   //                         purpose, by someone who knows they want them.
   //   freehand            — the second hand-drawing tool, and the more
@@ -1864,11 +1869,9 @@
   //                         put it back in one line.
   var ESSENTIAL_TOOLS = [
     "grabber",
-    "rectangle", "circle",
+    "marker", "eraser",
     "arrow", "line",
-    "marker",
-    "text",
-    "eraser"
+    "text"
   ];
 
   // Corner radius on image shapes, as a fraction of the shorter rendered

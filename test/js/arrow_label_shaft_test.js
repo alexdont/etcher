@@ -28,6 +28,9 @@ function extract(name) {
 
 const ridesShaft = extract("_labelRidesShaft");
 const titleBox = extract("_shapeTitleBoxImage");
+const arrowPath = extract("_arrowPath");
+const shaftPointAt = extract("_shaftPointAt");
+const shaftOffsetFor = extract("_shaftOffsetFor");
 
 // Free helpers the non-riding path reaches.
 global.normalizeTitleAlign = () => null;
@@ -45,7 +48,13 @@ for (const k of ["rectangle", "circle", "text", "callout", "marker"]) {
 
 // ── the arrow's label is centred on the shaft, wherever its box says ──────
 
-const board = { _labelRidesShaft: ridesShaft, _textDefaultBoxImagePx: () => 10 };
+const board = {
+  _labelRidesShaft: ridesShaft,
+  _textDefaultBoxImagePx: () => 10,
+  _arrowPath: arrowPath,
+  _shaftPointAt: shaftPointAt,
+  _shaftOffsetFor: shaftOffsetFor,
+};
 
 {
   const arrow = {
@@ -76,6 +85,45 @@ const board = { _labelRidesShaft: ridesShaft, _textDefaultBoxImagePx: () => 10 }
   const box = titleBox.call(board, line, null);
   assert.deepStrictEqual(box, { x: 900, y: 900, w: 40, h: 20 },
     "a line's label stays exactly where it was put");
+}
+
+// ── a BENT arrow carries its label along the bend ─────────────────────────
+
+{
+  // Right angle: a=(0,0) -> bend (100,0) -> b=(100,100). Arc length 200.
+  // The a->b chord's midpoint is (50,50) — a point the drawn line never
+  // touches. The label must sit on the LINE: t=0.5 is the bend itself.
+  const bent = { a: [0, 0], b: [100, 100], points: [[100, 0]] };
+
+  assert.deepStrictEqual(shaftPointAt.call(board, bent, 0.5), { x: 100, y: 0 },
+    "half way by arc length is the bend, not the chord's midpoint");
+  assert.deepStrictEqual(shaftPointAt.call(board, bent, 0.25), { x: 50, y: 0 },
+    "a quarter of the way is half along the first leg");
+  assert.deepStrictEqual(shaftPointAt.call(board, bent, 0.75), { x: 100, y: 50 },
+    "three quarters is half down the second leg");
+
+  const arrow = {
+    kind: "arrow",
+    geometry: bent,
+    metadata: { title: "x", title_offset: 0.5, title_box: { x: 0, y: 0, w: 40, h: 20 } },
+  };
+  const box = titleBox.call(board, arrow, null);
+  assert.deepStrictEqual(box, { x: 100 - 20, y: 0 - 10, w: 40, h: 20 },
+    "the label box is centred on the routed line — the bug was it hovering " +
+    "over the phantom straight chord after the arrow was bent");
+
+  // Dragging projects onto the nearest SEGMENT, so the offset lands where
+  // the pointer is, not where the chord thinks it is.
+  assert.strictEqual(shaftOffsetFor.call(board, bent, { x: 50, y: -30 }), 0.25,
+    "a point above the first leg projects onto it");
+  assert.strictEqual(shaftOffsetFor.call(board, bent, { x: 140, y: 50 }), 0.75,
+    "a point beside the second leg projects onto it");
+
+  // And the two-point case — every dimension, an unbent arrow — reduces to
+  // the plain lerp it always was.
+  const straight = { a: [0, 0], b: [100, 200] };
+  assert.deepStrictEqual(shaftPointAt.call(board, straight, 0.25), { x: 25, y: 50 });
+  assert.strictEqual(shaftOffsetFor.call(board, { a: [0, 0], b: [100, 0] }, { x: 25, y: 10 }), 0.25);
 }
 
 // ── the rest of the riding behaviour routes through the same helper ───────

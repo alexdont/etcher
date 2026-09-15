@@ -12443,11 +12443,15 @@
           if (typeof meta.title_offset === "number") {
             dt = Math.max(0, Math.min(1, meta.title_offset));
           }
-          var dpx = dg.a[0] + (dg.b[0] - dg.a[0]) * dt;
-          var dpy = dg.a[1] + (dg.b[1] - dg.a[1]) * dt;
-          return {
-            x: dpx - size.w / 2, y: dpy - size.h / 2, w: size.w, h: size.h
-          };
+          // Along the ROUTED shaft, bends included — the a->b chord stays
+          // put when the middle is dragged into a bend, which left the
+          // label hovering over where the line used to be.
+          var dp = this._shaftPointAt(dg, dt);
+          if (dp) {
+            return {
+              x: dp.x - size.w / 2, y: dp.y - size.h / 2, w: size.w, h: size.h
+            };
+          }
         }
       }
 
@@ -12859,16 +12863,14 @@
         // away from the thing it rides — and a dimension's label is the
         // measurement, an arrow's is the name of the pointing.
         if (self._labelRidesShaft(shape.kind)) {
-          var dgg = shape.geometry;
-          var dxL = dgg.b[0] - dgg.a[0];
-          var dyL = dgg.b[1] - dgg.a[1];
-          var lenSqL = dxL * dxL + dyL * dyL;
-          // A zero-length dimension has no line to project onto — leave the
-          // offset alone rather than dividing by zero.
-          if (lenSqL > 0.0001) {
-            var tProj = ((pt.x - dgg.a[0]) * dxL + (pt.y - dgg.a[1]) * dyL) / lenSqL;
+          // Projected onto the routed shaft — segment by segment, bends
+          // included — so the label follows a bent arrow instead of the
+          // invisible chord between its endpoints. A zero-length shaft
+          // returns null; the offset is left alone rather than guessed.
+          var tProj = self._shaftOffsetFor(shape.geometry, pt);
+          if (tProj != null) {
             shape.metadata = Object.assign({}, shape.metadata || {}, {
-              title_offset: Math.max(0, Math.min(1, tProj))
+              title_offset: tProj
             });
             self._renderShape(shape);
             if (self.editingTitleShape === shape) {
@@ -15102,6 +15104,66 @@
       (g.points || []).forEach(function(p) { pts.push({ x: p[0], y: p[1] }); });
       pts.push({ x: g.b[0], y: g.b[1] });
       return pts;
+    },
+
+    // The point at arc-length fraction `t` (0-1) along the ROUTED shaft —
+    // tail, bends, head — not along the a->b chord. A label whose offset
+    // lerps the chord stays put when the middle of the arrow is dragged
+    // into a bend (the endpoints never moved), hovering over where the
+    // line used to be. Measured by arc length so t=0.5 is the middle of
+    // the drawn line, wherever its bends take it; a two-point shaft (every
+    // dimension, an unbent arrow) reduces to the plain lerp.
+    _shaftPointAt: function(g, t) {
+      var pts = this._arrowPath(g);
+      if (pts.length < 2) return null;
+      var lens = [], total = 0, i;
+      for (i = 1; i < pts.length; i++) {
+        var d = Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+        lens.push(d);
+        total += d;
+      }
+      if (!(total > 0)) return { x: pts[0].x, y: pts[0].y };
+      var target = Math.max(0, Math.min(1, t)) * total;
+      for (i = 0; i < lens.length; i++) {
+        if (target <= lens[i] || i === lens.length - 1) {
+          var f = lens[i] > 0 ? Math.min(1, target / lens[i]) : 0;
+          return {
+            x: pts[i].x + (pts[i + 1].x - pts[i].x) * f,
+            y: pts[i].y + (pts[i + 1].y - pts[i].y) * f
+          };
+        }
+        target -= lens[i];
+      }
+      return { x: pts[pts.length - 1].x, y: pts[pts.length - 1].y };
+    },
+
+    // The inverse: the arc-length fraction of the routed shaft closest to
+    // `pt`. This is what makes dragging a label along a BENT arrow feel
+    // right — the pointer is projected onto whichever segment it is
+    // actually near, not onto the chord between the endpoints.
+    _shaftOffsetFor: function(g, pt) {
+      var pts = this._arrowPath(g);
+      if (pts.length < 2) return null;
+      var lens = [], total = 0, i;
+      for (i = 1; i < pts.length; i++) {
+        var d = Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+        lens.push(d);
+        total += d;
+      }
+      if (!(total > 0)) return null;
+      var best = null, bestD = Infinity, run = 0;
+      for (i = 0; i < lens.length; i++) {
+        var ax = pts[i].x, ay = pts[i].y;
+        var dx = pts[i + 1].x - ax, dy = pts[i + 1].y - ay;
+        var l2 = dx * dx + dy * dy;
+        var s = l2 > 0 ? ((pt.x - ax) * dx + (pt.y - ay) * dy) / l2 : 0;
+        s = Math.max(0, Math.min(1, s));
+        var cx = ax + dx * s, cy = ay + dy * s;
+        var dd = (pt.x - cx) * (pt.x - cx) + (pt.y - cy) * (pt.y - cy);
+        if (dd < bestD) { bestD = dd; best = run + lens[i] * s; }
+        run += lens[i];
+      }
+      return best == null ? null : Math.max(0, Math.min(1, best / total));
     },
 
     // Remove the bend at handle index `idx`. Indices run over the whole
@@ -18488,12 +18550,14 @@
         // with the current zoom. The arrow takes this branch too — its
         // label is a metadata title, but it LANDS on the shaft, so the
         // editor has to open there or the typed text jumps on commit.
-        var dimA = shape.geometry.a;
-        var dimB = shape.geometry.b;
         var dimT = (shape.metadata && typeof shape.metadata.title_offset === "number")
           ? shape.metadata.title_offset : 0.5;
-        var lblX = dimA[0] + (dimB[0] - dimA[0]) * dimT;
-        var lblY = dimA[1] + (dimB[1] - dimA[1]) * dimT;
+        // The routed shaft, not the chord: the editor must open where the
+        // label actually sits, bends included.
+        var dimP = this._shaftPointAt(shape.geometry, dimT) ||
+          { x: shape.geometry.a[0], y: shape.geometry.a[1] };
+        var lblX = dimP.x;
+        var lblY = dimP.y;
         var basePx = this._textDefaultBoxImagePx();
         var dlw = basePx * 6;
         var dlh = basePx * 1.4;

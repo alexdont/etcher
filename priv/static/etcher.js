@@ -6206,6 +6206,44 @@
       this._labelBgBefore = null;
     },
 
+    // The write half of the label-colour chip — the twin of `_setLabelBg`,
+    // and shaped exactly like it: with label-bearing shapes selected the
+    // colour lands on THEM (their own ink, one undo entry each, authoring
+    // defaults untouched); with nothing selected it sets the default the
+    // next label starts in. It used to always do only the second, which
+    // made the row a liar: the chip said "this label" while the pick
+    // silently edited the default — the background half updated the
+    // selection, the text half did nothing you could see.
+    //
+    // Where the colour lives mirrors `_currentLabelColor`'s read: a text
+    // or callout IS its label, so theirs is the shape's own colour; every
+    // other kind carries label ink in metadata.title_color.
+    _setLabelColor: function(color) {
+      var self = this;
+      var shapes = this._fontTargetShapes();
+      if (shapes.length) {
+        shapes.forEach(function(shape) {
+          if (!shape.uuid) return;
+          var before = self._snapshotShape(shape);
+          if (shape.kind === "text" || shape.kind === "callout") {
+            shape.style = Object.assign({}, shape.style || {}, { color: color });
+          } else {
+            shape.metadata = Object.assign({}, shape.metadata || {}, {
+              title_color: color
+            });
+          }
+          self._renderShape(shape);
+          self._pushUndo(shape.uuid, before, self._snapshotShape(shape));
+        });
+        this._emitChanged();
+        this._syncStyleInspector();
+      } else {
+        this._setPref("label_color", color);
+        this._restyleDrafts();
+      }
+      this._refreshLabelSwatch();
+    },
+
     // The colour the current label is WRITTEN in — the twin of
     // `_currentLabelBg`, so both halves of the swatch row answer about the
     // same thing: the label you are on, or the default when you are on
@@ -7470,8 +7508,7 @@
         return;
       }
       if (this._labelPickTarget) {
-        this._setPref("label_color", hex);
-        this._refreshLabelSwatch();
+        this._setLabelColor(hex);
         return;
       }
       // Inspecting a shape: the pick recolors IT and the palette stays as

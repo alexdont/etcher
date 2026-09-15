@@ -152,17 +152,18 @@ assert.ok(
 const applyPickedColor = lift("_applyPickedColor", "hex");
 
 {
-  // Label mode: the pick lands on the pref, never the palette.
-  const prefs = {};
+  // Label mode: the pick goes to the label-colour writer — which prefers
+  // the selection and falls back to the pref (label_text_color_test.js
+  // pins that split) — and never the palette.
+  let landed = null;
   const self = {
     _labelPickTarget: true,
-    _setPref: (k, v) => (prefs[k] = v),
-    _refreshLabelSwatch: () => {},
+    _setLabelColor: (hex) => (landed = hex),
     _setSlotColor: () => assert.fail("must not touch the palette"),
     _selectColor: () => assert.fail("must not change the stroke color"),
   };
   applyPickedColor.call(self, "#12ab34");
-  assert.strictEqual(prefs.label_color, "#12ab34");
+  assert.strictEqual(landed, "#12ab34");
 }
 
 {

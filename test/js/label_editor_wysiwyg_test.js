@@ -45,10 +45,16 @@ function edit(shape, opts) {
   opts = opts || {};
   const noop = () => {};
   let input = null;
-  global.svgEl = (tag) => ({
-    tag, style: {}, classList: { add: noop },
-    appendChild: noop, setAttribute: noop, remove: noop,
-  });
+  let fo = null;
+  global.svgEl = (tag) => {
+    const el = {
+      tag, style: {}, attrs: {}, classList: { add: noop },
+      appendChild: noop, remove: noop,
+      setAttribute(k, v) { this.attrs[k] = v; },
+    };
+    if (tag === "foreignObject") fo = el;
+    return el;
+  };
   global.document = {
     createElement: () => {
       input = {
@@ -88,6 +94,7 @@ function edit(shape, opts) {
   delete global.document;
   delete global.svgEl;
   assert.ok(input, "no input was built");
+  input.fo = fo;
   return input;
 }
 
@@ -133,21 +140,56 @@ function edit(shape, opts) {
     "a stored-box label renders left-anchored, so it edits left-anchored");
 }
 
-// ── the width-fit cap, live ───────────────────────────────────────────────
+// ── the box hugs the text, live ───────────────────────────────────────────
 
 {
+  // Short text: the box shrink-wraps to text + the render's padding and
+  // stays centred on its anchor — editing IS the label, not a field.
   const input = edit({ kind: "rectangle", metadata: null }, { renderedFontSize: 20 });
-  assert.ok(input.listeners.input, "unpinned labels re-fit as they type");
+  assert.ok(input.listeners.input, "the editor re-fits as the user types");
+  input.value = "hi";
+  input.listeners.input();
+  // measure stub: 2 chars × 20 × 0.5 = 20px wide; pad = box h 40 × 0.13
+  const hugW = parseFloat(input.fo.attrs.width);
+  assert.ok(hugW < 200, "the box hugs short text instead of gaping around it");
+  assert.ok(hugW >= 20, "…but never collapses below the text");
+  const x = parseFloat(input.fo.attrs.x);
+  assert.ok(Math.abs((x + hugW / 2) - 200) < 1,
+    "and resizes about its centre anchor (box centre stays put)");
+
+  // Long text: the width-fit cap gives font, the box stops at the full
+  // box width — exactly the committed result at every keystroke.
   input.value = "a very long label that cannot fit the box at full size";
   input.listeners.input();
   assert.ok(parseFloat(input.style.fontSize) < 20,
-    "text wider than the box shrinks the font, exactly as commit will — " +
-    "instead of scrolling out of view inside the input");
+    "past the box, the font gives — as commit will");
+  assert.ok(parseFloat(input.fo.attrs.width) <= 200 + 0.001,
+    "the box never outgrows what commit would draw");
+}
 
+{
+  // Pinned: the font holds and the BOX grows — the render's rule.
   const pinned = edit({ kind: "rectangle", metadata: null },
     { renderedFontSize: 20, pinned: true });
-  assert.ok(!pinned.listeners.input,
-    "a pinned size never re-fits — same exemption as the render");
+  pinned.value = "a very long label at a size the user chose deliberately";
+  pinned.listeners.input();
+  assert.strictEqual(parseFloat(pinned.style.fontSize), 20,
+    "a pinned size never shrinks — same exemption as the render");
+  assert.ok(parseFloat(pinned.fo.attrs.width) > 200,
+    "…the box grows to hold it instead");
+}
+
+{
+  // A stored, un-aligned, un-pinned box is honoured at full size by the
+  // render — so the editor keeps it too; hugging here would show a
+  // tighter label than Enter draws.
+  const boxed = edit({ kind: "rectangle",
+    metadata: { title: "x", title_box: { x: 0, y: 0, w: 40, h: 20 } } },
+    { renderedFontSize: 18 });
+  boxed.value = "x";
+  boxed.listeners.input();
+  assert.strictEqual(boxed.fo.attrs.width, undefined,
+    "commit honours the stored box, so the editor never resizes it");
 }
 
 console.log("label editor wysiwyg: all checks passed");

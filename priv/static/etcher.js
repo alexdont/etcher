@@ -18741,28 +18741,60 @@
           ? "center"
           : "left";
 
-      // The render's width-fit cap, live: a title wider than its box is
-      // drawn at a smaller font rather than clipped, so the editor shrinks
-      // the same way AS the user types — otherwise a long label scrolled
-      // inside the input and came back a size the typing never showed.
-      // Pinned sizes are exempt here exactly as they are in the render.
-      if (!this._hasPinnedFontSize(shape)) {
-        var selfEd = this;
-        var edAvail = Math.max(1, w - edPad * 2);
-        var edFit = function() {
-          var t = input.value || "";
-          var size = edFontSize;
-          var wide = t && selfEd._measureTextWidth(t, edFontSize, edFamily, "500");
-          if (wide > edAvail) {
-            size = Math.max(
-              selfEd._zoomPx(10), edFontSize * edAvail / wide * 0.99
-            );
-          }
-          input.style.fontSize = size + "px";
-        };
-        input.addEventListener("input", edFit);
-        edFit();
-      }
+      // The box hugs the text, live — the render's own rules replayed on
+      // every keystroke, so the editor is not "a field the label goes
+      // into" but the label itself with a caret in it.
+      //
+      // Which rule depends on what commit will do, and the split mirrors
+      // the render's `hasExplicitBox` exactly: a stored, un-aligned,
+      // un-pinned box is honoured at its full size (so the editor keeps
+      // it — hugging here would show a tighter label than Enter draws),
+      // and everything else shrink-wraps (so the editor does too: width
+      // tracks the text plus the render's padding, the font shrinks at
+      // the width-fit cap once the text outgrows the box, and a pinned
+      // size grows the box instead, cap-exempt — all exactly as commit).
+      // The anchor holds while the box breathes: centre-anchored text
+      // resizes about its centre, left-anchored about its left edge.
+      var selfEd = this;
+      var edPinned = this._hasPinnedFontSize(shape);
+      var edAlignForBox = this._labelRidesShaft(shape.kind)
+        ? null
+        : normalizeTitleAlign(shape.metadata && shape.metadata.title_align);
+      var edExplicitBox = !edAlignForBox && !edPinned &&
+        !!(shape.metadata && shape.metadata.title_box);
+      var edCx = (Math.min(tl.x, br.x) + Math.max(tl.x, br.x)) / 2;
+      var edCy = (Math.min(tl.y, br.y) + Math.max(tl.y, br.y)) / 2;
+      var edLeft = Math.min(tl.x, br.x);
+      var edFit = function() {
+        var t = input.value || "";
+        var size = edFontSize;
+        var textW = t
+          ? selfEd._measureTextWidth(t, edFontSize, edFamily, "500")
+          : 0;
+        if (!edPinned && textW + edPad * 2 > w) {
+          // The render's width-fit cap: past the box, the font gives.
+          size = Math.max(
+            selfEd._zoomPx(10),
+            edFontSize * Math.max(1, w - edPad * 2) / textW * 0.99
+          );
+          textW = t ? selfEd._measureTextWidth(t, size, edFamily, "500") : 0;
+        }
+        input.style.fontSize = size + "px";
+        if (edExplicitBox) return; // commit honours the stored box; so do we
+        // Shrink-wrap, with a floor so an empty label still shows a caret
+        // box worth aiming at (~2 characters).
+        var boxW = Math.max(size * 2, textW + edPad * 2);
+        if (!edPinned && boxW > w) boxW = w;
+        var boxH = size * 1.2 + edPad * 2;
+        fo.setAttribute("width", boxW);
+        fo.setAttribute("height", boxH);
+        fo.setAttribute("y", edCy - boxH / 2);
+        fo.setAttribute("x", input.style.textAlign === "center"
+          ? edCx - boxW / 2
+          : edLeft);
+      };
+      input.addEventListener("input", edFit);
+      edFit();
 
       fo.appendChild(input);
       this.svg.appendChild(fo);
@@ -18774,6 +18806,11 @@
       var hostEl = this._textEditHost(shape);
       var existing = hostEl && hostEl.querySelector(".etcher-text-content");
       if (existing) existing.setAttribute("visibility", "hidden");
+      // The rect too — the input wears the plate and the box now, and the
+      // committed rect frozen at its old extent behind a live-resizing
+      // editor reads as two labels fighting.
+      var exRect = hostEl && hostEl.querySelector(".etcher-text-rect");
+      if (exRect) exRect.setAttribute("visibility", "hidden");
 
       input.addEventListener("keydown", function(e) {
         if (e.key === "Enter") {
@@ -18909,6 +18946,8 @@
       var hostEl = ed.shape && this._textEditHost(ed.shape);
       var existing = hostEl && hostEl.querySelector(".etcher-text-content");
       if (existing) existing.removeAttribute("visibility");
+      var exRect = hostEl && hostEl.querySelector(".etcher-text-rect");
+      if (exRect) exRect.removeAttribute("visibility");
       this._textEditor = null;
     },
 

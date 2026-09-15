@@ -3793,6 +3793,36 @@
         // required — the !INPUT/!TEXTAREA gate above keeps it from
         // firing while the user is typing in a form.
         if (e.key === "Backspace" || e.key === "Delete") {
+          // A focused LABEL first: clicking a label clears the shape
+          // selection on the way into title-edit mode, so this state and
+          // the ones below are mutually exclusive — and without this
+          // branch, Delete on a label fell through every check and did
+          // nothing at all. On a text-kind shape (text, callout,
+          // dimension) the text IS the shape, so deleting the label
+          // deletes it, same as selecting it would; everywhere else the
+          // label clears — text and its box, alignment, offset, colour —
+          // and the shape stays, one undo entry for the lot.
+          if (self.editingTitleShape) {
+            e.preventDefault();
+            var tShape = self.editingTitleShape;
+            self._exitTitleEditMode();
+            if (self._isTextKind(tShape.kind)) {
+              self._deleteShape(tShape);
+            } else {
+              var tBefore = self._snapshotShape(tShape);
+              tShape.metadata = Object.assign({}, tShape.metadata || {}, {
+                title: "",
+                title_box: null,
+                title_align: null,
+                title_offset: null,
+                title_color: null
+              });
+              self._renderShape(tShape);
+              self._pushUndo(tShape.uuid, tBefore, self._snapshotShape(tShape));
+              self._emitChanged();
+            }
+            return;
+          }
           // Vertex selection wins over shape selection — clicking a
           // polygon vertex first scopes the next delete to just those
           // points. Falls through if removing the selected count would

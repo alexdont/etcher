@@ -197,6 +197,13 @@ function edit(shape, opts) {
     "the title render never wraps — multi-line is the author's newlines");
   assert.ok(!src.includes("widthAtHeightFont > availWidth"),
     "and never caps the font to the box");
+  const commit = src.slice(
+    src.indexOf("var newTitle = ed.input.value"),
+    src.indexOf("_cancelTextEdit: function")
+  );
+  assert.ok(/if \(this\.editingTitleShape === shape\) this\._positionAllTitleHandles\(shape\);/.test(commit),
+    "committing text re-seats the corner handles — the text sizes the box " +
+    "now, so new text moves the corners they sit on");
 }
 
 console.log("label editor wysiwyg: all checks passed");

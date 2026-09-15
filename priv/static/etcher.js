@@ -18845,6 +18845,11 @@
       shape.metadata = Object.assign({}, shape.metadata || {}, patch);
       this._endTextEdit();
       this._renderShape(shape);
+      // The box is sized by the text now, so committing new text moves the
+      // label's corners — and the title-edit handles sit ON those corners.
+      // Without this they stay at the old extent, framing where the label
+      // used to end.
+      if (this.editingTitleShape === shape) this._positionAllTitleHandles(shape);
       // Whether the label controls apply turns on `metadata.title`, which
       // just changed without the selection changing — the selection-driven
       // syncs won't fire, so the section would stay as it was.

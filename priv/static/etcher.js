@@ -6570,11 +6570,12 @@
         row.appendChild(head);
         row.appendChild(input);
         popup.appendChild(row);
-        return { input: input, val: val };
+        return { row: row, input: input, val: val };
       }
 
       var w = sliderRow("Thickness");
       w.input.min = "1"; w.input.max = "40"; w.input.step = "1";
+      self._paramsWeightRow = w.row;
       self._paramsWeightInput = w.input;
       self._paramsWeightVal = w.val;
       w.input.addEventListener("input", function() {
@@ -6587,6 +6588,7 @@
 
       var o = sliderRow("Opacity");
       o.input.min = "10"; o.input.max = "100"; o.input.step = "5";
+      self._paramsOpacityRow = o.row;
       self._paramsOpacityInput = o.input;
       self._paramsOpacityVal = o.val;
       o.input.addEventListener("input", function() {
@@ -6722,6 +6724,7 @@
         return b;
       });
       popup.appendChild(dashRow);
+      self._paramsDashRow = dashRow;
 
       // Fill mode. Rides the same `_setLineParam` path as thickness and dash,
       // so selection targeting, live preview and undo all come for free.
@@ -7002,12 +7005,27 @@
       (this._paramsFillBtns || []).forEach(function(b) {
         b.classList.toggle("is-selected", b.dataset.fill === fill);
       });
+      // "No targets" is two different situations, and the panel used to
+      // conflate them. Nothing focused at all → the popup edits the global
+      // authoring defaults, and every stroke row belongs. But a focus that
+      // simply carries no stroke — a text shape, a focused label — used to
+      // fall into the same branch, so clicking a label box made the fill
+      // buttons (and sliders) appear for a thing that has neither fill nor
+      // stroke, silently wired to the authoring defaults underneath.
+      var strokeless = !targets.length &&
+        !!((this.selectedShapes && this.selectedShapes.length) ||
+           this.editingShape || this.editingTitleShape);
+      [this._paramsWeightRow, this._paramsOpacityRow, this._paramsDashRow]
+        .forEach(function(row) {
+          if (row) row.style.display = strokeless ? "none" : "";
+        });
       // A selection that cannot hold a fill (shafts, markers) hides the fill
       // row rather than offering buttons that would edit dead data. With no
-      // targets the popup edits the global default, which IS fillable.
+      // targets AND nothing focused the popup edits the global default,
+      // which IS fillable.
       if (this._paramsFillRow) {
         var self = this;
-        var fillable = !targets.length ||
+        var fillable = (!targets.length && !strokeless) ||
           targets.some(function(s) { return self._isStrokeShape(s.kind); });
         this._paramsFillRow.style.display = fillable ? "" : "none";
       }

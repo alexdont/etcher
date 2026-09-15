@@ -18990,6 +18990,25 @@
         // editor stays; the panel edit lands on it live; typing or a
         // click on the canvas commits as before.
         if (e.target.closest && e.target.closest(CHROME_SELECTOR)) return;
+        // A canvas click on a box that was STYLED this session but is
+        // still empty means "done with the menus, back to typing" — the
+        // click that used to throw the freshly-dressed element away.
+        // Refocus instead. Scoped three ways so nothing else changes
+        // meaning: only while empty (text present -> click-away commits,
+        // as ever), only after a panel edit (an unstyled empty box still
+        // dismisses on click-away — the change-of-mind gesture), and only
+        // on EMPTY canvas (a press on another shape is about that shape).
+        var ed = self._textEditor;
+        if (ed && ed.styledSinceOpen && !(input.value || "").trim()) {
+          var onShape = null;
+          try { onShape = self._shapeAt(self._toImage(e)); } catch (_) {}
+          if (!onShape || onShape === ed.shape) {
+            e.preventDefault();
+            e.stopPropagation();
+            setTimeout(function() { try { input.focus(); } catch (_) {} }, 0);
+            return;
+          }
+        }
         self._commitTextEdit();
       };
       document.addEventListener("pointerdown", self._textEditOutsideDown, true);
@@ -19014,6 +19033,11 @@
           shape, parseFloat(ed.input.style.fontSize) || 14
         );
       }
+      // Remember that this edit session has been STYLED — the outside-
+      // click handler treats a styled-but-still-empty box differently
+      // (refocus to type, not discard): someone who just picked its
+      // colour has not changed their mind about wanting it.
+      ed.styledSinceOpen = true;
       if (ed.setFontSize) ed.setFontSize(size);
       ed.input.style.fontSize = size + "px";
       var color = this._titleColorFor(shape) || "#000";

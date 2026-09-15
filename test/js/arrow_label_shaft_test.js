@@ -141,4 +141,21 @@ const board = {
     "the drag site speaks of shaft-riders now, not the dimension alone");
 }
 
+// ── alignment never fights the shaft ──────────────────────────────────────
+
+{
+  // _commitTextEdit stamps center/middle on fresh non-text labels so a
+  // rectangle's name lands inside it. Stamped on an arrow, the render's
+  // aligned re-anchor snapped the label back to the shape's bbox centre
+  // on every render — the drag stored a new offset, the render threw it
+  // away, and the label read as ungrabbable (the failure was masked on
+  // straight arrows, whose bbox centre IS the chord midpoint; a pinned
+  // label size forced the re-anchoring path and surfaced it).
+  assert.ok(/!this\._labelRidesShaft\(shape\.kind\) &&\n\s*!normalizeTitleAlign/.test(src),
+    "a fresh shaft-riding label is never stamped with an alignment");
+  assert.ok(/var titleAlign = this\._labelRidesShaft\(shape\.kind\)\n\s*\? null/.test(src),
+    "and the render ignores an alignment already stamped on one, so " +
+    "existing labels heal instead of staying stuck at the bbox centre");
+}
+
 console.log("arrow label shaft: all checks passed");

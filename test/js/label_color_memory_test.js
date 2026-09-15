@@ -36,6 +36,7 @@ function commit(shape, typed, remembered) {
     _textEditor: { shape, input: { value: typed } },
     _getPref: (k) => (k === "label_color" ? remembered : undefined),
     _isTextKind: (k) => k === "text" || k === "callout" || k === "dimension",
+    _labelRidesShaft: (k) => k === "dimension" || k === "arrow",
     _snapshotShape: () => ({}),
     _endTextEdit: () => {},
     _renderShape: () => {},

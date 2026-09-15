@@ -12194,7 +12194,17 @@
         // label reads wrong at any size but its own — a right-anchored box
         // wider than its text puts the shape's right edge next to empty
         // space, not next to the words.
-        var titleAlign = normalizeTitleAlign(shape.metadata && shape.metadata.title_align);
+        // Alignment is meaningless on a shaft-riding label — its position
+        // IS the offset along the line. _commitTextEdit used to stamp
+        // center/middle on every fresh non-text label, arrow included, and
+        // the aligned re-anchor below then snapped the label back to the
+        // shape's bbox centre on every render: the drag stored a new
+        // offset, the render threw it away, and the label read as
+        // ungrabbable. Ignored here (not just no longer stamped) so labels
+        // that already carry the stamp heal instead of staying stuck.
+        var titleAlign = this._labelRidesShaft(shape.kind)
+          ? null
+          : normalizeTitleAlign(shape.metadata && shape.metadata.title_align);
         // A PINNED size sizes the box too, dragged or not. The stored box is
         // the record of a drag, and a drag is the other way of setting the
         // size — so once a number has been typed instead, honouring the old
@@ -18684,6 +18694,7 @@
       // name to land in the rectangle. Only on creation, so re-editing the
       // text never moves a label the user has since placed.
       if (newTitle && !prevTitle && !this._isTextKind(shape.kind) &&
+          !this._labelRidesShaft(shape.kind) &&
           !normalizeTitleAlign(shape.metadata && shape.metadata.title_align)) {
         patch.title_align = { h: "center", v: "middle" };
       }

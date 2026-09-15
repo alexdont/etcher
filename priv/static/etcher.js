@@ -18877,12 +18877,18 @@
       input.style.outline = "none";
       // Typing grows from where the committed text will sit: centred for a
       // shaft-rider, a fresh label (commit centres those in the shape) or
-      // an aligned one; left only for a label whose stored box anchors it.
+      // an aligned one. Left for a label whose stored box anchors it — and
+      // for text and callout shapes, whose committed render draws from the
+      // left edge of their own box: centring those made the words jump
+      // left the moment Enter landed.
       var edHasTitle =
         shape.metadata && String(shape.metadata.title || "").trim() !== "";
+      var edOwnBox = shape.kind === "text" || shape.kind === "callout";
       input.style.textAlign =
-        this._labelRidesShaft(shape.kind) || !edHasTitle ||
-        normalizeTitleAlign(shape.metadata && shape.metadata.title_align)
+        this._labelRidesShaft(shape.kind) ||
+        (!edOwnBox &&
+          (!edHasTitle ||
+            normalizeTitleAlign(shape.metadata && shape.metadata.title_align)))
           ? "center"
           : "left";
 
@@ -18908,10 +18914,14 @@
           if (lw > maxW) maxW = lw;
         }
         // Floor of ~2 characters so an empty label still shows a caret
-        // box worth aiming at. Height mirrors the render's line layout:
-        // one font-height plus 1.1em per further line, plus the pads.
+        // box worth aiming at. Height allots the full 1.1em line box per
+        // line PLUS descender headroom: the first cut of this maths gave
+        // each line exactly 1.0em, and with overflow:hidden the textarea
+        // clipped the bottom of every glyph while typing — the committed
+        // SVG text (which nothing clips) then popped in whole, so the
+        // editor looked "crooked" precisely until Enter.
         var boxW = Math.max(edFontSize * 2, maxW + edPad * 2);
-        var boxH = edFontSize * (1 + (linesEd.length - 1) * 1.1) + edPad * 2;
+        var boxH = edFontSize * (1.1 * linesEd.length + 0.2) + edPad * 2;
         fo.setAttribute("width", boxW);
         fo.setAttribute("height", boxH);
         fo.setAttribute("y", edCy - boxH / 2);

@@ -138,6 +138,11 @@ function edit(shape, opts) {
     metadata: { title: "x", title_box: { x: 0, y: 0, w: 40, h: 20 } } }, { renderedFontSize: 18 });
   assert.strictEqual(boxed.style.textAlign, "left",
     "a stored-box label renders left-anchored, so it edits left-anchored");
+  const textShape = edit({ kind: "text", geometry: { x: 0, y: 0, w: 200, h: 60 },
+    metadata: null }, { renderedFontSize: 18 });
+  assert.strictEqual(textShape.style.textAlign, "left",
+    "a text shape commits from the left edge of its own box — centring " +
+    "the editor made the words jump left on Enter");
 }
 
 // ── the box hugs the text, live — no caps, no wrap ────────────────────────

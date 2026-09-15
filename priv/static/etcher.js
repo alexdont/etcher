@@ -6308,6 +6308,15 @@
           var before = self._snapshotShape(shape);
           if (shape.kind === "text" || shape.kind === "callout") {
             shape.style = Object.assign({}, shape.style || {}, { color: color });
+            // The element too, not just the style: text and callout draw
+            // in currentColor off their own <g>, and their render never
+            // re-reads style.color — so writing the style alone changed
+            // nothing visible. The WYSIWYG editor DOES read the style,
+            // which is why the preview looked right and the committed
+            // text popped back to the old ink on Enter (the plate chip
+            // worked all along because _applyLabelBg reads style at
+            // render). Same explicit call _applyColorToTargets makes.
+            self._applyShapeColor(shape.el, color, shape.style);
           } else {
             shape.metadata = Object.assign({}, shape.metadata || {}, {
               title_color: color

@@ -43,6 +43,10 @@ function board(over) {
     _getPref(k) { return this.prefs[k]; },
     _setPref(k, v) { this.prefs[k] = v; },
     _renderShape(s) { this.rendered.push(s); },
+    painted: [],
+    _applyShapeColor(el, color) {
+      this.painted.push({ el, color });
+    },
     _restyleDrafts() { this.restyled++; },
     _refreshTextEditorStyle() {},
     _refreshLabelSwatch() {},
@@ -66,10 +70,10 @@ function board(over) {
 // ── with a selection: the pick lands on IT, visibly ───────────────────────
 
 {
-  const titled = { uuid: "a", kind: "rectangle", metadata: { title: "hi" }, style: { color: "#0000ff" } };
-  const text = { uuid: "b", kind: "text", style: { color: "#0000ff" } };
-  const callout = { uuid: "c", kind: "callout", style: { color: "#0000ff" } };
-  const plain = { uuid: "d", kind: "rectangle", style: { color: "#0000ff" } };
+  const titled = { uuid: "a", kind: "rectangle", el: { id: "a" }, metadata: { title: "hi" }, style: { color: "#0000ff" } };
+  const text = { uuid: "b", kind: "text", el: { id: "b" }, style: { color: "#0000ff" } };
+  const callout = { uuid: "c", kind: "callout", el: { id: "c" }, style: { color: "#0000ff" } };
+  const plain = { uuid: "d", kind: "rectangle", el: { id: "d" }, style: { color: "#0000ff" } };
   const self = board({ selectedShapes: [titled, text, callout, plain] });
   self.shapes = [titled, text, callout, plain];
 
@@ -84,6 +88,13 @@ function board(over) {
   // mirroring exactly where _currentLabelColor reads from.
   assert.strictEqual(text.style.color, "#00ff00");
   assert.strictEqual(callout.style.color, "#00ff00");
+  // …painted onto the ELEMENT too: both draw in currentColor off their
+  // own <g>, and their render never re-reads style.color — writing the
+  // style alone looked right in the editor preview and popped back to
+  // the old ink on commit.
+  assert.deepStrictEqual(self.painted.map((p) => p.el.id), ["b", "c"],
+    "text and callout get _applyShapeColor, in order — and nothing else does");
+  assert.ok(self.painted.every((p) => p.color === "#00ff00"));
 
   assert.ok(!(plain.metadata && plain.metadata.title_color),
     "a shape with no label has no label to recolour");

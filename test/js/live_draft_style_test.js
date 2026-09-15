@@ -44,6 +44,7 @@ function board(over) {
     activeColor: "#93c5fd",
     lineParams: { width: 4, opacity: 1, dash: "solid", fill: "semi" },
     _restyleDrafts: restyleDrafts,
+    _refreshTextEditorStyle() {},
     _styleForNewShape: styleForNewShape,
     _isShaftKind: isShaftKind,
     _isStrokeShape: isStrokeShape,

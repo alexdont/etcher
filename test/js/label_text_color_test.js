@@ -44,6 +44,7 @@ function board(over) {
     _setPref(k, v) { this.prefs[k] = v; },
     _renderShape(s) { this.rendered.push(s); },
     _restyleDrafts() { this.restyled++; },
+    _refreshTextEditorStyle() {},
     _refreshLabelSwatch() {},
     _syncStyleInspector() {},
     _snapshotShape: (s) => JSON.parse(JSON.stringify(s || {})),

@@ -1219,7 +1219,14 @@
       // The foreignObject editor sits above the shape — its inner
       // <input> handles its own focus/blur, but a fallback z-index keeps
       // it clear of any overlapping shape.
-      ".etcher-text-editor { z-index: 10; }",
+      // pointer-events back on: the editor lives inside the overlay SVG,
+      // which is pointer-events:none so drags reach the canvas — without
+      // this override a click INTO the open editor fell through to the
+      // document handler and committed it. Typing only ever worked because
+      // focus was set programmatically; clicking to reposition the caret,
+      // or to come back after a trip to the style panel, closed the very
+      // box being written.
+      ".etcher-text-editor { z-index: 10; pointer-events: auto; }",
       // Eraser mid-sweep: shapes the cursor has touched get
       // de-saturated + dimmed so the user can see what's about to
       // disappear when they release.
@@ -6239,6 +6246,7 @@
         this._setPref("label_bg", color == null ? null : color);
         this._restyleDrafts();
       }
+      this._refreshTextEditorStyle();
       this._syncLabelBgRow();
       this._refreshLabelSwatch();
       if (!commit) return;
@@ -6288,6 +6296,7 @@
         this._setPref("label_color", color);
         this._restyleDrafts();
       }
+      this._refreshTextEditorStyle();
       this._refreshLabelSwatch();
     },
 
@@ -6345,6 +6354,13 @@
         if (s.kind === "text" || s.kind === "callout") return true;
         return !!(s.metadata && String(s.metadata.title || "").trim() !== "");
       }
+      // An OPEN text editor is the most explicit focus there is — the
+      // user placed a box and is styling what they are about to type.
+      // Without this, the panel's size/colour controls edited the global
+      // default while the box on screen kept its old dress.
+      if (this._textEditor && draws(this._textEditor.shape)) {
+        return [this._textEditor.shape];
+      }
       if (this.selectedShapes && this.selectedShapes.length) {
         return this.selectedShapes.filter(draws);
       }
@@ -6388,6 +6404,9 @@
         else this.lineParams.font_size = value;
         this._restyleDrafts();
       }
+      // A panel edit while the inline editor is open dresses the editor
+      // too — the user is styling the text they are typing.
+      this._refreshTextEditorStyle();
       if (!commit) return;
       if (this._fontSizeBefore && this._fontSizeBefore.length) {
         this._emitChanged();
@@ -6996,6 +7015,12 @@
     // The shape whose style the panel is showing: the selection's first
     // shape, else the edit-mode shape, else nothing (defaults).
     _inspectedShape: function() {
+      // The shape whose inline text editor is open counts as inspected —
+      // a palette press while styling a fresh text box must dress THAT
+      // box, not repaint the authoring default under it.
+      if (this._textEditor && this._textEditor.shape) {
+        return this._textEditor.shape;
+      }
       if (this.selectedShapes && this.selectedShapes.length) {
         return this.selectedShapes[0];
       }
@@ -10794,7 +10819,11 @@
         ? []
         : (this.selectedShapes && this.selectedShapes.length)
           ? this.selectedShapes.slice()
-          : (this.editingShape ? [this.editingShape] : []);
+          : this.editingShape
+            ? [this.editingShape]
+            : (this._textEditor && this._textEditor.shape)
+              ? [this._textEditor.shape]
+              : [];
       colorTargets.forEach(function(shape) {
         if (!shape.uuid) return;
         var before = self._snapshotShape(shape);
@@ -10824,6 +10853,7 @@
         this.freehandEditor.controls.forEach(function(c) { c.el.style.color = handleColor; });
         this.freehandEditor.lines.forEach(function(l) { l.el.style.color = handleColor; });
       }
+      this._refreshTextEditorStyle();
     },
 
     _applyShapeColor: function(el, color, style) {
@@ -18868,7 +18898,15 @@
 
       fo.appendChild(input);
       this.svg.appendChild(fo);
-      this._textEditor = { fo: fo, input: input, shape: shape };
+      this._textEditor = {
+        fo: fo,
+        input: input,
+        shape: shape,
+        // For _refreshTextEditorStyle: re-fit after a panel edit, and
+        // swap the closure's font size so the fit measures at the new one.
+        fit: edFit,
+        setFontSize: function(s) { edFontSize = s; }
+      };
       // Hide the visible <text> while editing — the input shows the
       // current content live, and overlapping them blurs the readout.
       // For title edits, the visible text lives on the title group
@@ -18901,6 +18939,11 @@
         // Defer so synchronous Enter/Esc handling above wins.
         setTimeout(function() {
           if (self._textEditor && self._textEditor.input === input) {
+            // Focus moved into the panel (a number input, a slider): the
+            // user is styling the text they are about to type, not done
+            // with it. Same exclusion as the pointerdown path above.
+            var a = document.activeElement;
+            if (a && a.closest && a.closest(CHROME_SELECTOR)) return;
             self._commitTextEdit();
           }
         }, 0);
@@ -18914,12 +18957,45 @@
       self._textEditOutsideDown = function(e) {
         if (!self._textEditor || self._textEditor.input !== input) return;
         if (e.target === input || (fo.contains && fo.contains(e.target))) return;
+        // Etcher's own chrome — the style panel, its popups, the toolbar —
+        // does not close the editor. Reaching for a size or a colour is
+        // the most natural thing to do with a fresh text box open, and
+        // committing here threw the (empty) box away mid-thought. The
+        // editor stays; the panel edit lands on it live; typing or a
+        // click on the canvas commits as before.
+        if (e.target.closest && e.target.closest(CHROME_SELECTOR)) return;
         self._commitTextEdit();
       };
       document.addEventListener("pointerdown", self._textEditOutsideDown, true);
       // Focus on next frame so the foreignObject is attached before
       // we yank the cursor in.
       setTimeout(function() { try { input.focus(); input.select(); } catch (_) {} }, 0);
+    },
+
+    // Re-dress the OPEN inline editor after a panel edit — size, ink,
+    // plate — in place, without recreating it, so the caret and the text
+    // typed so far survive. The setters that can restyle a text shape all
+    // call this; with no editor open it is a no-op.
+    _refreshTextEditorStyle: function() {
+      var ed = this._textEditor;
+      if (!ed || !ed.shape || !ed.input) return;
+      var shape = ed.shape;
+      var host = this._textEditHost(shape);
+      var tEl = host && host.querySelector && host.querySelector("text");
+      var size = tEl && parseFloat(tEl.getAttribute("font-size"));
+      if (!(size > 0)) {
+        size = this._fontSizeFor(
+          shape, parseFloat(ed.input.style.fontSize) || 14
+        );
+      }
+      if (ed.setFontSize) ed.setFontSize(size);
+      ed.input.style.fontSize = size + "px";
+      var color = this._titleColorFor(shape) || "#000";
+      ed.input.style.color = color;
+      ed.input.style.caretColor = color;
+      var bg = this._labelBgFor ? this._labelBgFor(shape) : null;
+      ed.input.style.background = bg || "transparent";
+      if (ed.fit) ed.fit();
     },
 
     _commitTextEdit: function() {

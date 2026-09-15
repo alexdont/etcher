@@ -1975,6 +1975,9 @@
   // geometry (hit test, label arc-length, bbox). Eight is plenty: bends
   // are sparse and the tolerances that consume this are generous.
   var ROUTE_SAMPLES = 8;
+  // Breathing room past the outermost out-of-image stroke when the pan
+  // bounds are loosened to reach it, in image px.
+  var PAN_BOUNDS_PAD = 48;
 
   // How much of a marker's incoming pointer position is carried over from the
   // previous smoothed one: `smoothed += (raw - smoothed) * (1 - STREAMLINE)`.
@@ -10546,7 +10549,78 @@
       }
     },
 
+    // Let pan reach ink outside the picture. Fresco clamps panning to the
+    // canvas, so a stroke drawn above a wide image (or beside a tall one)
+    // became unreachable the moment you zoomed in — you could SEE it at
+    // fit zoom and never get to it. Whenever annotations change, the pan
+    // bounds grow to the union of the canvas and everything drawn, padded
+    // on the spilled sides only — no ink outside, no extra slack — and
+    // collapse back to the default clamp when the last outside shape goes.
+    _syncPanBounds: function() {
+      if (this.handleKind !== "canvas") return;
+      var h = this.handle;
+      if (!h || typeof h.setPanBounds !== "function" ||
+          typeof h.getCanvasSize !== "function") return;
+      // An infinite canvas has no clamp to loosen — setting bounds there
+      // would ADD one, turning a free board into a fenced one the moment
+      // a shape strayed. Only manage bounds where Fresco clamps by
+      // default, and only when the handle can say which it is.
+      if (typeof h.isInfiniteCanvas !== "function" || h.isInfiniteCanvas()) {
+        return;
+      }
+      var size = null;
+      try { size = h.getCanvasSize(); } catch (_) {}
+      if (!size || !(size.width > 0) || !(size.height > 0)) return;
+      var minX = 0, minY = 0, maxX = size.width, maxY = size.height;
+      var self = this;
+      (this.shapes || []).forEach(function(sh) {
+        var boxes = [];
+        try {
+          var b = self._shapeBBoxImagePx(sh);
+          if (b) boxes.push(b);
+        } catch (_) {}
+        // Labels hang off their shapes, and a label can be the very thing
+        // parked outside.
+        if (sh._renderedTitleImage) boxes.push(sh._renderedTitleImage);
+        boxes.forEach(function(r) {
+          if (!r) return;
+          if (r.x < minX) minX = r.x;
+          if (r.y < minY) minY = r.y;
+          if (r.x + (r.w || 0) > maxX) maxX = r.x + (r.w || 0);
+          if (r.y + (r.h || 0) > maxY) maxY = r.y + (r.h || 0);
+        });
+      });
+      var spills = minX < 0 || minY < 0 ||
+        maxX > size.width || maxY > size.height;
+      if (!spills) {
+        // Back to the stock clamp — but only if we were the ones who
+        // loosened it, so a host's own setPanBounds is never clobbered.
+        if (this._panBoundsActive) {
+          this._panBoundsActive = false;
+          try { h.setPanBounds(null); } catch (_) {}
+        }
+        return;
+      }
+      // Breathing room on the spilled sides only, so the outermost stroke
+      // isn't glued to the clamp edge; the un-spilled sides keep the exact
+      // default so nothing changes where nothing was drawn.
+      var rect = {
+        x: minX < 0 ? minX - PAN_BOUNDS_PAD : 0,
+        y: minY < 0 ? minY - PAN_BOUNDS_PAD : 0
+      };
+      rect.width =
+        (maxX > size.width ? maxX + PAN_BOUNDS_PAD : size.width) - rect.x;
+      rect.height =
+        (maxY > size.height ? maxY + PAN_BOUNDS_PAD : size.height) - rect.y;
+      this._panBoundsActive = true;
+      try { h.setPanBounds(rect); } catch (_) {}
+    },
+
     _emitChanged: function() {
+      // Every change worth persisting is also a moment the reachable
+      // canvas may have grown or shrunk — before the host guard, because
+      // pan bounds matter on hosts that persist nothing.
+      this._syncPanBounds();
       if (!this.pushEventTo) return;
       var stripMode = this.handleKind === "strip";
       // An image still uploading IS included: its position, size, layering
@@ -19470,6 +19544,10 @@
         self._renderAnnotation(ann);
       });
 
+      // Hydrated shapes may already live outside the picture — the pan
+      // must reach them from the first frame, not from the first edit.
+      self._syncPanBounds();
+
       // If any pre-0.4.7 canvas shapes got their `image_id`
       // backfilled during the loop above, push one bulk emit so the
       // consumer persists the new ids. The next mount sees them in
@@ -19529,6 +19607,7 @@
 
       // Tell consumer save handlers the live set changed.
       this._emitChanged();
+      this._syncPanBounds();
     },
 
     // Re-seed color slots from the swapped-in `extensions.etcher.colors`,
@@ -22011,6 +22090,7 @@
       if (this.editingTitleShape === shape) this._positionAllTitleHandles(shape);
 
       this._emitChanged();
+      this._syncPanBounds();
     },
 
     _refreshUndoButtons: function() {

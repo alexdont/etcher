@@ -1231,6 +1231,12 @@
       // Cursor changes to "grab" so users know they can drag it; the
       // leader line stays subtle so the parent shape remains the
       // primary visual.
+      // The WYSIWYG label editor's placeholder: the label's own ink,
+      // dimmed — a grey placeholder would be invisible on some plates and
+      // garish on others.
+      ".etcher-text-editor input::placeholder {",
+      "  color: currentColor; opacity: 0.45;",
+      "}",
       ".etcher-title-group { cursor: grab; }",
       ".etcher-title-group.is-dragging { cursor: grabbing; }",
       ".etcher-title-leader {",
@@ -18679,16 +18685,84 @@
       input.style.width = "100%";
       input.style.height = "100%";
       input.style.boxSizing = "border-box";
-      input.style.border = "2px dashed currentColor";
-      input.style.background = "rgba(255, 255, 255, 0.9)";
-      // Hard-pin black so the typed text is readable on the white-ish
-      // input background regardless of the shape's stroke color (light
-      // pastels like yellow / pink were nearly invisible when the input
-      // inherited the shape's color).
-      input.style.color = "#000";
-      input.style.padding = "2px 4px";
-      input.style.font = "500 14px ui-sans-serif, system-ui, -apple-system, sans-serif";
+
+      // The editor IS the label. It used to be a white box with a dashed
+      // border and 14px black text — nothing like what commit would draw,
+      // so every edit was typed blind into a form control and the real
+      // look only appeared on Enter. Instead the input wears exactly what
+      // the rendered label wears — its font at its rendered size, its own
+      // ink, its plate (or nothing) behind it — so what is on screen while
+      // typing is what will be on screen after.
+      //
+      // The font size comes off the RENDERED <text> when there is one:
+      // that number already went through the box-drives-font rule, the
+      // pinned-size override and the width-fit cap, and re-deriving it
+      // here would just be a second copy of that pipeline to keep honest.
+      // A label-less shape has no text yet, so its editor uses the same
+      // base rule the first render will (box height × 0.65, floored).
+      var edHost = this._textEditHost(shape);
+      var edTextEl = edHost && edHost.querySelector &&
+        edHost.querySelector("text");
+      var edFontSize = edTextEl && parseFloat(edTextEl.getAttribute("font-size"));
+      if (!(edFontSize > 0)) {
+        edFontSize = this._fontSizeFor(shape, Math.max(this._zoomPx(10), h * 0.65));
+      }
+      // Readability is the label's own problem now, which is the point: a
+      // colour that vanishes over the photo vanishes while typing too, and
+      // the plate toggle is right there. Pinning black here was the old
+      // trade — legible editing, blind editing.
+      var edColor = this._titleColorFor(shape) || "#000";
+      var edBg = this._labelBgFor ? this._labelBgFor(shape) : null;
+      input.style.border = "none";
+      input.style.background = edBg || "transparent";
+      if (edBg) {
+        input.style.borderRadius =
+          Math.round(LABEL_BG_RADIUS_RATIO * Math.min(w, h)) + "px";
+      }
+      input.style.color = edColor;
+      input.style.caretColor = edColor;
+      // The render's own padding rule: a fraction of the box, or of the
+      // font once a size is pinned (0.13 / 0.65 = 0.2 — same proportion).
+      var edPad = this._hasPinnedFontSize(shape)
+        ? edFontSize * 0.2
+        : h * 0.13;
+      input.style.padding = "0 " + Math.round(edPad) + "px";
+      var edFamily = "ui-sans-serif, system-ui, -apple-system, sans-serif";
+      input.style.font = "500 " + edFontSize + "px " + edFamily;
       input.style.outline = "none";
+      // Typing grows from where the committed text will sit: centred for a
+      // shaft-rider, a fresh label (commit centres those in the shape) or
+      // an aligned one; left only for a label whose stored box anchors it.
+      var edHasTitle =
+        shape.metadata && String(shape.metadata.title || "").trim() !== "";
+      input.style.textAlign =
+        this._labelRidesShaft(shape.kind) || !edHasTitle ||
+        normalizeTitleAlign(shape.metadata && shape.metadata.title_align)
+          ? "center"
+          : "left";
+
+      // The render's width-fit cap, live: a title wider than its box is
+      // drawn at a smaller font rather than clipped, so the editor shrinks
+      // the same way AS the user types — otherwise a long label scrolled
+      // inside the input and came back a size the typing never showed.
+      // Pinned sizes are exempt here exactly as they are in the render.
+      if (!this._hasPinnedFontSize(shape)) {
+        var selfEd = this;
+        var edAvail = Math.max(1, w - edPad * 2);
+        var edFit = function() {
+          var t = input.value || "";
+          var size = edFontSize;
+          var wide = t && selfEd._measureTextWidth(t, edFontSize, edFamily, "500");
+          if (wide > edAvail) {
+            size = Math.max(
+              selfEd._zoomPx(10), edFontSize * edAvail / wide * 0.99
+            );
+          }
+          input.style.fontSize = size + "px";
+        };
+        input.addEventListener("input", edFit);
+        edFit();
+      }
 
       fo.appendChild(input);
       this.svg.appendChild(fo);

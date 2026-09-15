@@ -145,4 +145,24 @@ function board(shapes) {
     "a handle that cannot answer is treated as unfenceable");
 }
 
+// ── the fresco handles etcher actually receives can all answer ────────────
+
+{
+  // The guard above treats a handle that cannot answer isInfiniteCanvas
+  // as untouchable — correct caution, but it silently disabled the whole
+  // feature on the canvas-board surface, whose OUTER handle forwarded
+  // setPanBounds and getCanvasSize but not the probe (the same trap
+  // zoomAt fell into once). Pin the forward in fresco itself, so a
+  // handle-layer refactor there fails HERE, where the consequence lives.
+  const frescoPath = path.join(__dirname, "..", "..", "..", "fresco",
+    "priv", "static", "fresco.js");
+  if (fs.existsSync(frescoPath)) {
+    const fresco = fs.readFileSync(frescoPath, "utf8");
+    const outer = fresco.slice(fresco.indexOf("setPanBounds:   function(b)"));
+    assert.ok(outer.includes("isInfiniteCanvas: function() { return controller.isInfiniteCanvas(); }"),
+      "fresco's outer handle must forward isInfiniteCanvas alongside " +
+      "setPanBounds, or every surface it serves loses out-of-picture pan");
+  }
+}
+
 console.log("pan bounds: all checks passed");

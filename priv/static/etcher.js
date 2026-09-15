@@ -14701,6 +14701,38 @@
       return true;
     },
 
+    // Nudge a just-placed tooltip clear of the style panel and any open
+    // popup. Zoom and pan can park a shape underneath the panel; brushing
+    // its exposed edge on the way to a control then opened a tooltip ON
+    // TOP of the very menu being aimed for — the tooltip out-stacks the
+    // panel, so the colour controls vanished behind it. The panel hangs on
+    // the right edge, so clear ground is to its left; the shift keeps the
+    // container's left edge as a floor rather than trading one covered
+    // control for an off-screen tooltip.
+    _keepTooltipClearOfChrome: function(tip, containerRect) {
+      var self = this;
+      var blockers = [this.stylePanel, this.toolsPopup, this.colorsPopup,
+                      this.paramsPopup, this.markerPopup];
+      blockers.forEach(function(el) {
+        if (!el || !el.getBoundingClientRect) return;
+        var b = el.getBoundingClientRect();
+        if (!b.width || !b.height) return; // hidden
+        var t = tip.getBoundingClientRect();
+        var overlaps = t.right > b.left && t.left < b.right &&
+                       t.bottom > b.top && t.top < b.bottom;
+        if (!overlaps) return;
+        var dx = t.right - (b.left - 8);
+        var left = parseFloat(tip.style.left) || 0;
+        var newLeft = left - dx;
+        // Floor: never push the tooltip's visible box past the container's
+        // left edge. `left` may be centre- or corner-anchored depending on
+        // the transform, so bound with the measured offset instead.
+        var minLeft = left - (t.left - (containerRect.left + 4));
+        if (newLeft < minLeft) newLeft = minLeft;
+        tip.style.left = newLeft + "px";
+      });
+    },
+
     _positionTooltip: function(shape) {
       var tip = this.tooltipEl;
       if (!tip || !shape || !shape.el) return;
@@ -14786,7 +14818,10 @@
         scrollLeft: sx,
         scrollTop: sy
       });
-      if (placed) return;
+      if (placed) {
+        this._keepTooltipClearOfChrome(tip, containerRect);
+        return;
+      }
 
       var anchorX = shapeRect.left + shapeRect.width / 2 - containerRect.left;
       var anchorTop = shapeRect.top - containerRect.top;
@@ -14827,6 +14862,7 @@
         else if (x > maxX) x = maxX;
       }
       tip.style.left = x + "px";
+      this._keepTooltipClearOfChrome(tip, containerRect);
     },
 
     _scheduleHideTooltip: function() {

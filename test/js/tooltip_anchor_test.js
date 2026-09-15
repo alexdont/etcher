@@ -130,6 +130,7 @@ function tooltipFor(shape, opts) {
       },
     },
     _isMediaKind: () => false,
+    _keepTooltipClearOfChrome: () => {},
     _shapeBBoxImagePx: () => null,
     // Identity projection, so container px == image px in these checks.
     _imageToContainer: (p) => ({ x: p.x, y: p.y }),

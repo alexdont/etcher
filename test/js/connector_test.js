@@ -543,4 +543,22 @@ assert.strictEqual(short[1][0] - short[0][0], long[1][0] - long[0][0],
   }
 }
 
+// ── magnetic mode off means off for EVERY gesture ───────────────────────────
+
+{
+  // The hover dots and the draw-from-a-dot gesture were always gated (a
+  // dot that never shows can't be dragged from), but the endpoint re-bind
+  // drag of an existing arrow searched and painted anchors
+  // unconditionally — so with the toggle off, the dots stayed away while
+  // drawing and then appeared the moment an endpoint was moved. The drag
+  // must resolve through the same _connectorsOn() gate as everything else.
+  const endpointDrag = src.slice(
+    src.indexOf("An endpoint. Same drag as line/dimension"),
+    src.indexOf("_paintTargetDots(arState)")
+  );
+  assert.ok(/var arState = this\._connectorsOn\(\)\s*\n\s*\? this\._arrowSnapState\(pt, shape\.uuid\)\s*\n\s*: \{ candidate: null, snap: null \}/.test(endpointDrag),
+    "the endpoint drag's snap search is gated on _connectorsOn() — off " +
+    "means no dots, no snap, no re-bind, for this gesture like every other");
+}
+
 console.log("connectors: all checks passed");

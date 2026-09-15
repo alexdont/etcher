@@ -21206,7 +21206,17 @@
           // anchor it's released near. Without this the handle would fight
           // the binding — the drag would move `a`/`b`, and the next render
           // would snap it straight back to the old anchor.
-          var arState = this._arrowSnapState(pt, shape.uuid);
+          //
+          // Only while connectors are ON. This drag used to search and
+          // paint anchors unconditionally, so with magnetic mode off the
+          // dots stayed away while DRAWING an arrow (that path starts from
+          // a dot, which off never shows) and then appeared the moment an
+          // endpoint was dragged — the toggle applied to one gesture and
+          // not the other. Off now means off everywhere: no dots, no snap,
+          // no re-bind; the endpoint goes exactly where the pointer says.
+          var arState = this._connectorsOn()
+            ? this._arrowSnapState(pt, shape.uuid)
+            : { candidate: null, snap: null };
           this._paintTargetDots(arState);
           var arSnap = arState.snap;
           var arEnd = arSnap ? { x: arSnap.x, y: arSnap.y } : pt;

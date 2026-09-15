@@ -203,6 +203,7 @@
     // its corners for the connector anchors — each says what it switches.
     grid: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="6" cy="6" r="1.6"/><circle cx="12" cy="6" r="1.6"/><circle cx="18" cy="6" r="1.6"/><circle cx="6" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="18" cy="12" r="1.6"/><circle cx="6" cy="18" r="1.6"/><circle cx="12" cy="18" r="1.6"/><circle cx="18" cy="18" r="1.6"/></svg>',
     connectors: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5"/><circle cx="7" cy="7" r="2" fill="currentColor" stroke="none"/><circle cx="17" cy="7" r="2" fill="currentColor" stroke="none"/><circle cx="7" cy="17" r="2" fill="currentColor" stroke="none"/><circle cx="17" cy="17" r="2" fill="currentColor" stroke="none"/></svg>',
+    titleHandles: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M9 16l3-8 3 8M10.2 13.4h5.6"/><circle cx="5.5" cy="5.5" r="1.8" fill="currentColor" stroke="none"/><circle cx="18.5" cy="5.5" r="1.8" fill="currentColor" stroke="none"/><circle cx="5.5" cy="18.5" r="1.8" fill="currentColor" stroke="none"/><circle cx="18.5" cy="18.5" r="1.8" fill="currentColor" stroke="none"/></svg>',
     // Two boxes centered on a shared dashed guide — the snap toggle.
     snap: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><line x1="12" y1="2.5" x2="12" y2="21.5" stroke-dasharray="2.4 2.2" stroke-opacity="0.6"/><rect x="5" y="5.5" width="14" height="5" rx="1.2"/><rect x="8" y="14" width="8" height="5" rx="1.2"/></svg>',
     // Two rows of dots — the drag handle every reorderable list uses.
@@ -5735,6 +5736,12 @@
         popup.appendChild(self.connectorsBtn);
       }
 
+      self.titleHandlesBtn = self._makePopupAction(
+        ICONS.titleHandles, self._titleHandlesTitle(),
+        function() { self._setPref("title_handles", !self._titleHandlesOn()); }
+      );
+      popup.appendChild(self.titleHandlesBtn);
+
       self.snapBtn = self._makePopupAction(
         ICONS.snap, self._snapTitle(),
         function() { self._setPref("snap", !self._snapOn()); }
@@ -8086,6 +8093,12 @@
         this.snapBtn.setAttribute("aria-label", this.snapBtn.title);
         this.snapBtn.setAttribute("aria-pressed", snapOn ? "true" : "false");
       }
+      if (this.titleHandlesBtn) {
+        var thOn = this._titleHandlesOn();
+        this.titleHandlesBtn.title = this._titleHandlesTitle();
+        this.titleHandlesBtn.setAttribute("aria-label", this.titleHandlesBtn.title);
+        this.titleHandlesBtn.setAttribute("aria-pressed", thOn ? "true" : "false");
+      }
     },
 
     _gridTitle: function() {
@@ -8096,6 +8109,22 @@
       return this._connectorsOn()
         ? "Hide connector anchors"
         : "Show connector anchors";
+    },
+
+    // The four corner dots on a focused label. OFF unless the user turns
+    // them on: the Label size input is the primary way to size a label —
+    // one number, applied exactly — and the dots are the freehand
+    // alternative for whoever prefers dragging. The preference persists
+    // with the rest (host-stored), so the choice holds across sessions
+    // and surfaces.
+    _titleHandlesOn: function() {
+      return this._getPref("title_handles") === true;
+    },
+
+    _titleHandlesTitle: function() {
+      return this._titleHandlesOn()
+        ? "Hide label resize dots"
+        : "Show label resize dots";
     },
 
     _snapTitle: function() {
@@ -12659,6 +12688,10 @@
 
     _renderTitleHandles: function(shape) {
       this._removeTitleHandles();
+      // The dots are opt-in (see _titleHandlesOn). Title-edit mode itself
+      // is unchanged — the label still focuses, drags and takes the panel
+      // controls — only the freehand resize corners stay away.
+      if (!this._titleHandlesOn()) return;
       var box =
         shape._renderedTitleImage ||
         this._shapeTitleBoxImage(shape, this._lastBboxTopImageFor(shape));
@@ -13269,6 +13302,12 @@
       // (`_connectorsAvailableFor` → `_connectorsOn`), so there is nothing
       // to push here. The dots currently on screen do have to go, though.
       if (!this._connectorsOn()) this._removeConnectorDots();
+      // Same for the label corner dots: a label focused right now gets or
+      // loses its dots the moment the switch flips, not on the next focus.
+      if (this.editingTitleShape) {
+        if (this._titleHandlesOn()) this._renderTitleHandles(this.editingTitleShape);
+        else this._removeTitleHandles();
+      }
       this._refreshToolbarTools();
       this._refreshLabelSwatch();
     },

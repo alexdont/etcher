@@ -103,8 +103,11 @@ assert.ok(src.includes('self._setPref("snap", !self._snapOn());'),
 {
   const conAt = src.indexOf("self.connectorsBtn = self._makePopupAction");
   const snapAt = src.indexOf("self.snapBtn = self._makePopupAction");
-  assert.ok(conAt !== -1 && snapAt !== -1 && snapAt > conAt && snapAt - conAt < 600,
-    "the snap toggle must sit next to the connector toggle in the customise menu");
+  // The view-toggle group has grown (label dots, ink-zoom anchoring sit
+  // between them now) — what matters is that snap stays in the same group
+  // after connectors, not a byte distance.
+  assert.ok(conAt !== -1 && snapAt !== -1 && snapAt > conAt && snapAt - conAt < 2000,
+    "the snap toggle must sit in the connector toggle's group in the customise menu");
 }
 
 // ── the drag respects the toggle ────────────────────────────────────────────

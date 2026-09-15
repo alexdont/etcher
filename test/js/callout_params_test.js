@@ -70,6 +70,7 @@ const isShaftKind = (k) => ["line", "arrow", "dimension"].indexOf(k) !== -1;
     _isStrokeShape: isStrokeShape,
     _isShaftKind: isShaftKind,
     _markerScale: () => 2,
+    _inkScale: () => 2,
     _getPref: () => null,
     _currentLineParams() {
       const lp = this.lineParams;
@@ -103,6 +104,7 @@ const isShaftKind = (k) => ["line", "arrow", "dimension"].indexOf(k) !== -1;
     _isShaftKind: isShaftKind,
     _paramsTargetShapes: paramsTargets,
     _markerScale: () => 2,
+    _inkScale: () => 2,
     _snapshotShape: () => ({}),
     _renderShape: (s) => rendered.push(s),
     _applyLineParams: () => assert.fail(

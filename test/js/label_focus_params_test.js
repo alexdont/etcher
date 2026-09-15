@@ -43,6 +43,7 @@ function panel(over) {
     _isStrokeShape: isStrokeShape,
     _isShaftKind: isShaftKind,
     _markerScale: () => 1,
+    _inkScale: () => 1,
     _syncFontRow() {},
     _syncLabelBgRow() {},
     _syncLabelSection() {},

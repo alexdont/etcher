@@ -205,6 +205,7 @@
     grid: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="6" cy="6" r="1.6"/><circle cx="12" cy="6" r="1.6"/><circle cx="18" cy="6" r="1.6"/><circle cx="6" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="18" cy="12" r="1.6"/><circle cx="6" cy="18" r="1.6"/><circle cx="12" cy="18" r="1.6"/><circle cx="18" cy="18" r="1.6"/></svg>',
     connectors: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5"/><circle cx="7" cy="7" r="2" fill="currentColor" stroke="none"/><circle cx="17" cy="7" r="2" fill="currentColor" stroke="none"/><circle cx="7" cy="17" r="2" fill="currentColor" stroke="none"/><circle cx="17" cy="17" r="2" fill="currentColor" stroke="none"/></svg>',
     titleHandles: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M9 16l3-8 3 8M10.2 13.4h5.6"/><circle cx="5.5" cy="5.5" r="1.8" fill="currentColor" stroke="none"/><circle cx="18.5" cy="5.5" r="1.8" fill="currentColor" stroke="none"/><circle cx="5.5" cy="18.5" r="1.8" fill="currentColor" stroke="none"/><circle cx="18.5" cy="18.5" r="1.8" fill="currentColor" stroke="none"/></svg>',
+    inkZoom: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="10" cy="10" r="6"/><path d="M14.5 14.5 20 20"/><path stroke-width="3" stroke-linecap="round" d="M7 10h6"/></svg>',
     // Two boxes centered on a shared dashed guide — the snap toggle.
     snap: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><line x1="12" y1="2.5" x2="12" y2="21.5" stroke-dasharray="2.4 2.2" stroke-opacity="0.6"/><rect x="5" y="5.5" width="14" height="5" rx="1.2"/><rect x="8" y="14" width="8" height="5" rx="1.2"/></svg>',
     // Two rows of dots — the drag handle every reorderable list uses.
@@ -5792,6 +5793,12 @@
       );
       popup.appendChild(self.titleHandlesBtn);
 
+      self.zoomAnchorBtn = self._makePopupAction(
+        ICONS.inkZoom, self._zoomAnchorTitle(),
+        function() { self._setPref("zoom_anchor", !self._zoomAnchorOn()); }
+      );
+      popup.appendChild(self.zoomAnchorBtn);
+
       self.snapBtn = self._makePopupAction(
         ICONS.snap, self._snapTitle(),
         function() { self._setPref("snap", !self._snapOn()); }
@@ -6054,7 +6061,7 @@
       // `src.width` is image px; the slider works in on-screen px, so scale it
       // up by the current zoom for display (inverse of what `_setMarkerStyle-
       // Prop` stores).
-      var width = Math.max(1, Math.round((src.width || 10) * this._markerScale()));
+      var width = Math.max(1, Math.round((src.width || 10) * this._inkScale()));
       var opacity = src.opacity == null ? 1 : src.opacity;
       var dash = src.dash || "solid";
       if (this._markerWeightInput) {
@@ -6083,7 +6090,7 @@
         shape.style = Object.assign({}, shape.style || {});
         // The weight slider is on-screen px; store it as image px so the
         // stroke scales with zoom. Opacity/dash are zoom-independent.
-        shape.style[prop] = prop === "width" ? value / this._markerScale() : value;
+        shape.style[prop] = prop === "width" ? value / this._inkScale() : value;
         this._renderShape(shape);
       } else {
         this.markerStyle = this.markerStyle || {};
@@ -6177,9 +6184,7 @@
         var textStyle = textColor ? { color: textColor } : {};
         var lp = this._currentLineParams();
         if (lp.font_size) {
-          var tScale = 1;
-          try { tScale = this._markerScale() || 1; } catch (_) { tScale = 1; }
-          textStyle.font_size = lp.font_size / tScale;
+          textStyle.font_size = lp.font_size / this._inkScale();
         }
         style = Object.keys(textStyle).length ? textStyle : null;
       } else {
@@ -6436,8 +6441,7 @@
             return { uuid: s.uuid, before: self._snapshotShape(s) };
           });
         }
-        var scale = 1;
-        try { scale = self._markerScale() || 1; } catch (_) { scale = 1; }
+        var scale = self._inkScale();
         shapes.forEach(function(shape) {
           shape.style = Object.assign({}, shape.style || {});
           if (value == null) delete shape.style.font_size;
@@ -6529,8 +6533,7 @@
 
     _lineParamsForNewShape: function() {
       var lp = this._currentLineParams();
-      var scale = 0;
-      try { scale = this._markerScale() || 0; } catch (_) {}
+      var scale = this._inkScale();
       if (!(scale > 0)) return lp;
       var out = Object.assign({}, lp, {
         width: (lp.width || 2) / scale,
@@ -7117,7 +7120,7 @@
         // as px, which for a shape drawn zoomed-in can be off severalfold.
         var anchored = shape.kind === "marker" || st.width_units === "canvas";
         width = anchored
-          ? Math.max(1, Math.round((st.width || 2) * this._markerScale()))
+          ? Math.max(1, Math.round((st.width || 2) * this._inkScale()))
           : (st.width || 2);
         opacity = st.opacity == null ? 1 : st.opacity;
         dash = st.dash || "solid";
@@ -7188,9 +7191,7 @@
       if (targets.length) {
         var first = targets[0];
         if (this._hasPinnedFontSize(first)) {
-          var scale = 1;
-          try { scale = this._markerScale() || 1; } catch (_) { scale = 1; }
-          px = Math.round(first.style.font_size * scale);
+          px = Math.round(first.style.font_size * this._inkScale());
         }
       } else {
         var lp = this.lineParams || {};
@@ -7277,7 +7278,7 @@
           if (prop === "width" &&
               (shape.kind === "marker" || shape.kind === "callout" ||
                self._isStrokeShape(shape.kind) || self._isShaftKind(shape.kind))) {
-            shape.style.width = value / self._markerScale();
+            shape.style.width = value / self._inkScale();
             if (shape.kind !== "marker") shape.style.width_units = "canvas";
           } else {
             shape.style[prop] = value;
@@ -8183,6 +8184,12 @@
         this.titleHandlesBtn.setAttribute("aria-label", this.titleHandlesBtn.title);
         this.titleHandlesBtn.setAttribute("aria-pressed", thOn ? "true" : "false");
       }
+      if (this.zoomAnchorBtn) {
+        var zaOn = this._zoomAnchorOn();
+        this.zoomAnchorBtn.title = this._zoomAnchorTitle();
+        this.zoomAnchorBtn.setAttribute("aria-label", this.zoomAnchorBtn.title);
+        this.zoomAnchorBtn.setAttribute("aria-pressed", zaOn ? "true" : "false");
+      }
     },
 
     _gridTitle: function() {
@@ -8209,6 +8216,40 @@
       return this._titleHandlesOn()
         ? "Hide label resize dots"
         : "Show label resize dots";
+    },
+
+    // The scale between the panel's numbers and stored canvas units — the
+    // ONE conversion every panel read/write and every new shape goes
+    // through. Rendering is untouched either way (stored canvas units ×
+    // the current zoom, so ink always scales with the drawing on screen).
+    //
+    // Default (un-anchored): 1. A thickness of 3 IS 3 document px — every
+    // stroke drawn with the slider at 3 is the same thickness, whatever
+    // the zoom was when it was drawn, and the number shown for a selected
+    // shape does not drift as you zoom. Head dev's call: consistency of
+    // the drawing beats constancy of the drawing hand.
+    //
+    // Zoom-anchored (the ⋯ toggle, pref "zoom_anchor"): the current zoom —
+    // a value means "this many px on screen right now", which is the old
+    // behaviour: what you draw looks the same as you draw it, at the cost
+    // of strokes from different zooms having different real thicknesses.
+    _inkScale: function() {
+      if (this._getPref("zoom_anchor") === true) {
+        var s = 0;
+        try { s = this._markerScale() || 0; } catch (_) { s = 0; }
+        if (s > 0) return s;
+      }
+      return 1;
+    },
+
+    _zoomAnchorOn: function() {
+      return this._getPref("zoom_anchor") === true;
+    },
+
+    _zoomAnchorTitle: function() {
+      return this._zoomAnchorOn()
+        ? "Size new ink uniformly (one thickness for the whole drawing)"
+        : "Size new ink by the current zoom (drawn size is what you see)";
     },
 
     _snapTitle: function() {
@@ -17976,7 +18017,7 @@
       var lp = this.lineParams || {};
       return {
         color: this.activeColor || "#3b82f6",
-        width: (lp.width || 2) / this._markerScale(),
+        width: (lp.width || 2) / this._inkScale(),
         opacity: lp.opacity == null ? 1 : lp.opacity,
         dash: lp.dash || "solid"
       };

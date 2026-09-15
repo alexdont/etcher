@@ -109,6 +109,7 @@ function board(targets) {
     _fontTargetShapes: fontTargets,
     _hasPinnedFontSize: hasPinned,
     _markerScale: () => 2,
+    _inkScale: () => 2,
     _snapshotShape: (s) => ({ was: s.style && s.style.font_size }),
     _renderShape: (s) => rendered.push(s),
     placedTitle: [],
@@ -271,6 +272,7 @@ function rowSelf(targets, paramTargets, lineParams) {
     _paramsTargetShapes: () => paramTargets || [],
     _hasPinnedFontSize: hasPinned,
     _markerScale: () => 2,
+    _inkScale: () => 2,
     lineParams: lineParams || {},
   };
 }

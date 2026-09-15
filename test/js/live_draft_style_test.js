@@ -49,6 +49,7 @@ function board(over) {
     _isShaftKind: isShaftKind,
     _isStrokeShape: isStrokeShape,
     _markerScale: () => 1,
+    _inkScale: () => 1,
     _getPref: () => null,
     _currentMarkerStyle() {
       const lp = this.lineParams;

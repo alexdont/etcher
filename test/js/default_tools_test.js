@@ -68,7 +68,7 @@ for (const key of offered) {
 
 // Marking up a picture: get around it, scribble on things and rub the
 // scribble out, point at them or rule a line between them, label.
-for (const key of ["grabber", "marker", "eraser", "arrow", "line", "text"]) {
+for (const key of ["grabber", "marker", "highlighter", "eraser", "arrow", "line", "text"]) {
   assert.ok(essentials.indexOf(key) !== -1,
     `"${key}" should be on the bar without customising`);
 }
@@ -97,9 +97,10 @@ assert.ok(essentials.length <= 8,
 
 const at = (k) => essentials.indexOf(k);
 assert.ok(at("grabber") === 0, "getting around comes first");
-assert.ok(at("marker") === 1 && at("eraser") === 2,
-  "scribble-and-correct leads — the head dev's spec, in the two slots the " +
-  "rectangle/circle pair used to hold");
+assert.ok(at("marker") === 1 && at("highlighter") === 2 && at("eraser") === 3,
+  "scribble, highlight, correct — the head dev's spec: the highlighter " +
+  "sits with the marker it is (same ink at fixed half opacity, its own " +
+  "tool so the two jobs never fight over one opacity slider)");
 assert.ok(Math.abs(at("arrow") - at("line")) === 1, "the two lines sit together");
 assert.ok(at("arrow") > at("eraser"), "the pointed lines follow");
 assert.ok(at("text") === essentials.length - 1, "labelling closes the bar");

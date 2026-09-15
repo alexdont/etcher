@@ -195,6 +195,7 @@
     // raw mark-making, as opposed to freehand's editable spline. Not a
     // paint brush and not a chisel highlighter, both of which read wrong.
     marker: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><g stroke-linecap="round" stroke-linejoin="round" transform="rotate(45 12 12)"><path d="M10 2h4a1 1 0 0 1 1 1v7h-6V3a1 1 0 0 1 1-1Z"/><path d="M9 10h6l-1 4h-4l-1-4Z"/><path d="M11.2 14h1.6v3h-1.6z"/></g><path stroke-linecap="round" d="M3 21c3-1.5 6-1.5 8-1"/></svg>',
+    highlighter: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><g stroke-linecap="round" stroke-linejoin="round" transform="rotate(45 12 12)"><path d="M10 2h4a1 1 0 0 1 1 1v7h-6V3a1 1 0 0 1 1-1Z"/><path d="M9 10h6l-1 4h-4l-1-4Z"/><path d="M10.4 14h3.2v2.4h-3.2z"/></g><path stroke-linecap="round" stroke-width="4" opacity="0.45" d="M4 20.5h9"/></svg>',
     // Eraser wedge over a surface line — the trash can it replaced reads
     // as "delete row", not "rub shapes out by sweeping".
     eraser: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path stroke-linecap="round" stroke-linejoin="round" d="M22 21H7"/><path stroke-linecap="round" stroke-linejoin="round" d="m5 11 9 9"/></svg>',
@@ -1883,7 +1884,7 @@
   //                         put it back in one line.
   var ESSENTIAL_TOOLS = [
     "grabber",
-    "marker", "eraser",
+    "marker", "highlighter", "eraser",
     "arrow", "line",
     "text"
   ];
@@ -2132,6 +2133,10 @@
     polygon:   { icon: ICONS.polygon,   title: "Polygon (double-click to close)" },
     freehand:  { icon: ICONS.freehand,  title: "Freehand curve (editable — drag its nodes after drawing)" },
     marker:    { icon: ICONS.marker,    title: "Marker (freehand ink stroke)" },
+    highlighter: {
+      icon: ICONS.highlighter,
+      title: "Highlighter (marker ink at half opacity)"
+    },
     // `styleless` tools take no stroke or fill, so the style panel has
     // nothing to offer while one is armed — _syncStylePanel hides it.
     grabber:   { icon: ICONS.grabber,   title: "Grab (pan only)", styleless: true },
@@ -2164,6 +2169,7 @@
     h: "grabber",
     d: "freehand",
     m: "marker",
+    g: "highlighter",
     e: "eraser",
     r: "rectangle",
     o: "circle",
@@ -2193,12 +2199,19 @@
   // cursor IS the tool, rather than a badge hung off a crosshair.
   // ===========================================================================
 
+  // The highlighter's fixed transparency. A constant, not a setting: the
+  // whole reason it is a separate tool is that the user should never have
+  // to dial the marker's opacity back and forth between writing and
+  // highlighting. Half, per the head dev's spec.
+  var HIGHLIGHT_OPACITY = 0.5;
+
   var CURSOR_BADGES = {
     rectangle: '<rect x="4" y="6" width="16" height="12" rx="1.5"/>',
     circle:    '<circle cx="12" cy="12" r="7.5"/>',
     polygon:   '<path d="M12 3.5 21 9.5 18 20H6L3 9.5 12 3.5Z"/>',
     freehand:  '<g transform="rotate(-10 12 12)"><path d="M4.5 15.5A7.6 7.6 0 0 1 19.5 15.5"/><path stroke-dasharray="2.4 2" d="M4.5 15.5 19.5 15.5"/><circle cx="4.5" cy="15.5" r="1.5"/><circle cx="19.5" cy="15.5" r="1.5"/></g>',
     marker:    '<g transform="rotate(45 12 12)"><path d="M10 2h4a1 1 0 0 1 1 1v7h-6V3a1 1 0 0 1 1-1Z"/><path d="M9 10h6l-1 4h-4l-1-4Z"/><path d="M11.2 14h1.6v3h-1.6z"/></g><path d="M3 21c3-1.5 6-1.5 8-1"/>',
+    highlighter: '<g transform="rotate(45 12 12)"><path d="M10 2h4a1 1 0 0 1 1 1v7h-6V3a1 1 0 0 1 1-1Z"/><path d="M9 10h6l-1 4h-4l-1-4Z"/><path d="M10.4 14h3.2v2.4h-3.2z"/></g><path stroke-width="4" opacity="0.45" d="M4 20.5h9"/>',
     // Shared by two consumers: hosts drawing OTHER people (without it,
     // someone panning is the only tool that shows as an anonymous arrow)
     // and `grabberCursor` below, which builds the LOCAL pointer from it —
@@ -6136,6 +6149,13 @@
       var style;
       if (kind === "marker") {
         style = this._currentMarkerStyle();
+        // The highlighter draws MARKER shapes — same ink, same width, same
+        // committed kind (so persistence, hit test and the spline all come
+        // free) — at a fixed half opacity. A separate tool rather than a
+        // setting, so writing and highlighting never fight over one slider.
+        if (this.activeTool === "highlighter") {
+          style = Object.assign({}, style, { opacity: HIGHLIGHT_OPACITY });
+        }
       } else if (this._isStrokeShape(kind)) {
         style = this._lineParamsForNewShape();
       } else if (this._isShaftKind(kind) || kind === "callout") {
@@ -13659,6 +13679,7 @@
         case "polygon":   this._polygonClick(pt); break;
         case "freehand":  this._startFreehand(pt, e); break;
         case "marker":    this._startMarker(pt, e); break;
+        case "highlighter": this._startMarker(pt, e); break;
         case "callout":   this._calloutClick(pt); break;
         case "text":      this._startText(pt, e); break;
         case "dimension": this._startDimension(pt, e); break;
@@ -13739,6 +13760,7 @@
         case "rectangle": this._updateRectangle(pt); break;
         case "circle":    this._updateCircle(pt); break;
         case "freehand":
+        case "highlighter":
         case "marker": {
           // Strokes consume every sample the browser captured, not just the
           // one position this event reports. A pointer is read far faster
@@ -13785,6 +13807,7 @@
         case "circle":    this._commitCircle(pt); break;
         case "freehand":  this._commitFreehand(pt); break;
         case "marker":    this._commitFreehand(pt); break;
+        case "highlighter": this._commitFreehand(pt); break;
         case "text":      this._commitText(pt); break;
         case "dimension": this._commitDimension(pt); break;
         case "line":      this._commitDimension(pt); break;

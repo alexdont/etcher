@@ -167,9 +167,12 @@ defmodule Etcher.Layer do
   `:image` — it is not offered by default because inserting a picture needs
   host wiring (see `:image_source`).
 
-  On the bar without customising: grabber, marker, eraser, arrow, line,
-  text — the marker and eraser lead because scribble-and-correct is the
-  loop a first-time user lives in. In the `⋯` grid: rectangle and circle
+  On the bar without customising: grabber, marker, highlighter, eraser,
+  arrow, line, text — the marker and eraser lead because
+  scribble-and-correct is the loop a first-time user lives in, and the
+  highlighter sits with the marker it is: the same ink at a fixed half
+  opacity, split into its own tool so writing and highlighting never
+  fight over one opacity slider. In the `⋯` grid: rectangle and circle
   (deliberate shapes — the marker covers the ring-around-the-thing job),
   polygon and dimension (precise work, reached for on purpose), freehand
   (the marker's exact cousin — an editable curve whose nodes you drag
@@ -324,6 +327,7 @@ defmodule Etcher.Layer do
       :polygon,
       :freehand,
       :marker,
+      :highlighter,
       :callout,
       :text,
       :dimension,
@@ -336,7 +340,8 @@ defmodule Etcher.Layer do
     Which tools the board OFFERS. The toolbar shows the common ones and
     keeps the rest one press of `⋯` away — see "Toolbar" below for which,
     and why. Drawing tools: `:grabber`,
-    `:rectangle`, `:circle`, `:polygon`, `:freehand`, `:marker`, `:callout`,
+    `:rectangle`, `:circle`, `:polygon`, `:freehand`, `:marker`,
+    `:highlighter` (the marker at a fixed half opacity), `:callout`,
     `:text`, `:dimension`, `:arrow`, `:line`, `:eraser`. Add `:image` for the image
     tool — a one-shot action (not a drawing mode) that inserts an image via
     the OS file picker or a host uploader (see `:image_source`).

@@ -48,7 +48,9 @@ function board(over) {
       this.painted.push({ el, color });
     },
     _restyleDrafts() { this.restyled++; },
+    _freshTargets: () => false,
     _refreshTextEditorStyle() {},
+    _freshTargets: () => false,
     _refreshLabelSwatch() {},
     _syncStyleInspector() {},
     _snapshotShape: (s) => JSON.parse(JSON.stringify(s || {})),

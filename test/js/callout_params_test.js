@@ -103,6 +103,7 @@ const isShaftKind = (k) => ["line", "arrow", "dimension"].indexOf(k) !== -1;
     _isStrokeShape: isStrokeShape,
     _isShaftKind: isShaftKind,
     _paramsTargetShapes: paramsTargets,
+    _freshTargets: () => false,
     _markerScale: () => 2,
     _inkScale: () => 2,
     _snapshotShape: () => ({}),

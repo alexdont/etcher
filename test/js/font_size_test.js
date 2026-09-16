@@ -122,7 +122,9 @@ function board(targets) {
     // Setting the DEFAULT also repaints whatever is being drawn right now,
     // so the preview follows the panel — see live_draft_style_test.js.
     _restyleDrafts() { this.restyled = (this.restyled || 0) + 1; },
+    _freshTargets: () => false,
     _refreshTextEditorStyle() {},
+    _freshTargets: () => false,
   };
 }
 

@@ -6292,6 +6292,11 @@
           else shape.style.label_bg = color;
           self._renderShape(shape);
         });
+        // Fresh shape: the plate choice carries to the next label too.
+        if (this._freshTargets(shapes)) {
+          if (color) this._setPref("label_bg_last", color);
+          this._setPref("label_bg", color == null ? null : color);
+        }
       } else {
         // Remembered even while off, so the toggle has something to turn
         // back ON — otherwise switching it off would lose the colour and
@@ -6355,6 +6360,8 @@
         });
         this._emitChanged();
         this._syncStyleInspector();
+        // Fresh shape: this ink is what the next label starts in.
+        if (this._freshTargets(shapes)) this._setPref("label_color", color);
       } else {
         this._setPref("label_color", color);
         this._restyleDrafts();
@@ -6466,6 +6473,14 @@
         else this.lineParams.font_size = value;
         this._restyleDrafts();
       }
+      // Fresh shape: the size just chosen is what the NEXT label starts
+      // at too (screen px, like the global branch stores).
+      if (shapes.length && this._freshTargets(shapes)) {
+        this.lineParams = this.lineParams || {};
+        if (value == null) delete this.lineParams.font_size;
+        else this.lineParams.font_size = value;
+        this._fontFreshMirror = true;
+      }
       // A panel edit while the inline editor is open dresses the editor
       // too — the user is styling the text they are typing.
       this._refreshTextEditorStyle();
@@ -6477,6 +6492,8 @@
           var shape = self.shapes.find(function(s) { return s.uuid === rec.uuid; });
           if (shape) self._pushUndo(rec.uuid, rec.before, self._snapshotShape(shape));
         });
+        if (this._fontFreshMirror) this._emitLineParamsChanged();
+        this._fontFreshMirror = false;
       } else {
         this._emitLineParamsChanged();
       }
@@ -7055,6 +7072,24 @@
     // else the single shape in edit mode — filtered to the kinds that carry
     // stroke params (outline shapes, markers, and the shaft kinds).
     // Empty → the popup edits the global default for new shapes.
+    // The FRESH shape: the one just drawn, still under the selection its
+    // creation gave it. While that lasts, panel edits do double duty —
+    // they restyle the shape AND become the tool's defaults, so the next
+    // arrow/line/box comes out identical (head dev's flow: draw, tune,
+    // keep drawing). The moment the user clicks off, freshness ends for
+    // good: re-selecting the same shape later is a one-time edit that
+    // leaves the defaults alone, exactly as selection edits always were.
+    _freshTargets: function(targets) {
+      var f = this._freshShape;
+      if (!f) return false;
+      if (!targets || targets.length !== 1 || targets[0] !== f) return false;
+      if (this.editingShape === f) return true;
+      if (this.selectedShapes && this.selectedShapes.length === 1 &&
+          this.selectedShapes[0] === f) return true;
+      if (this._textEditor && this._textEditor.shape === f) return true;
+      return false;
+    },
+
     _paramsTargetShapes: function() {
       var self = this;
       function eligible(s) {
@@ -7296,6 +7331,15 @@
             self._applyLineParams(shape.el, shape.style, self._markerScale());
           }
         });
+        // A FRESH shape's tuning is also the tool's tuning: the user just
+        // drew it and is dialling it in — the next one should come out
+        // the same (see _freshTargets). A re-selected shape edits alone.
+        if (this._freshTargets(shapes)) {
+          this.lineParams = this.lineParams || {};
+          this.lineParams[prop] = value;
+          this._restyleDrafts();
+          this._lineParamFreshMirror = true;
+        }
       } else {
         this.lineParams = this.lineParams || {};
         this.lineParams[prop] = value;
@@ -7313,6 +7357,9 @@
             var shape = self.shapes.find(function(s) { return s.uuid === rec.uuid; });
             if (shape) self._pushUndo(rec.uuid, rec.before, self._snapshotShape(shape));
           });
+          // The fresh mirror changed the global default too — persist it
+          // the same way a nothing-selected edit would.
+          if (this._lineParamFreshMirror) this._emitLineParamsChanged();
         } else {
           // No shapes targeted → the popup edited the GLOBAL default. Notify
           // the consumer so per-user line params can be persisted (mirror of
@@ -7320,6 +7367,7 @@
           this._emitLineParamsChanged();
         }
         this._lineParamBefore = null;
+        this._lineParamFreshMirror = false;
       }
     },
 
@@ -11046,6 +11094,10 @@
         self._pushUndo(shape.uuid, before, self._snapshotShape(shape));
       });
       if (colorTargets.length) self._emitChanged();
+      // Fresh shape: its colour is also the colour the user is drawing in
+      // now — the next shape matches (_selectColor updates activeColor and
+      // announces it for host persistence).
+      if (this._freshTargets(colorTargets)) this._selectColor(color);
 
       // Repaint any active handles so the vertex dots match the new
       // shape color immediately instead of waiting for the next handle
@@ -16325,6 +16377,7 @@
     },
 
     _clearSelection: function() {
+      this._freshShape = null;
       var list = this.selectedShapes || [];
       var self = this;
       list.forEach(function(s) {
@@ -19519,6 +19572,12 @@
         this._suppressEditDismissUntil = Date.now() + 400;
         this._enterEditMode(shape);
       }
+
+      // From here until the user clicks away, this is the FRESH shape:
+      // panel edits write through to the tool's defaults (see
+      // _freshTargets). Set last, after _enterEditMode's own
+      // _exitEditMode teardown has run, or the flag would clear itself.
+      this._freshShape = shape;
     },
 
     // Returns the shape's bottom-left corner in container px (the
@@ -20011,6 +20070,9 @@
     },
 
     _exitEditMode: function() {
+      // Leaving the shape ends its freshness for good — a later
+      // re-select is a one-time edit (see _freshTargets).
+      this._freshShape = null;
       if (!this.editingShape) return;
       this.editingShape.el.classList.remove("is-editing");
       this._refreshImageRing(this.editingShape);

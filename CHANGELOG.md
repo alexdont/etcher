@@ -4,6 +4,127 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.14.0] — 2026-09-16
+
+The arrow and the highlighter join the toolbar, every ink tool gets
+colours of its own, labels become WYSIWYG, and ink stops changing size
+with the zoom.
+
+### Added
+
+- **A single-arrow tool** (`A`). A dimension is a measurement — two
+  heads, and a label it drops you into writing. This is the other thing
+  people reach for a line-with-an-end for — pointing — so it has one
+  head and no label unless you ask for one (double-click, like any
+  shape). It reuses the `arrow` kind connectors are made of: same
+  render, same handles, same bend-dropping, with no bindings. Bent
+  arrows draw as smooth centripetal Catmull-Rom curves — and are
+  measured, hit and labelled along that same curve.
+
+- **The highlighter** (`G`): the marker at a fixed half opacity, as its
+  own tool. It commits `marker` shapes, so nothing downstream needs to
+  learn a new kind — but it arms, remembers and colours as a tool of
+  its own.
+
+- **Per-tool ink colours and palettes.** The marker and the highlighter
+  each keep their own colour AND their own five-slot palette
+  (`marker_color(s)` / `highlighter_color(s)` prefs), swapped in while
+  the tool is armed and swapped back out after — a yellow highlighting
+  session never leaks into the next rectangle. First arms seed
+  sensibly: the marker copies the shared palette, the highlighter
+  starts on the classic highlight set, yellow first. The wheel edits
+  whichever palette is on screen; the legacy colours-only host channel
+  stays shared-only. While a pure-ink tool is armed the panel drops the
+  label and fill rows — settings its stroke cannot wear.
+
+- **Label size** — a font-size control for labels in the style panel
+  (and the compact strip). A pinned size drives the box (text-drives-
+  box); the row shows the label's REAL rendered size, says "custom"
+  when a corner dot moved it, and the default makes the round trip to
+  the host with the other line params.
+
+- **A toggleable background plate for labels**, rounded, previewed on
+  the colour chip pair (Text / Behind), togglable per label or as the
+  default.
+
+- **Pan and zoom out to ink beyond the picture.** Shapes drawn outside
+  the image extend the pan bounds, and the zoom floor follows the ink
+  so fully-out shows everything; Home still frames the picture.
+  Engages on Fresco ≥ 0.12 (`isInfiniteCanvas` / `getZoomFloor`), and
+  leaves boards it cannot classify untouched.
+
+- **Hold Space to pan**, release to get your tool back; the scroll
+  wheel zooms while a drawing tool is held.
+
+- **Click-click drawing** for dimensions, lines, callouts and arrows —
+  a click arms, a second click commits; too-close second clicks cancel
+  instead of committing a speck.
+
+### Changed
+
+- **Ink is sized uniformly by default.** Strokes, text and labels keep
+  one visual size across zoom levels, so lines drawn at different
+  zooms match; the old zoom-anchored sizing became the "Zoom-anchored
+  ink" opt-in in the ⋯ menu.
+
+- **Labels are edited in place, WYSIWYG.** The editor is dressed as
+  the label it edits, at the label's own size and colours, its box
+  hugging the text live. Text drives the box: no font cap, no
+  auto-wrap, newlines only where the author put them (Shift+Enter).
+  Click-away commits instead of discarding; a styled-but-empty text
+  box refocuses rather than vanishing.
+
+- **Labels ride their shafts.** An arrow's label sticks to the shaft
+  like a dimension's, slides along it, follows bends — and the shaft
+  breaks around the label (a per-shape mask, honouring curves, dashes
+  and arrowheads), the drafting convention.
+
+- **A dimension can exist without a label** — the release-time prompt
+  is gone; label it by double-click when you want one.
+
+- **The just-drawn shape tunes its tool.** Panel edits on a shape you
+  JUST drew (before clicking away) update the tool's defaults; edits
+  after re-selecting touch only that shape. The style panel inspects a
+  selection without moving the drawing defaults, hides stroke rows for
+  strokeless focuses, and offers the label controls from the first
+  keystroke of a new label.
+
+- **The default toolbar was recomposed** — marker and eraser on the
+  bar in place of the shape pair; the corner dots on labels (and the
+  text/callout sizing dots) moved behind a ⋯ opt-in, off by default.
+
+- **Cursor and tooltip polish**: the grabber shows a proper hand that
+  curls while it holds the canvas, armed tools show a plain cross,
+  hover tooltips belong to the cursor tool only and park beside a
+  stroke's middle instead of on it, the marquee previews what it will
+  take, and drafts draw in the exact style they will commit with.
+
+### Fixed
+
+- **Delete takes a focused label**, not just a selected shape.
+- **The label colour chip recolours text and callout shapes** — they
+  draw via `currentColor` and never saw the style write.
+- **The editor stopped clipping glyph bottoms**, and fresh text
+  commits left-anchored instead of jumping on commit.
+- **Shaft-riding labels stopped snapping back** — a stale
+  `title_align` stamp re-anchored them to the bbox centre every
+  render, which read as the label being ungrabbable.
+- **A label's hitbox matches its drawn size** at every font size.
+- **The endpoint re-bind drag honours the connectors toggle** instead
+  of resurrecting magnet dots the user turned off.
+- **Wheel-zoom over a strip viewer no longer calls a `zoomAt` that
+  isn't there** — the wheel is handed back to Fresco.
+- **Hatched shapes select by their outline** — the perimeter, not
+  every stripe inside it — and the stripe-ringing filter died with it.
+- **Tooltips stay off the style panel and open popups.**
+- **Dimension arrowheads are part of what you can click**, with the
+  arrow's head treated the same.
+
+### Requires
+
+- Fresco `~> 0.12.0` for the out-of-bounds pan/zoom features (older
+  Fresco: everything else works; those features quietly stand down).
+
 ## [0.13.2] — 2026-09-12
 
 The style panel learns whose corner it's in and which tool is armed,

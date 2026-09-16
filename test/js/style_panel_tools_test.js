@@ -172,6 +172,7 @@ const applyPickedColor = lift("_applyPickedColor", "hex");
   const self = {
     _labelPickTarget: false,
     _inspectedShape: () => null,
+    _armedInkTool: () => false,
     _activeSlot: 2,
     _setSlotColor: (i, hex) => calls.push(["slot", i, hex]),
     _selectColor: (hex) => calls.push(["select", hex]),

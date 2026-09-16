@@ -2208,6 +2208,11 @@
   // to dial the marker's opacity back and forth between writing and
   // highlighting. Half, per the head dev's spec.
   var HIGHLIGHT_OPACITY = 0.5;
+  // …and the colour a first-time highlighter starts in. The marker
+  // inherits whatever the palette held when it was first armed, but a
+  // highlighter that starts in the same blue as the pen is the complaint
+  // this answers — out of the box the two ink tools must not match.
+  var HIGHLIGHT_DEFAULT_COLOR = "#facc15";
 
   var CURSOR_BADGES = {
     rectangle: '<rect x="4" y="6" width="16" height="12" rx="1.5"/>',
@@ -7756,6 +7761,13 @@
         this._syncStyleInspector();
         return;
       }
+      // While an ink tool is armed the picker recolours THAT tool, not
+      // the palette: the slot keeps the shared colour the board returns
+      // to on disarm. (_selectColor stores the pick under the tool.)
+      if (this._armedInkTool()) {
+        this._selectColor(hex);
+        return;
+      }
       this._setSlotColor(this._activeSlot, hex);
       this._selectColor(hex);
     },
@@ -10854,6 +10866,7 @@
 
     _selectTool: function(toolKey) {
       var self = this;
+      var prevTool = self.activeTool;
       if (self.activeTool !== toolKey) self._cancelDraft();
       // Leaving the eraser tool clears any in-flight hover preview
       // so a grayed shape doesn't get stuck looking "about to delete"
@@ -10888,6 +10901,35 @@
       if (toolKey != null) {
         self._exitEditMode();
         self._clearSelection();
+      }
+
+      // Each ink tool keeps its own colour, apart from the palette colour
+      // the shapes share. Arming one banks the shared selection (slot and
+      // colour both — the colour may not live in any slot), loads the
+      // tool's remembered colour, and disarming restores the bank — so a
+      // yellow highlighting session never leaks into the next rectangle.
+      // Marker-to-highlighter keeps the one bank: only the first ink arm
+      // is a shared colour worth returning to.
+      var wasInk = prevTool === "marker" || prevTool === "highlighter";
+      var isInk = toolKey === "marker" || toolKey === "highlighter";
+      if (isInk) {
+        if (!wasInk) {
+          self._bankedSharedColor = { slot: self._activeSlot,
+                                      color: self.activeColor };
+        }
+        var inkColor = self._getPref(toolKey + "_color") ||
+          (toolKey === "highlighter" ? HIGHLIGHT_DEFAULT_COLOR
+                                     : self.activeColor);
+        // Highlight the swatch only when the colour actually lives in a
+        // slot; -1 lights nothing, which is honest — the tool's colour is
+        // its own, not one of the palette's.
+        self._activeSlot = (self._colorSlots || []).indexOf(inkColor);
+        self._selectColor(inkColor);
+      } else if (wasInk && self._bankedSharedColor) {
+        var bank = self._bankedSharedColor;
+        self._bankedSharedColor = null;
+        self._activeSlot = bank.slot;
+        self._selectColor(bank.color);
       }
 
       // Sync `.is-selected` across the main toolbar AND the
@@ -11038,6 +11080,14 @@
     // `null` resets to the CSS default blue.
     _selectColor: function(color) {
       this.activeColor = color;
+      // While an ink tool is armed, the palette is standing in for THAT
+      // tool's colour — remember the pick under the tool, so the next time
+      // the marker (or highlighter) comes up it comes up in its own colour,
+      // not in whatever the shapes were last drawn in. The write rides the
+      // prefs channel, so it survives sessions like the other toggles.
+      if (this._armedInkTool()) {
+        this._setPref(this.activeTool + "_color", color);
+      }
       this._dispatch("etcher:color-changed", { color: color });
 
       // Sync `.is-selected` across the main toolbar swatches AND

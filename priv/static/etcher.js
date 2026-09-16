@@ -2213,6 +2213,11 @@
   // highlighter that starts in the same blue as the pen is the complaint
   // this answers — out of the box the two ink tools must not match.
   var HIGHLIGHT_DEFAULT_COLOR = "#facc15";
+  // …and its starting palette: the classic highlighter set (yellow first,
+  // matching the default colour above). The marker's palette seeds from
+  // the shared one instead — a pen starts where the shapes are.
+  var HIGHLIGHT_DEFAULT_SLOTS =
+    ["#facc15", "#4ade80", "#f472b6", "#fb923c", "#38bdf8"];
 
   var CURSOR_BADGES = {
     rectangle: '<rect x="4" y="6" width="16" height="12" rx="1.5"/>',
@@ -7849,7 +7854,7 @@
       // board is the palette on the next one. `_emitColorsChanged` below is
       // the older, colours-only channel and stays for hosts wired to it;
       // this is the one that rides the preferences hook.
-      this._setPref("colors", this._colorSlots.slice());
+      this._setPref(this._paletteKey(), this._colorSlots.slice());
     },
 
     // Generic persistence hook for the color palette — fires on every
@@ -7858,6 +7863,12 @@
     // server-side (LiveView `handle_event` → DB / user meta) or in pure
     // JS. Etcher stores nothing itself.
     _emitColorsChanged: function() {
+      // While an ink tool is armed the visible slots are the TOOL's
+      // palette. This colours-only channel predates per-tool palettes and
+      // hosts wired to it store whatever arrives as the shared palette —
+      // the prefs channel (marker_colors / highlighter_colors) already
+      // persists ink palettes, so this one stays shared-only.
+      if (this._armedInkTool()) return;
       var colors = (this._colorSlots || []).slice();
       if (this.pushEventTo) {
         this.pushEventTo(this.el, "etcher:colors-changed", {
@@ -8318,6 +8329,15 @@
     _armedInkTool: function() {
       return !!this.annotationMode &&
         (this.activeTool === "marker" || this.activeTool === "highlighter");
+    },
+
+    // Which preference the visible palette belongs to. The shapes share
+    // "colors"; each ink tool owns a full five-slot set of its own
+    // ("marker_colors" / "highlighter_colors") that is swapped in while
+    // the tool is armed — so an edit always persists under the palette
+    // the user was actually looking at.
+    _paletteKey: function() {
+      return this._armedInkTool() ? this.activeTool + "_colors" : "colors";
     },
 
     _titleHandlesTitle: function() {
@@ -10913,30 +10933,40 @@
       var isInk = toolKey === "marker" || toolKey === "highlighter";
       if (isInk) {
         if (!wasInk) {
-          self._bankedSharedColor = { slot: self._activeSlot,
+          self._bankedSharedColor = { slots: (self._colorSlots || []).slice(),
+                                      slot: self._activeSlot,
                                       color: self.activeColor };
         }
+        // The shared palette to seed and fall back from is the BANKED one:
+        // arming the marker straight from the highlighter must not seed the
+        // marker's palette with highlight colours.
+        var bankShared = self._bankedSharedColor || {};
+        var pal = self._getPref(toolKey + "_colors");
+        pal = Array.isArray(pal) && pal.length
+          ? self._sanitizeColorSlots(pal)
+          : (toolKey === "highlighter" ? HIGHLIGHT_DEFAULT_SLOTS.slice()
+                                       : (bankShared.slots || []).slice());
+        self._colorSlots = pal;
         var inkColor = self._getPref(toolKey + "_color") ||
           (toolKey === "highlighter" ? HIGHLIGHT_DEFAULT_COLOR
-                                     : self.activeColor);
+                                     : bankShared.color || self.activeColor);
         // Highlight the swatch only when the colour actually lives in a
         // slot; -1 lights nothing, which is honest — the tool's colour is
         // its own, not one of the palette's.
-        self._activeSlot = (self._colorSlots || []).indexOf(inkColor);
+        self._activeSlot = pal.indexOf(inkColor);
+        self._refreshToolbarSwatches();
         self._selectColor(inkColor);
       } else if (wasInk && self._bankedSharedColor) {
         var bank = self._bankedSharedColor;
-        var slots = self._colorSlots || [];
         self._bankedSharedColor = null;
+        self._colorSlots = bank.slots;
         self._activeSlot = bank.slot;
-        // The slot's CURRENT colour, not the banked value: the user may
-        // have edited that swatch through the wheel while the ink tool
-        // was up, and restoring the stale colour would highlight a swatch
-        // showing a different colour than the one being drawn with. The
-        // banked value only stands when no slot was active (a shared
-        // colour from outside the palette).
-        self._selectColor(bank.slot >= 0 && bank.slot < slots.length
-          ? slots[bank.slot] : bank.color);
+        self._refreshToolbarSwatches();
+        // The banked raw colour only stands when no slot was active (a
+        // shared colour from outside the palette) — otherwise the slot is
+        // the source of truth for what the swatch shows.
+        self._selectColor(bank.slot >= 0 && bank.slot < bank.slots.length
+          ? bank.slots[bank.slot] : bank.color);
       }
 
       // Sync `.is-selected` across the main toolbar AND the
@@ -13708,7 +13738,7 @@
       var prefs = this._loadPrefs();
       this._applyGridPref(prefs.grid);
       this._applyPanelPref(prefs.panel);
-      this._applyColorsPref(prefs.colors);
+      this._applyColorsPref(prefs[this._paletteKey()]);
       this._applyCompactParts(prefs.compact);
       // Connector anchors are resolved at the moment they would be shown
       // (`_connectorsAvailableFor` → `_connectorsOn`), so there is nothing

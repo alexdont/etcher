@@ -446,6 +446,7 @@ assert.ok(
   applyPrefs.call({
     _loadPrefs: () => ({}),
     _applyGridPref() {}, _applyPanelPref() {}, _applyColorsPref() {},
+    _paletteKey: () => "colors",
     _applyCompactParts() {}, _connectorsOn: () => true,
     _removeConnectorDots() {}, _refreshToolbarTools() {},
     _refreshLabelSwatch: () => calls.push("label"),

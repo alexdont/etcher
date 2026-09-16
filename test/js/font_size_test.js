@@ -275,6 +275,8 @@ function rowSelf(targets, paramTargets, lineParams) {
     _hasPinnedFontSize: hasPinned,
     _markerScale: () => 2,
     _inkScale: () => 2,
+    _textEditHost: (sh) => sh.host || null,
+    _textEditor: null,
     lineParams: lineParams || {},
   };
 }
@@ -288,11 +290,25 @@ function rowSelf(targets, paramTargets, lineParams) {
 }
 
 {
-  // An unpinned label: blank, so the placeholder can say "auto".
-  const self = rowSelf([{ style: {} }]);
+  // An unpinned label with a rendered size shows THAT size — the number
+  // it is actually drawn at, in the panel's unit — instead of a blank
+  // that said "custom" and told the user nothing. (Rendered 36 container
+  // px, markerScale 2, inkScale 2 → 36.)
+  const rendered = { style: {}, host: {
+    querySelector: () => ({ getAttribute: () => "36" }) } };
+  const self = rowSelf([rendered]);
   syncFontRow.call(self);
-  assert.strictEqual(self.els.num.value, "", "empty means auto, not 0");
+  assert.strictEqual(self.els.num.value, "36",
+    "the label HAS a size; the box says it");
   assert.strictEqual(self.els.row.style.display, "");
+}
+
+{
+  // Truly unmeasurable (nothing rendered, no editor): blank, so the
+  // placeholder can still say "custom" rather than showing a guess.
+  const self = rowSelf([{ style: {}, host: { querySelector: () => null } }]);
+  syncFontRow.call(self);
+  assert.strictEqual(self.els.num.value, "", "no number is better than a fake one");
 }
 
 {

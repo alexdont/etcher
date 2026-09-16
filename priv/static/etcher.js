@@ -6427,8 +6427,12 @@
       // An OPEN text editor is the most explicit focus there is — the
       // user placed a box and is styling what they are about to type.
       // Without this, the panel's size/colour controls edited the global
-      // default while the box on screen kept its old dress.
-      if (this._textEditor && draws(this._textEditor.shape)) {
+      // default while the box on screen kept its old dress. No draws()
+      // requirement here: a shape whose FIRST label is being typed has no
+      // title yet, and requiring one hid every label control during
+      // exactly the moment the user most wants them — they had to type,
+      // commit, and re-select before the panel would talk about the label.
+      if (this._textEditor && this._textEditor.shape) {
         return [this._textEditor.shape];
       }
       if (this.selectedShapes && this.selectedShapes.length) {
@@ -7230,6 +7234,26 @@
         var first = targets[0];
         if (this._hasPinnedFontSize(first)) {
           px = Math.round(first.style.font_size * this._inkScale());
+        } else {
+          // No pin — show the size the label is ACTUALLY rendering at,
+          // in the panel's own unit (rendered container px normalised by
+          // the ink scale, so the number matches what typing it would
+          // pin). "custom"/blank told the user nothing; the label HAS a
+          // size, and this is it. Read off the rendered <text>; a label
+          // still being born (editor open, nothing painted) falls back
+          // to its editor's font, and only then to blank.
+          var host = this._textEditHost(first);
+          var tEl = host && host.querySelector && host.querySelector("text");
+          var attr = tEl && parseFloat(tEl.getAttribute("font-size"));
+          if (!(attr > 0) && this._textEditor &&
+              this._textEditor.shape === first) {
+            attr = parseFloat(this._textEditor.input.style.fontSize);
+          }
+          if (attr > 0) {
+            var scale = 1;
+            try { scale = this._markerScale() || 1; } catch (_) { scale = 1; }
+            px = Math.round(attr / scale * this._inkScale());
+          }
         }
       } else {
         var lp = this.lineParams || {};
@@ -19320,6 +19344,11 @@
       // Focus on next frame so the foreignObject is attached before
       // we yank the cursor in.
       setTimeout(function() { try { input.focus(); input.select(); } catch (_) {} }, 0);
+
+      // The editor's shape just became the panel's target (see
+      // _fontTargetShapes) — sync now, or the label rows only appear
+      // after some unrelated interaction happens to refresh them.
+      this._syncStyleInspector();
     },
 
     // Re-dress the OPEN inline editor after a panel edit — size, ink,

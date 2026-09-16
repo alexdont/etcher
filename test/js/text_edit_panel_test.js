@@ -49,6 +49,17 @@ const refresh = extract("_refreshTextEditorStyle");
     "no editor, no selection — the defaults path is unchanged");
 }
 
+{
+  // A shape whose FIRST label is being typed has no title yet — and used
+  // to fail the draws() check, hiding every label control during exactly
+  // the moment the user most wants them: they had to type, commit, and
+  // re-select before the panel would talk about the label.
+  const unlabeled = { uuid: "r", kind: "rectangle", metadata: null };
+  const board = { _textEditor: { shape: unlabeled }, selectedShapes: [] };
+  assert.deepStrictEqual(fontTargets.call(board), [unlabeled],
+    "a label being born is a label target from the first keystroke");
+}
+
 // ── the editor re-dresses in place, caret intact ──────────────────────────
 
 {

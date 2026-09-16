@@ -137,6 +137,7 @@ function board(over) {
     shapes: [],
     selectedShapes: [],
     _fontTargetShapes: fontTargets,
+    _armedInkTool: () => false,
     _labelBgFor: labelBgFor,
     _setLabelBg: setLabelBg,
     _currentLabelBg: currentLabelBg,
@@ -267,6 +268,7 @@ function board(over) {
       row: { style: {} },
       _paramsBgRow: null, _paramsBgBtn: btn,
       _fontTargetShapes: () => targets,
+      _armedInkTool: () => false,
       _paramsTargetShapes: () => paramTargets || [],
       _currentLabelBg: () => bg || null,
       // The row sync repaints the swatches, since that is the hook that
@@ -355,6 +357,7 @@ function swatchSelf(targets, prefs) {
     labelBgSwatchEl: mk(),
     prefs: prefs || {},
     _fontTargetShapes: () => targets,
+    _armedInkTool: () => false,
     _currentLabelBg: currentLabelBg,
     _currentLabelColor: currentLabelColor,
     _labelBgFor: labelBgFor,
@@ -421,6 +424,7 @@ function swatchSelf(targets, prefs) {
 // A panel that was never built must not throw.
 assert.doesNotThrow(() => refreshSwatch.call({
   _fontTargetShapes: () => [],
+  _armedInkTool: () => false,
   _currentLabelColor: currentLabelColor,
   _currentLabelBg: currentLabelBg,
   _getPref: () => null,

@@ -272,6 +272,7 @@ function rowSelf(targets, paramTargets, lineParams) {
     _paramsFontNum: els.num,
     _fontTargetShapes: () => targets,
     _paramsTargetShapes: () => paramTargets || [],
+    _armedInkTool: () => false,
     _hasPinnedFontSize: hasPinned,
     _markerScale: () => 2,
     _inkScale: () => 2,

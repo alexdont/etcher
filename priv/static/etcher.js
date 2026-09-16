@@ -7209,13 +7209,15 @@
       // which IS fillable.
       if (this._paramsFillRow) {
         var self = this;
-        var fillable = (!targets.length && !strokeless) ||
+        var fillable = (!targets.length && !strokeless &&
+            !this._armedInkTool()) ||
           targets.some(function(s) { return self._isStrokeShape(s.kind); });
         this._paramsFillRow.style.display = fillable ? "" : "none";
       }
       this._syncFontRow();
       this._syncLabelBgRow();
       this._syncLabelSection();
+      this._refreshLabelSwatch();
     },
 
     // The font row shows when there is text for it to act on — the shapes
@@ -7225,7 +7227,8 @@
     _syncFontRow: function() {
       if (!this._paramsFontRow) return;
       var targets = this._fontTargetShapes();
-      var global = !targets.length && !this._paramsTargetShapes().length;
+      var global = !targets.length && !this._paramsTargetShapes().length &&
+        !this._armedInkTool();
       this._paramsFontRow.style.display = (targets.length || global) ? "" : "none";
       if (!targets.length && !global) return;
 
@@ -7276,7 +7279,8 @@
     _syncLabelBgRow: function() {
       if (!this._paramsBgRow) return;
       var targets = this._fontTargetShapes();
-      var global = !targets.length && !this._paramsTargetShapes().length;
+      var global = !targets.length && !this._paramsTargetShapes().length &&
+        !this._armedInkTool();
       this._paramsBgRow.style.display = (targets.length || global) ? "" : "none";
       // Before the early return below: the swatches live in the colour row,
       // not in this one, so they need repainting even when this row is
@@ -7762,6 +7766,13 @@
       // label you touched — which reads as the SELECTED one, and is the
       // worst kind of wrong: confidently.
       var onLabel = this._fontTargetShapes().length > 0;
+      // With a pure-ink tool armed and no label in focus, the chips
+      // describe nothing the next stroke can have — hide the row with
+      // the other label controls.
+      if (this._labelChipsRow) {
+        this._labelChipsRow.style.display =
+          onLabel || !this._armedInkTool() ? "" : "none";
+      }
       var color = this._currentLabelColor();
       var forWhat = onLabel ? "this label" : "new labels";
 
@@ -7914,6 +7925,7 @@
       // them — contrast is a property of the pair, not of either one.
       var labelRow = document.createElement("div");
       labelRow.className = "etcher-label-row";
+      self._labelChipsRow = labelRow;
 
       var lb = document.createElement("button");
       lb.type = "button";
@@ -8285,6 +8297,16 @@
     // and surfaces.
     _titleHandlesOn: function() {
       return this._getPref("title_handles") === true;
+    },
+
+    // A tool that draws pure ink — its strokes are not labelled at
+    // creation and cannot hold a fill — so while it is armed the panel's
+    // label rows and fill row are noise about things the next gesture
+    // cannot produce. Selection always wins: clicking a labelled shape
+    // brings every applicable row back regardless of the armed tool.
+    _armedInkTool: function() {
+      return !!this.annotationMode &&
+        (this.activeTool === "marker" || this.activeTool === "highlighter");
     },
 
     _titleHandlesTitle: function() {
@@ -10947,6 +10969,10 @@
       self._syncStylePanel();
 
       self._dispatch("etcher:tool-changed", { tool: toolKey });
+      // Arming or disarming a tool changes which panel rows apply
+      // (a pure-ink tool hides the label rows and the fill row) — sync
+      // now, not on the next unrelated refresh.
+      this._syncStyleInspector();
     },
 
     // Lock single-pointer drag-pan when the cursor tool is active in

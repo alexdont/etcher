@@ -40,6 +40,7 @@ function commit(anchor, pt, over) {
   const self = Object.assign({
     draftState: { anchor, el: { classList: { remove() {} } } },
     _textDefaultBoxImagePx: () => 20,
+    _textDefaultBoxInkPx: () => 20,
     _markerScale: () => 1,
     _renderShape() {},
     _startTextEdit() {},

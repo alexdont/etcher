@@ -10550,7 +10550,7 @@
       // user can paste the rest deliberately if they want it.
       if (trimmed.length > 500) trimmed = trimmed.slice(0, 500) + "…";
 
-      var basePx = this._textDefaultBoxImagePx();
+      var basePx = this._textDefaultBoxInkPx();
       // Roughly half an em per character at the default size, wrapped at a
       // comfortable measure, so a short paste gets a short box and a long
       // one gets a taller one instead of a single unreadable line.
@@ -12742,10 +12742,10 @@
       // `title_box`, and that path is untouched.
       var basePx;
       if (stored) {
-        basePx = this._textDefaultBoxImagePx();
+        basePx = this._textDefaultBoxInkPx();
       } else {
         if (!(shape._titleBasePx > 0)) {
-          shape._titleBasePx = this._textDefaultBoxImagePx();
+          shape._titleBasePx = this._textDefaultBoxInkPx();
         }
         basePx = shape._titleBasePx;
       }
@@ -17548,7 +17548,7 @@
     // the preview shows before the pointer has moved; where the label ends
     // up is wherever the drag or the second click puts it.
     _calloutDefaultBox: function(pt) {
-      var basePx = this._textDefaultBoxImagePx();
+      var basePx = this._textDefaultBoxInkPx();
       var h = basePx * 1.4;
       return {
         x: pt.x + basePx * 4,
@@ -18535,12 +18535,17 @@
       // size in image px so the user gets a usable text bbox even on a
       // single click. The minimum is computed from the current zoom so
       // it looks roughly the same on screen across zoom levels.
+      // The click-vs-drag THRESHOLD is a gesture judgement and stays
+      // screen-relative; the minted default SIZE is ink and rides the
+      // uniform policy — a clicked text box is the same relative size
+      // whatever the zoom was when it was clicked.
       var minImagePx = this._textDefaultBoxImagePx();
       // Read BEFORE the clamps: whether the user actually drew a box, as
       // opposed to clicking — the clamped defaults are ours, not theirs.
       var drewBox = geom.h >= minImagePx;
-      if (geom.w < minImagePx) geom.w = minImagePx * 4;
-      if (geom.h < minImagePx) geom.h = minImagePx * 1.2;
+      var boxPx = this._textDefaultBoxInkPx();
+      if (geom.w < minImagePx) geom.w = boxPx * 4;
+      if (geom.h < minImagePx) geom.h = boxPx * 1.2;
 
       var el = this.draftState.el;
       el.classList.remove("is-draft");
@@ -18909,6 +18914,23 @@
       }
     },
 
+    // The same unit for SIZES — how big a freshly clicked text box, a
+    // callout's text box, a paste box or a label's first box comes out.
+    // Rides _inkScale like every other new-ink size: by default a
+    // constant 16 image px, so text minted at any zoom is the same
+    // relative size (the lines got this treatment; the text default was
+    // still zoom-baked through the function above). Screen-anchored only
+    // with the ⋯ zoom toggle on. `_textDefaultBoxImagePx` (screen-
+    // relative) remains for GESTURE thresholds and hit tolerances —
+    // those are about fingers on glass, not about ink.
+    _textDefaultBoxInkPx: function() {
+      try {
+        return 16 / this._inkScale();
+      } catch (e) {
+        return 16;
+      }
+    },
+
     // Whether the draw gesture from `a` to `b` (image px) was a bare click.
     // Judged in SCREEN px so the answer doesn't change with zoom — the old
     // check compared image px, which at high zoom canceled deliberate small
@@ -18966,7 +18988,7 @@
     // bbox at that point so they render without a migration.
     _calloutTextBoxImage: function(geometry) {
       if (geometry && geometry.text_box) return geometry.text_box;
-      var basePx = this._textDefaultBoxImagePx();
+      var basePx = this._textDefaultBoxInkPx();
       var w = basePx * 6;
       var h = basePx * 1.4;
       var p = (geometry && geometry.text_at) || [0, 0];
@@ -19048,7 +19070,7 @@
           { x: shape.geometry.a[0], y: shape.geometry.a[1] };
         var lblX = dimP.x;
         var lblY = dimP.y;
-        var basePx = this._textDefaultBoxImagePx();
+        var basePx = this._textDefaultBoxInkPx();
         var dlw = basePx * 6;
         var dlh = basePx * 1.4;
         g = { x: lblX - dlw / 2, y: lblY - dlh / 2, w: dlw, h: dlh };

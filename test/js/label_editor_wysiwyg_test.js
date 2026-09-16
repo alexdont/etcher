@@ -73,6 +73,7 @@ function edit(shape, opts) {
     _labelRidesShaft: ridesShaft,
     _calloutTextBoxImage: (g) => g,
     _textDefaultBoxImagePx: () => 16,
+    _textDefaultBoxInkPx: () => 16,
     _shapeTitleBoxImage: () => ({ x: 100, y: 100, w: 200, h: 40 }),
     _shaftPointAt: () => ({ x: 150, y: 120 }),
     _lastBboxTopImageFor: () => ({ x: 150, y: 100 }),

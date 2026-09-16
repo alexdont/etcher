@@ -94,6 +94,34 @@ function board(anchored, zoom) {
     "_setFontSize converts through _inkScale, not raw zoom");
 }
 
+// ── text defaults ride the same policy ────────────────────────────────────
+
+{
+  // The lines got the uniform treatment first; text minted through the
+  // default box was still zoom-baked. The ink twin sizes what NEW text
+  // comes out at; the screen-relative original stays for gesture
+  // thresholds and hit tolerances.
+  const inkBox = extract("_textDefaultBoxInkPx");
+  const on = { _getPref: (k) => (k === "zoom_anchor" ? true : null),
+    _markerScale: () => 4, _inkScale: inkScale };
+  const off = { _getPref: () => null, _markerScale: () => 4, _inkScale: inkScale };
+  assert.strictEqual(inkBox.call(off), 16,
+    "un-anchored: 16 image px, whatever the zoom — same relative text size");
+  assert.strictEqual(inkBox.call(on), 4,
+    "anchored: screen-constant, the old behaviour, behind the toggle");
+  for (const [site, what] of [
+    ["var basePx = this._textDefaultBoxInkPx();\n      var w = basePx * 6;", "legacy callout box"],
+    ["shape._titleBasePx = this._textDefaultBoxInkPx();", "a label's first box"],
+    ["var boxPx = this._textDefaultBoxInkPx();", "a clicked text's minted box"],
+  ]) {
+    assert.ok(s_includes(site), `text-size mint not ink-scaled: ${what}`);
+  }
+  function s_includes(needle) { return src.includes(needle.replace(/\\n/g, "\n")); }
+  // The gesture threshold deliberately stays screen-relative.
+  assert.ok(src.includes("var minImagePx = this._textDefaultBoxImagePx();"),
+    "click-vs-drag is a finger judgement and keeps the screen-relative unit");
+}
+
 // ── the switch lives with the other view toggles ──────────────────────────
 
 {

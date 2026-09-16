@@ -56,6 +56,7 @@ for (const k of ["rectangle", "circle", "text", "callout", "marker"]) {
 const board = {
   _labelRidesShaft: ridesShaft,
   _textDefaultBoxImagePx: () => 10,
+  _textDefaultBoxInkPx: () => 10,
   _arrowPath: arrowPath,
   _crSample: crSample,
   _arrowRoute: arrowRoute,

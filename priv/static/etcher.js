@@ -13561,6 +13561,13 @@
         if (this._titleHandlesOn()) this._renderTitleHandles(this.editingTitleShape);
         else this._removeTitleHandles();
       }
+      // And the text-sizing dots on a text or callout already in edit
+      // mode — same immediacy, same switch.
+      if (this.editingShape &&
+          (this.editingShape.kind === "text" ||
+           this.editingShape.kind === "callout")) {
+        this._renderHandles(this.editingShape);
+      }
       this._refreshToolbarTools();
       this._refreshLabelSwatch();
     },
@@ -20997,6 +21004,11 @@
             { x: g.x,         y: g.y + g.h }     // 3: bottom-left
           ];
         case "text": {
+          // The four corners are TEXT-resize dots, and those are opt-in
+          // (the ⋯ toggle, same as a label's): the Label size input is
+          // the primary way to size text, and dots that only duplicate a
+          // number the panel already offers stay hidden until asked for.
+          if (!this._titleHandlesOn()) return [];
           // Handles ride the shrunk-to-text bbox so users grab where
           // they see the box, not the (often wider) storage envelope.
           var tBox = shape._renderedBox || g;
@@ -21016,6 +21028,14 @@
           // 4 text-corner handles snap to what's drawn, not the wider
           // storage envelope.
           var cbox = shape._renderedBox || this._calloutTextBoxImage(g);
+          // The anchor dot is POSITIONAL — where the callout points — and
+          // always stays. The four text corners are text-resize dots and
+          // ride the same ⋯ opt-in as every other text-sizing dot; index
+          // 0 keeps meaning "anchor" either way, so the handle-drag
+          // mapping is untouched.
+          if (!this._titleHandlesOn()) {
+            return [{ x: g.anchor[0], y: g.anchor[1] }];
+          }
           return [
             { x: g.anchor[0],            y: g.anchor[1]            },  // 0: anchor
             { x: cbox.x,                 y: cbox.y                 },  // 1: text TL

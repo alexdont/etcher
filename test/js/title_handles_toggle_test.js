@@ -65,6 +65,46 @@ const renderHandles = extract("_renderTitleHandles");
     "Show label resize dots");
 }
 
+// ── every text-sizing dot rides the same switch ───────────────────────────
+
+{
+  // Text and callout shapes size their text through the same Label size
+  // input — their corner dots are the same duplication the label's were.
+  const handlePositions = extract("_handlePositions");
+  const geomText = { x: 10, y: 20, w: 200, h: 60 };
+  const geomCallout = { anchor: [5, 5], text_box: { x: 50, y: 50, w: 120, h: 40 } };
+  function board(on) {
+    return {
+      _titleHandlesOn: () => on,
+      _calloutTextBoxImage: (g) => g.text_box,
+    };
+  }
+
+  assert.deepStrictEqual(
+    handlePositions.call(board(false), { kind: "text", geometry: geomText }),
+    [], "a text shape shows no dots until asked");
+  assert.strictEqual(
+    handlePositions.call(board(true), { kind: "text", geometry: geomText }).length,
+    4, "…and all four when asked");
+
+  const calloutOff = handlePositions.call(board(false),
+    { kind: "callout", geometry: geomCallout });
+  assert.deepStrictEqual(calloutOff, [{ x: 5, y: 5 }],
+    "a callout keeps its ANCHOR dot — that one is positional, where the " +
+    "callout points, not a text-size duplicate");
+  const calloutOn = handlePositions.call(board(true),
+    { kind: "callout", geometry: geomCallout });
+  assert.strictEqual(calloutOn.length, 5, "anchor + four text corners when on");
+  assert.deepStrictEqual(calloutOn[0], { x: 5, y: 5 },
+    "index 0 means anchor either way — the drag mapping never shifts");
+
+  // Geometric kinds are none of this switch's business.
+  assert.strictEqual(
+    handlePositions.call(board(false),
+      { kind: "rectangle", geometry: { x: 0, y: 0, w: 10, h: 10 } }).length,
+    4, "a rectangle's corners resize GEOMETRY, not text — always there");
+}
+
 // ── wiring the fakes cannot reach ─────────────────────────────────────────
 
 {
@@ -75,6 +115,8 @@ const renderHandles = extract("_renderTitleHandles");
   assert.ok(/if \(this\._titleHandlesOn\(\)\) this\._renderTitleHandles\(this\.editingTitleShape\);\s*\n\s*else this\._removeTitleHandles\(\);/.test(src),
     "a label focused right now gets or loses its dots the moment the " +
     "switch flips, not on the next focus");
+  assert.ok(/this\.editingShape\.kind === "text" \|\|\s*\n\s*this\.editingShape\.kind === "callout"/.test(src),
+    "…and so does a text or callout already in edit mode");
   assert.ok(src.includes('this.titleHandlesBtn.setAttribute("aria-pressed", thOn ? "true" : "false");'),
     "the button announces its state like the other view toggles");
 }

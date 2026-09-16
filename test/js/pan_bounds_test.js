@@ -43,6 +43,11 @@ function board(shapes) {
       getCanvasSize: () => ({ width: 1000, height: 600 }),
       setPanBounds: (r) => calls.push(r),
       isInfiniteCanvas: () => false,
+      container: { getBoundingClientRect: () => ({ width: 800, height: 500 }) },
+      floors: [],
+      hostFloor: null,
+      getZoomFloor() { return this.hostFloor; },
+      setZoomFloor(v) { this.floors.push(v); },
     },
   };
 }
@@ -125,6 +130,33 @@ function board(shapes) {
   const undo = src.slice(src.indexOf("_applyHistorySnapshot: function"),
                          src.indexOf("_applyHistorySnapshot: function") + 3000);
   assert.ok(undo.includes("this._syncPanBounds();"), "…and undo/redo");
+}
+
+// ── the zoom floor drops to fit ALL the content ───────────────────────────
+
+{
+  // Panning could reach the ink; zooming out still stopped at the
+  // picture. With spill, the floor drops to where the whole content rect
+  // fits the viewport — all four ratios, so it holds under rotation.
+  const b = board([{ bbox: { x: 200, y: -400, w: 300, h: 100 } }]);
+  syncPanBounds.call(b);
+  const r = b.calls[0];
+  const expected = Math.min(800 / r.width, 500 / r.height,
+                            800 / r.height, 500 / r.width);
+  assert.strictEqual(b.handle.floors.length, 1, "the floor moved with the bounds");
+  assert.ok(Math.abs(b.handle.floors[0] - expected) < 1e-9,
+    "…to exactly where everything fits at once");
+
+  // Un-spill: the HOST'S floor comes back, not a blind null.
+  b.handle.hostFloor = 0.4; // pretend the host had one when we first lowered
+  // (captured at first lowering — so re-run the cycle from scratch)
+  const b2 = board([{ bbox: { x: 200, y: -400, w: 300, h: 100 } }]);
+  b2.handle.hostFloor = 0.4;
+  syncPanBounds.call(b2);
+  b2.shapes.length = 0;
+  syncPanBounds.call(b2);
+  assert.deepStrictEqual(b2.handle.floors[b2.handle.floors.length - 1], 0.4,
+    "the floor the host configured survives our borrowing of it");
 }
 
 // ── infinite canvases are left free ───────────────────────────────────────

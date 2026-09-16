@@ -10599,6 +10599,13 @@
           this._panBoundsActive = false;
           try { h.setPanBounds(null); } catch (_) {}
         }
+        // And the zoom floor: restore the HOST'S floor (captured when we
+        // first lowered it), not a blind null.
+        if (this._zoomFloorManaged) {
+          this._zoomFloorManaged = false;
+          try { h.setZoomFloor(this._hostZoomFloor); } catch (_) {}
+          this._hostZoomFloor = null;
+        }
         return;
       }
       // Breathing room on the spilled sides only, so the outermost stroke
@@ -10614,6 +10621,36 @@
         (maxY > size.height ? maxY + PAN_BOUNDS_PAD : size.height) - rect.y;
       this._panBoundsActive = true;
       try { h.setPanBounds(rect); } catch (_) {}
+
+      // Panning to the ink was half of it: the zoom FLOOR still only let
+      // the view fit the picture, so "zoom all the way out and see
+      // everything" stopped short of the very shapes the pan could reach.
+      // Lower the floor to where the whole content rect fits the viewport
+      // (all four ratios, so the guarantee holds under rotation too). The
+      // Home/reset button is untouched — it fits the IMAGE, as ever; this
+      // only extends how far the wheel may go.
+      if (typeof h.setZoomFloor === "function") {
+        var vw = 0, vh = 0;
+        try {
+          var cr = h.container.getBoundingClientRect();
+          vw = cr.width;
+          vh = cr.height;
+        } catch (_) {}
+        if (vw > 0 && vh > 0 && rect.width > 0 && rect.height > 0) {
+          if (!this._zoomFloorManaged) {
+            this._zoomFloorManaged = true;
+            // Whatever floor the host had — null for the default — is
+            // what un-spilling restores.
+            this._hostZoomFloor = (typeof h.getZoomFloor === "function")
+              ? h.getZoomFloor()
+              : null;
+          }
+          h.setZoomFloor(Math.min(
+            vw / rect.width, vh / rect.height,
+            vw / rect.height, vh / rect.width
+          ));
+        }
+      }
     },
 
     _emitChanged: function() {

@@ -2130,6 +2130,8 @@
   // Bumped per Etcher instance that ends up needing a hatch, to keep the
   // `<pattern>` ids of two overlays on one page apart.
   var HATCH_SEQ = 0;
+  // Same per-instance uniqueness story for the shaft-label gap masks.
+  var SHAFT_GAP_SEQ = 0;
 
   var TOOL_DEFS = {
     rectangle: { icon: ICONS.rectangle, title: "Rectangle" },
@@ -6679,6 +6681,80 @@
     // (head dev's call): an arrow's label names the pointing, so a label
     // that can wander off the line reads as a separate note, not a name.
     // NOT the plain line: its label stays the ordinary float-above kind.
+    // Cut the shaft out from behind (and just around) its riding label —
+    // the drafting convention: a dimension's value sits IN the line, in a
+    // break of its own, not printed across it. Done with a per-shape mask
+    // on the shaft group rather than by splitting the path, so the cut
+    // honours curves, dash patterns and the arrowheads for free, and the
+    // geometry (hit-testing, handles, offsets) never learns about it —
+    // the line is still there to grab, it just does not paint under the
+    // label. The mask id is instance-prefixed for the same reason the
+    // hatch patterns are: url(#…) resolves document-wide.
+    _syncShaftLabelGap: function(shape, rectEl) {
+      if (!this.svg || !shape || !shape.el || !shape.uuid || !rectEl) return;
+      if (!this._defs) {
+        this._defs = svgEl("defs");
+        this.svg.insertBefore(this._defs, this.svg.firstChild);
+      }
+      if (!this._shaftGapPrefix) {
+        SHAFT_GAP_SEQ += 1;
+        this._shaftGapPrefix = "etcher-shaft-gap-" + SHAFT_GAP_SEQ + "-";
+      }
+      var id = this._shaftGapPrefix +
+        String(shape.uuid).replace(/[^a-z0-9-]/gi, "");
+      var mask = this._defs.querySelector('[id="' + id + '"]');
+      if (!mask) {
+        // userSpaceOnUse with an oversized keep-rect: the mask must cover
+        // wherever pan/zoom puts the shaft, not the shaft's initial bbox
+        // (the default objectBoundingBox units would also make the cut
+        // rect's coordinates relative, and they are container px).
+        mask = svgEl("mask", {
+          id: id,
+          maskUnits: "userSpaceOnUse",
+          x: -100000, y: -100000, width: 200000, height: 200000
+        });
+        var keep = svgEl("rect", {
+          x: -100000, y: -100000, width: 200000, height: 200000, fill: "#fff"
+        });
+        var cut = svgEl("rect", { fill: "#000" });
+        cut.classList.add("etcher-shaft-gap-cut");
+        mask.appendChild(keep);
+        mask.appendChild(cut);
+        this._defs.appendChild(mask);
+      }
+      // The cut is the label's rendered rect plus a margin, so the line
+      // ends a clean step short of the words instead of touching them.
+      // Proportional to the label with a floor: a margin that scaled only
+      // with the screen would crowd a large label and drown a small one.
+      var x = Number(rectEl.getAttribute("x")) || 0;
+      var y = Number(rectEl.getAttribute("y")) || 0;
+      var w = Number(rectEl.getAttribute("width")) || 0;
+      var h = Number(rectEl.getAttribute("height")) || 0;
+      var gap = Math.max(4, h * 0.18);
+      var cutEl = mask.querySelector(".etcher-shaft-gap-cut");
+      cutEl.setAttribute("x", x - gap);
+      cutEl.setAttribute("y", y - gap);
+      cutEl.setAttribute("width", w + gap * 2);
+      cutEl.setAttribute("height", h + gap * 2);
+      // A turned board turns the label; the cut has to turn with it or the
+      // gap sits askew of the words it is clearing space for.
+      var turn = rectEl.getAttribute("transform");
+      if (turn) cutEl.setAttribute("transform", turn);
+      else cutEl.removeAttribute("transform");
+      shape.el.setAttribute("mask", "url(#" + id + ")");
+    },
+
+    // Label gone (deleted, emptied): the line closes back up. The mask
+    // node goes too, so a board that sheds labels does not accrete defs.
+    _clearShaftLabelGap: function(shape) {
+      if (shape && shape.el) shape.el.removeAttribute("mask");
+      if (!this._defs || !shape || !shape.uuid || !this._shaftGapPrefix) return;
+      var id = this._shaftGapPrefix +
+        String(shape.uuid).replace(/[^a-z0-9-]/gi, "");
+      var mask = this._defs.querySelector('[id="' + id + '"]');
+      if (mask && mask.parentNode) mask.parentNode.removeChild(mask);
+    },
+
     _labelRidesShaft: function(kind) {
       return kind === "dimension" || kind === "arrow";
     },
@@ -12553,6 +12629,8 @@
           shape.titleGroup.parentNode.removeChild(shape.titleGroup);
         }
         shape.titleGroup = null;
+        // A shaft whose label went away paints whole again.
+        if (this._labelRidesShaft(shape.kind)) this._clearShaftLabelGap(shape);
         return;
       }
 
@@ -12780,6 +12858,12 @@
           lineEl.setAttribute("x2", anchors.parent.x);
           lineEl.setAttribute("y2", anchors.parent.y);
         }
+      }
+      // Last, once the rect holds its final box (shrink-wrapped, centred
+      // back on the line): break the shaft around the label. Rendered
+      // with no text, the branch above has already closed the line up.
+      if (this._labelRidesShaft(shape.kind)) {
+        this._syncShaftLabelGap(shape, rectEl);
       }
     },
 

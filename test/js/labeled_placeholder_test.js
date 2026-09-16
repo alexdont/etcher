@@ -2,7 +2,7 @@
 //
 // A press-drag-release places exactly what was dragged, and both kinds then
 // drop straight into label editing — selected, inline input open, waiting
-// for text — because a dimension or callout without a label is a shape the
+// for text — because a callout without a label is a shape the
 // user still has to come back for. Lines share the machinery but stay
 // label-silent: consumers collect line titles via their own composer on
 // `etcher:shape-drawn`, and stacking two inputs confuses where to type.
@@ -89,15 +89,16 @@ function ctx(draft) {
   assert.deepStrictEqual(c.out.edit, [], "and opens no label editor for a shape that isn't there");
 }
 
-// ── dimension: drag → exactly the dragged span, label editor open ───────────
+// ── dimension: drag → exactly the dragged span, NO label prompt ─────────────
 
 {
   const c = ctx({ state: { kind: "dimension", anchor: { x: 10, y: 10 } } });
   commitDimension.call(c, { x: 90, y: 60 });
   assert.deepStrictEqual(c.out.finalized.geom, { a: [10, 10], b: [90, 60] },
     "a dragged dimension keeps its dragged endpoints");
-  assert.deepStrictEqual(c.out.edit, [["edit", "u1"], ["label", "u1"]],
-    "a dragged dimension must also land in label editing — that is the point of drawing one");
+  assert.deepStrictEqual(c.out.edit, [],
+    "no editor blinks on release (head dev's call) — the line just exists, " +
+    "and a double-click adds the label later like on any other shaft");
 }
 
 // ── line: same gestures, no label editor ────────────────────────────────────

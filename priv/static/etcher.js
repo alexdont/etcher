@@ -17685,8 +17685,12 @@
       var el = this.draftState.el;
       var kind = this.draftState.kind;
       el.classList.remove("is-draft");
-      if (kind === "dimension") this._finalizeLabeled(kind, geom, el);
-      else this._finalizeShape(kind, geom, el);
+      // The dimension used to finalize into the label editor — release,
+      // and a text prompt was already blinking. Head dev's call: just
+      // make the line. It comes up selected like every other shape, and
+      // a double-click adds the label later if one is wanted. (The
+      // callout keeps the prompt — a callout with no text is nothing.)
+      this._finalizeShape(kind, geom, el);
     },
 
     // Finalize + drop straight into label editing: selected with handles,
@@ -19006,9 +19010,12 @@
     // -------------------------------------------------------------------------
 
     // Kinds whose text IS the shape — deleting the text deletes them.
-    // Every other kind merely carries a label in `metadata.title`.
+    // Every other kind merely carries a label in `metadata.title`. The
+    // dimension used to be in this class; now that it draws unlabelled
+    // and takes a label by double-click like any shaft, its text is a
+    // LABEL — deleting it (or committing it empty) leaves the line.
     _isTextKind: function(kind) {
-      return kind === "text" || kind === "callout" || kind === "dimension";
+      return kind === "text" || kind === "callout";
     },
 
     _startTextEdit: function(shape) {

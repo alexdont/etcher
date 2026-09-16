@@ -39,7 +39,7 @@ function board(over) {
     undos: [],
     exited: 0,
     rendered: [],
-    _isTextKind: (k) => k === "text" || k === "callout" || k === "dimension",
+    _isTextKind: (k) => k === "text" || k === "callout",
     _exitTitleEditMode() { this.exited++; this.editingTitleShape = null; },
     _deleteShape(s) { this.deleted.push(s); },
     _deleteSelectedShapes() { this.deleted.push(...this.selectedShapes); },
@@ -88,11 +88,21 @@ function board(over) {
 // ── on a text-kind, the text IS the shape ─────────────────────────────────
 
 {
+  const cal = { uuid: "c", kind: "callout", metadata: { title: "look" } };
+  const { self, key } = board({ editingTitleShape: cal });
+  key("Backspace");
+  assert.deepStrictEqual(self.deleted, [cal],
+    "deleting a callout's label deletes the callout — its text is the shape");
+}
+
+{
+  // The dimension LEFT that class when its release-time prompt was cut:
+  // its text is a label now, so Delete clears the label and the line stays.
   const dim = { uuid: "d", kind: "dimension", metadata: { title: "42cm" } };
   const { self, key } = board({ editingTitleShape: dim });
   key("Backspace");
-  assert.deepStrictEqual(self.deleted, [dim],
-    "deleting a dimension's label deletes the dimension — its text is the shape");
+  assert.deepStrictEqual(self.deleted, [], "the line survives");
+  assert.strictEqual(dim.metadata.title, "", "…its label does not");
 }
 
 // ── the existing paths are untouched ──────────────────────────────────────

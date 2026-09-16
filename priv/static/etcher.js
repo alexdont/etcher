@@ -7761,13 +7761,12 @@
         this._syncStyleInspector();
         return;
       }
-      // While an ink tool is armed the picker recolours THAT tool, not
-      // the palette: the slot keeps the shared colour the board returns
-      // to on disarm. (_selectColor stores the pick under the tool.)
-      if (this._armedInkTool()) {
-        this._selectColor(hex);
-        return;
-      }
+      // The wheel edits the slot it was opened from, ink tool armed or
+      // not — five swatches that silently stop taking edits while the
+      // marker is up read as broken. (While armed, _selectColor also
+      // stores the pick as the tool's colour.) With the tool in a colour
+      // outside the palette no slot is active (-1), and _setSlotColor's
+      // own bounds check makes the pick a pure tool recolour.
       this._setSlotColor(this._activeSlot, hex);
       this._selectColor(hex);
     },
@@ -10927,9 +10926,17 @@
         self._selectColor(inkColor);
       } else if (wasInk && self._bankedSharedColor) {
         var bank = self._bankedSharedColor;
+        var slots = self._colorSlots || [];
         self._bankedSharedColor = null;
         self._activeSlot = bank.slot;
-        self._selectColor(bank.color);
+        // The slot's CURRENT colour, not the banked value: the user may
+        // have edited that swatch through the wheel while the ink tool
+        // was up, and restoring the stale colour would highlight a swatch
+        // showing a different colour than the one being drawn with. The
+        // banked value only stands when no slot was active (a shared
+        // colour from outside the palette).
+        self._selectColor(bank.slot >= 0 && bank.slot < slots.length
+          ? slots[bank.slot] : bank.color);
       }
 
       // Sync `.is-selected` across the main toolbar AND the

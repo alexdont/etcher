@@ -4,9 +4,11 @@
 // Arming an ink tool banks the shared selection and loads the tool's
 // remembered colour (a first-time highlighter starts yellow, so the two
 // ink tools never match out of the box); a pick while armed is stored
-// under the tool and leaves the palette slots alone; disarming restores
-// the banked shared colour — so a yellow highlighting session never
-// leaks into the next rectangle.
+// under the tool; disarming restores the banked shared selection — so a
+// yellow highlighting session never leaks into the next rectangle. The
+// palette itself stays fully editable throughout: the wheel edits the
+// slot it was opened from whatever tool is up, and the restore reads the
+// slot's CURRENT colour, so an edit made mid-marker sticks.
 //
 //   node test/js/ink_tool_colors_test.js
 
@@ -69,15 +71,14 @@ function colorBoard(armedTool) {
     "no tool armed: the pick is the shared palette selection, not a pref");
 }
 
-// ── the picker leaves the palette slot alone while ink is armed ───────────
+// ── the wheel edits the slot it was opened from, armed or not ─────────────
 
 {
-  function pickerBoard(armed) {
+  function pickerBoard() {
     return {
       _labelBgPickTarget: null,
       _labelPickTarget: null,
       _inspectedShape: () => null,
-      _armedInkTool: () => armed,
       _activeSlot: 1,
       slotWrites: [],
       picks: [],
@@ -85,16 +86,30 @@ function colorBoard(armedTool) {
       _selectColor(hex) { this.picks.push(hex); },
     };
   }
-  const armed = pickerBoard(true);
+  // Ink armed: the swatch being edited MUST repaint — five swatches that
+  // silently stop taking edits while the marker is up read as broken.
+  // (_selectColor is what stores the pick as the tool's colour.)
+  const armed = pickerBoard();
   applyPickedColor.call(armed, "#123456");
-  assert.deepStrictEqual(armed.slotWrites, [],
-    "the slot keeps the shared colour the board returns to on disarm");
-  assert.deepStrictEqual(armed.picks, ["#123456"], "the tool still gets the pick");
+  assert.deepStrictEqual(armed.slotWrites, [[1, "#123456"]],
+    "the wheel edits the slot whatever tool is up");
+  assert.deepStrictEqual(armed.picks, ["#123456"]);
 
-  const idle = pickerBoard(false);
-  applyPickedColor.call(idle, "#123456");
-  assert.deepStrictEqual(idle.slotWrites, [[1, "#123456"]],
-    "no ink armed: the picker edits the active slot, as ever");
+  // A tool colour outside the palette leaves no slot active; the pick is
+  // then a pure tool recolour, guarded by _setSlotColor's own bounds
+  // check rather than a branch here.
+  const setSlotColor = extract("_setSlotColor");
+  const off = {
+    _colorSlots: ["#aaaaaa"],
+    swatchEls: [],
+    _activeSlot: -1,
+    activeColor: "#ff0000",
+    _setPref() { this.persisted = true; },
+  };
+  setSlotColor.call(off, -1, "#123456");
+  assert.deepStrictEqual(off._colorSlots, ["#aaaaaa"],
+    "no active slot: the palette survives the pick");
+  assert.ok(!off.persisted, "…and nothing is persisted for it");
 }
 
 // ── arming banks the shared colour; disarming restores it ─────────────────
@@ -102,7 +117,8 @@ function colorBoard(armedTool) {
 // Lift _selectTool's swap block and drive it through a whole session.
 const blockStart = src.indexOf("      var wasInk = prevTool ===");
 assert.notStrictEqual(blockStart, -1, "could not find the ink-colour swap");
-const blockEnd = src.indexOf("self._selectColor(bank.color);\n      }\n", blockStart);
+const blockEnd = src.indexOf(
+  "? slots[bank.slot] : bank.color);\n      }\n", blockStart);
 assert.notStrictEqual(blockEnd, -1, "could not find the end of the swap block");
 const swap = new Function("self", "prevTool", "toolKey", "HIGHLIGHT_DEFAULT_COLOR",
   src.slice(blockStart, src.indexOf("\n", blockEnd + 40)));
@@ -142,10 +158,15 @@ const swap = new Function("self", "prevTool", "toolKey", "HIGHLIGHT_DEFAULT_COLO
   assert.deepStrictEqual(board._bankedSharedColor, { slot: 2, color: "#111111" },
     "only the first ink arm is a shared colour worth returning to");
 
-  // Disarm: the shared selection comes back, slot and all.
+  // The user edits the banked swatch through the wheel mid-highlight.
+  board._colorSlots[2] = "#22cc44";
+
+  // Disarm: the shared selection comes back — slot and all, reading the
+  // slot's CURRENT colour, so the edit made while the ink tool was up
+  // sticks instead of being rolled back to the stale banked value.
   arm("highlighter", null);
-  assert.strictEqual(board.activeColor, "#111111",
-    "a highlighting session must not leak into the next rectangle");
+  assert.strictEqual(board.activeColor, "#22cc44",
+    "a swatch edited mid-marker must stay edited after disarm");
   assert.strictEqual(board._activeSlot, 2);
   assert.strictEqual(board._bankedSharedColor, null);
 
@@ -159,6 +180,16 @@ const swap = new Function("self", "prevTool", "toolKey", "HIGHLIGHT_DEFAULT_COLO
   // …and the highlighter in its.
   arm("marker", "highlighter");
   assert.strictEqual(board.activeColor, HIGHLIGHT_DEFAULT_COLOR);
+
+  // A shared colour from OUTSIDE the palette (host-seeded) banks as a
+  // raw value — no slot to re-read — and comes back verbatim.
+  arm("highlighter", null);
+  board._activeSlot = -1;
+  board.activeColor = "#0ff00f";
+  arm(null, "marker");
+  arm("marker", null);
+  assert.strictEqual(board.activeColor, "#0ff00f",
+    "an off-palette shared colour restores from the banked value");
 }
 
 // ── the swap sits after the selection teardown ────────────────────────────

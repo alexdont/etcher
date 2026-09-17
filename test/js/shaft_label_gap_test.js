@@ -152,8 +152,9 @@ function board() {
   const body = src.slice(start, end);
   assert.ok(body.includes("this._syncShaftLabelGap(shape, rectEl);"),
     "a rendered shaft label must break its line");
-  assert.ok(body.includes("if (this._labelRidesShaft(shape.kind)) this._clearShaftLabelGap(shape);"),
-    "…and a removed one must close it back up");
+  assert.ok(/if \(this\._labelRidesShaft\(shape\.kind\) &&\s+!\(this\._textEditor && this\._textEditor\.shape === shape\)\) \{\s+this\._clearShaftLabelGap\(shape\);/.test(body),
+    "…and a removed one must close it back up — but NOT while its label " +
+    "is being typed, or every repaint erases the break the editor set");
   const cleared = body.indexOf("_clearShaftLabelGap");
   const returned = body.indexOf("return;", body.indexOf("if (!trimmed || !bboxTopImage) {"));
   assert.ok(cleared !== -1 && cleared < returned,

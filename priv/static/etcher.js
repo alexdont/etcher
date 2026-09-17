@@ -12624,8 +12624,16 @@
           shape.titleGroup.parentNode.removeChild(shape.titleGroup);
         }
         shape.titleGroup = null;
-        // A shaft whose label went away paints whole again.
-        if (this._labelRidesShaft(shape.kind)) this._clearShaftLabelGap(shape);
+        // A shaft whose label went away paints whole again — unless its
+        // label is being TYPED right now: the title is still empty then,
+        // but the editor's fit has already broken the line under itself,
+        // and this render (finalize, enter-edit, any repaint) would close
+        // it back up until the next keystroke re-broke it — a flicker on
+        // exactly the first frame of typing.
+        if (this._labelRidesShaft(shape.kind) &&
+            !(this._textEditor && this._textEditor.shape === shape)) {
+          this._clearShaftLabelGap(shape);
+        }
         return;
       }
 

@@ -4,50 +4,6 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [0.15.0] — 2026-09-17
-
-Shaft labels wear their line's colour, and the dimension asks for its
-label again — politely.
-
-### Changed
-
-- **A label on an arrow or dimension defaults to the LINE's own
-  colour** — a red arrow gets a red label. The dimension was the one
-  kind that did not inherit (a hardcoded black default), and the
-  remembered label colour stamped itself onto both shaft kinds at
-  creation; both are gone. An explicit colour — the swatch, the chips —
-  still wins everywhere, so any label can be given a colour of its own.
-
-- **The dimension drops back into its label editor on release**,
-  reversing half of 0.14's "just make the line" (and keeping the half
-  that mattered): the editor opens focused for typing, but it is
-  skippable — Enter on empty text or a click away keeps the line,
-  label-less. A measurement usually wants its value written on it;
-  lines and arrows stay promptless and take a label by double-click.
-
-### Fixed
-
-- **The shaft breaks under the label editor while typing.** The
-  line-break mask synced only from the committed render, so while
-  typing the shaft ran straight through the editor — the text is the
-  line's colour now, so with the plate off that was red words on a red
-  line — and the break popping in on Enter read as the line being
-  deleted out from under the text at placement. The editor's fit
-  engine now syncs the gap to its own box per keystroke (and the
-  no-title render clear stands down while the editor is open, or every
-  repaint erased the break until the next key). What you see while
-  typing is what placement gives you.
-
-- **A label-prompted shape stays fresh, so its label size becomes the
-  tool's default.** _finalizeLabeled entered edit mode after
-  _finalizeShape had already set the fresh flag — and that entry's
-  teardown cleared it, so panel edits made while typing a dimension's
-  or callout's label never mirrored to the defaults. Colour and
-  thickness only appeared to survive (the open editor routes them
-  through the global branch); the label size was the visible casualty,
-  with every new label reverting small. The flag is re-set after
-  entering edit mode, same as the callee's own discipline.
-
 ## [0.14.1] — 2026-09-17
 
 Shaft labels wear their line's colour, and the dimension asks for its

@@ -17941,6 +17941,15 @@
       if (!made) return;
       this._suppressEditDismissUntil = Date.now() + 400;
       this._enterEditMode(made);
+      // The same order-of-operations trap _finalizeShape documents about
+      // itself: entering edit mode runs _exitEditMode's teardown, which
+      // ends freshness — so re-set it AFTER, or a shape born through the
+      // label prompt (dimension, callout) never mirrors panel edits to
+      // the tool's defaults while every other kind does. The label SIZE
+      // was the visible casualty: colour and thickness happen to fall
+      // through to the global branch while the editor is open, but the
+      // font path targets the editing shape and checks freshness.
+      this._freshShape = made;
       this._startTextEdit(made);
     },
 

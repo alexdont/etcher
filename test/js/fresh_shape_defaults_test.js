@@ -106,6 +106,28 @@ const setLineParam = extract("_setLineParam");
   const exitAt = src.indexOf("_exitEditMode: function()");
   assert.ok(src.slice(exitAt, exitAt + 300).includes("this._freshShape = null;"),
     "leaving edit mode ends freshness for good");
+  // A shape born through the label prompt (dimension, callout) enters
+  // edit mode AFTER _finalizeShape returns — and that teardown clears the
+  // fresh flag _finalizeShape just set. _finalizeLabeled must re-set it,
+  // or panel edits made while typing the label (the label SIZE was the
+  // visible casualty) never become the tool's defaults.
+  {
+    const finalizeLabeled = extract("_finalizeLabeled");
+    const ctx = {
+      _finalizeShape(kind, geom, el, afterCreate) {
+        this._freshShape = { uuid: "f1", kind };
+        afterCreate(this._freshShape);
+      },
+      // What the real one does on entry: teardown ends freshness.
+      _enterEditMode() { this._freshShape = null; },
+      _startTextEdit() {},
+    };
+    finalizeLabeled.call(ctx, "dimension", {}, {});
+    assert.ok(ctx._freshShape && ctx._freshShape.uuid === "f1",
+      "the label prompt must not cost the shape its freshness — the size " +
+      "picked while typing is what the NEXT label starts at");
+  }
+
   const clearAt = src.indexOf("_clearSelection: function()");
   assert.ok(src.slice(clearAt, clearAt + 200).includes("this._freshShape = null;"),
     "so does clearing the selection");

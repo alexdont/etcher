@@ -160,4 +160,21 @@ function board() {
     "the clear must run on the no-title exit, before the early return");
 }
 
+// ── the break happens WHILE TYPING, not only on commit ───────────────────
+
+{
+  // The editor's fit function (runs on every keystroke) must sync the
+  // gap to the editor's own box for shaft-riding shapes. The text is the
+  // line's colour, so an unbroken shaft runs straight through the words
+  // while typing — and the break popping in only on commit read as the
+  // line being deleted out from under the text at placement.
+  const start = src.indexOf("      var edFit = function() {");
+  assert.notStrictEqual(start, -1, "could not find the editor fit engine");
+  const end = src.indexOf('input.addEventListener("input", edFit);', start);
+  const fitBody = src.slice(start, end);
+  assert.ok(fitBody.includes("selfEd._labelRidesShaft(shape.kind)") &&
+            fitBody.includes("selfEd._syncShaftLabelGap(shape, fo);"),
+    "the fit engine must break the shaft under the editor, live");
+}
+
 console.log("shaft label gap: all checks passed");

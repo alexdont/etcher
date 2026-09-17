@@ -19450,6 +19450,18 @@
         fo.setAttribute("x", input.style.textAlign === "center"
           ? edCx - boxW / 2
           : edLeft);
+        // A shaft-riding label breaks its line — and it must break WHILE
+        // TYPING, sized to the editor as it grows. The text is the line's
+        // own colour now, so an unbroken shaft runs straight through the
+        // words (same colour on same colour, unreadable with the plate
+        // off) — and the break popping in only on commit read as the line
+        // being deleted out from under the text at placement. The mask
+        // tracks the editor's box per keystroke; the commit render then
+        // re-syncs it to the label's real rect, or closes the line back
+        // up if nothing was typed.
+        if (selfEd._labelRidesShaft(shape.kind)) {
+          selfEd._syncShaftLabelGap(shape, fo);
+        }
       };
       input.addEventListener("input", edFit);
       edFit();

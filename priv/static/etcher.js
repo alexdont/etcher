@@ -1804,11 +1804,6 @@
     ".etcher-link-editor, " +
     ".etcher-popup, .etcher-tooltip";
 
-  // A dimension's label is a measurement written ON the drawing, not part of
-  // the line it belongs to, so it reads as annotation rather than as more of
-  // the shape and defaults to black instead of inheriting the line's colour.
-  // Every label can still be given a colour of its own.
-  var DIMENSION_LABEL_COLOR = "#000000";
 
   // The size every text measurement is taken at, whatever size the text will
   // be drawn at. Text metrics are not linear in font size, so measuring at
@@ -12939,10 +12934,14 @@
     // labels have always behaved — except on a dimension, where the label is
     // a measurement written on the drawing rather than part of the line, and
     // black is what it has always been.
+    // A label defaults to its shape's own colour — a red arrow gets a red
+    // label (head dev's call; the dimension's old black default read as an
+    // annotation disconnected from the line it measures, and it was the one
+    // kind that did not inherit). An explicit `title_color` always wins, so
+    // any label can still be given a colour of its own.
     _titleColorFor: function(shape) {
       var meta = (shape && shape.metadata) || {};
       if (meta.title_color) return meta.title_color;
-      if (shape && shape.kind === "dimension") return DIMENSION_LABEL_COLOR;
       return (shape && shape.style && shape.style.color) || "";
     },
 
@@ -17906,12 +17905,19 @@
       var el = this.draftState.el;
       var kind = this.draftState.kind;
       el.classList.remove("is-draft");
-      // The dimension used to finalize into the label editor — release,
-      // and a text prompt was already blinking. Head dev's call: just
-      // make the line. It comes up selected like every other shape, and
-      // a double-click adds the label later if one is wanted. (The
-      // callout keeps the prompt — a callout with no text is nothing.)
-      this._finalizeShape(kind, geom, el);
+      // The dimension drops straight into its label editor on release
+      // (head dev's call, restoring the prompt his earlier call removed —
+      // with the half that mattered kept): the editor opens focused for
+      // typing, but it is SKIPPABLE. Enter on empty text or a click away
+      // keeps the line, label-less — the empty-commit path discards only
+      // kinds that ARE their text. A measurement usually wants its value
+      // written on it; a plain pointer line usually doesn't, so lines and
+      // arrows stay promptless and take a label by double-click.
+      if (kind === "dimension") {
+        this._finalizeLabeled(kind, geom, el);
+      } else {
+        this._finalizeShape(kind, geom, el);
+      }
     },
 
     // Finalize + drop straight into label editing: selected with handles,
@@ -19611,10 +19617,13 @@
       // recolouring each one by hand. Creation only, and only where no
       // explicit colour exists, so re-editing text never repaints a label.
       // Text and callout are excluded — their text IS the shape and takes
-      // the shape's colour; dimension is in, its label honours
-      // `title_color` ahead of its black default.
+      // the shape's colour. Shaft-riding labels (dimension, arrow) are
+      // excluded too: they default to their LINE's colour (a red arrow, a
+      // red label — head dev's call), which a remembered preference must
+      // not override; recolouring one by hand still writes title_color.
       if (newTitle && !prevTitle &&
           shape.kind !== "text" && shape.kind !== "callout" &&
+          !this._labelRidesShaft(shape.kind) &&
           !(shape.metadata && shape.metadata.title_color)) {
         var rememberedLabelColor = this._getPref("label_color");
         if (typeof rememberedLabelColor === "string" && rememberedLabelColor) {

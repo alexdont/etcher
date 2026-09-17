@@ -57,9 +57,40 @@ function commit(shape, typed, remembered) {
     "a brand-new label should start in the colour the user last gave a label");
 }
 {
+  // Shaft-riding labels (dimension, arrow) default to their LINE's colour
+  // — a red arrow gets a red label — so the remembered preference must
+  // not stamp them. Recolouring one by hand still writes title_color,
+  // which _titleColorFor honours ahead of the inherited colour.
   const meta = commit({ kind: "dimension", uuid: "u2", metadata: null }, "42 cm", "#3b82f6");
-  assert.strictEqual(meta.title_color, "#3b82f6",
-    "dimension labels honour title_color ahead of their black default — they must adopt the memory too");
+  assert.strictEqual(meta.title_color, undefined,
+    "a dimension's label rides its line's colour, not the remembered one");
+}
+{
+  const meta = commit({ kind: "arrow", uuid: "u3", metadata: null }, "here", "#3b82f6");
+  assert.strictEqual(meta.title_color, undefined,
+    "an arrow's label rides its line's colour, not the remembered one");
+}
+
+// ── what an unstamped shaft label actually renders in ───────────────────────
+
+{
+  // The other half of the shaft rule: _titleColorFor resolves an
+  // unstamped label to the SHAPE's colour — dimension included, whose
+  // old hardcoded black default read as an annotation disconnected from
+  // the line it measures. An explicit title_color still wins.
+  const titleColorFor = extract("_titleColorFor");
+  const red = { kind: "dimension", style: { color: "#ef4444" }, metadata: {} };
+  assert.strictEqual(titleColorFor.call({}, red), "#ef4444",
+    "a red dimension gets a red label, not a black one");
+  const arrow = { kind: "arrow", style: { color: "#ef4444" }, metadata: {} };
+  assert.strictEqual(titleColorFor.call({}, arrow), "#ef4444");
+  const explicit = {
+    kind: "dimension",
+    style: { color: "#ef4444" },
+    metadata: { title_color: "#111111" }
+  };
+  assert.strictEqual(titleColorFor.call({}, explicit), "#111111",
+    "…but a colour given by hand always wins");
 }
 
 // ── with nothing remembered, nothing is stamped ─────────────────────────────

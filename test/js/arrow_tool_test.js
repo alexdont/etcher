@@ -158,19 +158,19 @@ function board() {
   assert.deepStrictEqual(self.committed.points, [],
     "the committed geometry is the draft's, not a fresh pair");
 
-  // The label question: every shaft — dimension included, since the head
-  // dev cut its release-time prompt — finalizes plainly and takes a label
-  // by double-click later. Only the callout keeps _finalizeLabeled: a
-  // callout with no text is nothing.
+  // The label question: a DIMENSION drops into its (skippable) label
+  // editor on release — a measurement usually wants its value written on
+  // it — while lines and this arrow finalize plainly and take a label by
+  // double-click. The callout keeps its prompt too: a callout with no
+  // text is nothing.
   const commitShaft = src.slice(src.indexOf("    _commitShaftDraft: function"),
                                 src.indexOf("\n    },", src.indexOf("    _commitShaftDraft: function")));
-  assert.ok(commitShaft.includes("this._finalizeShape(kind, geom, el);") &&
-            !commitShaft.includes("_finalizeLabeled"),
-    "shafts finalize without a label prompt");
-  assert.ok(src.includes('this._finalizeLabeled("callout", geom, el);'),
-    "…while the callout still opens its editor — it IS its text");
+  assert.ok(/if \(kind === "dimension"\) \{\s+this\._finalizeLabeled\(kind, geom, el\);/.test(commitShaft),
+    "the dimension prompts for its label on creation");
   assert.ok(commitShaft.includes("this._finalizeShape(kind, geom, el);"),
-    "…and shafts do not — a label is available by double-click, like any shape");
+    "…while the other shafts — this arrow included — finalize without one");
+  assert.ok(src.includes('this._finalizeLabeled("callout", geom, el);'),
+    "…and the callout still opens its editor — it IS its text");
 }
 
 // ── and it draws either way, like the other two-ended tools ───────────────

@@ -90,16 +90,19 @@ function ctx(draft) {
   assert.deepStrictEqual(c.out.edit, [], "and opens no label editor for a shape that isn't there");
 }
 
-// ── dimension: drag → exactly the dragged span, NO label prompt ─────────────
+// ── dimension: drag → exactly the dragged span, straight into its label ────
 
 {
   const c = ctx({ state: { kind: "dimension", anchor: { x: 10, y: 10 } } });
   commitDimension.call(c, { x: 90, y: 60 });
   assert.deepStrictEqual(c.out.finalized.geom, { a: [10, 10], b: [90, 60] },
     "a dragged dimension keeps its dragged endpoints");
-  assert.deepStrictEqual(c.out.edit, [],
-    "no editor blinks on release (head dev's call) — the line just exists, " +
-    "and a double-click adds the label later like on any other shaft");
+  // Head dev's call, second pass: the prompt is back — a measurement
+  // usually wants its value written on it — but SKIPPABLE: the
+  // empty-commit path keeps a label-less dimension (it discards only
+  // kinds that ARE their text; see _commitTextEdit).
+  assert.deepStrictEqual(c.out.edit, [["edit", "u1"], ["label", "u1"]],
+    "release drops straight into the label editor, focused for typing");
 }
 
 // ── line: same gestures, no label editor ────────────────────────────────────

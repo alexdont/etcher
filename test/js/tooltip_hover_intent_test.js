@@ -1,0 +1,182 @@
+// Pins the tooltip's manners.
+//
+// It used to appear the instant the cursor touched a shape and sit for
+// five seconds — so crossing a drawing flashed a tooltip per shape on
+// the way, and the one you did want covered the picture long after you
+// had read it. Now: the cursor has to settle before anything appears,
+// the box fades rather than pops, and the dwell is short.
+//
+// The delay is for tooltips that arrive UNINVITED. A tooltip already
+// open switches shape at once, and every deliberate path — pinning, the
+// re-show after a handle drag or a bend edit — still shows immediately,
+// because the user just acted on that shape and is waiting for it.
+//
+//   node test/js/tooltip_hover_intent_test.js
+
+const fs = require("fs");
+const path = require("path");
+const assert = require("assert");
+
+const SOURCE = path.join(__dirname, "..", "..", "priv", "static", "etcher.js");
+const src = fs.readFileSync(SOURCE, "utf8");
+
+function extract(name) {
+  const needle = `    ${name}: function`;
+  const start = src.indexOf(needle);
+  assert.notStrictEqual(start, -1, `could not find ${name}`);
+  const end = src.indexOf("\n    },", start);
+  return eval("(" + src.slice(start, end + "\n    }".length)
+    .replace(`${name}: function`, "function") + ")");
+}
+
+for (const name of ["TOOLTIP_OPEN_DELAY_MS", "TOOLTIP_DWELL_MS", "TOOLTIP_FADE_MS"]) {
+  const m = src.match(new RegExp(`var ${name} = (\\d+);`));
+  assert.ok(m, `could not find ${name}`);
+  global[name] = Number(m[1]);
+}
+
+// ── the timings are the point ─────────────────────────────────────────────
+
+{
+  assert.ok(TOOLTIP_OPEN_DELAY_MS >= 200 && TOOLTIP_OPEN_DELAY_MS <= 600,
+    "long enough that crossing a shape is silent, short enough to feel instant when meant");
+  assert.ok(TOOLTIP_DWELL_MS <= 2500,
+    "the complaint was that it took way too long to go away");
+  assert.ok(TOOLTIP_DWELL_MS > TOOLTIP_OPEN_DELAY_MS,
+    "…but it must outlast its own opening");
+  assert.ok(TOOLTIP_FADE_MS > 0 && TOOLTIP_FADE_MS < 200,
+    "a fade you notice as a fade, not as a wait");
+}
+
+// ── hover waits; an open tooltip switches at once ─────────────────────────
+
+const hover = extract("_hoverTooltip");
+const cancelOpen = extract("_cancelTooltipOpen");
+
+function board(visible) {
+  const timers = [];
+  return {
+    shown: [],
+    tooltipEl: { style: { display: visible ? "" : "none" } },
+    tooltipPinned: false,
+    _hoveredShape: null,
+    _showTooltipFor(s) { this.shown.push(s && s.uuid); },
+    _cancelTooltipOpen: cancelOpen,
+    _timers: timers,
+    // A stand-in scheduler, so the test can fire the pending open by hand.
+    _fire() { const t = timers.shift(); if (t) t(); },
+  };
+}
+
+{
+  const self = board(false);
+  const shape = { uuid: "a" };
+  global.setTimeout = (fn) => { self._timers.push(fn); return self._timers.length; };
+  global.clearTimeout = () => {};
+
+  self._hoveredShape = shape;
+  hover.call(self, shape);
+  assert.deepStrictEqual(self.shown, [],
+    "nothing appears on contact — the cursor has to settle");
+  self._fire();
+  assert.deepStrictEqual(self.shown, ["a"], "…and then it does");
+}
+
+{
+  // Crossing a drawing: hover lands on a shape, moves on before the
+  // window closes. Nothing should ever have appeared.
+  const self = board(false);
+  const passed = { uuid: "passed" };
+  const wanted = { uuid: "wanted" };
+  global.setTimeout = (fn) => { self._timers.push(fn); return self._timers.length; };
+
+  self._hoveredShape = passed;
+  hover.call(self, passed);
+  self._hoveredShape = wanted;           // the cursor moved on
+  self._fire();                           // the stale timer fires
+  assert.deepStrictEqual(self.shown, [],
+    "a tooltip must not open for a shape the cursor has already left");
+}
+
+{
+  // Already open: switching shapes is immediate. Charging the delay twice
+  // would just feel slow.
+  const self = board(true);
+  self._hoveredShape = { uuid: "b" };
+  hover.call(self, self._hoveredShape);
+  assert.deepStrictEqual(self.shown, ["b"], "an open tooltip follows the cursor at once");
+}
+
+{
+  // A pin landing inside the window wins — hover must not yank it away.
+  const self = board(false);
+  const shape = { uuid: "c" };
+  global.setTimeout = (fn) => { self._timers.push(fn); return self._timers.length; };
+  self._hoveredShape = shape;
+  hover.call(self, shape);
+  self.tooltipPinned = true;
+  self._fire();
+  assert.deepStrictEqual(self.shown, [], "a pinned tooltip is not replaced by a pending hover");
+}
+
+// ── the deliberate paths stay instant ─────────────────────────────────────
+
+{
+  // Hover is the ONLY caller that waits. Pinning and the re-shows after a
+  // handle drag / bend edit go straight to _showTooltipFor.
+  // Exactly two callers: the element's own mouseenter and the shared
+  // _setHoveredShape. (The definition reads `_hoverTooltip: function`, so
+  // it is not counted here.)
+  const hoverSites = (src.match(/_hoverTooltip\(/g) || []).length;
+  assert.strictEqual(hoverSites, 2,
+    "hover should route through _hoverTooltip in exactly its two places");
+  assert.ok(src.includes("_hoverTooltip: function(shape)"), "…and it must exist");
+
+  const pin = src.slice(src.indexOf("_pinTooltipFor: function"),
+                        src.indexOf("_pinTooltipFor: function") + 900);
+  assert.ok(pin.includes("this._showTooltipFor(shape);"),
+    "a click-to-pin shows at once — the user asked for it");
+}
+
+// ── a pending open never outlives its reason ──────────────────────────────
+
+{
+  const hide = src.slice(src.indexOf("    _hideTooltip: function"),
+                         src.indexOf("    _hideTooltip: function") + 1400);
+  assert.ok(hide.includes("this._cancelTooltipOpen();"),
+    "hiding must drop a pending open, or it reappears after being dismissed");
+
+  const setHovered = src.slice(src.indexOf("      this._hoveredShape = next;"),
+                               src.indexOf("      this._hoveredOnTitle = onTitle;"));
+  assert.ok(setHovered.includes("this._cancelTooltipOpen();"),
+    "leaving a shape drops the open it was about to make");
+}
+
+// ── leaving closes it; reaching for it does not ───────────────────────────
+
+{
+  // The heart of the complaint: leaving a shape used to leave the dwell
+  // timer in charge, so the tooltip rode out its whole window wherever
+  // the cursor went. It closes on leave now, over a short bridge so the
+  // trip to its own delete button does not snap it shut.
+  const leaveAt = src.indexOf('el.addEventListener("mouseleave"');
+  assert.notStrictEqual(leaveAt, -1, "the shape's mouseleave must exist");
+  const leave = src.slice(leaveAt, leaveAt + 900);
+  assert.ok(leave.includes("self._scheduleHideTooltip();"),
+    "leaving a shape must start closing its tooltip");
+  assert.ok(leave.includes("self._cancelTooltipOpen();"),
+    "…and drop a pending open, so one cannot arrive after the cursor left");
+  assert.ok(!/the dwell\s+\/\/ timer \(armed on show\) owns closing/.test(leave),
+    "the old 'dwell owns closing' rule is what made it overstay");
+
+  // Both renderers (canvas and strip) build a tooltip; both must behave.
+  const enters = src.match(/tip\.addEventListener\("mouseenter", function\(\) \{\s*\n\s*self\._cancelHideTooltip\(\);\s*\n\s*self\._cancelTooltipAutoClose\(\);/g) || [];
+  assert.strictEqual(enters.length, 2,
+    "arriving on the tooltip must stop BOTH clocks, in both renderers — " +
+    "cancelling only the dwell left it vanishing mid-reach");
+  const tipLeaves = src.match(/tip\.addEventListener\("mouseleave"[\s\S]{0,420}?_scheduleHideTooltip\(\);/g) || [];
+  assert.strictEqual(tipLeaves.length, 2,
+    "leaving the tooltip closes it on the same bridge, in both renderers");
+}
+
+console.log("tooltip hover intent: all checks passed");

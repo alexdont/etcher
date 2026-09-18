@@ -1685,6 +1685,20 @@
       "  font-size: 12px; line-height: 1.35; max-width: 260px;",
       "  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);",
       "  display: none;",
+      // Fades in and out rather than appearing and vanishing. `display`
+      // still carries "is it up" — every other read in the file asks
+      // that — and the class carries the paint, one frame later, so the
+      // transition has two states to move between.
+      "  opacity: 0; transform: translateY(3px);",
+      "  transition: opacity " + TOOLTIP_FADE_MS + "ms ease," +
+        " transform " + TOOLTIP_FADE_MS + "ms ease;",
+      "  will-change: opacity, transform;",
+      "}",
+      ".etcher-tooltip.is-visible { opacity: 1; transform: translateY(0); }",
+      // Motion is decoration here; the information is the point.
+      "@media (prefers-reduced-motion: reduce) {",
+      "  .etcher-tooltip { transition: none; transform: none; }",
+      "  .etcher-tooltip.is-visible { transform: none; }",
       "}",
       ".etcher-tooltip-header {",
       "  display: flex; align-items: center; gap: 10px;",
@@ -2527,7 +2541,19 @@
   // out the full window. Pinned tooltips ignore this entirely (they
   // close only on an explicit click). Hovering the tooltip itself
   // pauses the countdown so the delete button stays reachable.
-  var TOOLTIP_DWELL_MS = 5000;
+  var TOOLTIP_DWELL_MS = 2200;
+
+  // Hover INTENT: the cursor has to settle on a shape for this long before
+  // a tooltip appears at all. Crossing a drawing to reach something else
+  // used to flash a tooltip per shape on the way — the single biggest
+  // reason the thing felt busy. Once one IS open, moving between shapes
+  // updates it immediately (see _hoverTooltip): the delay buys quiet, and
+  // charging it twice would just feel slow.
+  var TOOLTIP_OPEN_DELAY_MS = 350;
+
+  // Fade length, in and out. Long enough to read as a fade, short enough
+  // that dismissing never feels like waiting.
+  var TOOLTIP_FADE_MS = 110;
 
   // Neutral defaults read from generic, non-comment-specific metadata
   // keys — a consumer who just populates these gets a working tooltip
@@ -3600,9 +3626,20 @@
       // Hovering the tooltip pauses the dwell countdown so the user can
       // read it / reach the delete button; leaving restarts the full
       // window. Same behavior as canvas mode.
-      tip.addEventListener("mouseenter", function() { self._cancelTooltipAutoClose(); });
+      // The cursor arriving on the tooltip is the user reaching for it:
+      // both clocks stop. The hide is the one that matters now that
+      // leaving a shape starts one — without cancelling it here, the
+      // tooltip would vanish mid-reach for its own delete button.
+      tip.addEventListener("mouseenter", function() {
+        self._cancelHideTooltip();
+        self._cancelTooltipAutoClose();
+      });
       tip.addEventListener("mouseleave", function() {
-        if (!self.tooltipPinned) self._startTooltipAutoClose();
+        if (self.tooltipPinned) return;
+        // Leaving the tooltip closes it on the same short bridge as
+        // leaving a shape; the dwell stays armed as the backstop.
+        self._scheduleHideTooltip();
+        self._startTooltipAutoClose();
       });
       tip.addEventListener("click", function(e) {
         e.stopPropagation();
@@ -4122,9 +4159,20 @@
       wrapper.appendChild(tip);
       self.tooltipEl = tip;
 
-      tip.addEventListener("mouseenter", function() { self._cancelTooltipAutoClose(); });
+      // The cursor arriving on the tooltip is the user reaching for it:
+      // both clocks stop. The hide is the one that matters now that
+      // leaving a shape starts one — without cancelling it here, the
+      // tooltip would vanish mid-reach for its own delete button.
+      tip.addEventListener("mouseenter", function() {
+        self._cancelHideTooltip();
+        self._cancelTooltipAutoClose();
+      });
       tip.addEventListener("mouseleave", function() {
-        if (!self.tooltipPinned) self._startTooltipAutoClose();
+        if (self.tooltipPinned) return;
+        // Leaving the tooltip closes it on the same short bridge as
+        // leaving a shape; the dwell stays armed as the backstop.
+        self._scheduleHideTooltip();
+        self._startTooltipAutoClose();
       });
       tip.addEventListener("click", function(e) {
         // Keep clicks from bubbling to OSD's mouse tracker so the
@@ -14428,17 +14476,23 @@
         // same shape to unpin). Hovering another shape doesn't yank
         // the pin away.
         if (self.tooltipPinned) return;
-        self._showTooltipFor(shape);
+        self._hoverTooltip(shape);
       });
       el.addEventListener("mouseleave", function() {
         // Always drop the hover styling so a pinned shape doesn't keep
         // a sticky dashed/selected outline after the cursor leaves.
         // The pin is for tooltip lifecycle, not visual hover state.
         el.classList.remove("is-hovered");
-        // Leaving the shape no longer closes the tooltip — the dwell
-        // timer (armed on show) owns closing, so it stays for its full
-        // window whether the cursor lingers, leaves, or moves to the
-        // tooltip itself.
+        // Whatever was about to open for this shape no longer has a
+        // reason to.
+        self._cancelTooltipOpen();
+        // Leaving the shape starts closing it. This used to be the dwell
+        // timer's job alone — the tooltip rode out its whole window
+        // wherever the cursor went, which is what "takes way too long to
+        // disappear" was. `_scheduleHideTooltip` leaves a short bridge so
+        // the trip from shape to tooltip (for the delete button) doesn't
+        // snap it shut, and pinned tooltips ignore it entirely.
+        self._scheduleHideTooltip();
       });
       el.addEventListener("click", function(e) {
         // Direct DOM clicks on shapes are mostly historical now —
@@ -14969,8 +15023,12 @@
         this._refreshImageRing(next);
         this._refreshMediaChrome(next);
       }
-      if (hideTooltip && !this.tooltipPinned) this._scheduleHideTooltip();
-      if (showTooltip && !this.tooltipPinned) this._showTooltipFor(next);
+      if (hideTooltip && !this.tooltipPinned) {
+        // Whatever was about to open no longer has anything to describe.
+        this._cancelTooltipOpen();
+        this._scheduleHideTooltip();
+      }
+      if (showTooltip && !this.tooltipPinned) this._hoverTooltip(next);
 
       this._hoveredOnTitle = onTitle;
       if (this.overlayWrapper) {
@@ -15041,6 +15099,12 @@
       if (!tip) return;
 
       this._cancelHideTooltip();
+      this._cancelTooltipOpen();
+      // A show landing inside a fade-out must not be cleaned up by it.
+      if (this._tooltipFadeTimer) {
+        clearTimeout(this._tooltipFadeTimer);
+        this._tooltipFadeTimer = null;
+      }
       this._tooltipShape = shape;
 
       // Delegate the three content regions to slot functions. Consumer
@@ -15134,10 +15198,60 @@
       // `_pinTooltipFor`); so does hovering the tooltip itself.
       this._startTooltipAutoClose();
 
+      // Painted in on the NEXT frame: the element has to be laid out at
+      // opacity 0 before the class can transition it, or the browser
+      // collapses both into one style resolution and it simply appears.
+      var fadeIn = tip;
+      if (typeof requestAnimationFrame === "function") {
+        requestAnimationFrame(function() {
+          if (fadeIn.style.display !== "none") fadeIn.classList.add("is-visible");
+        });
+      } else {
+        tip.classList.add("is-visible");
+      }
+
       this._dispatch("etcher:tooltip-show", {
         uuid: shape.uuid || null,
         anchor: { x: parseFloat(tip.style.left) || 0, y: parseFloat(tip.style.top) || 0 }
       });
+    },
+
+    // Hover asks through here; everything else (a pin, the tooltip coming
+    // back after a handle drag) still calls _showTooltipFor directly and
+    // appears at once, because the user just acted on that shape and is
+    // waiting for the answer.
+    _hoverTooltip: function(shape) {
+      if (!shape) return;
+      var up = this.tooltipEl && this.tooltipEl.style.display !== "none";
+      // One already open: switch now. The delay is there to stop tooltips
+      // appearing uninvited, not to slow down reading a second one.
+      if (up) { this._showTooltipFor(shape); return; }
+      var self = this;
+      this._cancelTooltipOpen();
+      this._tooltipOpenTimer = setTimeout(function() {
+        self._tooltipOpenTimer = null;
+        // Still the shape under the cursor? A hover that moved on in the
+        // meantime has already cancelled this, but a pin or a hide landing
+        // in the same window must win too.
+        if (self.tooltipPinned) return;
+        // Either signal counts. The shared pointermove path sets
+        // `_hoveredShape`; the element's own mouseenter sets the class —
+        // and a shape that moves under a still cursor gets the second
+        // without the first, which asking only for `_hoveredShape` would
+        // read as "not hovered" and swallow the tooltip entirely.
+        var stillOn = self._hoveredShape === shape ||
+          !!(shape.el && shape.el.classList &&
+             shape.el.classList.contains("is-hovered"));
+        if (!stillOn) return;
+        self._showTooltipFor(shape);
+      }, TOOLTIP_OPEN_DELAY_MS);
+    },
+
+    _cancelTooltipOpen: function() {
+      if (this._tooltipOpenTimer) {
+        clearTimeout(this._tooltipOpenTimer);
+        this._tooltipOpenTimer = null;
+      }
     },
 
     // Place the (already-populated, already-visible) tooltip element
@@ -15608,12 +15722,31 @@
       var hidShape = this._tooltipShape;
       this._cancelHideTooltip();
       this._cancelTooltipAutoClose();
+      this._cancelTooltipOpen();
       // _hideTooltip is the universal teardown; make sure pin state is
       // also reset so the next click-to-pin starts clean.
       this.tooltipPinned = false;
       this._removeTooltipOutsideClickHandler();
       this._tooltipShape = null;
-      if (this.tooltipEl) this.tooltipEl.style.display = "none";
+      if (this.tooltipEl) {
+        // Fade out, then leave the layout. `display` is what the rest of
+        // the file reads as "is it up", so it flips only once the paint
+        // is done — and immediately if it was not showing anyway.
+        var tipEl = this.tooltipEl;
+        tipEl.classList.remove("is-visible");
+        if (this._tooltipFadeTimer) clearTimeout(this._tooltipFadeTimer);
+        if (!wasVisible) {
+          this._tooltipFadeTimer = null;
+          tipEl.style.display = "none";
+        } else {
+          var selfHide = this;
+          this._tooltipFadeTimer = setTimeout(function() {
+            selfHide._tooltipFadeTimer = null;
+            // A show inside the fade window owns the element now.
+            if (!tipEl.classList.contains("is-visible")) tipEl.style.display = "none";
+          }, TOOLTIP_FADE_MS);
+        }
+      }
 
       if (wasVisible) {
         this._dispatch("etcher:tooltip-hide", {

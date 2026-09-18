@@ -31,7 +31,7 @@ const cssEnd = src.indexOf('].join("\\n");', cssStart);
 assert.notStrictEqual(cssEnd, -1, "could not find the end of the style array");
 // The array interpolates a few top-level constants (connector-dot colors);
 // pull their declarations in rather than hardcoding stand-in values.
-for (const name of ["CONNECTOR_DOT_CORE", "CONNECTOR_DOT_RING"]) {
+for (const name of ["CONNECTOR_DOT_CORE", "CONNECTOR_DOT_RING", "TOOLTIP_FADE_MS"]) {
   const m = src.match(new RegExp(`var ${name} = [^;]+;`));
   assert.ok(m, `could not find the ${name} constant the style array uses`);
   eval("global." + m[0].slice(4));
@@ -355,3 +355,25 @@ function run(kind, afterCreate) {
 }
 
 console.log("selection: all checks passed");
+
+// ── the tooltip fades rather than appearing and vanishing ─────────────────
+
+{
+  // Subtlety, not speed: a box that pops in and out at full contrast reads
+  // as an interruption however short its life is.
+  const base = ruleFor(".etcher-tooltip");
+  assert.ok(/opacity:\s*0/.test(base), "it starts transparent");
+  assert.ok(/transform:\s*translateY\(3px\)/.test(base), "…and a hair low");
+  assert.ok(/transition:[^;]*opacity/.test(base) && /transition:[^;]*transform/.test(base),
+    "both are transitioned, or the class swap is just a pop with extra steps");
+  assert.ok(/display:\s*none/.test(base),
+    "display still carries 'is it up' — every other read in the file asks that");
+
+  const shown = ruleFor(".etcher-tooltip.is-visible");
+  assert.ok(/opacity:\s*1/.test(shown) && /translateY\(0\)/.test(shown),
+    "the visible state is what it transitions to");
+
+  assert.ok(/@media \(prefers-reduced-motion: reduce\)/.test(css) &&
+            /\.etcher-tooltip \{ transition: none/.test(css),
+    "motion is decoration here; the information is the point");
+}

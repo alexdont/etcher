@@ -2047,6 +2047,14 @@
 
   var FONT_SIZE_MIN = 6;
   var FONT_SIZE_MAX = 200;
+  // What a new label starts at when the user has not chosen a size. There
+  // was no default before — an unset size meant box-drives-font, which
+  // sized the editor off the default title box at the current zoom and the
+  // committed label off ANOTHER box measurement: the size felt random
+  // while typing and then visibly shrank at placement. A real number,
+  // stored through the same ink-scaled pipeline as a hand-picked size, is
+  // stable against the canvas and identical in the editor and the commit.
+  var DEFAULT_LABEL_FONT_SIZE = 16;
 
   // The blue every selected thing is outlined in, and how far the outline
   // stands proud of the shape's own stroke on each side — matched to the
@@ -6232,6 +6240,17 @@
       return Math.max(1, shape.style.font_size * scale);
     },
 
+    // The label size new labels start at: the user's chosen default when
+    // one is set (the panel's global Label size), else the built-in.
+    _defaultLabelFontSize: function() {
+      var lp = this.lineParams || {};
+      if (typeof lp.font_size === "number" && isFinite(lp.font_size) &&
+          lp.font_size > 0) {
+        return lp.font_size;
+      }
+      return DEFAULT_LABEL_FONT_SIZE;
+    },
+
     _hasPinnedFontSize: function(shape) {
       var fs = shape && shape.style && shape.style.font_size;
       return typeof fs === "number" && isFinite(fs) && fs > 0;
@@ -6863,16 +6882,14 @@
       fontNum.min = String(FONT_SIZE_MIN);
       fontNum.max = String(FONT_SIZE_MAX);
       fontNum.step = "1";
-      // "custom", not "auto": the size isn't being chosen for you, it is
-      // the one you dragged the box to. Shown through the placeholder
-      // because the value really is empty — a number input cannot hold a
-      // word, and a sentinel number would be a size you could accidentally
-      // commit.
+      // "custom" appears while a SELECTED label is box-sized (dragged by
+      // its corners); the global default is always a real number now.
       fontNum.placeholder = "custom";
       // Carries the naming in the compact strip, where the row's own label
       // has no room to be drawn.
       fontNum.title =
-        "Label size in px — empty means custom, sized by dragging the box";
+        "Label size in px — what new labels start at; clearing it returns " +
+        "to the default (" + DEFAULT_LABEL_FONT_SIZE + ")";
       fontRow.appendChild(fontHead);
       fontRow.appendChild(fontNum);
       popup.appendChild(fontRow);
@@ -7340,10 +7357,10 @@
           }
         }
       } else {
-        var lp = this.lineParams || {};
-        if (typeof lp.font_size === "number" && lp.font_size > 0) {
-          px = Math.round(lp.font_size);
-        }
+        // The default is a real size now — show the number a new label
+        // will actually get, chosen or built-in, instead of a blank that
+        // told the user nothing.
+        px = Math.round(this._defaultLabelFontSize());
       }
 
       if (this._paramsFontNum) {
@@ -19292,6 +19309,23 @@
       // is how one gets added; the `if (!g) return` below drops the kinds
       // that have nowhere to place a title box.
       this._endTextEdit();
+
+      // A BRAND-NEW label pins the default size the moment its editor
+      // opens — before, an unpinned new label derived its editor font
+      // from the default title box at the current zoom and its committed
+      // font from a second, different box measurement: random-feeling
+      // while typing, then visibly smaller at placement. Stamped here
+      // (not at shape creation) so it also covers shapes that predate
+      // the default; same ink-scaled unit a panel pick stores. Text and
+      // callout keep their own sizing — their text IS the shape, and a
+      // drag-drawn text box already pins from the drawn height.
+      if (!this._isTextKind(shape.kind) &&
+          !(shape.metadata && shape.metadata.title) &&
+          !this._hasPinnedFontSize(shape)) {
+        shape.style = Object.assign({}, shape.style || {}, {
+          font_size: this._defaultLabelFontSize() / this._inkScale()
+        });
+      }
 
       var self = this;
       var g;

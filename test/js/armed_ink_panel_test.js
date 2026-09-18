@@ -53,6 +53,7 @@ const syncFontRow = extract("_syncFontRow");
       _fontTargetShapes: () => fontTargets || [],
       _paramsTargetShapes: () => [],
       _armedInkTool: () => armed,
+      _defaultLabelFontSize: () => 16,
       _hasPinnedFontSize: () => false,
       _textEditHost: () => null,
       _textEditor: null,

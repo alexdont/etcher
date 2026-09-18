@@ -39,7 +39,14 @@ for (const name of ["DASH_MODES", "FILL_MODES", "FONT_SIZE_MIN", "FONT_SIZE_MAX"
 }
 
 const fontSizeFor = extract("_fontSizeFor");
+{
+  const m = src.match(/var DEFAULT_LABEL_FONT_SIZE = (\d+);/);
+  assert.ok(m, "the built-in label size default must exist");
+  global.DEFAULT_LABEL_FONT_SIZE = Number(m[1]);
+}
+
 const hasPinned = extract("_hasPinnedFontSize");
+const defaultLabelFontSize = extract("_defaultLabelFontSize");
 const fontTargets = extract("_fontTargetShapes");
 const setFontSize = extract("_setFontSize");
 const unpin = extract("_unpinFontSize");
@@ -274,6 +281,7 @@ function rowSelf(targets, paramTargets, lineParams) {
     _paramsTargetShapes: () => paramTargets || [],
     _armedInkTool: () => false,
     _hasPinnedFontSize: hasPinned,
+    _defaultLabelFontSize: defaultLabelFontSize,
     _markerScale: () => 2,
     _inkScale: () => 2,
     _textEditHost: (sh) => sh.host || null,
@@ -318,6 +326,26 @@ function rowSelf(targets, paramTargets, lineParams) {
   syncFontRow.call(self);
   assert.strictEqual(self.els.row.style.display, "");
   assert.strictEqual(self.els.num.value, "30", "a default is already in screen px");
+}
+
+{
+  // Nothing selected and no default chosen: the built-in default shows —
+  // a real number a new label will actually get, never a blank. (An
+  // unset size used to mean box-drives-font: the editor sized off one
+  // box measurement and the commit off another, so labels felt random
+  // while typing and shrank at placement.)
+  const self = rowSelf([], [], {});
+  syncFontRow.call(self);
+  assert.strictEqual(self.els.num.value, "16",
+    "the built-in default is a real size, shown as one");
+}
+
+{
+  const dlf = defaultLabelFontSize;
+  assert.strictEqual(dlf.call({ lineParams: { font_size: 30 } }), 30,
+    "a chosen default wins");
+  assert.strictEqual(dlf.call({ lineParams: {} }), 16, "else the built-in");
+  assert.strictEqual(dlf.call({}), 16, "even before lineParams exists");
 }
 
 {

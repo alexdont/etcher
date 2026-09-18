@@ -59,6 +59,10 @@ function editorBoxFor(shape, floatingBox) {
   };
   const ctx = {
     _labelRidesShaft: ridesShaft,
+    _isTextKind: (k) => k === "text" || k === "callout",
+    _hasPinnedFontSize: (s) => !!(s && s.style && s.style.font_size > 0),
+    _defaultLabelFontSize: () => 16,
+    _inkScale: () => 1,
     _endTextEdit: noop,
     _calloutTextBoxImage: (g) => g.text_box,
     _textDefaultBoxImagePx: () => 16,

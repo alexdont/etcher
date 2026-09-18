@@ -84,6 +84,9 @@ function edit(shape, opts) {
     _titleColorFor: () => opts.color || "#fca5a5",
     _labelBgFor: () => opts.bg || null,
     _hasPinnedFontSize: () => !!opts.pinned,
+    _isTextKind: (k) => k === "text" || k === "callout",
+    _defaultLabelFontSize: () => opts.defaultSize || 16,
+    _inkScale: () => 1,
     _zoomPx: (n) => n,
     // Width proportional to length: 10px per character at font 20.
     _measureTextWidth: (t, size) => t.length * size * 0.5,
@@ -97,6 +100,35 @@ function edit(shape, opts) {
   assert.ok(input, "no input was built");
   input.fo = fo;
   return input;
+}
+
+// ── a brand-new label pins the default size at editor open ────────────────
+
+{
+  // Before: an unpinned new label derived its editor font from the
+  // default title box at the current zoom and its committed font from a
+  // second box measurement — random while typing, smaller at placement.
+  // The editor now stamps the default pin the moment it opens, so both
+  // measurements are the same number.
+  const shape = { kind: "rectangle", metadata: {} };
+  edit(shape, { defaultSize: 16 });
+  assert.strictEqual(shape.style && shape.style.font_size, 16,
+    "opening a NEW label's editor pins the default size");
+
+  const titled = { kind: "rectangle", metadata: { title: "kept" }, style: {} };
+  edit(titled, {});
+  assert.ok(!(titled.style.font_size > 0),
+    "an EXISTING unpinned label is left as it is — no retroactive pin");
+
+  const pinned = { kind: "rectangle", metadata: {}, style: { font_size: 9 } };
+  edit(pinned, { pinned: true });
+  assert.strictEqual(pinned.style.font_size, 9,
+    "a shape already pinned keeps its own size");
+
+  const text = { kind: "text", metadata: {}, geometry: { x: 0, y: 0, w: 10, h: 10 } };
+  edit(text, {});
+  assert.ok(!(text.style && text.style.font_size),
+    "text keeps its own sizing — a drag-drawn box already pins from height");
 }
 
 // ── the input wears the label's own dress ─────────────────────────────────

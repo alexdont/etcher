@@ -12853,6 +12853,28 @@
           shape._renderedTitleImage = shrunk;
           tw = actualW;
           th = actualH;
+
+          // Centre the INK, not the em box. Baseline placement leaves a
+          // line of digits (no descenders) sitting low: measured against
+          // the painted extents, the glyphs had ~an x-height of slack
+          // above and overhung the rect's bottom edge — visibly so on a
+          // shaft label, where the line then grazed the digit bottoms
+          // while empty margin sat above, worst zoomed out where the
+          // break's floor is tightest. Measure what was actually painted
+          // and shift the text so its visible centre IS the rect's
+          // centre; the rect, the plate, the cut and the handles all key
+          // off the rect and stay put.
+          try {
+            var inkBox = textEl.getBBox();
+            if (inkBox && inkBox.height > 0) {
+              var inkShift = (ty + th / 2) - (inkBox.y + inkBox.height / 2);
+              if (inkShift) {
+                textEl.setAttribute(
+                  "y", (parseFloat(textEl.getAttribute("y")) || 0) + inkShift
+                );
+              }
+            }
+          } catch (_) {}
         }
       } else {
         shape._renderedTitleImage = null;

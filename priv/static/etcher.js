@@ -14131,6 +14131,9 @@
           snap: this._lastArrowSnap || null
         });
       }
+      // An open label editor is positioned in container px like the
+      // handles above, so it needs the same per-frame re-anchoring.
+      if (this._textEditor) this._repositionTextEditor();
       // Keep an open tooltip glued to its anchor shape. `_renderAll`
       // runs on every pan/zoom animation frame (after the shapes above
       // have moved), so re-anchoring here makes the tooltip track the
@@ -19327,33 +19330,14 @@
       return kind === "text" || kind === "callout";
     },
 
-    _startTextEdit: function(shape) {
-      if (!shape) return;
-      // text + callout + dimension edit their own bbox; rect/circle/
-      // poly/freehand edit a title that lives in `metadata.title_box`
-      // on the parent. A shape with no title yet is editable too — that
-      // is how one gets added; the `if (!g) return` below drops the kinds
-      // that have nowhere to place a title box.
-      this._endTextEdit();
-
-      // A BRAND-NEW label pins the default size the moment its editor
-      // opens — before, an unpinned new label derived its editor font
-      // from the default title box at the current zoom and its committed
-      // font from a second, different box measurement: random-feeling
-      // while typing, then visibly smaller at placement. Stamped here
-      // (not at shape creation) so it also covers shapes that predate
-      // the default; same ink-scaled unit a panel pick stores. Text and
-      // callout keep their own sizing — their text IS the shape, and a
-      // drag-drawn text box already pins from the drawn height.
-      if (!this._isTextKind(shape.kind) &&
-          !(shape.metadata && shape.metadata.title) &&
-          !this._hasPinnedFontSize(shape)) {
-        shape.style = Object.assign({}, shape.style || {}, {
-          font_size: this._defaultLabelFontSize() / this._inkScale()
-        });
-      }
-
-      var self = this;
+    // WHERE the inline editor sits, in image px — the box the label will
+    // occupy. Factored out of _startTextEdit so the open editor can be
+    // re-anchored on every pan/zoom frame (see _repositionTextEditor):
+    // computed once at open, the box stayed put in container px while the
+    // board moved under it, so the text being typed slid off its line and
+    // snapped back on commit.
+    _textEditBoxImage: function(shape) {
+      if (!shape) return null;
       var g;
       if (shape.kind === "text") {
         g = shape.geometry;
@@ -19398,6 +19382,37 @@
           }
         }
       }
+      return g || null;
+    },
+
+    _startTextEdit: function(shape) {
+      if (!shape) return;
+      // text + callout + dimension edit their own bbox; rect/circle/
+      // poly/freehand edit a title that lives in `metadata.title_box`
+      // on the parent. A shape with no title yet is editable too — that
+      // is how one gets added; the `if (!g) return` below drops the kinds
+      // that have nowhere to place a title box.
+      this._endTextEdit();
+
+      // A BRAND-NEW label pins the default size the moment its editor
+      // opens — before, an unpinned new label derived its editor font
+      // from the default title box at the current zoom and its committed
+      // font from a second, different box measurement: random-feeling
+      // while typing, then visibly smaller at placement. Stamped here
+      // (not at shape creation) so it also covers shapes that predate
+      // the default; same ink-scaled unit a panel pick stores. Text and
+      // callout keep their own sizing — their text IS the shape, and a
+      // drag-drawn text box already pins from the drawn height.
+      if (!this._isTextKind(shape.kind) &&
+          !(shape.metadata && shape.metadata.title) &&
+          !this._hasPinnedFontSize(shape)) {
+        shape.style = Object.assign({}, shape.style || {}, {
+          font_size: this._defaultLabelFontSize() / this._inkScale()
+        });
+      }
+
+      var self = this;
+      var g = this._textEditBoxImage(shape);
       if (!g) return;
       var tl = this._imageToContainer({ x: g.x, y: g.y });
       var br = this._imageToContainer({ x: g.x + g.w, y: g.y + g.h });
@@ -19552,7 +19567,12 @@
         // For _refreshTextEditorStyle: re-fit after a panel edit, and
         // swap the closure's font size so the fit measures at the new one.
         fit: edFit,
-        setFontSize: function(s) { edFontSize = s; }
+        setFontSize: function(s) { edFontSize = s; },
+        // For _repositionTextEditor: the board moves under an open editor
+        // on every pan/zoom frame, so its anchor and its metrics have to
+        // be replaceable, not frozen at open time.
+        setAnchor: function(cx, cy, left) { edCx = cx; edCy = cy; edLeft = left; },
+        setPad: function(p) { edPad = p; }
       };
       // Hide the visible <text> while editing — the input shows the
       // current content live, and overlapping them blurs the readout.
@@ -19647,6 +19667,52 @@
     // plate — in place, without recreating it, so the caret and the text
     // typed so far survive. The setters that can restyle a text shape all
     // call this; with no editor open it is a no-op.
+    // Keep an open editor glued to its shape through pan and zoom. The box
+    // is positioned in CONTAINER px, and the board moves underneath it on
+    // every frame — so without this the text being typed slides off its
+    // line (visibly left and right as the zoom changes) and only snaps
+    // into place on commit. Same job `_renderAll` already does for
+    // handles, connector dots and the tooltip.
+    _repositionTextEditor: function() {
+      var ed = this._textEditor;
+      if (!ed || !ed.shape || !ed.fo || !ed.setAnchor) return;
+      var g = this._textEditBoxImage(ed.shape);
+      if (!g) return;
+      var tl = this._imageToContainer({ x: g.x, y: g.y });
+      var br = this._imageToContainer({ x: g.x + g.w, y: g.y + g.h });
+      var left = Math.min(tl.x, br.x);
+      var top = Math.min(tl.y, br.y);
+      var boxH = Math.max(16, Math.abs(br.y - tl.y));
+      ed.setAnchor(
+        (left + Math.max(tl.x, br.x)) / 2,
+        (top + Math.max(tl.y, br.y)) / 2,
+        left
+      );
+      // The label's size tracks the zoom (a pinned size is stored in canvas
+      // units and multiplied back by the scale), so the text being typed
+      // has to track it too — and the fit measures at that size, so both
+      // move before the fit runs. Read from the rendered <text> when there
+      // is one, exactly as _refreshTextEditorStyle does; that flag it sets
+      // is deliberately NOT touched here — a zoom is not the user styling
+      // the label.
+      var host = this._textEditHost(ed.shape);
+      var tEl = host && host.querySelector && host.querySelector("text");
+      var size = tEl && parseFloat(tEl.getAttribute("font-size"));
+      if (!(size > 0)) {
+        size = this._fontSizeFor(
+          ed.shape, parseFloat(ed.input.style.fontSize) || 14
+        );
+      }
+      if (size > 0 && ed.setFontSize) {
+        ed.setFontSize(size);
+        ed.input.style.fontSize = size + "px";
+        var pad = this._hasPinnedFontSize(ed.shape) ? size * 0.2 : boxH * 0.13;
+        if (ed.setPad) ed.setPad(pad);
+        ed.input.style.padding = Math.round(pad) + "px";
+      }
+      ed.fit();
+    },
+
     _refreshTextEditorStyle: function() {
       var ed = this._textEditor;
       if (!ed || !ed.shape || !ed.input) return;

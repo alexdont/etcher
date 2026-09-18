@@ -58,6 +58,11 @@ function editorBoxFor(shape, floatingBox) {
     })
   };
   const ctx = {
+    // The real anchor-box computation, lifted: _startTextEdit delegates
+    // to it so the open editor can be re-anchored per frame.
+    _textEditBoxImage: extract("_textEditBoxImage"),
+    _shaftPointAt: () => ({ x: 150, y: 120 }),
+    _textDefaultBoxInkPx: () => 16,
     _labelRidesShaft: ridesShaft,
     _isTextKind: (k) => k === "text" || k === "callout",
     _hasPinnedFontSize: (s) => !!(s && s.style && s.style.font_size > 0),
@@ -164,4 +169,65 @@ assert.ok(
     destroyed.includes("this._endTextEdit();"),
     "hook destroy ends an open edit so the listener can't leak"
   );
+}
+
+// ── the open editor follows the board ─────────────────────────────────────
+
+{
+  // The editor's box is positioned in CONTAINER px, and the board moves
+  // underneath it on every pan/zoom frame. Without re-anchoring, the text
+  // being typed slid off its line — measured at 269px off after one zoom
+  // step, 385 after two — and only snapped into place on commit.
+  const reposition = extract("_repositionTextEditor");
+
+  let scale = 1;
+  const anchors = [];
+  const fits = [];
+  const ed = {
+    shape: { kind: "dimension", geometry: { a: [0, 0], b: [200, 0] }, style: {}, metadata: {} },
+    fo: {},
+    input: { style: { fontSize: "16px", padding: "2px" } },
+    setAnchor: (cx, cy, left) => anchors.push([cx, cy, left]),
+    setFontSize: (s) => fits.push(["size", s]),
+    setPad: (p) => fits.push(["pad", +p.toFixed(2)]),
+    fit: () => fits.push(["fit"]),
+  };
+  const ctx = {
+    _textEditor: ed,
+    _textEditBoxImage: () => ({ x: 80, y: 40, w: 40, h: 20 }),
+    // A zoom is a different image→container mapping, nothing else.
+    _imageToContainer: (p) => ({ x: p.x * scale, y: p.y * scale }),
+    _textEditHost: () => null,
+    _hasPinnedFontSize: () => true,
+    _fontSizeFor: (_s, fallback) => 16 * scale,
+  };
+
+  reposition.call(ctx);
+  assert.deepStrictEqual(anchors[0], [100, 50, 80],
+    "the editor anchors on the label's box, centre and left edge");
+
+  scale = 2;
+  reposition.call(ctx);
+  assert.deepStrictEqual(anchors[1], [200, 100, 160],
+    "…and follows the board when the zoom changes");
+
+  assert.ok(fits.some((f) => f[0] === "size" && f[1] === 32),
+    "the typed text tracks the label's own size through the zoom");
+  assert.ok(fits.some((f) => f[0] === "pad" && f[1] === 6.4),
+    "…and its padding, so the editor keeps the label's proportions");
+  assert.strictEqual(fits[fits.length - 1][0], "fit",
+    "the re-fit runs last, measuring at the metrics just set");
+
+  // Nothing open, nothing to move — and no throw.
+  reposition.call({ _textEditor: null });
+  reposition.call({ _textEditor: { shape: null } });
+}
+
+// ── and the per-frame render is what drives it ────────────────────────────
+
+{
+  const renderAll = src.slice(src.indexOf("    _renderAll: function() {"),
+                              src.indexOf("\n    },", src.indexOf("    _renderAll: function() {")));
+  assert.ok(renderAll.includes("if (this._textEditor) this._repositionTextEditor();"),
+    "_renderAll must re-anchor the editor like it re-glues handles and dots");
 }

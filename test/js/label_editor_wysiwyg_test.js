@@ -69,6 +69,7 @@ function edit(shape, opts) {
     ? { getAttribute: (k) => (k === "font-size" ? String(opts.renderedFontSize) : null) }
     : null;
   const ctx = {
+    _textEditBoxImage: extract("_textEditBoxImage"),
     _endTextEdit: noop,
     _labelRidesShaft: ridesShaft,
     _calloutTextBoxImage: (g) => g,

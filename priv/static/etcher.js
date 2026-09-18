@@ -6017,13 +6017,16 @@
         return { input: input, val: val };
       }
 
-      // Weight (stroke width, px).
+      // Weight (stroke width). Shown as a bare number on purpose: the
+      // value is a weight relative to the canvas, not a count of pixels
+      // (see _canvasInkScale), and a "px" suffix promised a pixel measure
+      // that never held across resolutions.
       var w = sliderRow("Weight");
       w.input.min = "1"; w.input.max = "40"; w.input.step = "1";
       self._markerWeightInput = w.input;
       self._markerWeightVal = w.val;
       w.input.addEventListener("input", function() {
-        w.val.textContent = w.input.value + "px";
+        w.val.textContent = w.input.value;
         self._setMarkerStyleProp("width", parseInt(w.input.value, 10), false);
       });
       w.input.addEventListener("change", function() {
@@ -6080,15 +6083,15 @@
                  this.editingShape.style)
         ? this.editingShape.style
         : this._currentMarkerStyle();
-      // `src.width` is image px; the slider works in on-screen px, so scale it
-      // up by the current zoom for display (inverse of what `_setMarkerStyle-
-      // Prop` stores).
+      // `src.width` is stored in document units; the slider shows the
+      // panel's own weight, so convert back through _inkScale — the
+      // inverse of what `_setMarkerStyleProp` stores.
       var width = Math.max(1, Math.round((src.width || 10) * this._inkScale()));
       var opacity = src.opacity == null ? 1 : src.opacity;
       var dash = src.dash || "solid";
       if (this._markerWeightInput) {
         this._markerWeightInput.value = width;
-        this._markerWeightVal.textContent = width + "px";
+        this._markerWeightVal.textContent = String(width);
       }
       if (this._markerOpacityInput) {
         var pct = Math.round(opacity * 100);
@@ -6855,7 +6858,7 @@
       self._paramsWeightInput = w.input;
       self._paramsWeightVal = w.val;
       w.input.addEventListener("input", function() {
-        w.val.textContent = w.input.value + "px";
+        w.val.textContent = w.input.value;
         self._setLineParam("width", parseInt(w.input.value, 10), false);
       });
       w.input.addEventListener("change", function() {
@@ -6904,7 +6907,7 @@
       // Carries the naming in the compact strip, where the row's own label
       // has no room to be drawn.
       fontNum.title =
-        "Label size in px — what new labels start at; clearing it returns " +
+        "Label size — what new labels start at; clearing it returns " +
         "to the default (" + DEFAULT_LABEL_FONT_SIZE + ")";
       fontRow.appendChild(fontHead);
       fontRow.appendChild(fontNum);
@@ -7290,7 +7293,7 @@
       }
       if (this._paramsWeightInput) {
         this._paramsWeightInput.value = width;
-        this._paramsWeightVal.textContent = width + "px";
+        this._paramsWeightVal.textContent = String(width);
       }
       if (this._paramsOpacityInput) {
         var pct = Math.round(opacity * 100);

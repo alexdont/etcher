@@ -198,3 +198,27 @@ console.log("ink scale: all checks passed");
   assert.strictEqual(anchored.width, 3 / 4,
     "anchored still means screen px at draw time, on any image");
 }
+
+// ── and the panel stops calling it px ─────────────────────────────────────
+
+{
+  // The number is a weight against a reference canvas, not a count of
+  // pixels — a "px" suffix promised a measure that never held across
+  // resolutions, which is the whole bug. The readouts show a bare
+  // number, and no user-facing string calls a stroke or a label size px.
+  for (const readout of [
+    'w.val.textContent = w.input.value;',
+    'this._markerWeightVal.textContent = String(width);',
+    'this._paramsWeightVal.textContent = String(width);',
+  ]) {
+    assert.ok(src.includes(readout), `readout still carries a unit: ${readout}`);
+  }
+  assert.ok(!/textContent = [^;]*\+ "px"/.test(src),
+    "no weight readout may append px");
+
+  // Titles and placeholders are user-facing too.
+  const strings = src.match(/(?:title|placeholder|textContent)\s*=\s*\n?\s*"[^"]*"/g) || [];
+  const offenders = strings.filter((s) => /\bpx\b/.test(s));
+  assert.deepStrictEqual(offenders, [],
+    `user-facing strings still say px: ${offenders.join(" | ")}`);
+}

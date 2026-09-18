@@ -6740,11 +6740,15 @@
       // ends a clean step short of the words instead of touching them.
       // Proportional to the label with a floor: a margin that scaled only
       // with the screen would crowd a large label and drown a small one.
+      // The floor is screen px and deliberately generous — labels scale
+      // down with zoom-out while the shaft's stroke stays screen-thick,
+      // so a small floor left the line pressed against the words exactly
+      // when the label was at its least legible.
       var x = Number(rectEl.getAttribute("x")) || 0;
       var y = Number(rectEl.getAttribute("y")) || 0;
       var w = Number(rectEl.getAttribute("width")) || 0;
       var h = Number(rectEl.getAttribute("height")) || 0;
-      var gap = Math.max(4, h * 0.18);
+      var gap = Math.max(8, h * 0.25);
       var cutEl = mask.querySelector(".etcher-shaft-gap-cut");
       cutEl.setAttribute("x", x - gap);
       cutEl.setAttribute("y", y - gap);

@@ -97,17 +97,21 @@ function board() {
   assert.strictEqual(keep.attrs.fill, "#fff", "everything paints by default");
   assert.strictEqual(cut.attrs.fill, "#000", "…except the label's box");
 
-  // gap = max(4, 20 * 0.18) = 4 — proportional with a floor.
+  // gap = max(8, 20 * 0.25) = 8 — proportional with a screen-px floor.
+  // The floor is generous on purpose: labels scale down with zoom-out
+  // while the shaft's stroke stays screen-thick, and a tight floor left
+  // the line pressed against the words exactly when the label was at
+  // its least legible.
   assert.deepStrictEqual(
     [cut.attrs.x, cut.attrs.y, cut.attrs.width, cut.attrs.height],
-    ["96", "46", "88", "28"],
+    ["92", "42", "96", "36"],
     "the cut is the label rect plus its margin");
   assert.ok(!("transform" in cut.attrs), "an unturned label cuts unturned");
 
-  // A taller label earns a wider margin (60 * 0.18 = 10.8 > the floor).
+  // A taller label earns a wider margin (60 * 0.25 = 15 > the floor).
   rect.setAttribute("height", 60);
   syncGap.call(self, shape, rect);
-  assert.strictEqual(cut.attrs.y, String(50 - 60 * 0.18),
+  assert.strictEqual(cut.attrs.y, String(50 - 60 * 0.25),
     "the margin scales with the label");
   assert.strictEqual(self._defs.children.length, 1,
     "re-syncing updates the one mask in place, never stacks another");

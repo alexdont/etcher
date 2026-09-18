@@ -19759,11 +19759,17 @@
     },
 
     // Which DOM element hosts the visible <text class="etcher-text-content">?
-    // text + callout + dimension: the shape's own `<g>`.
-    // rect/circle/poly/freehand with a title: the title group.
+    // text + callout: the shape's own `<g>` — their text IS the shape.
+    // Everything else with a title — dimension included — renders it
+    // through the standard title-sibling group. The dimension used to be
+    // in the first list, from the era when its label was a <text> welded
+    // into the shape's own element; once the label moved to the sibling
+    // path, the stale mapping meant the editor's hide-while-editing found
+    // nothing to hide, and the OLD label stayed visible as a phantom
+    // under the editor until the new text committed.
     _textEditHost: function(shape) {
       if (!shape) return null;
-      if (shape.kind === "text" || shape.kind === "callout" || shape.kind === "dimension") {
+      if (shape.kind === "text" || shape.kind === "callout") {
         return shape.el;
       }
       return shape.titleGroup || null;

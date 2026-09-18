@@ -245,3 +245,27 @@ function edit(shape, opts) {
 }
 
 console.log("label editor wysiwyg: all checks passed");
+
+// ── the editor hides the label it is editing — dimension included ─────────
+
+{
+  // _textEditHost is what the hide-while-editing (and the restore in
+  // _endTextEdit) queries. The dimension sat in the shape's-own-<g> list
+  // from the era when its label was welded into the shape element; its
+  // label renders through the title-sibling group now, and the stale
+  // mapping left the OLD text visible as a phantom under the editor
+  // until the new label committed.
+  const textEditHost = extract("_textEditHost");
+  const group = { marker: "title-group" };
+  assert.strictEqual(
+    textEditHost.call({}, { kind: "dimension", el: {}, titleGroup: group }), group,
+    "a dimension's visible label lives on its title group");
+  assert.strictEqual(
+    textEditHost.call({}, { kind: "arrow", el: {}, titleGroup: group }), group);
+  assert.strictEqual(
+    textEditHost.call({}, { kind: "rectangle", el: {}, titleGroup: group }), group);
+  const own = { marker: "own-el" };
+  assert.strictEqual(textEditHost.call({}, { kind: "text", el: own }), own,
+    "text IS its shape — its element hosts the text");
+  assert.strictEqual(textEditHost.call({}, { kind: "callout", el: own }), own);
+}

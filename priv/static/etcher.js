@@ -2541,7 +2541,17 @@
   // out the full window. Pinned tooltips ignore this entirely (they
   // close only on an explicit click). Hovering the tooltip itself
   // pauses the countdown so the delete button stays reachable.
-  var TOOLTIP_DWELL_MS = 2200;
+  var TOOLTIP_DWELL_MS = 1600;
+
+  // How far the cursor may travel before a shown tooltip takes it as "the
+  // user has moved on". A tooltip is a PEEK: it arrives when the cursor
+  // settles and leaves when the cursor doesn't — sitting out a timer while
+  // someone is plainly doing something else is what made it feel like it
+  // was hanging around waiting. Bigger than hand jitter, smaller than a
+  // deliberate reach; it closes through the same fade as everything else,
+  // and through the usual bridge, so a reach TOWARD the tooltip still
+  // lands on it.
+  var TOOLTIP_PEEK_PX = 14;
 
   // Hover INTENT: the cursor has to settle on a shape for this long before
   // a tooltip appears at all. Crossing a drawing to reach something else
@@ -14692,6 +14702,13 @@
           if (self._hoveredShape) self._setHoveredShape(null, false);
           return;
         }
+        // Where the cursor is, for the tooltip to open at and measure
+        // against. Kept here because this handler already runs on every
+        // hover move and nothing else tracks it.
+        self._lastPointerClient = { x: e.clientX, y: e.clientY };
+        // Moved on? Then the tooltip's welcome is over, even over the
+        // same shape.
+        self._tooltipPeekMove(e);
         var pt;
         try { pt = self._toImage(e); } catch (_) { return; }
         var hit = self._shapeAt(pt);
@@ -15185,6 +15202,12 @@
       // dwell timer.
       this._positionTooltip(shape);
 
+      // Where the cursor was when this opened — the origin the peek
+      // measures against (see _tooltipPeekMove).
+      this._tooltipCursorOrigin = this._lastPointerClient
+        ? { x: this._lastPointerClient.x, y: this._lastPointerClient.y }
+        : null;
+
       // Grace window after show: the next ~250 ms ignores
       // `_scheduleHideTooltip` calls. Defeats the iOS-synthesized
       // mousemove-on-just-shown-tooltip race that fires
@@ -15667,6 +15690,27 @@
       }
       tip.style.left = x + "px";
       this._keepTooltipClearOfChrome(tip, containerRect);
+    },
+
+    // Cursor moved on: start closing, even though it is still over the
+    // same shape. The tooltip earned its place by the cursor being still
+    // and gives it up the same way. Runs on the hover move path AFTER the
+    // chrome check — a move onto the tooltip never reaches here — and the
+    // close is the usual 180ms bridge into the usual fade, so a reach that
+    // lands on the tooltip cancels it on arrival.
+    _tooltipPeekMove: function(e) {
+      if (this.tooltipPinned) return;
+      var tip = this.tooltipEl;
+      if (!tip || tip.style.display === "none") return;
+      // Already closing — re-arming on every move would push the close
+      // further out the more the user moved, which is backwards.
+      if (this._tooltipTimer) return;
+      var origin = this._tooltipCursorOrigin;
+      if (!origin) return;
+      var dx = e.clientX - origin.x;
+      var dy = e.clientY - origin.y;
+      if (dx * dx + dy * dy < TOOLTIP_PEEK_PX * TOOLTIP_PEEK_PX) return;
+      this._scheduleHideTooltip();
     },
 
     _scheduleHideTooltip: function() {

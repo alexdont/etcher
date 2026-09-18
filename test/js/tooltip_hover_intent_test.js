@@ -29,7 +29,8 @@ function extract(name) {
     .replace(`${name}: function`, "function") + ")");
 }
 
-for (const name of ["TOOLTIP_OPEN_DELAY_MS", "TOOLTIP_DWELL_MS", "TOOLTIP_FADE_MS"]) {
+for (const name of ["TOOLTIP_OPEN_DELAY_MS", "TOOLTIP_DWELL_MS", "TOOLTIP_FADE_MS",
+                    "TOOLTIP_PEEK_PX"]) {
   const m = src.match(new RegExp(`var ${name} = (\\d+);`));
   assert.ok(m, `could not find ${name}`);
   global[name] = Number(m[1]);
@@ -177,6 +178,77 @@ function board(visible) {
   const tipLeaves = src.match(/tip\.addEventListener\("mouseleave"[\s\S]{0,420}?_scheduleHideTooltip\(\);/g) || [];
   assert.strictEqual(tipLeaves.length, 2,
     "leaving the tooltip closes it on the same bridge, in both renderers");
+}
+
+// ── a peek, not a stay: moving on closes it ───────────────────────────────
+
+{
+  // The last of the complaint: it appeared and then "just chilled there
+  // waiting for something". It earned its place by the cursor being
+  // still, so it gives it up the same way — even over the same shape.
+  // The close runs through the usual bridge and the usual fade, so a
+  // reach toward the tooltip still lands.
+  assert.ok(TOOLTIP_PEEK_PX >= 8 && TOOLTIP_PEEK_PX <= 30,
+    "past hand jitter, short of a deliberate reach");
+
+  const peek = extract("_tooltipPeekMove");
+  function board(extra) {
+    return Object.assign({
+      tooltipPinned: false,
+      tooltipEl: { style: { display: "" } },
+      _tooltipTimer: null,
+      _tooltipCursorOrigin: { x: 100, y: 100 },
+      hides: 0,
+      _scheduleHideTooltip() { this.hides++; },
+    }, extra || {});
+  }
+
+  const still = board();
+  peek.call(still, { clientX: 104, clientY: 103 });
+  assert.strictEqual(still.hides, 0, "a hand that wobbles is still a hand holding still");
+
+  const moved = board();
+  peek.call(moved, { clientX: 100 + TOOLTIP_PEEK_PX + 2, clientY: 100 });
+  assert.strictEqual(moved.hides, 1, "moving on starts the close");
+
+  const pinned = board({ tooltipPinned: true });
+  peek.call(pinned, { clientX: 400, clientY: 400 });
+  assert.strictEqual(pinned.hides, 0, "a pinned tooltip was asked for and stays");
+
+  const closed = board({ tooltipEl: { style: { display: "none" } } });
+  peek.call(closed, { clientX: 400, clientY: 400 });
+  assert.strictEqual(closed.hides, 0, "nothing up, nothing to close");
+
+  const closing = board({ _tooltipTimer: 7 });
+  peek.call(closing, { clientX: 400, clientY: 400 });
+  assert.strictEqual(closing.hides, 0,
+    "already closing — re-arming on every move would push the close further " +
+    "out the more the user moved, which is backwards");
+
+  const noOrigin = board({ _tooltipCursorOrigin: null });
+  peek.call(noOrigin, { clientX: 400, clientY: 400 });
+  assert.strictEqual(noOrigin.hides, 0, "no origin, no judgement");
+}
+
+// ── and the hover move path is what drives it ─────────────────────────────
+
+{
+  const moveAt = src.indexOf("self._lastPointerClient = { x: e.clientX, y: e.clientY };");
+  assert.notStrictEqual(moveAt, -1, "the hover move must track the cursor for the peek");
+  assert.ok(src.slice(moveAt, moveAt + 300).includes("self._tooltipPeekMove(e);"),
+    "…and run the peek on every hover move");
+
+  // AFTER the chrome guard: a move onto the tooltip is a reach for it, not
+  // a move away from the shape.
+  const chromeAt = src.indexOf("// Over Etcher's own chrome (toolbar / popup / tooltip): no shape hover.");
+  assert.ok(chromeAt !== -1 && chromeAt < moveAt,
+    "the peek must sit after the chrome check, or reaching the tooltip would close it");
+
+  // The origin is stamped when it opens, from the tracked position.
+  const show = src.slice(src.indexOf("    _showTooltipFor: function"),
+                         src.indexOf("    _hoverTooltip: function"));
+  assert.ok(show.includes("this._tooltipCursorOrigin = this._lastPointerClient"),
+    "the peek measures from where the cursor was when the tooltip opened");
 }
 
 console.log("tooltip hover intent: all checks passed");

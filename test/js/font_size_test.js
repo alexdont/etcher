@@ -453,7 +453,9 @@ assert.ok(!src.includes("_paramsFontInput"),
   const body = src.slice(start, src.indexOf("var dashRow = document.createElement", start));
   assert.ok(body.includes('fontLabel.textContent = "Label size";'),
     'the row says what it sizes — "Label size", not "Font size"');
-  assert.ok(/fontNum\.title =\s*\n?\s*"Label size in px/.test(body),
+  // No unit in the wording: the number is a weight against a reference
+  // canvas, not a count of pixels (see ink_scale_test).
+  assert.ok(/fontNum\.title =\s*\n?\s*"Label size —/.test(body),
     "and the input's tooltip says it too, which is all there is to go on " +
     "in the compact strip where the caption cannot be drawn");
   assert.ok(body.includes('"etcher-marker-row etcher-font-row"'),

@@ -4,6 +4,85 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.15.0] — 2026-09-18
+
+Ink measured against the picture instead of its pixels, a toolbar that
+stays out of your way, and labels that hold still.
+
+### Changed
+
+- **Thickness is relative to the canvas, not to its pixels.** A weight
+  of 5 meant five document pixels, and a big image simply has more of
+  them — the same 5 was a fat stroke on a 720px photo and a hairline on
+  an 11384px panorama, so every drawing had to be re-tuned per image.
+  Panel numbers are now quoted against a reference canvas
+  (REFERENCE_CANVAS_PX, 1000) through `_inkScale`, the one conversion
+  every panel read, panel write and new shape already went through, so
+  strokes, markers, shafts and label sizes all follow. Rendering is
+  untouched — stored document px × the current zoom — so zoom still
+  thickens ink with the drawing and shapes already on a board render
+  exactly as they did. Zoom-anchored ink measures the screen and is
+  already resolution-proof, so it does not take the reference on top.
+  The panel stops saying "px": the number is a weight, and the suffix
+  promised a measure that never held.
+
+- **The weight sliders spread over the weights people use.** A normal
+  arrow is about 8, which on the old linear 1..40 track sat a fifth of
+  the way along. Both sliders now travel 0-100 and curve onto the
+  range: 8 lands mid-track, the first half covers 1 through 9, and the
+  same ceiling is still reachable.
+
+- **A tool stays armed after a create.** Picking the rectangle again
+  for every rectangle in a row is most of what drawing is — the marker
+  was already exempt, and now the rest are too. Cursor mode is asked
+  for: the toolbar, V, or Escape. The just-drawn shape is still
+  selected, so a panel edit still tunes both it and the tool's
+  defaults.
+
+- **The marker has a palette of its own** — black to write with, then
+  strong contrasting hues — instead of seeding from the shapes'
+  palette, which meant the pen came up in whatever the boxes were
+  outlined in. Three palettes now (shapes, pen, highlighter), each
+  arriving as itself whichever tool was armed before.
+
+- **A new label starts at a real size.** An unset size meant
+  box-driven sizing, and the editor and the commit measured different
+  boxes — so the size felt random while typing and shrank at
+  placement. It is a genuine default now (16, through the same
+  ink-scaled pipeline as a hand-picked size), pinned when a new
+  label's editor opens so typing and placement agree.
+
+- **The tooltip is a peek.** It used to appear on contact and sit for
+  five seconds wherever the cursor went. Now the cursor has to settle
+  (350ms) before one appears at all, it fades in and out, moving on
+  closes it — even over the same shape — and leaving closes it over a
+  bridge short enough to feel immediate but long enough to reach the
+  tooltip's own buttons. A 1600ms dwell remains as the backstop for a
+  cursor that never moves. Pinned tooltips are unaffected.
+
+### Fixed
+
+- **Labels sit where they are drawn.** Their painted ink is centred on
+  both axes from the box the engine actually laid out, rather than
+  from the baseline and the advance width — those leftovers are a
+  fixed fraction of a pixel, so they vanished on a big label and
+  dominated a small one, which read as the words drifting right as the
+  board zoomed out.
+
+- **An open label editor follows its shape** through pan and zoom
+  instead of staying where it opened (measured 269px adrift after one
+  zoom step, snapping back only on commit), and the break it cuts in
+  the shaft now matches the committed label's box exactly, so nothing
+  settles when the label lands.
+
+- **A dimension's old label no longer ghosts under its editor** — the
+  editor's hide-while-editing was looking at the element the label
+  stopped living in.
+
+- **The shaft break keeps its clearance when zoomed out**, where the
+  old floor left the line pressed against the words at exactly the
+  size they were least legible.
+
 ## [0.14.1] — 2026-09-17
 
 Shaft labels wear their line's colour, and the dimension asks for its

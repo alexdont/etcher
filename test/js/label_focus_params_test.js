@@ -43,6 +43,7 @@ function panel(over) {
     _isStrokeShape: isStrokeShape,
     _isShaftKind: isShaftKind,
     _markerScale: () => 1,
+    _sliderFromWeight: () => 0,
     _armedInkTool: () => false,
     _refreshLabelSwatch() {},
     _inkScale: () => 1,

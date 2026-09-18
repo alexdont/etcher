@@ -2045,6 +2045,16 @@
   // pill however tall the label is set.
   var LABEL_BG_RADIUS_RATIO = 0.18;
 
+  // The weight sliders travel 0-100 and curve onto WEIGHT_MIN..WEIGHT_MAX,
+  // so the weights people actually draw with sit around the middle of the
+  // track instead of bunched in its first fifth. Squared: at the thin end
+  // one notch is a hair, at the heavy end it is a step — which is how
+  // thickness reads to the eye, and it leaves the same ceiling reachable
+  // as the old linear 1..40.
+  var WEIGHT_MIN = 1;
+  var WEIGHT_MAX = 40;
+  var WEIGHT_CURVE = 2.2;
+
   // The canvas size the panel's numbers are quoted against: a thickness of
   // 5 means "5 as it would look on a 1000px canvas", on every image. See
   // _canvasInkScale.
@@ -6022,15 +6032,16 @@
       // (see _canvasInkScale), and a "px" suffix promised a pixel measure
       // that never held across resolutions.
       var w = sliderRow("Weight");
-      w.input.min = "1"; w.input.max = "40"; w.input.step = "1";
+      w.input.min = "0"; w.input.max = "100"; w.input.step = "1";
       self._markerWeightInput = w.input;
       self._markerWeightVal = w.val;
       w.input.addEventListener("input", function() {
-        w.val.textContent = w.input.value;
-        self._setMarkerStyleProp("width", parseInt(w.input.value, 10), false);
+        var mw = self._weightFromSlider(w.input.value);
+        w.val.textContent = String(mw);
+        self._setMarkerStyleProp("width", mw, false);
       });
       w.input.addEventListener("change", function() {
-        self._setMarkerStyleProp("width", parseInt(w.input.value, 10), true);
+        self._setMarkerStyleProp("width", self._weightFromSlider(w.input.value), true);
       });
 
       // Opacity (0–100% → 0.0–1.0).
@@ -6090,7 +6101,7 @@
       var opacity = src.opacity == null ? 1 : src.opacity;
       var dash = src.dash || "solid";
       if (this._markerWeightInput) {
-        this._markerWeightInput.value = width;
+        this._markerWeightInput.value = this._sliderFromWeight(width);
         this._markerWeightVal.textContent = String(width);
       }
       if (this._markerOpacityInput) {
@@ -6853,16 +6864,17 @@
       }
 
       var w = sliderRow("Thickness");
-      w.input.min = "1"; w.input.max = "40"; w.input.step = "1";
+      w.input.min = "0"; w.input.max = "100"; w.input.step = "1";
       self._paramsWeightRow = w.row;
       self._paramsWeightInput = w.input;
       self._paramsWeightVal = w.val;
       w.input.addEventListener("input", function() {
-        w.val.textContent = w.input.value;
-        self._setLineParam("width", parseInt(w.input.value, 10), false);
+        var pw = self._weightFromSlider(w.input.value);
+        w.val.textContent = String(pw);
+        self._setLineParam("width", pw, false);
       });
       w.input.addEventListener("change", function() {
-        self._setLineParam("width", parseInt(w.input.value, 10), true);
+        self._setLineParam("width", self._weightFromSlider(w.input.value), true);
       });
 
       var o = sliderRow("Opacity");
@@ -7292,7 +7304,7 @@
         fill = lp.fill || "semi";
       }
       if (this._paramsWeightInput) {
-        this._paramsWeightInput.value = width;
+        this._paramsWeightInput.value = this._sliderFromWeight(width);
         this._paramsWeightVal.textContent = String(width);
       }
       if (this._paramsOpacityInput) {
@@ -8481,6 +8493,29 @@
         if (s > 0) return s;
       }
       return this._canvasInkScale();
+    },
+
+    // Slider position (0-100) -> weight. Rounded to whole units: the
+    // number is what the panel shows and what gets stored, and a weight of
+    // 7.4 is not a thing anyone asked for.
+    _weightFromSlider: function(pos) {
+      var p = Number(pos);
+      if (!isFinite(p)) return WEIGHT_MIN;
+      p = Math.max(0, Math.min(100, p)) / 100;
+      var w = WEIGHT_MIN + (WEIGHT_MAX - WEIGHT_MIN) * Math.pow(p, WEIGHT_CURVE);
+      return Math.max(WEIGHT_MIN, Math.round(w));
+    },
+
+    // …and back, for showing a stored weight on the track. A weight past
+    // the ceiling (an older board, a programmatic style) pins the handle at
+    // the end rather than vanishing off it; the readout still shows the
+    // real number.
+    _sliderFromWeight: function(weight) {
+      var w = Number(weight);
+      if (!isFinite(w)) return 0;
+      w = Math.max(WEIGHT_MIN, Math.min(WEIGHT_MAX, w));
+      var f = (w - WEIGHT_MIN) / (WEIGHT_MAX - WEIGHT_MIN);
+      return Math.round(100 * Math.pow(f, 1 / WEIGHT_CURVE));
     },
 
     // REFERENCE_CANVAS_PX over the canvas's longest side. The longest side

@@ -206,8 +206,11 @@ console.log("ink scale: all checks passed");
   // pixels — a "px" suffix promised a measure that never held across
   // resolutions, which is the whole bug. The readouts show a bare
   // number, and no user-facing string calls a stroke or a label size px.
+  // The sliders travel a curve now (see weight_slider_test), so the
+  // readout shows the WEIGHT that position maps to — still a bare number.
   for (const readout of [
-    'w.val.textContent = w.input.value;',
+    'w.val.textContent = String(mw);',
+    'w.val.textContent = String(pw);',
     'this._markerWeightVal.textContent = String(width);',
     'this._paramsWeightVal.textContent = String(width);',
   ]) {

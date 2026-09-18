@@ -2045,6 +2045,10 @@
   // pill however tall the label is set.
   var LABEL_BG_RADIUS_RATIO = 0.18;
 
+  // The canvas size the panel's numbers are quoted against: a thickness of
+  // 5 means "5 as it would look on a 1000px canvas", on every image. See
+  // _canvasInkScale.
+  var REFERENCE_CANVAS_PX = 1000;
   var FONT_SIZE_MIN = 6;
   var FONT_SIZE_MAX = 200;
   // What a new label starts at when the user has not chosen a size. There
@@ -8451,23 +8455,44 @@
     // through. Rendering is untouched either way (stored canvas units ×
     // the current zoom, so ink always scales with the drawing on screen).
     //
-    // Default (un-anchored): 1. A thickness of 3 IS 3 document px — every
-    // stroke drawn with the slider at 3 is the same thickness, whatever
-    // the zoom was when it was drawn, and the number shown for a selected
-    // shape does not drift as you zoom. Head dev's call: consistency of
-    // the drawing beats constancy of the drawing hand.
+    // Default (un-anchored): the canvas's own size against a reference
+    // canvas, so the number is a thickness RELATIVE TO THE PICTURE rather
+    // than a count of its pixels. A 5 drawn on an 800px photo and a 5
+    // drawn on an 11384px panorama look identical when the two are viewed
+    // at the same size — which they did not before: widths were stored as
+    // document px, so the same 5 was a fat stroke on a small image and a
+    // hairline on a big one, and every drawing had to be re-tuned per
+    // image. Zoom behaviour is unchanged: stored units still ride the
+    // zoom, so ink thickens with the drawing as you go in.
     //
     // Zoom-anchored (the ⋯ toggle, pref "zoom_anchor"): the current zoom —
     // a value means "this many px on screen right now", which is the old
     // behaviour: what you draw looks the same as you draw it, at the cost
     // of strokes from different zooms having different real thicknesses.
+    // Already resolution-independent by construction (it measures the
+    // screen), so the reference does not apply.
     _inkScale: function() {
       if (this._getPref("zoom_anchor") === true) {
         var s = 0;
         try { s = this._markerScale() || 0; } catch (_) { s = 0; }
         if (s > 0) return s;
       }
-      return 1;
+      return this._canvasInkScale();
+    },
+
+    // REFERENCE_CANVAS_PX over the canvas's longest side. The longest side
+    // is what a fit-to-view zoom is driven by, so matching it keeps a
+    // stroke's on-screen weight the same for two images shown at the same
+    // size whatever their pixel counts — landscape, portrait or square.
+    //
+    // 1 for a board that cannot report a size (a headless layer, a strip
+    // before its first measure), which is exactly the old behaviour, and
+    // for a canvas that IS the reference size.
+    _canvasInkScale: function() {
+      var sz = this.imageSize;
+      var dim = sz && Math.max(sz.x || 0, sz.y || 0);
+      if (!(dim > 0) || !isFinite(dim)) return 1;
+      return REFERENCE_CANVAS_PX / dim;
     },
 
     _zoomAnchorOn: function() {

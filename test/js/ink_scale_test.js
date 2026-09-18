@@ -4,10 +4,17 @@
 // now", so a 3px line drawn zoomed-in and a 3px line drawn zoomed-out
 // were different real thicknesses — visually constant for the hand,
 // inconsistent for the drawing. Head dev's call: consistency wins by
-// default. A value is document px — every stroke drawn at 3 IS the same
-// thickness — and the old behaviour lives on behind the ⋯ toggle
-// ("zoom_anchor"). Rendering is untouched either way: stored canvas
-// units × the current zoom, so ink always scales with the drawing.
+// default — every stroke drawn at 3 IS the same thickness — and the old
+// behaviour lives on behind the ⋯ toggle ("zoom_anchor"). Rendering is
+// untouched either way: stored canvas units × the current zoom, so ink
+// always scales with the drawing.
+//
+// What a value MEASURES is the canvas, not its pixels: the panel number
+// is quoted against a reference canvas, so a 5 on a small photo and a 5
+// on a huge one look the same when both are viewed at the same size.
+// Stored as document px still (nothing about rendering or old shapes
+// changes), but the number the user types converts through the canvas's
+// own size on the way in and back out.
 //
 //   node test/js/ink_scale_test.js
 
@@ -29,15 +36,26 @@ function extract(name) {
 }
 
 const inkScale = extract("_inkScale");
+const canvasInkScale = extract("_canvasInkScale");
+const REFERENCE = (() => {
+  const m = src.match(/var REFERENCE_CANVAS_PX = (\d+);/);
+  assert.ok(m, "the reference canvas size must exist");
+  return Number(m[1]);
+})();
+global.REFERENCE_CANVAS_PX = REFERENCE;
 const lineParamsForNew = extract("_lineParamsForNewShape");
 const markerStyle = extract("_currentMarkerStyle");
 
-function board(anchored, zoom) {
+function board(anchored, zoom, imageSize) {
   const prefs = anchored ? { zoom_anchor: true } : {};
   return {
+    // No imageSize → scale 1, which is the behaviour every assertion
+    // below was written against.
+    imageSize: imageSize || null,
     _getPref: (k) => prefs[k],
     _markerScale: () => zoom,
     _inkScale: inkScale,
+    _canvasInkScale: canvasInkScale,
     _currentLineParams: () => ({ width: 3, opacity: 1, dash: "solid" }),
     lineParams: { width: 3 },
     activeColor: "#fca5a5",
@@ -103,8 +121,9 @@ function board(anchored, zoom) {
   // thresholds and hit tolerances.
   const inkBox = extract("_textDefaultBoxInkPx");
   const on = { _getPref: (k) => (k === "zoom_anchor" ? true : null),
-    _markerScale: () => 4, _inkScale: inkScale };
-  const off = { _getPref: () => null, _markerScale: () => 4, _inkScale: inkScale };
+    _markerScale: () => 4, _inkScale: inkScale, _canvasInkScale: canvasInkScale };
+  const off = { _getPref: () => null, _markerScale: () => 4, _inkScale: inkScale,
+    _canvasInkScale: canvasInkScale };
   assert.strictEqual(inkBox.call(off), 16,
     "un-anchored: 16 image px, whatever the zoom — same relative text size");
   assert.strictEqual(inkBox.call(on), 4,
@@ -132,3 +151,50 @@ function board(anchored, zoom) {
 }
 
 console.log("ink scale: all checks passed");
+
+// ── the same number is the same thickness on any resolution ───────────────
+
+{
+  // The complaint this answers: a 5 set on a low-res image was a fat
+  // stroke, and the same 5 on a high-res one a hairline — the value was
+  // a count of document pixels, and a big image simply has more of them.
+  const small = lineParamsForNew.call(board(false, 1, { x: 800, y: 600 }));
+  const huge = lineParamsForNew.call(board(false, 1, { x: 11384, y: 4221 }));
+  assert.strictEqual(small.width, 3 * 800 / REFERENCE);
+  assert.strictEqual(huge.width, 3 * 11384 / REFERENCE);
+  assert.ok(huge.width > small.width * 14,
+    "the big canvas stores a proportionally bigger number of its own px");
+
+  // …and that is exactly what makes them LOOK the same. Displayed at one
+  // size, the zoom each needs is inversely proportional to its pixels, so
+  // the rendered weights land on top of each other.
+  const shown = 1000;                       // both images displayed 1000px wide
+  const renderedSmall = small.width * (shown / 800);
+  const renderedHuge = huge.width * (shown / 11384);
+  assert.ok(Math.abs(renderedSmall - renderedHuge) < 1e-9,
+    "same number, same ink on screen — whatever the image's resolution");
+  assert.strictEqual(Math.round(renderedSmall), 3,
+    "…and it is the number the user typed, at the reference size");
+}
+
+{
+  // The longest side, so landscape and portrait of the same picture agree.
+  assert.strictEqual(canvasInkScale.call({ imageSize: { x: 4000, y: 3000 } }),
+    REFERENCE / 4000);
+  assert.strictEqual(canvasInkScale.call({ imageSize: { x: 3000, y: 4000 } }),
+    REFERENCE / 4000);
+  // A board that cannot report a size keeps the old behaviour exactly.
+  assert.strictEqual(canvasInkScale.call({}), 1);
+  assert.strictEqual(canvasInkScale.call({ imageSize: { x: 0, y: 0 } }), 1);
+  assert.strictEqual(canvasInkScale.call({ imageSize: { x: Infinity, y: 2 } }), 1);
+  assert.strictEqual(canvasInkScale.call({ imageSize: { x: REFERENCE, y: 10 } }), 1,
+    "the reference canvas itself is unscaled — the number IS document px there");
+}
+
+{
+  // Zoom-anchoring measures the screen, so it is already resolution-proof
+  // and must NOT take the reference on top.
+  const anchored = lineParamsForNew.call(board(true, 4, { x: 11384, y: 4221 }));
+  assert.strictEqual(anchored.width, 3 / 4,
+    "anchored still means screen px at draw time, on any image");
+}

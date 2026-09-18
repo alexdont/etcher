@@ -12872,6 +12872,29 @@
           // and shift the text so its visible centre IS the rect's
           // centre; the rect, the plate, the cut and the handles all key
           // off the rect and stay put.
+          // …and the same correction horizontally, from the line that sets
+          // the box's width — measured on the painted pixels rather than
+          // the advance box, which getBBox reports.
+          var inkLines = String(trimmed).split("\n");
+          var inkWidest = inkLines[0];
+          if (inkLines.length > 1) {
+            var inkMax = -1;
+            for (var ili = 0; ili < inkLines.length; ili++) {
+              var ilw = this._measureTextWidth(
+                inkLines[ili], fontSize, fontFamily, fontWeight
+              );
+              if (ilw > inkMax) { inkMax = ilw; inkWidest = inkLines[ili]; }
+            }
+          }
+          var inkShiftX = this._inkCenterShiftX(
+            inkWidest, fontSize, fontFamily, fontWeight
+          );
+          if (inkShiftX) {
+            var inkX = (parseFloat(textEl.getAttribute("x")) || 0) + inkShiftX;
+            textEl.setAttribute("x", inkX);
+            this._shiftTspans(textEl, inkX);
+          }
+
           try {
             var inkBox = textEl.getBBox();
             if (inkBox && inkBox.height > 0) {
@@ -13590,6 +13613,44 @@
       try { w = ctx.measureText(s).width; }
       catch (_) { w = s.length * TEXT_MEASURE_FONT_PX * 0.55; }
       return w * (fontSize / TEXT_MEASURE_FONT_PX);
+    },
+
+    // How far to move a line of text so its PAINTED pixels centre where its
+    // advance box would. The two are not the same: a glyph sits inside a
+    // cell with side bearings, and in this family the left bearing usually
+    // exceeds the right, so centring the advance box leaves the words
+    // looking a touch right of centre. The error is proportional to the
+    // font — which is what made it read as drift rather than as a constant
+    // nudge: labels scale with the board, so the words crept right on zoom
+    // in and back left on zoom out.
+    //
+    // Measured at TEXT_MEASURE_FONT_PX and scaled, like _measureTextWidth,
+    // so one canvas state serves every size. Browsers without the
+    // actualBoundingBox metrics get 0 — the advance centring they had.
+    _inkCenterShiftX: function(text, fontSize, fontFamily, fontWeight) {
+      var s = String(text == null ? "" : text);
+      if (!s || !(fontSize > 0)) return 0;
+      if (!this._measureCanvas) {
+        this._measureCanvas = document.createElement("canvas");
+      }
+      var m;
+      try {
+        var ctx = this._measureCanvas.getContext("2d");
+        ctx.font = (fontWeight || "500") + " " + TEXT_MEASURE_FONT_PX + "px " +
+          (fontFamily || "ui-sans-serif, system-ui, -apple-system, sans-serif");
+        m = ctx.measureText(s);
+      } catch (_) {
+        return 0;
+      }
+      if (!m || typeof m.actualBoundingBoxLeft !== "number" ||
+          typeof m.actualBoundingBoxRight !== "number" ||
+          !isFinite(m.actualBoundingBoxLeft) ||
+          !isFinite(m.actualBoundingBoxRight)) {
+        return 0;
+      }
+      var k = fontSize / TEXT_MEASURE_FONT_PX;
+      var inkCx = (-m.actualBoundingBoxLeft + m.actualBoundingBoxRight) / 2 * k;
+      return m.width * k / 2 - inkCx;
     },
 
     _fillTextWithWrappedTspans: function(textEl, content, maxWidth, fontSize) {

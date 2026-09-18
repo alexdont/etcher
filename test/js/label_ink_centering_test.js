@@ -1,9 +1,19 @@
 // Pins the label's INK centring.
 //
-// SVG places text by its baseline, so a line of digits — no descenders —
-// sits low in its em box: measured against the painted extents, the
-// glyphs had roughly an x-height of slack above the rect and OVERHUNG
-// its bottom edge. On a shaft-riding label that is the line grazing the
+// Two axes, one idea: what a reader sees is the PAINTED pixels, and
+// neither SVG's baseline placement nor its advance box centres those.
+//
+// Vertically, SVG places text by its baseline, so a line of digits — no
+// descenders — sits low in its em box: measured against the painted
+// extents, the glyphs had roughly an x-height of slack above the rect
+// and OVERHUNG its bottom edge.
+//
+// Horizontally, a glyph sits inside a cell with side bearings, and in
+// this family the left bearing usually exceeds the right — so centring
+// the advance box left the words a touch right of centre, by an amount
+// PROPORTIONAL to the font ("RECT" was 1.2px off at 20px and 3.3px at
+// 61px). Labels scale with the board, so that read as drift: the words
+// crept right on zoom in and back left on zoom out. On a shaft-riding label that is the line grazing the
 // digit bottoms while empty margin sits above, and the offset shrinks
 // with the font, so the label appears to shift as you zoom out.
 //
@@ -94,3 +104,87 @@ function runShift(inkY, inkH, ty, th, startY) {
 }
 
 console.log("label ink centering: all checks passed");
+
+// ── horizontal: the painted ink centres, not the advance box ──────────────
+
+{
+  const m = src.match(/var TEXT_MEASURE_FONT_PX = (\d+);/);
+  assert.ok(m, "the measurement base size must exist");
+  global.TEXT_MEASURE_FONT_PX = Number(m[1]);
+}
+
+const shiftX = (() => {
+  const start = src.indexOf("    _inkCenterShiftX: function");
+  assert.notStrictEqual(start, -1, "could not find _inkCenterShiftX");
+  const end = src.indexOf("\n    },", start);
+  return eval("(" + src.slice(start, end + "\n    }".length)
+    .replace("_inkCenterShiftX: function", "function") + ")");
+})();
+
+// The measure canvas, with the metrics a browser reports: a glyph run
+// whose ink starts 2 units in and ends 2 short of the advance.
+function measuringCtx(metrics) {
+  return {
+    _measureCanvas: {
+      getContext: () => ({
+        set font(v) { this._font = v; },
+        get font() { return this._font; },
+        measureText: () => metrics,
+      }),
+    },
+  };
+}
+
+{
+  // MEASURE_PX is 100, so a size of 50 halves every measurement.
+  const self = measuringCtx({
+    width: 100, actualBoundingBoxLeft: -10, actualBoundingBoxRight: 80,
+  });
+  // ink spans 10..80 (centre 45); advance centre is 50 → shift +5, halved.
+  assert.strictEqual(shiftX.call(self, "text", 50), 2.5,
+    "the pen moves so the painted pixels straddle the box centre");
+
+  // Ink already centred in its advance: nothing to correct.
+  const centred = measuringCtx({
+    width: 100, actualBoundingBoxLeft: -10, actualBoundingBoxRight: 90,
+  });
+  assert.strictEqual(shiftX.call(centred, "text", 100), 0);
+
+  // The correction scales with the font — which is exactly why the
+  // uncorrected version looked like drift rather than a fixed nudge.
+  const big = shiftX.call(self, "text", 100);
+  const small = shiftX.call(self, "text", 25);
+  assert.ok(big > small && small > 0 && Math.abs(big / small - 4) < 1e-9,
+    "the offset is proportional to the size");
+}
+
+{
+  // Empty, sizeless, and metric-less browsers all fall back to the
+  // advance centring that came before.
+  const self = measuringCtx({ width: 10, actualBoundingBoxLeft: 0, actualBoundingBoxRight: 5 });
+  assert.strictEqual(shiftX.call(self, "", 20), 0);
+  assert.strictEqual(shiftX.call(self, "x", 0), 0);
+  const old = measuringCtx({ width: 10 });
+  assert.strictEqual(old.constructor === Object ? shiftX.call(old, "x", 20) : 0, 0,
+    "a browser without actualBoundingBox metrics keeps the old behaviour");
+  const nan = measuringCtx({ width: 10, actualBoundingBoxLeft: NaN, actualBoundingBoxRight: 5 });
+  assert.strictEqual(shiftX.call(nan, "x", 20), 0);
+  const throwing = { _measureCanvas: { getContext: () => { throw new Error("no 2d"); } } };
+  assert.strictEqual(shiftX.call(throwing, "x", 20), 0);
+}
+
+// ── the render applies it to the text AND its tspans ──────────────────────
+
+{
+  const applyAt = render.indexOf("var inkShiftX = this._inkCenterShiftX(");
+  assert.notStrictEqual(applyAt, -1,
+    "the title render must correct the horizontal ink centre");
+  assert.ok(applyAt < blockStart,
+    "…before the vertical shift, which measures the box it just moved");
+  const apply = render.slice(applyAt, blockStart);
+  assert.ok(apply.includes('textEl.setAttribute("x", inkX);') &&
+            apply.includes("this._shiftTspans(textEl, inkX);"),
+    "both the <text> and its tspans move, or a multi-line label tears");
+  assert.ok(render.includes("var inkWidest = inkLines[0];"),
+    "the correction comes from the line that sets the box width");
+}

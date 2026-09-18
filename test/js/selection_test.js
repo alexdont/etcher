@@ -267,17 +267,23 @@ function run(kind, afterCreate) {
   return { calls, ctx };
 }
 
-// A drawn rectangle: cursor tool first, then edit mode on the new shape —
-// in that order, since `_selectTool` with a real tool exits edit mode.
+// A drawn rectangle: edit mode on the new shape, and NO tool flip —
+// the tool stays armed so the next drag draws another (head dev's call;
+// dropping to the cursor meant re-picking the tool for every shape in a
+// row). The selection is what lets a panel edit tune both the shape just
+// drawn and the tool's defaults.
 {
   const { calls, ctx } = run("rectangle");
-  assert.deepStrictEqual(calls, [["selectTool", null], ["enterEditMode", "uuid-test"]],
-    `rectangle create should select the cursor then the shape, got ${JSON.stringify(calls)}`);
+  assert.deepStrictEqual(calls, [["enterEditMode", "uuid-test"]],
+    `rectangle create should keep the tool and select the shape, got ${JSON.stringify(calls)}`);
+  assert.ok(!calls.some((c) => c[0] === "selectTool"),
+    "nothing may drop the user back to the cursor after a create");
   assert.ok(ctx._suppressEditDismissUntil > Date.now(),
     "the dismiss guard was not armed — the gesture's own synthesized click can tear the selection down");
 }
 
-// The marker stays armed for the next stroke: no tool flip, no selection.
+// The marker stays armed AND selects nothing: a sketch tool's strokes
+// come in flurries, and handles under the next one would fight it.
 {
   const { calls } = run("marker");
   assert.deepStrictEqual(calls, [],
@@ -290,8 +296,11 @@ function run(kind, afterCreate) {
   let after = 0;
   const { calls } = run("text", () => { after++; });
   assert.strictEqual(after, 1, "afterCreate did not run");
-  assert.deepStrictEqual(calls, [["selectTool", null]],
+  assert.deepStrictEqual(calls, [],
     `with an afterCreate hook the shape must not also enter edit mode, got ${JSON.stringify(calls)}`);
+  assert.ok(!calls.some((c) => c[0] === "selectTool"),
+    "…and the tool stays armed here too — the hook's own flow decides " +
+    "what happens next, not a flip back to the cursor");
 }
 
 // ── the guard actually guards ───────────────────────────────────────────────

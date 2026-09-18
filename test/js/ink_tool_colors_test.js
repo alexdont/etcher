@@ -129,6 +129,20 @@ assert.ok(sm, "the highlighter needs a starting palette of its own");
 const HIGHLIGHT_DEFAULT_SLOTS = eval(sm[1]);
 assert.strictEqual(HIGHLIGHT_DEFAULT_SLOTS[0], HIGHLIGHT_DEFAULT_COLOR,
   "the default colour leads its own palette");
+
+// The pen has one too — ink colours, not the shapes' outline pastels.
+const mm = src.match(/var MARKER_DEFAULT_SLOTS =\n\s+(\[[^\]]+\]);/);
+assert.ok(mm, "the marker needs a starting palette of its own");
+const MARKER_DEFAULT_SLOTS = eval(mm[1]);
+const mc = src.match(/var MARKER_DEFAULT_COLOR = "(#[0-9a-f]{6})";/);
+assert.ok(mc, "…and a first colour");
+const MARKER_DEFAULT_COLOR = mc[1];
+assert.strictEqual(MARKER_DEFAULT_SLOTS[0], MARKER_DEFAULT_COLOR,
+  "the default colour leads its own palette");
+assert.notDeepStrictEqual(MARKER_DEFAULT_SLOTS, HIGHLIGHT_DEFAULT_SLOTS,
+  "the two ink tools must not come up on the same set");
+global.MARKER_DEFAULT_SLOTS = MARKER_DEFAULT_SLOTS;
+global.MARKER_DEFAULT_COLOR = MARKER_DEFAULT_COLOR;
 const swap = new Function("self", "prevTool", "toolKey",
   "HIGHLIGHT_DEFAULT_COLOR", "HIGHLIGHT_DEFAULT_SLOTS",
   src.slice(blockStart, src.indexOf("\n", blockEnd + 44)));
@@ -155,18 +169,19 @@ const swap = new Function("self", "prevTool", "toolKey",
     swap(board, prev, next, HIGHLIGHT_DEFAULT_COLOR, HIGHLIGHT_DEFAULT_SLOTS);
   };
 
-  // First marker arm: no memory yet — its palette seeds from the shared
-  // one, it inherits the shared colour, and the shared selection is
-  // banked whole (slots included).
+  // First marker arm: no memory yet — it comes up on the PEN's own set,
+  // not on whatever the shapes are drawn in (a pale outline colour is the
+  // wrong thing to write with), and the shared selection is banked whole.
   arm(null, "marker");
-  assert.deepStrictEqual(board._colorSlots, SHARED);
-  assert.strictEqual(board.activeColor, "#111111");
+  assert.deepStrictEqual(board._colorSlots, MARKER_DEFAULT_SLOTS);
+  assert.strictEqual(board.activeColor, MARKER_DEFAULT_COLOR);
   assert.deepStrictEqual(board._bankedSharedColor,
     { slots: SHARED, slot: 2, color: "#111111" });
   assert.ok(board.refreshes > 0, "the swatch row repaints on the swap");
 
   // The user edits marker slot 0 through the wheel and picks it — what
   // _setSlotColor + _selectColor do while armed (pinned above).
+  board._colorSlots = board._colorSlots.slice();
   board._colorSlots[0] = "#ff0000";
   prefs.marker_colors = board._colorSlots.slice();
   board._selectColor("#ff0000");
@@ -194,13 +209,14 @@ const swap = new Function("self", "prevTool", "toolKey",
 
   // Re-arm the marker: its edited palette and its colour — the point.
   arm(null, "marker");
-  assert.deepStrictEqual(board._colorSlots, ["#ff0000", "#bbbbbb", "#111111"],
+  assert.deepStrictEqual(board._colorSlots,
+    ["#ff0000"].concat(MARKER_DEFAULT_SLOTS.slice(1)),
     "the marker's five slots are its own, edits included");
   assert.strictEqual(board.activeColor, "#ff0000");
   assert.strictEqual(board._activeSlot, 0);
 
-  // Straight to the highlighter: seeded from the BANKED shared palette
-  // is what it must NOT be — it keeps the highlight set.
+  // Straight to the highlighter: seeded from the marker's set is what it
+  // must NOT be — it keeps the highlight set.
   arm("marker", "highlighter");
   assert.deepStrictEqual(board._colorSlots, HIGHLIGHT_DEFAULT_SLOTS);
   assert.strictEqual(board.activeColor, HIGHLIGHT_DEFAULT_COLOR);
@@ -208,6 +224,7 @@ const swap = new Function("self", "prevTool", "toolKey",
   // A shared colour from OUTSIDE the palette (host-seeded) banks as a
   // raw value — no slot to re-read — and comes back verbatim.
   arm("highlighter", null);
+  board._colorSlots = SHARED.slice();
   board._activeSlot = -1;
   board.activeColor = "#0ff00f";
   arm(null, "marker");

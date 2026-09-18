@@ -2232,11 +2232,20 @@
   // highlighter that starts in the same blue as the pen is the complaint
   // this answers — out of the box the two ink tools must not match.
   var HIGHLIGHT_DEFAULT_COLOR = "#facc15";
-  // …and its starting palette: the classic highlighter set (yellow first,
-  // matching the default colour above). The marker's palette seeds from
-  // the shared one instead — a pen starts where the shapes are.
+  // …and its starting palette: the classic highlighter set, the
+  // transparent-marker colours, yellow first to match the default above.
   var HIGHLIGHT_DEFAULT_SLOTS =
     ["#facc15", "#4ade80", "#f472b6", "#fb923c", "#38bdf8"];
+
+  // The pen's own set, and its first colour. Ink colours rather than the
+  // shapes' pastels: black to write with, then strong contrasting hues
+  // that hold up over a photograph. Seeding the marker from the shared
+  // palette (what it used to do) meant the pen came up in whatever the
+  // boxes happened to be drawn in — usually a pale outline colour, which
+  // is the wrong thing to write with.
+  var MARKER_DEFAULT_COLOR = "#111111";
+  var MARKER_DEFAULT_SLOTS =
+    ["#111111", "#ef4444", "#2563eb", "#16a34a", "#ffffff"];
 
   var CURSOR_BADGES = {
     rectangle: '<rect x="4" y="6" width="16" height="12" rx="1.5"/>',
@@ -11100,19 +11109,18 @@
                                       slot: self._activeSlot,
                                       color: self.activeColor };
         }
-        // The shared palette to seed and fall back from is the BANKED one:
-        // arming the marker straight from the highlighter must not seed the
-        // marker's palette with highlight colours.
-        var bankShared = self._bankedSharedColor || {};
+        // Each ink tool starts on its OWN set, not on whatever the shapes
+        // happen to be drawn in — so the pen comes up as a pen and the
+        // highlighter as a highlighter, whichever was armed before.
         var pal = self._getPref(toolKey + "_colors");
         pal = Array.isArray(pal) && pal.length
           ? self._sanitizeColorSlots(pal)
           : (toolKey === "highlighter" ? HIGHLIGHT_DEFAULT_SLOTS.slice()
-                                       : (bankShared.slots || []).slice());
+                                       : MARKER_DEFAULT_SLOTS.slice());
         self._colorSlots = pal;
         var inkColor = self._getPref(toolKey + "_color") ||
           (toolKey === "highlighter" ? HIGHLIGHT_DEFAULT_COLOR
-                                     : bankShared.color || self.activeColor);
+                                     : MARKER_DEFAULT_COLOR);
         // Highlight the swatch only when the colour actually lives in a
         // slot; -1 lights nothing, which is honest — the tool's colour is
         // its own, not one of the palette's.
@@ -20065,16 +20073,12 @@
         try { afterCreate(shape); } catch (_) {}
       }
 
-      // Drop back to cursor mode after every successful create so the
-      // next click selects rather than starting another shape. `null`
-      // is the cursor; passing it does NOT exit any inline edit mode
-      // the afterCreate hook may have entered (text / callout), since
-      // `_selectTool` only calls `_exitEditMode` when toolKey != null.
-      //
-      // EXCEPT the marker: it's a sketch tool the user typically uses for
-      // several strokes in a row, so it stays armed until they pick another
-      // tool (or cursor) themselves.
-      if (kind !== "marker") this._selectTool(null);
+      // The tool STAYS ARMED. Dropping back to the cursor after every
+      // create meant re-picking the tool for every shape in a row, which
+      // is most of what drawing is — the marker was already exempt for
+      // exactly that reason, and head dev's call is that the rest work
+      // the same way. Cursor mode is now something the user asks for:
+      // the toolbar, V, or Escape.
 
       // ...and select what was just drawn. Finishing a stroke and then
       // having to click it AGAIN before the thickness / dash / color
@@ -20086,9 +20090,13 @@
       //
       // Skipped when an afterCreate hook took over — text goes straight
       // into inline typing, which is the richer editing state, and the
-      // media-insert path returns to its dialog flow. The marker skips too:
-      // its tool stays armed (above), and `_enterEditMode` under an armed
-      // tool would fight the next stroke.
+      // media-insert path returns to its dialog flow. The marker skips
+      // too: a sketch tool's strokes come in flurries, and handles under
+      // the next one would fight it. Every other kind keeps the selection
+      // even though its tool is still armed — that is what lets a panel
+      // edit tune BOTH the shape just drawn and the tool's defaults (see
+      // _freshTargets), and the next stroke simply starts on the canvas,
+      // dismissing it.
       //
       // The guard timestamp swallows the click the browser synthesizes
       // from the drawing gesture's own pointerup: it lands after

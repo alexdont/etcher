@@ -129,6 +129,25 @@ function board() {
     "a board that sheds labels must not accrete masks");
 }
 
+// ── a plain box works as well as a live rect ──────────────────────────────
+
+{
+  // The editor hands a {x, y, w, h} (the committed label's future box);
+  // the render hands the live <rect>. Both must cut the same way.
+  const self = board();
+  const shape = { uuid: "boxed", el: fakeEl("g"), kind: "dimension" };
+  syncGap.call(self, shape, { x: 100, y: 50, w: 80, h: 20 });
+  const cut = self._defs.children[0].children[1];
+  assert.deepStrictEqual(
+    [cut.attrs.x, cut.attrs.y, cut.attrs.width, cut.attrs.height],
+    ["92", "42", "96", "36"],
+    "a plain box cuts exactly as the equivalent rect element does");
+
+  syncGap.call(self, shape, { x: 100, y: 50, w: 80, h: 20, transform: "rotate(90 140 60)" });
+  assert.strictEqual(cut.attrs.transform, "rotate(90 140 60)",
+    "…and carries a turn the same way");
+}
+
 // ── two shafts, two masks — and drafts without a uuid are left alone ──────
 
 {
@@ -178,8 +197,16 @@ function board() {
   const end = src.indexOf('input.addEventListener("input", edFit);', start);
   const fitBody = src.slice(start, end);
   assert.ok(fitBody.includes("selfEd._labelRidesShaft(shape.kind)") &&
-            fitBody.includes("selfEd._syncShaftLabelGap(shape, fo);"),
+            fitBody.includes("selfEd._syncShaftLabelGap(shape, {"),
     "the fit engine must break the shaft under the editor, live");
+  // …to the box the COMMITTED label will occupy, not the editor's own:
+  // the editor's is taller by the headroom its textarea needs, and
+  // cutting to that made the gap settle visibly at Enter — and moved
+  // where a diagonal shaft stopped.
+  assert.ok(fitBody.includes("x: edCx - gapW / 2, y: edCy - gapH / 2"),
+    "the typing break must be centred like the committed label");
+  assert.ok(/gapH = Math\.max\(\s*edFontSize \+ \(linesEd\.length - 1\) \* edFontSize \* 1\.1 \+ edPad \* 2,\s*edFontSize \* 1\.2\s*\)/.test(fitBody),
+    "…and sized by the render's own shrink-wrap formula");
 }
 
 console.log("shaft label gap: all checks passed");

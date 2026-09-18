@@ -6736,6 +6736,13 @@
         mask.appendChild(cut);
         this._defs.appendChild(mask);
       }
+      // `box` is either the label's rendered <rect> or a plain
+      // {x, y, w, h} — the editor passes the box the COMMITTED label will
+      // occupy rather than its own, which is deliberately taller (a
+      // textarea needs a full line box plus descender headroom inside
+      // overflow:hidden). Cutting to the editor's box made the break
+      // visibly settle at Enter, and on a diagonal shaft moved where the
+      // line stopped.
       // The cut is the label's rendered rect plus a margin, so the line
       // ends a clean step short of the words instead of touching them.
       // Proportional to the label with a floor: a margin that scaled only
@@ -6744,10 +6751,11 @@
       // down with zoom-out while the shaft's stroke stays screen-thick,
       // so a small floor left the line pressed against the words exactly
       // when the label was at its least legible.
-      var x = Number(rectEl.getAttribute("x")) || 0;
-      var y = Number(rectEl.getAttribute("y")) || 0;
-      var w = Number(rectEl.getAttribute("width")) || 0;
-      var h = Number(rectEl.getAttribute("height")) || 0;
+      var live = rectEl && typeof rectEl.getAttribute === "function";
+      var x = Number(live ? rectEl.getAttribute("x") : rectEl.x) || 0;
+      var y = Number(live ? rectEl.getAttribute("y") : rectEl.y) || 0;
+      var w = Number(live ? rectEl.getAttribute("width") : rectEl.w) || 0;
+      var h = Number(live ? rectEl.getAttribute("height") : rectEl.h) || 0;
       var gap = Math.max(8, h * 0.25);
       var cutEl = mask.querySelector(".etcher-shaft-gap-cut");
       cutEl.setAttribute("x", x - gap);
@@ -6756,7 +6764,7 @@
       cutEl.setAttribute("height", h + gap * 2);
       // A turned board turns the label; the cut has to turn with it or the
       // gap sits askew of the words it is clearing space for.
-      var turn = rectEl.getAttribute("transform");
+      var turn = live ? rectEl.getAttribute("transform") : rectEl.transform;
       if (turn) cutEl.setAttribute("transform", turn);
       else cutEl.removeAttribute("transform");
       shape.el.setAttribute("mask", "url(#" + id + ")");
@@ -19552,7 +19560,19 @@
         // re-syncs it to the label's real rect, or closes the line back
         // up if nothing was typed.
         if (selfEd._labelRidesShaft(shape.kind)) {
-          selfEd._syncShaftLabelGap(shape, fo);
+          // The box the COMMITTED label will have — same formulas the
+          // render's shrink-wrap uses — so the break is identical while
+          // typing and after Enter. The editor's own box is taller by the
+          // headroom its textarea needs, and cutting to that made the gap
+          // settle visibly at commit.
+          var gapW = Math.max(maxW + edPad * 2, edFontSize);
+          var gapH = Math.max(
+            edFontSize + (linesEd.length - 1) * edFontSize * 1.1 + edPad * 2,
+            edFontSize * 1.2
+          );
+          selfEd._syncShaftLabelGap(shape, {
+            x: edCx - gapW / 2, y: edCy - gapH / 2, w: gapW, h: gapH
+          });
         }
       };
       input.addEventListener("input", edFit);

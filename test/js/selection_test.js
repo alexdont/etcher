@@ -260,6 +260,7 @@ function run(kind, afterCreate) {
     _syncDraftHandles: () => {},
     _selectTool: (k) => calls.push(["selectTool", k]),
     _enterEditMode: (s) => calls.push(["enterEditMode", s && s.uuid]),
+    _syncDockedTooltip() {},
     draftState: {}
   };
   const el = { setAttribute: () => {}, classList: { remove: () => {} } };
@@ -329,6 +330,7 @@ function run(kind, afterCreate) {
     _exitEditMode: () => exits.push(1),
     _exitTitleEditMode: noop, _refreshImageRing: noop, _removeConnectorDots: noop,
     _syncArrangeButtons: noop, _showLinkMenuFor: noop, _hideTooltip: noop,
+    _syncDockedTooltip: noop,
     _syncToolbarColorToShape: noop, _renderHandles: noop,
     _hasMidpointHandles: () => false, _wireMidpointTracker: noop,
     _toImage: () => { throw new Error("no viewer"); },

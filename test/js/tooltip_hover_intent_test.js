@@ -374,11 +374,23 @@ console.log("tooltip hover intent: all checks passed");
   });
   assert.ok(scheduled);
 
-  // Clicking away: _exitEditMode takes the section with the selection.
+  // Clicking away re-asks what the section should show, once the
+  // selection has actually been cleared — the answer is the shape under
+  // the cursor if there is one, else nothing.
   const exit = src.slice(src.indexOf("    _exitEditMode: function"),
-                         src.indexOf("    _exitEditMode: function") + 900);
-  assert.ok(exit.includes("this._tooltipDocked()") && exit.includes("this._hideTooltip();"),
-    "clearing the selection must leave the panel as plain stroke and colour");
+                         src.indexOf("    _exitEditMode: function") + 1400);
+  assert.ok(exit.includes("var wasDocked = this._tooltipDocked() && !!this.editingShape;"),
+    "the teardown has to notice it HAD a selection before clearing it");
+  const askAt = exit.indexOf("if (wasDocked) this._syncDockedTooltip();");
+  const clearAt = exit.indexOf("this.editingShape = null;");
+  assert.ok(askAt !== -1 && clearAt !== -1 && askAt > clearAt,
+    "…and re-ask AFTER clearing, or it answers with the shape being deselected");
+
+  // Selecting one is what puts its actions in the panel.
+  const enter = src.slice(src.indexOf("    _enterEditMode: function"),
+                          src.indexOf("    _enterEditMode: function") + 1200);
+  assert.ok(enter.includes("this._syncDockedTooltip();"),
+    "selecting a shape shows its section");
 }
 
 // ── the placement is a host's choice, not a default change ────────────────
@@ -415,4 +427,82 @@ console.log("tooltip hover intent: all checks passed");
   assert.strictEqual(
     allowed.call({ annotationMode: false, activeTool: null, _tooltipDocked: () => false }),
     true, "anchored hosts still hover in view mode — that is their whole tooltip");
+}
+
+// ── docked: the section is state, not a sequence of timers ───────────────
+
+{
+  // The bug this answers: a hover REPLACED the selected shape's section
+  // and left an empty panel when the cursor moved on, so the promise of
+  // the mode — click a shape and its actions are there while it is
+  // selected — held only until the cursor wandered over something else.
+  const sync = extract("_syncDockedTooltip");
+  const selected = { uuid: "sel" };
+  const other = { uuid: "other" };
+
+  function board(hovered, editing, showing) {
+    return {
+      shown: [], hidden: 0,
+      _tooltipDocked: () => true,
+      _hoverAllowed: () => true,
+      _hoveredShape: hovered,
+      editingShape: editing,
+      _tooltipShape: showing || null,
+      tooltipEl: { style: { display: showing ? "block" : "none" } },
+      _showTooltipFor(s) { this.shown.push(s.uuid); },
+      _hideTooltip() { this.hidden++; },
+    };
+  }
+
+  var b = board(null, selected, null);
+  sync.call(b);
+  assert.deepStrictEqual(b.shown, ["sel"], "a selection with no hover shows the selection");
+
+  b = board(other, selected, selected);
+  sync.call(b);
+  assert.deepStrictEqual(b.shown, ["other"], "a hover borrows the section to preview");
+
+  b = board(null, selected, other);
+  sync.call(b);
+  assert.deepStrictEqual(b.shown, ["sel"],
+    "…and leaving hands it BACK to the selection — the empty panel was the bug");
+
+  b = board(null, null, other);
+  sync.call(b);
+  assert.strictEqual(b.hidden, 1, "nothing hovered, nothing selected: nothing shown");
+
+  b = board(selected, selected, selected);
+  sync.call(b);
+  assert.deepStrictEqual(b.shown, [], "already showing the right shape: left alone");
+
+  // Anchored hosts never reach any of this.
+  b = board(other, selected, selected);
+  b._tooltipDocked = () => false;
+  sync.call(b);
+  assert.deepStrictEqual(b.shown, []);
+  assert.strictEqual(b.hidden, 0);
+}
+
+// ── docked: a selection is not on a clock; a preview is ──────────────────
+
+{
+  const auto = extract("_startTooltipAutoClose");
+  const shape = { uuid: "s" };
+  let armed = 0;
+  global.setTimeout = () => { armed++; return 1; };
+
+  auto.call({
+    _tooltipDocked: () => true,
+    editingShape: shape, _tooltipShape: shape,
+    _cancelTooltipAutoClose() {},
+  });
+  assert.strictEqual(armed, 0,
+    "a selected shape's section never times out — that is the promise of the mode");
+
+  auto.call({
+    _tooltipDocked: () => true,
+    editingShape: shape, _tooltipShape: { uuid: "preview" },
+    _cancelTooltipAutoClose() {},
+  });
+  assert.strictEqual(armed, 1, "a hover preview of something else times out, like any glance");
 }

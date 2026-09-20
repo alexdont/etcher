@@ -15117,16 +15117,22 @@
         this._refreshImageRing(next);
         this._refreshMediaChrome(next);
       }
-      // Docked: leaving the shape is what closes a hover preview, since
-      // neither of the anchored mode's timers applies — and the hit-test
-      // path, not the element's own mouseleave, is what actually reports
-      // the leave on a board where the shapes take no pointer events.
-      // A PINNED tooltip ignores this (`_scheduleHideTooltip` returns
-      // early): clicking a shape is what makes its actions reachable, and
-      // it holds until the user clicks away.
-      if (!next && !this.tooltipPinned && this._tooltipDocked()) {
-        this._cancelTooltipOpen();
-        this._scheduleHideTooltip();
+      // Docked: the section is a function of what is hovered and what is
+      // selected, so every hover change — onto a shape, between shapes,
+      // off them entirely — is answered in one place. The anchored mode's
+      // show/hide scheduling is skipped wholesale; there is nothing to
+      // schedule when the answer is simply "show whatever applies now".
+      if (this._tooltipDocked()) {
+        if (!this.tooltipPinned) {
+          this._cancelTooltipOpen();
+          this._syncDockedTooltip();
+        }
+        this._hoveredOnTitle = onTitle;
+        if (this.overlayWrapper) {
+          this.overlayWrapper.classList.toggle("is-shape-hovered", !!next);
+        }
+        this._syncConnectorDots(onTitle ? null : next);
+        return;
       }
       if (hideTooltip && !this.tooltipPinned) {
         // Whatever was about to open no longer has anything to describe.
@@ -15830,6 +15836,31 @@
                 this.el.dataset.tooltipDock === "panel");
     },
 
+    // What the panel's shape section should be showing, from state rather
+    // than from a sequence of timers: the hovered shape if there is one,
+    // otherwise the SELECTED shape, otherwise nothing.
+    //
+    // The selected shape is the baseline — that is the promise of the
+    // mode: click a shape and its actions are in the panel for as long as
+    // it is selected, with nothing counting down. A hover borrows the
+    // section to preview another shape, and handing it back is what this
+    // function is for: before, the preview simply replaced the selection's
+    // section and left an empty panel behind when the cursor moved on.
+    _syncDockedTooltip: function() {
+      if (!this._tooltipDocked()) return;
+      var want = null;
+      if (this._hoveredShape && this._hoverAllowed()) want = this._hoveredShape;
+      else if (this.editingShape) want = this.editingShape;
+
+      if (!want) {
+        if (this._tooltipShape) this._hideTooltip();
+        return;
+      }
+      var showing = this.tooltipEl && this.tooltipEl.style.display !== "none";
+      if (this._tooltipShape === want && showing) return;
+      this._showTooltipFor(want);
+    },
+
     _tooltipPeekMove: function(e) {
       // The peek exists because an anchored tooltip covers the drawing —
       // a docked one covers nothing, so it can simply follow the hover
@@ -15853,13 +15884,12 @@
       // Pinned tooltips never auto-close — only an explicit click action
       // (same shape again, another shape, or outside) closes them.
       if (this.tooltipPinned) return;
-      // Docked: the panel section belongs to whatever is SELECTED, and a
-      // selection outlives the cursor — that is what makes its delete and
-      // comment buttons reachable at all, since they live over in the
-      // panel. Hover previews (nothing selected, or a different shape
-      // selected) still close the moment the cursor leaves. Clicking away
-      // clears the selection, and `_exitEditMode` takes the section with
-      // it.
+      // Docked: a selected shape's section is not on a clock and is not
+      // the cursor's to close — it holds until the selection goes, which
+      // is what makes its comment and delete buttons reachable at all,
+      // since they live over in the panel. A hover preview (nothing
+      // selected, or a different shape selected) still closes when the
+      // cursor leaves, handing the section back to the selection.
       if (this._tooltipDocked() && this.editingShape &&
           this.editingShape === this._tooltipShape) {
         return;
@@ -15894,11 +15924,15 @@
     // window from scratch.
     _startTooltipAutoClose: function() {
       this._cancelTooltipAutoClose();
-      // A docked tooltip is out of the way, so nothing is gained by taking
-      // it down while the cursor is still on the shape — and a readout
-      // that vanishes mid-sentence is worse than one that waits. Leaving
-      // the shape still closes it.
-      if (this._tooltipDocked()) return;
+      // Docked: a SELECTED shape's section never times out — that is the
+      // promise of the mode, and a panel row that disappears while the
+      // thing it describes is still selected is exactly the "it doesn't
+      // always work" this answers. A hover PREVIEW of something else does
+      // time out, like any glance.
+      if (this._tooltipDocked() &&
+          this.editingShape && this.editingShape === this._tooltipShape) {
+        return;
+      }
       var self = this;
       this._tooltipAutoCloseTimer = setTimeout(function() {
         self._tooltipAutoCloseTimer = null;
@@ -20866,6 +20900,9 @@
       this.editingShape = shape;
       shape.el.classList.add("is-editing");
       this._refreshImageRing(shape);
+      // Docked: selecting a shape is what puts its actions in the panel,
+      // and they stay there for as long as it is selected.
+      this._syncDockedTooltip();
       // Hand the eight points over to the resize handles about to be drawn
       // there — see `_connectorsAvailableFor`.
       if (this._connectorDotShape === shape) this._removeConnectorDots();
@@ -20938,14 +20975,12 @@
       // Leaving the shape ends its freshness for good — a later
       // re-select is a one-time edit (see _freshTargets).
       this._freshShape = null;
-      // Docked: the panel section belongs to the SELECTED shape, so it
-      // goes when the selection does — clicking away leaves the panel as
-      // plain stroke and colour again. (Hover previews close on their own
-      // when the cursor leaves; this is the clicked case.)
-      if (this._tooltipDocked() && this.editingShape &&
-          this._tooltipShape === this.editingShape) {
-        this._hideTooltip();
-      }
+      // Docked: the section belongs to the selection, so losing the
+      // selection re-asks what should be showing — the shape under the
+      // cursor if there is one, else nothing. Asked AFTER `editingShape`
+      // is cleared below, or it would answer with the shape being
+      // deselected.
+      var wasDocked = this._tooltipDocked() && !!this.editingShape;
       if (!this.editingShape) return;
       this.editingShape.el.classList.remove("is-editing");
       this._refreshImageRing(this.editingShape);
@@ -20960,6 +20995,7 @@
         this._outsideClickHandler = null;
       }
       this._syncArrangeButtons();
+      if (wasDocked) this._syncDockedTooltip();
     },
 
     // Mark polygon vertices as the Backspace / Delete target. Plain

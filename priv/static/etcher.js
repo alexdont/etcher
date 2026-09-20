@@ -2257,6 +2257,15 @@
   // palette (what it used to do) meant the pen came up in whatever the
   // boxes happened to be drawn in — usually a pale outline colour, which
   // is the wrong thing to write with.
+  // …and the weights the two come up at. A highlighter is a chisel tip: at
+  // the pen's weight it was a thin line that happened to be see-through,
+  // which reads as a faded marker rather than as highlighting. Three times
+  // the pen, so the tool announces what it is on the first stroke — and
+  // both stay ordinary panel weights the user can dial from there (the
+  // slider's curve puts them at roughly 40% and 68% of its travel).
+  var MARKER_DEFAULT_WIDTH = 6;
+  var HIGHLIGHT_DEFAULT_WIDTH = 18;
+
   var MARKER_DEFAULT_COLOR = "#111111";
   var MARKER_DEFAULT_SLOTS =
     ["#111111", "#ef4444", "#2563eb", "#16a34a", "#ffffff"];
@@ -7571,6 +7580,16 @@
         // under the slider rather than waiting for the release.
         this._restyleDrafts();
       }
+      // While an ink tool is armed the thickness slider is standing in for
+      // THAT tool's weight — remember it under the tool, exactly as
+      // _selectColor remembers the colour, so the next time the
+      // highlighter comes up it comes up as a highlighter. Only the
+      // weight: opacity, dash and fill stay shared, which is what makes
+      // the highlighter's half-opacity a property of the tool rather than
+      // something the user has to keep re-picking.
+      if (prop === "width" && this._armedInkTool()) {
+        this._setPref(this.activeTool + "_width", value);
+      }
       if (commit) {
         if (this._lineParamBefore && this._lineParamBefore.length) {
           // Edited selected shapes → per-shape style persists via the
@@ -11152,20 +11171,21 @@
         self._clearSelection();
       }
 
-      // Each ink tool keeps its own colour, apart from the palette colour
-      // the shapes share. Arming one banks the shared selection (slot and
-      // colour both — the colour may not live in any slot), loads the
-      // tool's remembered colour, and disarming restores the bank — so a
-      // yellow highlighting session never leaks into the next rectangle.
-      // Marker-to-highlighter keeps the one bank: only the first ink arm
-      // is a shared colour worth returning to.
+      // Each ink tool keeps its own colour AND its own weight, apart from
+      // the palette and thickness the shapes share. Arming one banks the
+      // shared selection (slot, colour and width — the colour may not live
+      // in any slot), loads the tool's remembered pair, and disarming
+      // restores the bank — so a fat yellow highlighting session never
+      // leaks into the next rectangle. Marker-to-highlighter keeps the one
+      // bank: only the first ink arm is a shared state worth returning to.
       var wasInk = prevTool === "marker" || prevTool === "highlighter";
       var isInk = toolKey === "marker" || toolKey === "highlighter";
       if (isInk) {
         if (!wasInk) {
           self._bankedSharedColor = { slots: (self._colorSlots || []).slice(),
                                       slot: self._activeSlot,
-                                      color: self.activeColor };
+                                      color: self.activeColor,
+                                      width: (self.lineParams || {}).width };
         }
         // Each ink tool starts on its OWN set, not on whatever the shapes
         // happen to be drawn in — so the pen comes up as a pen and the
@@ -11185,6 +11205,10 @@
         self._activeSlot = pal.indexOf(inkColor);
         self._refreshToolbarSwatches();
         self._selectColor(inkColor);
+        // The weight, the same way: the tool's own, remembered or built-in.
+        self._setInkWidth(self._getPref(toolKey + "_width") ||
+          (toolKey === "highlighter" ? HIGHLIGHT_DEFAULT_WIDTH
+                                     : MARKER_DEFAULT_WIDTH));
       } else if (wasInk && self._bankedSharedColor) {
         var bank = self._bankedSharedColor;
         self._bankedSharedColor = null;
@@ -11196,6 +11220,9 @@
         // the source of truth for what the swatch shows.
         self._selectColor(bank.slot >= 0 && bank.slot < bank.slots.length
           ? bank.slots[bank.slot] : bank.color);
+        // A board that never had a width of its own gets none back: the
+        // shapes fall to the same built-in they started on.
+        self._setInkWidth(bank.width);
       }
 
       // Sync `.is-selected` across the main toolbar AND the
@@ -11344,6 +11371,23 @@
     // Color picker — affects the active draft if drawing, the editing
     // shape if one is being edited, and the default for future shapes.
     // `null` resets to the CSS default blue.
+    // Put a weight into the global line params and show it, without going
+    // through _setLineParam — that path decides between editing selected
+    // shapes and editing the default, and a tool swap is neither: it is
+    // the default being exchanged for another default. `undefined` clears
+    // it, which is how a board that never had a width of its own gets
+    // none back on disarm.
+    _setInkWidth: function(width) {
+      this.lineParams = this.lineParams || {};
+      if (typeof width === "number" && isFinite(width) && width > 0) {
+        this.lineParams.width = width;
+      } else {
+        delete this.lineParams.width;
+      }
+      this._restyleDrafts();
+      this._syncParamsPopup();
+    },
+
     _selectColor: function(color) {
       this.activeColor = color;
       // While an ink tool is armed, the palette is standing in for THAT

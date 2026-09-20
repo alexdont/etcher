@@ -112,6 +112,8 @@ const isShaftKind = (k) => ["line", "arrow", "dimension"].indexOf(k) !== -1;
       "a callout must re-render — its stroke is applied by the render case, " +
       "not by painting params onto the <g>"),
     _syncParamsPopup: () => {},
+    _armedInkTool: () => false,
+    _setPref() {},
     _emitChanged: () => {},
     _pushUndo: () => {},
     shapes: [callout],

@@ -121,7 +121,7 @@ function colorBoard(armedTool) {
 const blockStart = src.indexOf("      var wasInk = prevTool ===");
 assert.notStrictEqual(blockStart, -1, "could not find the ink-colour swap");
 const blockEnd = src.indexOf(
-  "? bank.slots[bank.slot] : bank.color);\n      }\n", blockStart);
+  "self._setInkWidth(bank.width);\n      }\n", blockStart);
 assert.notStrictEqual(blockEnd, -1, "could not find the end of the swap block");
 const sm = src.match(
   /var HIGHLIGHT_DEFAULT_SLOTS =\n\s+(\[[^\]]+\]);/);
@@ -143,9 +143,17 @@ assert.notDeepStrictEqual(MARKER_DEFAULT_SLOTS, HIGHLIGHT_DEFAULT_SLOTS,
   "the two ink tools must not come up on the same set");
 global.MARKER_DEFAULT_SLOTS = MARKER_DEFAULT_SLOTS;
 global.MARKER_DEFAULT_COLOR = MARKER_DEFAULT_COLOR;
+// Each ink tool's default weight, the twin of its default colour.
+const wm = src.match(/var MARKER_DEFAULT_WIDTH = (\d+);/);
+const hwm = src.match(/var HIGHLIGHT_DEFAULT_WIDTH = (\d+);/);
+assert.ok(wm && hwm, "each ink tool needs a default weight");
+const MARKER_DEFAULT_WIDTH = Number(wm[1]);
+const HIGHLIGHT_DEFAULT_WIDTH = Number(hwm[1]);
+global.MARKER_DEFAULT_WIDTH = MARKER_DEFAULT_WIDTH;
+global.HIGHLIGHT_DEFAULT_WIDTH = HIGHLIGHT_DEFAULT_WIDTH;
 const swap = new Function("self", "prevTool", "toolKey",
   "HIGHLIGHT_DEFAULT_COLOR", "HIGHLIGHT_DEFAULT_SLOTS",
-  src.slice(blockStart, src.indexOf("\n", blockEnd + 44)));
+  src.slice(blockStart, src.indexOf("\n", blockEnd + 40)));
 
 {
   const prefs = {};
@@ -158,6 +166,12 @@ const swap = new Function("self", "prevTool", "toolKey",
     _getPref: (k) => prefs[k],
     _sanitizeColorSlots: (a) => a.slice(),
     _refreshToolbarSwatches() { this.refreshes++; },
+    lineParams: { width: 3 },
+    _setInkWidth(w) {
+      this.lineParams = this.lineParams || {};
+      if (typeof w === "number" && w > 0) this.lineParams.width = w;
+      else delete this.lineParams.width;
+    },
     _selectColor(c) {
       this.activeColor = c;
       // What the real one does while ink is armed (pinned above).
@@ -176,7 +190,8 @@ const swap = new Function("self", "prevTool", "toolKey",
   assert.deepStrictEqual(board._colorSlots, MARKER_DEFAULT_SLOTS);
   assert.strictEqual(board.activeColor, MARKER_DEFAULT_COLOR);
   assert.deepStrictEqual(board._bankedSharedColor,
-    { slots: SHARED, slot: 2, color: "#111111" });
+    { slots: SHARED, slot: 2, color: "#111111", width: 3 },
+    "the bank carries the shared weight as well as the shared colour");
   assert.ok(board.refreshes > 0, "the swatch row repaints on the swap");
 
   // The user edits marker slot 0 through the wheel and picks it — what
@@ -195,7 +210,7 @@ const swap = new Function("self", "prevTool", "toolKey",
     "out of the box the two ink tools must not match");
   assert.strictEqual(board._activeSlot, 0, "…and yellow is a slot of its own set");
   assert.deepStrictEqual(board._bankedSharedColor,
-    { slots: SHARED, slot: 2, color: "#111111" },
+    { slots: SHARED, slot: 2, color: "#111111", width: 3 },
     "only the first ink arm is a shared state worth returning to");
 
   // Disarm: the shared palette AND selection come back — the marker's
@@ -312,3 +327,91 @@ const swap = new Function("self", "prevTool", "toolKey",
 }
 
 console.log("ink tool colors: all checks passed");
+
+// ── each ink tool comes up at its own weight ──────────────────────────────
+
+{
+  // A highlighter is a chisel tip. At the pen's weight it was a thin line
+  // that happened to be see-through — a faded marker, not highlighting —
+  // so the tool has to announce itself on the first stroke.
+  assert.ok(HIGHLIGHT_DEFAULT_WIDTH >= MARKER_DEFAULT_WIDTH * 2,
+    "the highlighter must be unmistakably thicker than the pen, not a shade");
+  assert.ok(MARKER_DEFAULT_WIDTH > 1,
+    "…and the pen is a pen, not a hairline");
+
+  const prefs = {};
+  const board = {
+    lineParams: { width: 3 },
+    _colorSlots: ["#aaaaaa"],
+    _activeSlot: 0,
+    activeColor: "#aaaaaa",
+    _getPref: (k) => prefs[k],
+    _sanitizeColorSlots: (a) => a.slice(),
+    _refreshToolbarSwatches() {},
+    _selectColor(c) { this.activeColor = c; },
+    _setInkWidth(w) {
+      if (typeof w === "number" && w > 0) this.lineParams.width = w;
+      else delete this.lineParams.width;
+    },
+  };
+  const arm = (prev, next) =>
+    swap(board, prev, next, HIGHLIGHT_DEFAULT_COLOR, HIGHLIGHT_DEFAULT_SLOTS);
+
+  arm(null, "marker");
+  assert.strictEqual(board.lineParams.width, MARKER_DEFAULT_WIDTH,
+    "the pen arrives at its own weight");
+
+  arm("marker", "highlighter");
+  assert.strictEqual(board.lineParams.width, HIGHLIGHT_DEFAULT_WIDTH,
+    "and the highlighter at its own — thicker, on the first stroke");
+
+  arm("highlighter", null);
+  assert.strictEqual(board.lineParams.width, 3,
+    "the shapes get their own thickness back — a fat highlighting session " +
+    "must not leak into the next rectangle");
+
+  // A remembered weight wins over the built-in, the way a remembered
+  // colour does.
+  prefs.highlighter_width = 25;
+  arm(null, "highlighter");
+  assert.strictEqual(board.lineParams.width, 25,
+    "a weight the user picked for the tool is the weight it comes back at");
+}
+
+// ── and a thickness edit while armed is saved under that tool ─────────────
+
+{
+  const setLineParam = extract("_setLineParam");
+  function board(tool) {
+    return {
+      activeTool: tool,
+      annotationMode: true,
+      lineParams: {},
+      prefs: [],
+      _armedInkTool() {
+        return this.activeTool === "marker" || this.activeTool === "highlighter";
+      },
+      _setPref(k, v) { this.prefs.push([k, v]); },
+      _paramsTargetShapes: () => [],
+      _freshTargets: () => false,
+      _restyleDrafts() {},
+      _emitLineParamsChanged() {},
+    };
+  }
+
+  const hi = board("highlighter");
+  setLineParam.call(hi, "width", 22, true);
+  assert.deepStrictEqual(hi.prefs, [["highlighter_width", 22]],
+    "the slider is standing in for the armed tool's weight");
+
+  // Opacity stays shared: the highlighter's half-opacity is a property of
+  // the tool, not something the user keeps re-picking.
+  const op = board("highlighter");
+  setLineParam.call(op, "opacity", 0.3, true);
+  assert.deepStrictEqual(op.prefs, [], "only the weight is per-tool");
+
+  const shapes = board(null);
+  setLineParam.call(shapes, "width", 4, true);
+  assert.deepStrictEqual(shapes.prefs, [],
+    "no ink armed: the thickness is the shapes' shared default, as ever");
+}

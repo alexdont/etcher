@@ -71,6 +71,8 @@ const setLineParam = extract("_setLineParam");
       _renderShape() {},
       _applyLineParams() {},
       _restyleDrafts() {},
+      _armedInkTool: () => false,
+      _setPref() {},
       _snapshotShape: () => ({}),
       _pushUndo() {},
       shapes: [shape],

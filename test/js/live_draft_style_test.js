@@ -77,6 +77,8 @@ function board(over) {
     _pushUndo() {},
     _emitChanged() {},
     _emitLineParamsChanged() {},
+    _armedInkTool: () => false,
+    _setPref() {},
     _syncParamsPopup() {},
     shapes: [],
   }, over || {});

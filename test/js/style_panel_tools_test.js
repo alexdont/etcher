@@ -383,8 +383,16 @@ assert.ok(
   assert.ok(
     picked.indexOf("this._inspectedShape()") !== -1 &&
       picked.indexOf("this._applyColorToTargets(hex);") !== -1 &&
-      picked.indexOf("this._inspectedShape()") < picked.indexOf("_setSlotColor"),
+      picked.indexOf("this._inspectedShape()") < picked.indexOf("this._activeSlot"),
     "a picker pick recolors the inspected shape before it can touch the active slot"
+  );
+  // The one slot it MAY touch while inspecting is the one the wheel was
+  // opened from — a second click on that swatch, which is the user asking
+  // for that colour to change. Never the active slot, which with a shape
+  // selected is not what they aimed at.
+  assert.ok(
+    picked.includes("if (this._slotPickTarget != null) this._setSlotColor(this._slotPickTarget, hex);"),
+    "the slot the wheel was opened from takes the pick, shape selected or not"
   );
 }
 assert.ok(
@@ -392,15 +400,30 @@ assert.ok(
   "toolbar and overflow swatch clicks recolor the inspected shape via the applier"
 );
 
-// The palette-persist hook must not fire for inspect-mode edits: nothing
-// in the palette changed.
-// Also skipped for a label-plate pick: that swatch sets the plate, not the
-// palette, so there is nothing about the palette to persist.
+// The palette-persist hook fires only when the palette actually changed:
+// not for a plain inspect-mode recolour (nothing in the palette moved), not
+// for a label-plate pick (that swatch sets the plate), but yes for a slot
+// edit made with a shape selected — the slot moved, and a host that never
+// hears about it keeps serving the old colour back.
+//
+// One rule, asked by both commit sites (preset click, drag release).
 assert.strictEqual(
-  (src.match(/!self\._labelPickTarget && !self\._labelBgPickTarget && !self\._inspectedShape\(\)\) self\._emitColorsChanged\(\);/g) || []).length,
+  (src.match(/self\._pickEditsPalette\(\)/g) || []).length,
   2,
-  "both persist guards (preset click, drag release) skip inspect-mode and label-plate edits"
+  "both persist guards (preset click, drag release) ask the one rule"
 );
+{
+  const rule = src.slice(
+    src.indexOf("    _pickEditsPalette: function() {"),
+    src.indexOf("\n    },", src.indexOf("    _pickEditsPalette: function() {"))
+  );
+  assert.ok(rule.includes("this._labelPickTarget || this._labelBgPickTarget") &&
+            rule.includes("this._slotPickTarget != null") &&
+            rule.includes("!this._inspectedShape()"),
+    "the rule weighs all three: a label target, a slot target, and the selection");
+  assert.ok(rule.indexOf("_labelPickTarget") < rule.indexOf("_slotPickTarget"),
+    "a label pick is never a palette edit, whatever slot the wheel came from");
+}
 
 
 // ── the label colour pref survives peers, late loads, and compact mode ─────

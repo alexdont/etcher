@@ -176,4 +176,132 @@ function board(state) {
     "…and the exemption has to come before the close, or it changes nothing");
 }
 
+// ── the wheel edits the slot it was opened from ──────────────────────────
+
+{
+  // With a shape selected, a swatch click recolours the SHAPE and leaves
+  // the palette alone — but clicking that same swatch again opens the wheel
+  // on it, and that is the user saying "change this colour". The pick used
+  // to reach only the shape, so the slot you had deliberately aimed at kept
+  // its old colour: "it just changes the color on the shape and doesn't
+  // replace the color in the slot you just clicked a second time to set."
+  const applyPicked = extract("_applyPickedColor");
+
+  function pick(state, hex) {
+    const log = { slots: [], targets: [], synced: 0, selected: [] };
+    const self = Object.assign({
+      _labelPickTarget: false,
+      _labelBgPickTarget: false,
+      _slotPickTarget: null,
+      _activeSlot: 0,
+      _inspectedShape: () => null,
+      _setSlotColor(i, c) { log.slots.push([i, c]); },
+      _applyColorToTargets(c) { log.targets.push(c); },
+      _syncStyleInspector() { log.synced++; },
+      _selectColor(c) { log.selected.push(c); },
+      _setLabelColor(c) { log.label = c; },
+      _setLabelBg(c) { log.labelBg = c; },
+    }, state);
+    applyPicked.call(self, hex);
+    return log;
+  }
+
+  const shape = { style: { color: "#d8b4fe" } };
+  {
+    const log = pick({ _inspectedShape: () => shape, _slotPickTarget: 3 }, "#2900ff");
+    assert.deepStrictEqual(log.slots, [[3, "#2900ff"]],
+      "the slot the wheel was opened from must take the pick");
+    assert.deepStrictEqual(log.targets, ["#2900ff"],
+      "…and the shape still follows: the wheel opened from the slot it matches, " +
+      "so leaving the two different is the surprise");
+  }
+  {
+    // No slot behind the wheel: the old rule stands, untouched.
+    const log = pick({ _inspectedShape: () => shape, _slotPickTarget: null }, "#2900ff");
+    assert.deepStrictEqual(log.slots, [],
+      "a pick that was not aimed at a slot must not rewrite the palette");
+    assert.deepStrictEqual(log.targets, ["#2900ff"]);
+  }
+  {
+    // Nothing selected: the target still wins over whatever happens to be
+    // the active slot, which is what "the slot it was opened from" means.
+    const log = pick({ _slotPickTarget: 3, _activeSlot: 0 }, "#2900ff");
+    assert.deepStrictEqual(log.slots, [[3, "#2900ff"]]);
+    assert.deepStrictEqual(log.selected, ["#2900ff"], "and it becomes the drawing colour");
+  }
+  {
+    const log = pick({ _slotPickTarget: null, _activeSlot: 1 }, "#2900ff");
+    assert.deepStrictEqual(log.slots, [[1, "#2900ff"]],
+      "opened some other way, it falls back to the active slot as it always did");
+  }
+  {
+    // Label targets are checked first and still win outright.
+    const log = pick({ _labelPickTarget: true, _slotPickTarget: 2 }, "#2900ff");
+    assert.strictEqual(log.label, "#2900ff");
+    assert.deepStrictEqual(log.slots, [], "a label pick never touches the palette");
+  }
+}
+
+// ── opening from a swatch is what records the slot ───────────────────────
+
+{
+  // The other end of the same rule: without this, every pick falls back to
+  // the ACTIVE slot — which, with a shape selected, is not the slot the
+  // user aimed at, because a swatch click there recolours the shape and
+  // leaves the palette selection alone.
+  const openForSwatch = extract("_openColorsForSwatch");
+
+  const b = { _openPopupKind: null, _openPopup(kind) { this.kind = kind; } };
+  openForSwatch.call(b, 3, { name: "swatch3" });
+  assert.strictEqual(b._slotPickTarget, 3, "the wheel must remember which slot opened it");
+  assert.strictEqual(b._colorsTrigger.name, "swatch3", "…and anchor to it");
+  assert.strictEqual(b.kind, "colors");
+
+  // Opened without a slot (a non-swatch caller): no target, rather than the
+  // last one, which would send the pick to a slot nobody aimed at.
+  const b2 = { _openPopupKind: null, _slotPickTarget: 4, _openPopup() {} };
+  openForSwatch.call(b2, undefined, {});
+  assert.strictEqual(b2._slotPickTarget, null);
+
+  // Already open on it: a toggle, and the close clears the target.
+  const b3 = { _openPopupKind: "colors", _slotPickTarget: 2, closed: 0,
+               _closePopup() { this.closed++; this._slotPickTarget = null; },
+               _openPopup() { assert.fail("must not re-open"); } };
+  openForSwatch.call(b3, 2, {});
+  assert.strictEqual(b3.closed, 1);
+  assert.strictEqual(b3._slotPickTarget, null);
+}
+
+// ── …and the palette-changed event follows the same rule ─────────────────
+
+{
+  const editsPalette = extract("_pickEditsPalette");
+  const shape = { style: {} };
+  const ask = (state) => editsPalette.call(Object.assign({
+    _labelPickTarget: false, _labelBgPickTarget: false,
+    _slotPickTarget: null, _inspectedShape: () => null,
+  }, state));
+
+  assert.strictEqual(ask({}), true, "a plain palette edit is announced");
+  assert.strictEqual(ask({ _inspectedShape: () => shape }), false,
+    "recolouring a shape is not a palette change");
+  assert.strictEqual(ask({ _inspectedShape: () => shape, _slotPickTarget: 1 }), true,
+    "…but a slot edit made with a shape selected IS one, or the host never hears " +
+    "about the colour that just changed under it");
+  assert.strictEqual(ask({ _labelPickTarget: true, _slotPickTarget: 1 }), false);
+  assert.strictEqual(ask({ _labelBgPickTarget: true }), false);
+}
+
+// ── closing forgets the slot, so the next open cannot inherit it ──────────
+
+{
+  const close = extract("_closePopup");
+  const board = { _slotPickTarget: 4, _labelPickTarget: true, _labelBgPickTarget: true };
+  close.call(board);
+  assert.strictEqual(board._slotPickTarget, null,
+    "a stale slot target would make the NEXT pick land on a slot nobody aimed at");
+  assert.strictEqual(board._labelPickTarget, false);
+  assert.strictEqual(board._labelBgPickTarget, false);
+}
+
 console.log("palette picker retarget: all checks passed");

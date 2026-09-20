@@ -5777,6 +5777,7 @@
           // Select the slot but keep the picker open so the user can
           // immediately tweak it on the wheel; re-aim the wheel at the
           // freshly-selected color.
+          self._slotPickTarget = i;
           self._selectSlot(i);
           self._syncPickerToActiveColor();
         });
@@ -6011,8 +6012,9 @@
           // ring pick) and persist, rather than spawning a new entry.
           // Keep the picker open (it only closes on an outside click) so
           // the user can keep adjusting.
+          var editsPalette = self._pickEditsPalette();
           self._applyPickedColor(s.color);
-          if (!self._labelPickTarget && !self._labelBgPickTarget && !self._inspectedShape()) self._emitColorsChanged();
+          if (editsPalette) self._emitColorsChanged();
         });
         presetRow.appendChild(b);
         return b;
@@ -7873,7 +7875,7 @@
             // Commit the edited slot on release — persist via the hook.
             // (A label-swatch pick persists through the prefs mechanism
             // inside _applyPickedColor; the palette didn't change.)
-            if (!self._labelPickTarget && !self._labelBgPickTarget && !self._inspectedShape()) self._emitColorsChanged();
+            if (self._pickEditsPalette()) self._emitColorsChanged();
           }
           el.addEventListener("pointermove", move);
           el.addEventListener("pointerup", up);
@@ -7966,6 +7968,11 @@
         this._closePopup();
         return;
       }
+      // WHICH slot the wheel is editing. `_activeSlot` is not the same
+      // question: with a shape selected the palette selection stays put
+      // (a swatch click recolours the shape), so the slot you opened the
+      // wheel from can be any of the five. Cleared by `_closePopup`.
+      this._slotPickTarget = typeof i === "number" ? i : null;
       this._colorsTrigger = swatchEl;
       this._openPopup("colors");
     },
@@ -7985,10 +7992,15 @@
         this._setLabelColor(hex);
         return;
       }
-      // Inspecting a shape: the pick recolors IT and the palette stays as
+      // Inspecting a shape: the pick recolors IT, and the palette stays as
       // it was — deselect and the colours you were drawing with are still
-      // there (the display half lives in _syncStyleInspector).
+      // there (the display half lives in _syncStyleInspector). Unless the
+      // wheel was opened from a slot, which is the user saying "change this
+      // colour": then the slot takes the pick too. Both, not either — the
+      // wheel opens from the slot the shape already matches, so leaving
+      // them different is the surprise.
       if (this._inspectedShape()) {
+        if (this._slotPickTarget != null) this._setSlotColor(this._slotPickTarget, hex);
         this._applyColorToTargets(hex);
         this._syncStyleInspector();
         return;
@@ -7999,8 +8011,22 @@
       // stores the pick as the tool's colour.) With the tool in a colour
       // outside the palette no slot is active (-1), and _setSlotColor's
       // own bounds check makes the pick a pure tool recolour.
-      this._setSlotColor(this._activeSlot, hex);
+      this._setSlotColor(
+        this._slotPickTarget != null ? this._slotPickTarget : this._activeSlot, hex);
       this._selectColor(hex);
+    },
+
+    // Does the pick in flight change the palette? A label swatch aims the
+    // wheel somewhere else entirely, so no. A selected shape normally means
+    // no either — a swatch click recolours the shape and leaves the colours
+    // you were drawing with alone. But opening the wheel FROM a slot (the
+    // second click on it) is a deliberate "edit this colour", and it stays
+    // that whether or not something is selected: the slot you aimed at
+    // keeping its old colour is the bug this answers.
+    _pickEditsPalette: function() {
+      if (this._labelPickTarget || this._labelBgPickTarget) return false;
+      if (this._slotPickTarget != null) return true;
+      return !this._inspectedShape();
     },
 
     _refreshLabelSwatch: function() {
@@ -8165,6 +8191,7 @@
           if (colorsOpen && (onLabel || self._activeSlot !== i)) {
             self._labelPickTarget = false;
             self._labelBgPickTarget = false;
+            self._slotPickTarget = i;
             self._selectSlot(i);
             self._syncPickerToActiveColor();
             return;
@@ -8377,6 +8404,7 @@
     _closePopup: function() {
       this._labelPickTarget = false;
       this._labelBgPickTarget = false;
+      this._slotPickTarget = null;
       if (this.toolsPopup) this.toolsPopup.classList.remove("is-open");
       if (this.colorsPopup) this.colorsPopup.classList.remove("is-open");
       if (this.markerPopup) this.markerPopup.classList.remove("is-open");

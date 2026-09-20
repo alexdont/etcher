@@ -391,9 +391,19 @@
       // the user's drag becomes a page scroll. Scoped to interactive
       // states only so static shapes don't block native scroll
       // past them.
-      ".etcher-handle, .etcher-handle-midpoint,",
+      ".etcher-handle, .etcher-handle-midpoint, .etcher-grab,",
       ".etcher-shape.is-editing, .etcher-shape.is-moving {",
       "  touch-action: none;",
+      "}",
+      // The finger-sized half of an edit handle. Invisible always, and
+      // inert unless the pointer is coarse — on a mouse the dot IS the
+      // target, and a 44px disc around each one would swallow the shape
+      // underneath and the handle next door.
+      ".etcher-grab {",
+      "  fill: transparent; stroke: none; pointer-events: none;",
+      "}",
+      "@media (pointer: coarse) {",
+      "  .etcher-grab { pointer-events: all; cursor: grab; }",
       "}",
       ".etcher-toolbar.is-active { display: flex; }",
       ".etcher-toolbar button {",
@@ -1972,6 +1982,20 @@
   var CONNECTOR_HIT_RADIUS = 15;
   var CONNECTOR_HIT_RADIUS_MIN = 6;
   var CONNECTOR_HIT_SHAPE_RATIO = 0.26;
+
+  // The same idea for edit handles, sized for a fingertip: a touch screen
+  // needs ~44px of target where a mouse needs five. The DOT stays five —
+  // growing it would put a row of blobs over the drawing you are editing —
+  // so the area rides an invisible disc under each one, exactly the pairing
+  // the connector anchors above use.
+  //
+  // Clamped for the same reason as those, but against the gap between the
+  // handles themselves (see `_syncGrabRadii`): four 44px zones on a shape
+  // 50px across merge into one, and then no corner can be picked at all.
+  // Recomputed as they move, so zooming out tightens them rather than
+  // letting them swallow each other.
+  var HANDLE_GRAB_RADIUS = 22;
+  var HANDLE_GRAB_RADIUS_MIN = 8;
 
   // How far outside a shape's box (screen px) the pointer can wander while
   // that shape still counts as a snap candidate and shows its anchors. Wider
@@ -13691,18 +13715,19 @@
         h.style.color = handleColor;
         h.dataset.index = idx;
         self.svg.appendChild(h);
-        self._positionHandle(h, pt);
-        h.addEventListener("pointerdown", function(e) {
+        var onTitleDown = function(e) {
           self._startTitleHandleDrag(shape, idx, h, e);
-        });
+        };
+        h.addEventListener("pointerdown", onTitleDown);
+        self._addGrabHalo(h, HANDLE_GRAB_RADIUS, onTitleDown);
+        self._positionHandle(h, pt);
         return h;
       });
     },
 
     _removeTitleHandles: function() {
-      (this.titleHandles || []).forEach(function(h) {
-        if (h.parentNode) h.parentNode.removeChild(h);
-      });
+      var self = this;
+      (this.titleHandles || []).forEach(function(h) { self._dropHandleEl(h); });
       this.titleHandles = [];
     },
 
@@ -13722,6 +13747,7 @@
       this.titleHandles.forEach(function(h, idx) {
         if (positions[idx]) self._positionHandle(h, positions[idx]);
       });
+      this._syncGrabRadii(this.titleHandles);
     },
 
     _startTitleHandleDrag: function(shape, idx, handleEl, e) {
@@ -21472,12 +21498,12 @@
         h.style.color = handleColor;
         h.dataset.index = idx;
         self.svg.appendChild(h);
-        self._positionHandle(h, pt);
         if (opts.interactive) {
-          h.addEventListener("pointerdown", function(e) {
-            self._startHandleDrag(shape, idx, h, e);
-          });
+          var onDown = function(e) { self._startHandleDrag(shape, idx, h, e); };
+          h.addEventListener("pointerdown", onDown);
+          self._addGrabHalo(h, HANDLE_GRAB_RADIUS, onDown);
         }
+        self._positionHandle(h, pt);
         return h;
       });
 
@@ -21516,20 +21542,21 @@
         h.style.color = handleColor;
         h.dataset.edgeIndex = i;
         self.svg.appendChild(h);
-        self._positionHandle(h, midImage);
         (function(edgeIdx, handleEl) {
-          handleEl.addEventListener("pointerdown", function(e) {
+          var onDown = function(e) {
             self._startMidpointDrag(shape, edgeIdx, handleEl, e);
-          });
+          };
+          handleEl.addEventListener("pointerdown", onDown);
+          self._addGrabHalo(handleEl, HANDLE_GRAB_RADIUS, onDown);
         })(i, h);
+        self._positionHandle(h, midImage);
         this.midpointHandles.push(h);
       }
     },
 
     _removeMidpointHandles: function() {
-      (this.midpointHandles || []).forEach(function(h) {
-        if (h.parentNode) h.parentNode.removeChild(h);
-      });
+      var self = this;
+      (this.midpointHandles || []).forEach(function(h) { self._dropHandleEl(h); });
       this.midpointHandles = [];
     },
 
@@ -21782,6 +21809,7 @@
       this.midpointHandles.forEach(function(h, i) {
         if (positions[i]) self._positionHandle(h, positions[i]);
       });
+      this._syncGrabRadii(this.handles, this.midpointHandles);
     },
 
     // Insert a new point at the midpoint under the ghost handle — a vertex
@@ -21938,6 +21966,8 @@
         this.handles.forEach(function(h, idx) {
           if (positions[idx]) self._positionHandle(h, positions[idx]);
         });
+        // They just moved, so the gaps between them changed.
+        this._syncGrabRadii(this.handles, this.midpointHandles);
       }
       // Midpoints aren't part of `_handlePositions` (they aren't
       // editable vertices), so keep them in sync on pan/zoom via
@@ -21946,6 +21976,76 @@
       // Freehand pen-editor anchors/handles live outside the generic
       // `handles` array — reposition them on the same pan/zoom tick.
       if (this.freehandEditor) this._positionFreehandEditor();
+    },
+
+
+    // Pair `h` with the invisible disc that gives a fingertip something to
+    // land on. Inserted BEFORE the dot so the dot still paints on top and
+    // still takes the press when the pointer is precise enough to hit it;
+    // `onDown` is the dot's own handler, so a grab through the disc starts
+    // exactly the same drag, `.is-dragging` and all.
+    _addGrabHalo: function(h, radius, onDown) {
+      if (!h || h._grab) return h;
+      var halo = svgEl("circle", { r: radius || HANDLE_GRAB_RADIUS });
+      halo.classList.add("etcher-grab");
+      if (h.parentNode) h.parentNode.insertBefore(halo, h);
+      else this.svg.appendChild(halo);
+      h._grab = halo;
+      if (onDown) halo.addEventListener("pointerdown", onDown);
+      return h;
+    },
+
+    // Remove a handle and the disc that came with it. Every teardown path
+    // goes through here so a halo can never be orphaned on the canvas —
+    // invisible, but still taking presses.
+    _dropHandleEl: function(el) {
+      if (!el) return;
+      if (el._grab) {
+        if (el._grab.parentNode) el._grab.parentNode.removeChild(el._grab);
+        el._grab = null;
+      }
+      if (el.parentNode) el.parentNode.removeChild(el);
+    },
+
+    // Size every zone in a group against the gap to its nearest neighbour,
+    // and re-do it whenever they move.
+    //
+    // The measure is the distance between HANDLES, not the size of the
+    // shape: a horizontal dimension is a zero-height box whose two ends are
+    // half the picture apart, so judging by the box would have handed the
+    // case that most needs a big target the smallest one going. Half the
+    // closest gap means neighbouring zones meet without overlapping —
+    // whichever handle is nearer is the one you get — and the clamp keeps
+    // that between "big enough for a fingertip" and "a landing pad".
+    //
+    // Groups that compete for the same finger are passed in together: a
+    // midpoint sits between two corners, so sizing them apart would let a
+    // corner's zone swallow it.
+    _syncGrabRadii: function() {
+      var els = [];
+      for (var a = 0; a < arguments.length; a++) {
+        (arguments[a] || []).forEach(function(h) {
+          if (h && h._grab && h._grab.parentNode) els.push(h._grab);
+        });
+      }
+      if (!els.length) return;
+      var pts = els.map(function(g) {
+        return { x: parseFloat(g.getAttribute("cx")) || 0,
+                 y: parseFloat(g.getAttribute("cy")) || 0 };
+      });
+      var min = Infinity;
+      for (var i = 0; i < pts.length; i++) {
+        for (var j = i + 1; j < pts.length; j++) {
+          var dx = pts[i].x - pts[j].x, dy = pts[i].y - pts[j].y;
+          var d = Math.sqrt(dx * dx + dy * dy);
+          if (d < min) min = d;
+        }
+      }
+      var r = min === Infinity
+        ? HANDLE_GRAB_RADIUS
+        : Math.max(HANDLE_GRAB_RADIUS_MIN,
+                   Math.min(HANDLE_GRAB_RADIUS, min / 2));
+      els.forEach(function(g) { g.setAttribute("r", r); });
     },
 
     _positionHandle: function(h, imagePt) {
@@ -21962,12 +22062,15 @@
         h.setAttribute("cx", c.x);
         h.setAttribute("cy", c.y);
       }
+      if (h._grab) {
+        h._grab.setAttribute("cx", c.x);
+        h._grab.setAttribute("cy", c.y);
+      }
     },
 
     _removeHandles: function() {
-      (this.handles || []).forEach(function(h) {
-        if (h.parentNode) h.parentNode.removeChild(h);
-      });
+      var self = this;
+      (this.handles || []).forEach(function(h) { self._dropHandleEl(h); });
       this.handles = [];
       this._removeMidpointHandles();
     },
@@ -22014,9 +22117,11 @@
           dot.style.color = color;
           self.svg.appendChild(dot);
           ed.controls.push({ el: dot, type: side, nodeIdx: i });
-          dot.addEventListener("pointerdown", function(e) {
+          var onDotDown = function(e) {
             self._startBezierHandleDrag(shape, i, side, dot, e);
-          });
+          };
+          dot.addEventListener("pointerdown", onDotDown);
+          self._addGrabHalo(dot, HANDLE_GRAB_RADIUS, onDotDown);
         });
 
         var anchor = svgEl("circle", { r: 5 });
@@ -22025,9 +22130,11 @@
         anchor.style.color = color;
         self.svg.appendChild(anchor);
         ed.controls.push({ el: anchor, type: "anchor", nodeIdx: i });
-        anchor.addEventListener("pointerdown", function(e) {
+        var onAnchorDown = function(e) {
           self._startAnchorDrag(shape, i, anchor, e);
-        });
+        };
+        anchor.addEventListener("pointerdown", onAnchorDown);
+        self._addGrabHalo(anchor, HANDLE_GRAB_RADIUS, onAnchorDown);
         anchor.addEventListener("dblclick", function(e) {
           e.preventDefault();
           e.stopPropagation();
@@ -22068,12 +22175,16 @@
           : { x: node.p[0] + h[0], y: node.p[1] + h[1] };
         self._positionHandle(c.el, pt);
       });
+      // Anchors and their bezier dots sit close together by design, so
+      // they are sized as one group against each other.
+      this._syncGrabRadii(ed.controls.map(function(c) { return c.el; }));
     },
 
     _removeFreehandEditor: function() {
       var ed = this.freehandEditor;
       if (!ed) return;
-      ed.controls.forEach(function(c) { if (c.el.parentNode) c.el.parentNode.removeChild(c.el); });
+      var selfEd = this;
+      ed.controls.forEach(function(c) { selfEd._dropHandleEl(c.el); });
       ed.lines.forEach(function(l) { if (l.el.parentNode) l.el.parentNode.removeChild(l.el); });
       this.freehandEditor = null;
     },

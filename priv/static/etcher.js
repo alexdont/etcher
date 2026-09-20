@@ -1695,6 +1695,19 @@
       "  will-change: opacity, transform;",
       "}",
       ".etcher-tooltip.is-visible { opacity: 1; transform: translateY(0); }",
+      // Docked: parked in the bottom-left corner instead of following the
+      // shape. The corner is free by construction — fresco's nav is
+      // top-left, the toolbar bottom-centre, the style panel top-right —
+      // and a tooltip there covers none of the drawing, which is the whole
+      // point of the mode. Wider than the anchored one: it is not sitting
+      // on top of anything, so it can afford to be read.
+      // Docked: parked in the bottom-left corner instead of following the
+      // shape. Only the LOOK is here — the corner's coordinates are
+      // computed like the anchored ones, because this element's offset
+      // parent is the stage that pans and zooms, not the viewer the user
+      // sees. Wider than the anchored one: it is not sitting on top of
+      // anything, so it can afford to be read.
+      ".etcher-tooltip.is-docked { max-width: 340px; }",
       // Motion is decoration here; the information is the point.
       "@media (prefers-reduced-motion: reduce) {",
       "  .etcher-tooltip { transition: none; transform: none; }",
@@ -15619,6 +15632,25 @@
       var tip = this.tooltipEl;
       if (!tip || !shape || !shape.el) return;
 
+      // Docked: the bottom-left of the VIEWER, which is a fixed place —
+      // the shape is not consulted at all. Same coordinate space the
+      // anchored path writes (container content px, scroll included),
+      // because this element's offset parent is the stage that pans and
+      // zooms: CSS `bottom: 12px` would be the bottom of the drawing,
+      // which is nowhere in particular.
+      if (this._tooltipDocked()) {
+        tip.classList.add("is-docked");
+        tip.style.display = "block";
+        var dockRect = this.handle.container.getBoundingClientRect();
+        var dockTip = tip.getBoundingClientRect();
+        var dockPad = 12;
+        tip.style.left = ((this.handle.container.scrollLeft || 0) + dockPad) + "px";
+        tip.style.top = ((this.handle.container.scrollTop || 0) +
+          Math.max(dockPad, dockRect.height - dockTip.height - dockPad)) + "px";
+        return;
+      }
+      tip.classList.remove("is-docked");
+
       // Anchor the tooltip just above the shape's bounding rect, in
       // container px. `getBoundingClientRect` reflects the current
       // post-animation position so the tooltip sits where the shape is
@@ -15753,7 +15785,22 @@
     // chrome check — a move onto the tooltip never reaches here — and the
     // close is the usual 180ms bridge into the usual fade, so a reach that
     // lands on the tooltip cancels it on arrival.
+    // Where a tooltip goes: beside its shape (default), or parked in the
+    // corner. A host whose users are annotating a photograph rather than
+    // inspecting a diagram does not want a box appearing over the picture
+    // at all — but that is a host's call about its own users, not
+    // something Etcher should decide for everyone, so it is an opt-in and
+    // every other consumer keeps exactly what it has.
+    _tooltipDocked: function() {
+      return !!(this.el && this.el.dataset &&
+                this.el.dataset.tooltipDock === "corner");
+    },
+
     _tooltipPeekMove: function(e) {
+      // The peek exists because an anchored tooltip covers the drawing —
+      // a docked one covers nothing, so it can simply follow the hover
+      // and leave when the cursor does (the close-on-leave paths below).
+      if (this._tooltipDocked()) return;
       if (this.tooltipPinned) return;
       var tip = this.tooltipEl;
       if (!tip || tip.style.display === "none") return;
@@ -15802,6 +15849,11 @@
     // window from scratch.
     _startTooltipAutoClose: function() {
       this._cancelTooltipAutoClose();
+      // A docked tooltip is out of the way, so nothing is gained by taking
+      // it down while the cursor is still on the shape — and a readout
+      // that vanishes mid-sentence is worse than one that waits. Leaving
+      // the shape still closes it.
+      if (this._tooltipDocked()) return;
       var self = this;
       this._tooltipAutoCloseTimer = setTimeout(function() {
         self._tooltipAutoCloseTimer = null;

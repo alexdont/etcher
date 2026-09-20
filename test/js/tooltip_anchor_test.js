@@ -118,12 +118,22 @@ function tooltipFor(shape, opts) {
   opts = opts || {};
   const tip = {
     style: {},
+    // The placement mode is carried by a class now (see the docked-corner
+    // checks in tooltip_hover_intent_test).
+    classes: new Set(),
+    classList: {
+      add(c) { tip.classes.add(c); },
+      remove(c) { tip.classes.delete(c); },
+      contains(c) { return tip.classes.has(c); },
+    },
     getBoundingClientRect: () => ({
       top: opts.tipTop == null ? 500 : opts.tipTop,
       width: TIP_W, height: TIP_H,
     }),
   };
   const self = {
+    // Anchored is the default; the docked mode has its own checks below.
+    _tooltipDocked: () => false,
     tooltipEl: tip,
     handleKind: opts.handleKind || "canvas",
     handle: {

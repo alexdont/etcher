@@ -200,6 +200,7 @@ function board(visible) {
       _tooltipCursorOrigin: { x: 100, y: 100 },
       hides: 0,
       _scheduleHideTooltip() { this.hides++; },
+      _tooltipDocked: () => false,
     }, extra || {});
   }
 
@@ -252,3 +253,76 @@ function board(visible) {
 }
 
 console.log("tooltip hover intent: all checks passed");
+
+// ── docked: parked in the corner, and quiet in a different way ────────────
+
+{
+  // A host whose users annotate photographs does not want a box over the
+  // picture at all. Docking is that host's call, opt-in, so every other
+  // consumer keeps the anchored behaviour above untouched.
+  const docked = extract("_tooltipDocked");
+  assert.strictEqual(docked.call({ el: { dataset: { tooltipDock: "corner" } } }), true);
+  assert.strictEqual(docked.call({ el: { dataset: {} } }), false,
+    "anchored is the default — a consumer that says nothing keeps what it had");
+  assert.strictEqual(docked.call({}), false, "and a layer with no element is not docked");
+
+  // The corner never moves, so there is nothing to anchor per frame.
+  const position = extract("_positionTooltip");
+  const classes = new Set();
+  const tip = {
+    style: { left: "40px", top: "90px" },
+    classList: {
+      add: (c) => classes.add(c),
+      remove: (c) => classes.delete(c),
+      contains: (c) => classes.has(c),
+    },
+  };
+  position.call({
+    tooltipEl: tip,
+    _tooltipDocked: () => true,
+    // Any of these being reached would mean the anchor math ran.
+    handle: null,
+    _isMediaKind: () => { throw new Error("docked must not measure the shape"); },
+  }, { el: {} });
+  assert.ok(classes.has("is-docked"), "the class carries the placement; CSS does the rest");
+  assert.strictEqual(tip.style.left, "", "…and the anchored coordinates are dropped");
+  assert.strictEqual(tip.style.top, "");
+
+  // Docked changes WHEN it leaves, too: the peek and the dwell both exist
+  // because an anchored tooltip covers the drawing.
+  const peek = extract("_tooltipPeekMove");
+  const peeked = {
+    tooltipPinned: false,
+    _tooltipDocked: () => true,
+    tooltipEl: { style: { display: "" } },
+    _tooltipTimer: null,
+    _tooltipCursorOrigin: { x: 0, y: 0 },
+    hides: 0,
+    _scheduleHideTooltip() { this.hides++; },
+  };
+  peek.call(peeked, { clientX: 400, clientY: 400 });
+  assert.strictEqual(peeked.hides, 0,
+    "a docked tooltip covers nothing, so moving on is not a reason to close it");
+
+  const auto = extract("_startTooltipAutoClose");
+  let armed = false;
+  auto.call({
+    _tooltipDocked: () => true,
+    _cancelTooltipAutoClose() {},
+  });
+  assert.strictEqual(armed, false,
+    "…nor does a dwell: a readout that vanishes mid-sentence is worse than one that waits");
+}
+
+// ── the placement is a host's choice, not a default change ────────────────
+
+{
+  const layer = fs.readFileSync(
+    path.join(__dirname, "..", "..", "lib", "etcher", "layer.ex"), "utf8");
+  assert.ok(/attr\(:tooltip_dock, :atom,\s*\n\s*default: :anchor/.test(layer),
+    "anchored stays the default — other consumers must not be moved by this");
+  assert.ok(layer.includes('values: [:anchor, :corner]'),
+    "…and the only alternative is the corner");
+  assert.ok(layer.includes('data-tooltip-dock={@tooltip_dock == :corner && "corner"}'),
+    "the attr has to actually reach the layer element");
+}

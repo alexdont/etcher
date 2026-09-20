@@ -393,6 +393,28 @@ defmodule Etcher.Layer do
     """
   )
 
+  attr(:tooltip_dock, :atom,
+    default: :anchor,
+    values: [:anchor, :corner],
+    doc: """
+    Where a shape's hover tooltip appears.
+
+    `:anchor` (default) floats it beside the shape it describes, which is
+    what every consumer has had. `:corner` parks it in the viewer's
+    bottom-left instead — nothing of the drawing is covered, which is
+    what a host wants when its users are annotating a photograph rather
+    than inspecting a diagram.
+
+    The corner is free by construction: Fresco's nav sits top-left,
+    Etcher's toolbar bottom-centre, its style panel top-right.
+
+    Docking also changes when the tooltip leaves, because the reasons it
+    hurried away no longer apply: it follows the hover and closes when
+    the cursor leaves the shape, instead of closing as soon as the cursor
+    moves on and after a short dwell.
+    """
+  )
+
   attr(:colors, :list,
     default: nil,
     doc: """
@@ -539,6 +561,7 @@ defmodule Etcher.Layer do
       data-colors={@colors_json}
       data-line-params={@line_params_json}
       data-panel-offset={@panel_offset_json}
+      data-tooltip-dock={@tooltip_dock == :corner && "corner"}
       class="hidden"
       aria-hidden="true"
       {@rest}

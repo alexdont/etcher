@@ -6291,7 +6291,12 @@
     _styleForNewShape: function(kind) {
       var style;
       if (kind === "marker") {
-        style = this._currentMarkerStyle();
+        // Stamped with the tool that drew it: the two are otherwise the
+        // same shape, and "which palette does this stroke belong to" has
+        // to survive a reload (see `_inkToolFor`).
+        style = Object.assign({}, this._currentMarkerStyle(),
+                              { ink: this.activeTool === "highlighter"
+                                       ? "highlighter" : "marker" });
         // The highlighter draws MARKER shapes — same ink, same width, same
         // committed kind (so persistence, hit test and the spline all come
         // free) — at a fixed half opacity. A separate tool rather than a
@@ -7364,6 +7369,10 @@
     // inspection untouched, so clicking around shapes to compare them
     // never changes what the next drawn shape looks like.
     _syncStyleInspector: function() {
+      // Ahead of everything else: the swatches below are read (and the
+      // matching one highlighted) straight after, so the row has to be the
+      // right five first.
+      this._syncPaletteForContext();
       this._syncParamsPopup();
       var shape = this._inspectedShape();
       var color = shape && shape.style && shape.style.color;
@@ -8121,7 +8130,7 @@
       // hosts wired to it store whatever arrives as the shared palette —
       // the prefs channel (marker_colors / highlighter_colors) already
       // persists ink palettes, so this one stays shared-only.
-      if (this._armedInkTool()) return;
+      if (this._paletteKey() !== "colors") return;
       var colors = (this._colorSlots || []).slice();
       if (this.pushEventTo) {
         this.pushEventTo(this.el, "etcher:colors-changed", {
@@ -8608,6 +8617,19 @@
     // label rows and fill row are noise about things the next gesture
     // cannot produce. Selection always wins: clicking a labelled shape
     // brings every applicable row back regardless of the armed tool.
+    // Which ink tool a stroke came off. The highlighter draws MARKER
+    // shapes — same kind, same geometry, same everything but a fixed half
+    // opacity — so the stamp `_styleForNewShape` puts on them is what tells
+    // the two apart. Strokes drawn before that stamp existed carry only the
+    // opacity, which is the signal the highlighter was defined by anyway.
+    _inkToolFor: function(shape) {
+      if (!shape || shape.kind !== "marker") return null;
+      var st = shape.style || {};
+      if (st.ink === "highlighter" || st.ink === "marker") return st.ink;
+      return st.opacity != null && st.opacity <= HIGHLIGHT_OPACITY
+        ? "highlighter" : "marker";
+    },
+
     _armedInkTool: function() {
       return !!this.annotationMode &&
         (this.activeTool === "marker" || this.activeTool === "highlighter");
@@ -8619,7 +8641,59 @@
     // the tool is armed — so an edit always persists under the palette
     // the user was actually looking at.
     _paletteKey: function() {
+      // A SELECTED stroke outranks the armed tool: the panel is describing
+      // that stroke, so the five swatches under it have to be the five the
+      // stroke was drawn from — click a highlighter and you get the
+      // highlighter's colours to recolour it with and to edit, not the
+      // shapes' set. (The two rarely coexist: arming a tool clears the
+      // selection.)
+      var ink = this._inkToolFor(this._inspectedShape());
+      if (ink) return ink + "_colors";
       return this._armedInkTool() ? this.activeTool + "_colors" : "colors";
+    },
+
+    // The built-in five for a palette that has never been set.
+    _defaultSlotsFor: function(key) {
+      if (key === "highlighter_colors") return HIGHLIGHT_DEFAULT_SLOTS.slice();
+      if (key === "marker_colors") return MARKER_DEFAULT_SLOTS.slice();
+      return this._sanitizeColorSlots(null);
+    },
+
+    // Put the palette the CONTEXT asks for on screen. Selecting a stroke,
+    // deselecting it, arming a tool — each can change which of the three
+    // sets the panel should be showing, and this is the one place that
+    // answers. A no-op unless the answer actually changed.
+    //
+    // Prefs first (every slot edit persists there), then what was on screen
+    // when we last left this palette — which is how a shared palette seeded
+    // by the host and never edited comes back intact rather than reverting
+    // to the presets — then the built-ins.
+    _syncPaletteForContext: function() {
+      var key = this._paletteKey();
+      if (key === this._paletteAppliedKey) return;
+      this._bankPalette();
+      this._paletteAppliedKey = key;
+
+      var next = this._getPref(key);
+      if (!(Array.isArray(next) && next.length)) {
+        next = (this._paletteBank || {})[key];
+      }
+      if (!(Array.isArray(next) && next.length)) next = this._defaultSlotsFor(key);
+
+      var slots = this._sanitizeColorSlots(next);
+      if (!slots.length) return;
+      this._colorSlots = slots;
+      if (this._activeSlot >= slots.length) this._activeSlot = 0;
+      this._refreshToolbarSwatches();
+    },
+
+    // Remember the slots currently on screen under the palette they belong
+    // to, so swapping back does not have to go through a pref that may
+    // never have been written.
+    _bankPalette: function() {
+      if (!this._paletteAppliedKey || !this._colorSlots) return;
+      this._paletteBank = this._paletteBank || {};
+      this._paletteBank[this._paletteAppliedKey] = this._colorSlots.slice();
     },
 
     _titleHandlesTitle: function() {
@@ -11272,7 +11346,9 @@
           ? self._sanitizeColorSlots(pal)
           : (toolKey === "highlighter" ? HIGHLIGHT_DEFAULT_SLOTS.slice()
                                        : MARKER_DEFAULT_SLOTS.slice());
+        self._bankPalette();
         self._colorSlots = pal;
+        self._paletteAppliedKey = toolKey + "_colors";
         var inkColor = self._getPref(toolKey + "_color") ||
           (toolKey === "highlighter" ? HIGHLIGHT_DEFAULT_COLOR
                                      : MARKER_DEFAULT_COLOR);
@@ -11300,7 +11376,9 @@
       } else if (wasInk && self._bankedSharedColor) {
         var bank = self._bankedSharedColor;
         self._bankedSharedColor = null;
+        self._bankPalette();
         self._colorSlots = bank.slots;
+        self._paletteAppliedKey = "colors";
         self._activeSlot = bank.slot;
         self._refreshToolbarSwatches();
         // The banked raw colour only stands when no slot was active (a

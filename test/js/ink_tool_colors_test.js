@@ -166,6 +166,8 @@ const swap = new Function("self", "prevTool", "toolKey",
     _getPref: (k) => prefs[k],
     _sanitizeColorSlots: (a) => a.slice(),
     _refreshToolbarSwatches() { this.refreshes++; },
+    // The palette swap banks what it is leaving (see ink_shape_palette_test).
+    _bankPalette() {},
     lineParams: { width: 3 },
     _setInkWidth(w) {
       this.lineParams = this.lineParams || {};
@@ -261,6 +263,10 @@ const swap = new Function("self", "prevTool", "toolKey",
         return this.activeTool === "marker" || this.activeTool === "highlighter";
       },
       _paletteKey: paletteKey,
+      // Nothing selected here: the key falls through to the armed tool.
+      // (A SELECTED ink stroke outranks it — ink_shape_palette_test.)
+      _inkToolFor: () => null,
+      _inspectedShape: () => null,
       _colorSlots: ["#aaaaaa", "#bbbbbb"],
       swatchEls: [],
       _activeSlot: 0,
@@ -284,9 +290,13 @@ const swap = new Function("self", "prevTool", "toolKey",
 
 {
   const emitColorsChanged = extract("_emitColorsChanged");
-  function emitBoard(armed) {
+  // The question is which palette is ON SCREEN, not why. A tool being
+  // armed is one reason; a stroke drawn with that tool being selected is
+  // the other (ink_shape_palette_test) — and both must stay off this
+  // channel, whose listeners store what arrives as the shared palette.
+  function emitBoard(key) {
     return {
-      _armedInkTool: () => armed,
+      _paletteKey: () => key,
       _colorSlots: ["#facc15"],
       pushed: [],
       pushEventTo(_el, evt, payload) { this.pushed.push([evt, payload.colors]); },
@@ -295,13 +305,18 @@ const swap = new Function("self", "prevTool", "toolKey",
       _dispatch(evt, detail) { this.pushed.push([evt, detail.colors]); },
     };
   }
-  const armed = emitBoard(true);
+  const armed = emitBoard("marker_colors");
   emitColorsChanged.call(armed);
   assert.deepStrictEqual(armed.pushed, [],
     "hosts on the colours-only channel must never receive an ink palette " +
     "as the shared one");
 
-  const idle = emitBoard(false);
+  const selected = emitBoard("highlighter_colors");
+  emitColorsChanged.call(selected);
+  assert.deepStrictEqual(selected.pushed, [],
+    "…including the palette a selected highlight puts on screen");
+
+  const idle = emitBoard("colors");
   emitColorsChanged.call(idle);
   assert.ok(idle.pushed.length >= 1, "the shared palette still reaches the host");
 }
@@ -348,6 +363,7 @@ console.log("ink tool colors: all checks passed");
     _getPref: (k) => prefs[k],
     _sanitizeColorSlots: (a) => a.slice(),
     _refreshToolbarSwatches() {},
+    _bankPalette() {},
     _selectColor(c) { this.activeColor = c; },
     _setInkWidth(w) {
       if (typeof w === "number" && w > 0) this.lineParams.width = w;
@@ -434,6 +450,7 @@ console.log("ink tool colors: all checks passed");
     _getPref: (k) => prefs[k],
     _sanitizeColorSlots: (a) => a.slice(),
     _refreshToolbarSwatches() {},
+    _bankPalette() {},
     _setInkWidth() {},
     _selectColor(c) {
       this.activeColor = c;

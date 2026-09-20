@@ -11199,10 +11199,21 @@
         var inkColor = self._getPref(toolKey + "_color") ||
           (toolKey === "highlighter" ? HIGHLIGHT_DEFAULT_COLOR
                                      : MARKER_DEFAULT_COLOR);
-        // Highlight the swatch only when the colour actually lives in a
-        // slot; -1 lights nothing, which is honest — the tool's colour is
-        // its own, not one of the palette's.
-        self._activeSlot = pal.indexOf(inkColor);
+        // A remembered colour that is not in this tool's palette is a
+        // colour from somewhere else — a pref written before the tools had
+        // palettes of their own, or a host-set value — and arming on it
+        // left the tool drawing in a colour none of its five swatches
+        // showed, with nothing selected. Everything picked while armed
+        // lands in a slot (the wheel edits the slot it was opened from),
+        // so an off-palette value here is stale rather than chosen: fall
+        // back to the palette's own lead colour, and let _selectColor
+        // below write it through so the tool heals for next time.
+        var inkSlot = pal.indexOf(inkColor);
+        if (inkSlot === -1) {
+          inkColor = pal[0];
+          inkSlot = 0;
+        }
+        self._activeSlot = inkSlot;
         self._refreshToolbarSwatches();
         self._selectColor(inkColor);
         // The weight, the same way: the tool's own, remembered or built-in.

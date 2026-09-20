@@ -415,3 +415,46 @@ console.log("ink tool colors: all checks passed");
   assert.deepStrictEqual(shapes.prefs, [],
     "no ink armed: the thickness is the shapes' shared default, as ever");
 }
+
+// ── a stale remembered colour heals instead of stranding the tool ─────────
+
+{
+  // The bug this pins: a `<tool>_color` pref left over from before the
+  // tools had palettes of their own (or set by a host) put the tool on a
+  // colour none of its five swatches showed, with nothing selected — a
+  // red highlighter with no slot lit. Everything picked WHILE armed lands
+  // in a slot (the wheel edits the slot it was opened from), so an
+  // off-palette value here is stale rather than chosen.
+  const prefs = { highlighter_color: "#fca5a5" };   // a shapes-palette red
+  const board = {
+    lineParams: { width: 3 },
+    _colorSlots: ["#aaaaaa"],
+    _activeSlot: 0,
+    activeColor: "#aaaaaa",
+    _getPref: (k) => prefs[k],
+    _sanitizeColorSlots: (a) => a.slice(),
+    _refreshToolbarSwatches() {},
+    _setInkWidth() {},
+    _selectColor(c) {
+      this.activeColor = c;
+      // What the real one does while ink is armed.
+      prefs.highlighter_color = c;
+    },
+  };
+  swap(board, null, "highlighter", HIGHLIGHT_DEFAULT_COLOR, HIGHLIGHT_DEFAULT_SLOTS);
+
+  assert.deepStrictEqual(board._colorSlots, HIGHLIGHT_DEFAULT_SLOTS);
+  assert.strictEqual(board.activeColor, HIGHLIGHT_DEFAULT_SLOTS[0],
+    "a stale colour falls back to the palette's own lead — yellow, for a highlighter");
+  assert.strictEqual(board._activeSlot, 0,
+    "…and the swatch that shows it is selected, not nothing");
+  assert.strictEqual(prefs.highlighter_color, HIGHLIGHT_DEFAULT_SLOTS[0],
+    "the pref heals, so the tool comes up right next time too");
+
+  // A remembered colour that IS in the palette is still honoured exactly.
+  prefs.highlighter_color = HIGHLIGHT_DEFAULT_SLOTS[2];
+  swap(board, null, "highlighter", HIGHLIGHT_DEFAULT_COLOR, HIGHLIGHT_DEFAULT_SLOTS);
+  assert.strictEqual(board.activeColor, HIGHLIGHT_DEFAULT_SLOTS[2],
+    "a colour the user picked from the tool's own set is not second-guessed");
+  assert.strictEqual(board._activeSlot, 2);
+}

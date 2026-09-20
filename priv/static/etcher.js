@@ -15346,6 +15346,12 @@
     // waiting for the answer.
     _hoverTooltip: function(shape) {
       if (!shape) return;
+      // Docked: one answer for what the panel shows, and it no-ops when
+      // nothing has changed. Routing this path through _showTooltipFor
+      // instead rebuilt the section every time the cursor entered a shape
+      // that was already showing — including the selected one — and each
+      // rebuild re-ran the fade, which is the flash.
+      if (this._tooltipDocked()) { this._syncDockedTooltip(shape); return; }
       var up = this.tooltipEl && this.tooltipEl.style.display !== "none";
       // One already open: switch now. The delay is there to stop tooltips
       // appearing uninvited, not to slow down reading a second one.
@@ -15846,10 +15852,15 @@
     // section to preview another shape, and handing it back is what this
     // function is for: before, the preview simply replaced the selection's
     // section and left an empty panel behind when the cursor moved on.
-    _syncDockedTooltip: function() {
+    _syncDockedTooltip: function(hoveredOverride) {
       if (!this._tooltipDocked()) return;
+      // `hoveredOverride` is for the element's own mouseenter, which knows
+      // which shape the cursor entered before the hit-test path has said
+      // so — on a board whose shapes take no pointer events the two do not
+      // always agree, and the enter is the earlier of the two.
+      var hovered = hoveredOverride || this._hoveredShape;
       var want = null;
-      if (this._hoveredShape && this._hoverAllowed()) want = this._hoveredShape;
+      if (hovered && this._hoverAllowed()) want = hovered;
       else if (this.editingShape) want = this.editingShape;
 
       if (!want) {
@@ -15884,14 +15895,15 @@
       // Pinned tooltips never auto-close — only an explicit click action
       // (same shape again, another shape, or outside) closes them.
       if (this.tooltipPinned) return;
-      // Docked: a selected shape's section is not on a clock and is not
-      // the cursor's to close — it holds until the selection goes, which
-      // is what makes its comment and delete buttons reachable at all,
-      // since they live over in the panel. A hover preview (nothing
-      // selected, or a different shape selected) still closes when the
-      // cursor leaves, handing the section back to the selection.
-      if (this._tooltipDocked() && this.editingShape &&
-          this.editingShape === this._tooltipShape) {
+      // Docked: nothing "hides" as such — the one state function decides
+      // what the panel should show and does it now. A selected shape's
+      // section holds (it is not on a clock and not the cursor's to
+      // close, which is what makes its comment and delete buttons
+      // reachable at all); a hover preview gives the section back to the
+      // selection, or clears it when there is none. Routing a bare hide
+      // through here instead would blank a live selection's section.
+      if (this._tooltipDocked()) {
+        this._syncDockedTooltip();
         return;
       }
       // Grace window from the most recent `_showTooltipFor` — no-op
@@ -15936,7 +15948,11 @@
       var self = this;
       this._tooltipAutoCloseTimer = setTimeout(function() {
         self._tooltipAutoCloseTimer = null;
-        self._hideTooltip();
+        // Docked: a preview that times out hands the section back to the
+        // selection rather than emptying the panel (the same rule every
+        // other close follows here).
+        if (self._tooltipDocked()) self._syncDockedTooltip();
+        else self._hideTooltip();
       }, TOOLTIP_DWELL_MS);
     },
 

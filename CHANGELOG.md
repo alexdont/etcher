@@ -4,6 +4,101 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.16.0] — 2026-09-20
+
+A host can park shape actions in the style panel instead of over the
+picture, each palette belongs to whatever is selected, and handles are
+big enough to grab with a thumb.
+
+### Added
+
+- **`tooltip_dock={:panel}`** — a shape's tooltip becomes a section of
+  the style panel, under the stroke and colour controls, instead of a
+  box floating over the drawing. Nothing of the picture is covered, and
+  the shape's own actions (label, comment, delete) sit with the rest of
+  what you can do to what is selected. Hovering previews a shape there;
+  clicking one keeps it until you click away. Docked hosts also make
+  shapes inert while Etcher is off — no hover, no outline, not
+  selectable — because with the panel gone there is nowhere for the
+  actions to live, and a shape nobody can act on should read as part of
+  the picture. `:anchor` is the default and is untouched.
+
+- **A fingertip-sized grab zone on every edit handle.** A 5px dot is
+  fair for a mouse and unfair for a thumb, so each one is now paired
+  with an invisible disc that takes the press for it — the dot itself
+  does not grow. Inert unless the pointer is coarse, so nothing about a
+  mouse changes. Sized against the gap to the nearest handle (half of
+  it, clamped), so crowded corners tighten instead of merging into one
+  target, and recomputed as the handles move. Covers corner and vertex
+  handles, midpoints, the pen editor's anchors and bezier dots, and a
+  label's corner handles.
+
+- **Each ink tool keeps its own weight.** A highlighter at the pen's
+  weight was a thin line that happened to be see-through; it comes up
+  three times thicker now. Both are ordinary panel weights you can dial
+  from there, remembered per tool alongside the colour.
+
+- **Dimension is on the default toolbar**, after the arrow it is drawn
+  like. Measuring a photograph turns out to be common enough to meet
+  without opening `⋯`.
+
+### Changed
+
+- **The bundled palette is full-strength, not pastel.** Tailwind's 300s
+  look calm in a panel and washed out on a photograph, and a thin
+  outline in one against a light background is close to invisible — the
+  same complaint the marker was given ink colours of its own to answer.
+  The seven hues move to their strong equivalents (the monochrome
+  bookends are unchanged), so a new user's five slots are a red,
+  orange, yellow, green and blue that carry over a picture. A stored
+  palette is untouched: this is what a first run gets.
+  `window.Etcher.colorSwatches` / `defaultColor` override it as before.
+
+- **The five swatches belong to whatever the panel is describing.**
+  Select a marker stroke and you get the marker's palette, a highlight
+  the highlighter's, anything else the shapes' — so recolouring a
+  highlight offers the colours it was drawn from, and editing a slot
+  there persists under that palette. New ink strokes carry
+  `style.ink` (`"marker"` / `"highlighter"`) so the two can be told
+  apart after a reload; older strokes fall back to their opacity.
+
+- **The colour wheel edits the slot it was opened from**, with a shape
+  selected or not. A second click on a swatch is a deliberate "change
+  this colour", and it used to reach only the selected shape, leaving
+  the slot you aimed at as it was. An open picker now also follows
+  swatch clicks instead of being dismissed by them.
+
+- **Setting a label ends the shape's selection**, whichever way you set
+  it — Enter, a click outside, or a click on Etcher's own chrome. They
+  were not ending the same way. This also ends the shape's freshness,
+  so the draw-tune-keep-drawing window from 0.15.0 now closes when you
+  name the shape.
+
+- **The click that sets a label no longer draws.** With a tool staying
+  armed after a create, typing a dimension's measurement and clicking
+  away to set it also started the next dimension. That press now draws
+  only if it becomes a drag, anchored where it landed.
+
+### Fixed
+
+- **A crash when recolouring a freshly drawn shape.** Recolouring a
+  fresh shape sets the colour to draw in next, and setting that colour
+  applies it to what is selected — which was the same fresh shape. The
+  two called each other until the tab died with "Maximum call stack size
+  exceeded". Reported from drawing a dimension, labelling it, and
+  picking a colour.
+
+- **The docked section no longer flashes or outstays its shape.** It
+  leaves the panel in the same frame the rows around it are rebuilt, a
+  hover no longer rebuilds the markup it is already showing, and a show
+  and a hide issued together can now cancel each other instead of both
+  surviving the frame and leaving the element up with nothing behind it.
+
+- **An ink tool that remembered a colour from outside its own palette**
+  came up drawing in a colour none of its five swatches showed, with
+  nothing selected. It falls back to the palette's lead colour and
+  writes that through, so the tool heals for next time.
+
 ## [0.15.0] — 2026-09-18
 
 Ink measured against the picture instead of its pixels, a toolbar that

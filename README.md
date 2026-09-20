@@ -128,6 +128,7 @@ Open the page, click the pencil in Fresco's nav column → the bottom toolbar ap
 | `fresco_id` | yes | DOM id of the `<Fresco.canvas>` this layer attaches to. |
 | `tools` | no | Subset of tools to expose. Defaults to all eight drawable kinds plus `:eraser`. Add `:image` for the [image tool](#images). |
 | `image_source` | no | `:file_picker` (default) or `:custom` — where the image tool gets its image. See [Images](#images). |
+| `tooltip_dock` | no | `:anchor` (default) floats a shape's tooltip beside it; `:panel` puts it in the style panel instead. See [Docking the tooltip](#docking-the-tooltip). |
 | `paste_images` | no | `true` (default) inserts an image pasted onto the canvas; `false` disables it. See [Images](#images). |
 | `id` | no | DOM id of the layer host element. Defaults to `"etcher-layer-<fresco_id>"`. |
 
@@ -289,7 +290,9 @@ Payload: `%{"annotations" => [annotation_map, ...]}` — the full current list, 
   "kind"     => "rectangle" | "circle" | "polygon" | "freehand"
               | "callout" | "text" | "dimension" | "line" | "image",
   "geometry" => %{ ... },        # shape-specific, canvas-pixel coords (see below)
-  "style"    => %{ "color" => "#ef4444" },  # optional
+  "style"    => %{ "color" => "#ef4444" },  # optional; marker strokes also
+                                            # carry "ink" => "marker" |
+                                            # "highlighter" (which tool drew it)
   "metadata" => %{ ... }          # optional, consumer-controlled
 }
 ```
@@ -588,6 +591,18 @@ window.Etcher.tooltipSlots = {
 - The whole `shape` object is passed (`{uuid, kind, geometry, style, metadata, …}`) so consumers can build whatever HTML their data supports.
 - Etcher controls the wrapper, positioning, hover bridge, click-to-pin, and the trash button — slots only own content. This keeps delete + pin behavior consistent across consumers.
 - `window.Etcher.escapeHtml(value)` is exposed as a stable escape helper.
+
+### Docking the tooltip
+
+`tooltip_dock={:panel}` moves the tooltip off the drawing and into the style panel, as a section under the stroke and colour controls:
+
+```heex
+<Etcher.layer fresco_id="photo" tooltip_dock={:panel} />
+```
+
+Nothing of the picture is ever covered, and a shape's own actions — label, comment, delete — sit with the rest of what you can do to whatever is selected. Hovering previews a shape there; clicking one keeps it until you click away, which is what makes the actions reachable.
+
+Docking also changes what a shape is when Etcher is off: with the panel gone there is nowhere for the actions to live, so shapes stop responding to hover and clicks entirely and read as part of the image. Turning Etcher on is what makes the drawing something you can act on. `:anchor` hosts are unaffected.
 
 ### Default slot keys
 

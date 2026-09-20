@@ -394,6 +394,42 @@ console.log("tooltip hover intent: all checks passed");
   assert.strictEqual(
     allowed.call({ annotationMode: false, activeTool: null, _tooltipDocked: () => false }),
     true, "anchored hosts still hover in view mode — that is their whole tooltip");
+
+  // Clicking is the other half. Without this a tap still pinned the
+  // tooltip and marked the shape selected — the blue outline on something
+  // that is supposed to be part of the picture.
+  const tap = extract("_onShapeTap");
+  const shape = { uuid: "s", readonly: false };
+
+  let acted = 0;
+  tap.call({
+    _tooltipDocked: () => true,
+    annotationMode: false,
+    _enterEditMode() { acted++; },
+    _pinTooltipFor() { acted++; },
+    _unpinTooltip() { acted++; },
+  }, shape);
+  assert.strictEqual(acted, 0,
+    "docked + Etcher off: a click on a shape does nothing at all");
+
+  // With Etcher on it selects, as ever.
+  let entered = 0;
+  tap.call({
+    _tooltipDocked: () => true,
+    annotationMode: true,
+    _enterEditMode() { entered++; },
+  }, shape);
+  assert.strictEqual(entered, 1);
+
+  // And an anchored host still pins in browse mode — that is its tooltip.
+  let pinned = 0;
+  tap.call({
+    _tooltipDocked: () => false,
+    annotationMode: false,
+    tooltipPinned: false,
+    _pinTooltipFor() { pinned++; },
+  }, shape);
+  assert.strictEqual(pinned, 1);
 }
 
 // ── docked: the section is state, not a sequence of timers ───────────────

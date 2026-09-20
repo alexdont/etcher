@@ -14673,6 +14673,13 @@
     // shape per current mode.
     _onShapeTap: function(shape) {
       if (!shape) return;
+      // Docked hosts with Etcher off: the shapes are part of the picture,
+      // so a click on one does nothing — no selection, no blue outline,
+      // no pinned tooltip. (Hover is already inert there; this is the
+      // other half, and without it a tap still pinned the tooltip and
+      // marked the shape selected.) Turning Etcher on is what makes the
+      // drawing something you can act on.
+      if (this._tooltipDocked() && !this.annotationMode) return;
       var id = shape.uuid;
       if (this.annotationMode && !shape.readonly) {
         // Edit handles only appear in annotation mode + cursor tool.

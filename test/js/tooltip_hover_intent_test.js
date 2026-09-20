@@ -277,16 +277,58 @@ console.log("tooltip hover intent: all checks passed");
       contains: (c) => classes.has(c),
     },
   };
+  tip.getBoundingClientRect = () => ({ width: 200, height: 60 });
   position.call({
     tooltipEl: tip,
     _tooltipDocked: () => true,
-    // Any of these being reached would mean the anchor math ran.
-    handle: null,
+    // The viewer's own box — 800x600 with nothing scrolled.
+    handle: {
+      container: {
+        scrollLeft: 0,
+        scrollTop: 0,
+        getBoundingClientRect: () => ({ width: 800, height: 600 }),
+      },
+    },
+    // Reaching this would mean the anchor math ran: a docked tooltip
+    // does not consult the shape at all.
     _isMediaKind: () => { throw new Error("docked must not measure the shape"); },
   }, { el: {} });
-  assert.ok(classes.has("is-docked"), "the class carries the placement; CSS does the rest");
-  assert.strictEqual(tip.style.left, "", "…and the anchored coordinates are dropped");
-  assert.strictEqual(tip.style.top, "");
+  assert.ok(classes.has("is-docked"), "the class carries the look");
+  // Bottom-left of the VIEWER, in the same container-content coordinates
+  // the anchored path writes — the offset parent is the stage that pans
+  // and zooms, so a CSS corner would be the bottom of the drawing.
+  assert.strictEqual(tip.style.left, "12px");
+  assert.strictEqual(tip.style.top, (600 - 60 - 12) + "px");
+
+  // A viewer shorter than the tooltip pins it to the top pad rather than
+  // pushing it off the top edge.
+  position.call({
+    tooltipEl: tip,
+    _tooltipDocked: () => true,
+    handle: {
+      container: {
+        scrollLeft: 0, scrollTop: 0,
+        getBoundingClientRect: () => ({ width: 800, height: 40 }),
+      },
+    },
+    _isMediaKind: () => { throw new Error("docked must not measure the shape"); },
+  }, { el: {} });
+  assert.strictEqual(tip.style.top, "12px");
+
+  // Strip mode scrolls its container, so the corner rides the scroll.
+  position.call({
+    tooltipEl: tip,
+    _tooltipDocked: () => true,
+    handle: {
+      container: {
+        scrollLeft: 30, scrollTop: 500,
+        getBoundingClientRect: () => ({ width: 800, height: 600 }),
+      },
+    },
+    _isMediaKind: () => { throw new Error("docked must not measure the shape"); },
+  }, { el: {} });
+  assert.strictEqual(tip.style.left, (30 + 12) + "px");
+  assert.strictEqual(tip.style.top, (500 + 600 - 60 - 12) + "px");
 
   // Docked changes WHEN it leaves, too: the peek and the dwell both exist
   // because an anchored tooltip covers the drawing.

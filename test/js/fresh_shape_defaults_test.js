@@ -134,13 +134,90 @@ const setLineParam = extract("_setLineParam");
   assert.ok(src.slice(clearAt, clearAt + 200).includes("this._freshShape = null;"),
     "so does clearing the selection");
   for (const [site, what] of [
-    ["if (this._freshTargets(colorTargets)) this._selectColor(color);", "colour"],
+    ["if (this._freshTargets(colorTargets)) {", "colour"],
     ['if (this._freshTargets(shapes)) this._setPref("label_color", color);', "label ink"],
     ["if (color) this._setPref(\"label_bg_last\", color);", "label plate"],
     ["this._fontFreshMirror = true;", "label size"],
   ]) {
     assert.ok(src.includes(site), `fresh mirror missing for ${what}`);
   }
+}
+
+// ── the mirror is a two-way street, and must not be a loop ───────────────
+
+{
+  // Recolouring a fresh shape tells `_selectColor` to make that the colour
+  // to draw in next; `_selectColor` in turn applies the colour to whatever
+  // is selected. With a fresh shape STILL selected, those two called each
+  // other until the stack gave out — a crashed tab, reported from drawing
+  // a dimension, typing its label, clicking away to set it, then picking a
+  // colour. (The click-away used to start a new dimension, which cleared
+  // the freshness on its way; once it stopped doing that, the loop was
+  // reachable.)
+  const selectColor = extract("_selectColor");
+  const applyColorToTargets = extract("_applyColorToTargets");
+
+  const fresh = { uuid: "f9", kind: "dimension", style: { color: "#111111" },
+                  metadata: { title: "7cm" }, el: {}, titleGroup: null };
+  const log = { undos: [], changed: 0, rendered: 0 };
+  const board = {
+    _freshShape: fresh,
+    editingShape: fresh,
+    selectedShapes: [],
+    editingTitleShape: null,
+    _textEditor: null,
+    activeColor: "#111111",
+    _activeSlot: 0,
+    swatchEls: null,
+    colorsPopupBtns: null,
+    _pickerPreview: null,
+    _freshTargets: freshTargets,
+    _selectColor: selectColor,
+    _applyColorToTargets: applyColorToTargets,
+    _armedInkTool: () => false,
+    _dispatch() {},
+    _layoutToolbar() {},
+    _restyleDrafts() {},
+    _setPref() {},
+    _snapshotShape: (s) => ({ color: s.style.color }),
+    _renderShape() { log.rendered++; },
+    _applyShapeColor() { log.rendered++; },
+    _titleColorFor: (s) => s.style.color,
+    _pushUndo(uuid, before, after) { log.undos.push([uuid, before.color, after.color]); },
+    _emitChanged() { log.changed++; },
+    _refreshTextEditorStyle() {},
+    _syncStyleInspector() {},
+    _refreshLabelSwatch() {},
+  };
+
+  // The call that used to never return.
+  board._selectColor("#2900ff");
+
+  assert.strictEqual(fresh.style.color, "#2900ff", "the shape still takes the colour");
+  assert.strictEqual(board.activeColor, "#2900ff",
+    "…and it is still the colour the next shape comes out in — the mirror works");
+  assert.strictEqual(log.undos.length, 1,
+    "recolouring once is ONE undo step: the second pass through the pair " +
+    "would push another, so a single Ctrl+Z would half-undo");
+  assert.strictEqual(log.changed, 1, "and one change announced, not two");
+  assert.strictEqual(board._applyingColorToTargets, false,
+    "the guard is released afterwards, or the next pick would skip applying entirely");
+
+  // Entering from the other side — the inspector's own path — behaves the
+  // same way and leaves the guard down.
+  const before = log.undos.length;
+  board._applyColorToTargets("#00ff88");
+  assert.strictEqual(fresh.style.color, "#00ff88");
+  assert.strictEqual(board.activeColor, "#00ff88");
+  assert.strictEqual(log.undos.length, before + 1);
+  assert.strictEqual(board._applyingColorToTargets, false);
+
+  // A shape that is no longer fresh does not mirror at all.
+  board._freshShape = null;
+  board._applyColorToTargets("#ff0000");
+  assert.strictEqual(fresh.style.color, "#ff0000");
+  assert.strictEqual(board.activeColor, "#00ff88",
+    "a later edit to the same shape is a one-time edit — the defaults stand");
 }
 
 console.log("fresh shape defaults: all checks passed");

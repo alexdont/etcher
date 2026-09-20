@@ -11610,7 +11610,17 @@
       // non-inspect paths (in that state it can only mean a focused label
       // or the empty set). Inspect-mode edits skip _selectColor entirely,
       // which is what keeps the authoring defaults untouched.
-      this._applyColorToTargets(color);
+      //
+      // …unless we are being called BY that function, which is the other
+      // half of a two-way street: recolouring a freshly drawn shape also
+      // sets the colour to draw in next, and it says so by calling here.
+      // Answering that with another application is what turned the pair
+      // into infinite recursion — one stack overflow per click, with a
+      // just-drawn shape still selected (drawing a dimension, labelling
+      // it, then picking a colour was the reported way in). The shape has
+      // already been recoloured by the caller; there is nothing here to
+      // apply.
+      if (!this._applyingColorToTargets) this._applyColorToTargets(color);
     },
 
     // Recolor the current targets — the multi-selection, the edit-mode
@@ -11676,8 +11686,18 @@
       if (colorTargets.length) self._emitChanged();
       // Fresh shape: its colour is also the colour the user is drawing in
       // now — the next shape matches (_selectColor updates activeColor and
-      // announces it for host persistence).
-      if (this._freshTargets(colorTargets)) this._selectColor(color);
+      // announces it for host persistence). Flagged for the duration so
+      // that call does not come straight back here: the targets are
+      // already recoloured, and answering would re-apply them, push a
+      // second undo entry, and recurse until the stack gives out.
+      if (this._freshTargets(colorTargets)) {
+        this._applyingColorToTargets = true;
+        try {
+          this._selectColor(color);
+        } finally {
+          this._applyingColorToTargets = false;
+        }
+      }
 
       // Repaint any active handles so the vertex dots match the new
       // shape color immediately instead of waiting for the next handle

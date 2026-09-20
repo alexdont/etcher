@@ -15988,7 +15988,31 @@
         var tipEl = this.tooltipEl;
         tipEl.classList.remove("is-visible");
         if (this._tooltipFadeTimer) clearTimeout(this._tooltipFadeTimer);
+        // Docked, the tooltip is a SECTION of the style panel — it holds
+        // panel height, so when it leaves the panel changes shape. The rows
+        // around it change too: losing the selection puts the fill row back,
+        // through the frame-coalesced `_scheduleStyleInspectorSync`. Fading
+        // out on a 110ms timer put those two in different paints — the panel
+        // grew by a row with the section still in place, then collapsed a
+        // tenth of a second later, which is the flash on every click-away.
+        //
+        // So the docked section leaves on the NEXT FRAME, which is the frame
+        // the coalesced sync already owns: both registered from the same
+        // task, both run before the same paint, and the panel changes shape
+        // once. Same guard as the fade path — a show inside the window owns
+        // the element and the hide stands down. The fade-IN is untouched;
+        // `display` is set before the opacity runs there, so it costs no
+        // layout change.
+        var docked = this._tooltipDocked();
         if (!wasVisible) {
+          this._tooltipFadeTimer = null;
+          tipEl.style.display = "none";
+        } else if (docked && typeof requestAnimationFrame === "function") {
+          this._tooltipFadeTimer = null;
+          requestAnimationFrame(function() {
+            if (!tipEl.classList.contains("is-visible")) tipEl.style.display = "none";
+          });
+        } else if (docked) {
           this._tooltipFadeTimer = null;
           tipEl.style.display = "none";
         } else {

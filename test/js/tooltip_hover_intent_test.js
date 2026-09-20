@@ -570,3 +570,88 @@ console.log("tooltip hover intent: all checks passed");
   sync.call(quiet);
   assert.strictEqual(quiet.shows, 1);
 }
+
+// ── docked: the section leaves in the frame the panel re-lays-out in ──────
+
+{
+  // The last flash. Docked, the tooltip is a section of the style panel, so
+  // it holds panel height until `display` flips — and the rows around it are
+  // rebuilt by `_scheduleStyleInspectorSync`, which coalesces into the next
+  // frame. A 110ms fade-out put those in different paints: the panel grew by
+  // a row with the section still in place, then collapsed a tenth of a
+  // second later. Both now land in the same frame, so the panel changes
+  // shape once. Anchored floats over the drawing and disturbs no rows, so it
+  // keeps its fade.
+  const hideTooltip = extract("_hideTooltip");
+
+  function hide(opts) {
+    const classes = new Set(opts.visible === false ? [] : ["is-visible"]);
+    const tip = {
+      style: { display: opts.visible === false ? "none" : "block" },
+      classList: {
+        add: (c) => classes.add(c),
+        remove: (c) => classes.delete(c),
+        contains: (c) => classes.has(c),
+      },
+    };
+    const timers = [], frames = [];
+    const realTimeout = global.setTimeout, realRaf = global.requestAnimationFrame;
+    global.setTimeout = (fn, ms) => { timers.push({ fn, ms }); return timers.length; };
+    global.requestAnimationFrame = (fn) => { frames.push(fn); return frames.length; };
+    try {
+      hideTooltip.call({
+        tooltipEl: tip,
+        _tooltipShape: { uuid: "u1" },
+        _tooltipDocked: () => opts.docked,
+        _cancelHideTooltip() {},
+        _cancelTooltipAutoClose() {},
+        _cancelTooltipOpen() {},
+        _removeTooltipOutsideClickHandler() {},
+        _dispatch() {},
+      });
+    } finally {
+      global.setTimeout = realTimeout;
+      global.requestAnimationFrame = realRaf;
+    }
+    return {
+      display: () => tip.style.display,
+      timers, frames, tip,
+      runFrame: () => frames.forEach((f) => f()),
+      reshow: () => { classes.add("is-visible"); tip.style.display = "block"; },
+    };
+  }
+
+  const docked = hide({ docked: true });
+  assert.strictEqual(docked.timers.length, 0,
+    "no fade timer: a tenth of a second is long enough to read as a second change");
+  assert.strictEqual(docked.frames.length, 1,
+    "the docked section leaves on the next frame — the one the coalesced " +
+    "inspector sync already owns, so the panel changes shape once");
+  assert.strictEqual(docked.display(), "block",
+    "…and not before: flipping it now would paint ahead of those rows");
+  docked.runFrame();
+  assert.strictEqual(docked.display(), "none", "the frame takes it out of the panel");
+
+  // A show inside that one-frame window owns the element; the hide stands down.
+  const raced = hide({ docked: true });
+  raced.reshow();
+  raced.runFrame();
+  assert.strictEqual(raced.display(), "block",
+    "hovering another shape in the same frame must not be undone by the hide it raced");
+
+  const anchored = hide({ docked: false });
+  assert.strictEqual(anchored.frames.length, 0);
+  assert.strictEqual(anchored.timers.length, 1,
+    "anchored floats over the drawing: nothing reflows behind it, so it still fades");
+  assert.ok(anchored.timers[0].ms > 0 && anchored.timers[0].ms <= 300,
+    "a fade you notice as a fade, not as a wait");
+  assert.strictEqual(anchored.display(), "block", "…and stays up for it");
+
+  // Not showing in the first place: down at once, no frame, no timer.
+  const already = hide({ docked: true, visible: false });
+  assert.strictEqual(already.display(), "none");
+  assert.strictEqual(already.frames.length, 0);
+  assert.strictEqual(already.timers.length, 0);
+}
+
+console.log("tooltip docked hide: all checks passed");

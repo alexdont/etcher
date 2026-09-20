@@ -8150,6 +8150,25 @@
             }
             return;
           }
+          // The picker is open → it follows the clicks. Clicking another
+          // slot re-aims the wheel at that slot instead of dismissing the
+          // picker, which is what the overflowed-slots row inside the popup
+          // has always done. Without it, the click that should have moved
+          // the picker only closed it, so editing a second colour took
+          // another two clicks — and a drag on the wheel in between
+          // silently went nowhere, because there was no wheel any more.
+          // Clicking the slot the picker is already on still closes it
+          // (the toggle below), but a picker aimed at a label colour is
+          // re-aimed rather than closed: that IS a different target.
+          var colorsOpen = self._openPopupKind === "colors";
+          var onLabel = colorsOpen && (self._labelPickTarget || self._labelBgPickTarget);
+          if (colorsOpen && (onLabel || self._activeSlot !== i)) {
+            self._labelPickTarget = false;
+            self._labelBgPickTarget = false;
+            self._selectSlot(i);
+            self._syncPickerToActiveColor();
+            return;
+          }
           // Click an inactive swatch → select it. Click the already-active
           // swatch again (or double-tap any swatch, whose 2nd click lands on
           // the now-active one) → open the hue picker to edit that color.
@@ -8342,6 +8361,14 @@
       this._popupOutsideClick = function(e) {
         if (popup.contains(e.target)) return;
         if (trigger.contains(e.target)) return;
+        // While the picker is up, the palette swatches are part of its
+        // surface: clicking one moves the picker to that slot (see the
+        // swatch handler). This fires on pointerdown, ahead of that click,
+        // so closing here would turn every retarget back into a dismiss.
+        if (self._openPopupKind === "colors" && e.target && e.target.closest &&
+            e.target.closest(".etcher-swatch")) {
+          return;
+        }
         self._closePopup();
       };
       document.addEventListener("pointerdown", this._popupOutsideClick, true);

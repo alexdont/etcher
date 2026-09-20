@@ -15437,10 +15437,19 @@
 
       this._cancelHideTooltip();
       this._cancelTooltipOpen();
-      // A show landing inside a fade-out must not be cleaned up by it.
+      // A show landing inside a fade-out must not be cleaned up by it —
+      // either half of one. The timer is the anchored fade; the frame is
+      // the docked section leaving the panel. Both end by flipping
+      // `display` unless the visible class is back, and the class only
+      // arrives a frame from now, so whichever of them is still pending
+      // would put this show away before it was ever painted.
       if (this._tooltipFadeTimer) {
         clearTimeout(this._tooltipFadeTimer);
         this._tooltipFadeTimer = null;
+      }
+      if (this._tooltipHideFrame) {
+        cancelAnimationFrame(this._tooltipHideFrame);
+        this._tooltipHideFrame = null;
       }
       this._tooltipShape = shape;
 
@@ -15545,8 +15554,23 @@
       // opacity 0 before the class can transition it, or the browser
       // collapses both into one style resolution and it simply appears.
       var fadeIn = tip;
+      var selfShow = this;
+      // Held so a hide arriving before this frame can cancel it. Without
+      // that, a show and a hide issued in the same task both survive into
+      // the frame — the paint lands first and the hide, which only flips
+      // `display` when the class is absent, stands down. The element is
+      // then left on screen with `_tooltipShape` already null, so every
+      // later sync sees nothing to hide and the section outlives whatever
+      // it was describing. (`_enterEditMode` does exactly that pair:
+      // docked, it puts the shape's actions in the panel, then hides the
+      // anchored bubble it would otherwise have opened.)
+      if (this._tooltipFadeInFrame) {
+        cancelAnimationFrame(this._tooltipFadeInFrame);
+        this._tooltipFadeInFrame = null;
+      }
       if (typeof requestAnimationFrame === "function") {
-        requestAnimationFrame(function() {
+        this._tooltipFadeInFrame = requestAnimationFrame(function() {
+          selfShow._tooltipFadeInFrame = null;
           if (fadeIn.style.display !== "none") fadeIn.classList.add("is-visible");
         });
       } else {
@@ -16188,6 +16212,12 @@
       this._cancelHideTooltip();
       this._cancelTooltipAutoClose();
       this._cancelTooltipOpen();
+      // …and the paint a show left waiting for the next frame. It would
+      // otherwise land after this hide and re-open what we just closed.
+      if (this._tooltipFadeInFrame) {
+        cancelAnimationFrame(this._tooltipFadeInFrame);
+        this._tooltipFadeInFrame = null;
+      }
       // _hideTooltip is the universal teardown; make sure pin state is
       // also reset so the next click-to-pin starts clean.
       this.tooltipPinned = false;
@@ -16221,7 +16251,9 @@
           tipEl.style.display = "none";
         } else if (docked && typeof requestAnimationFrame === "function") {
           this._tooltipFadeTimer = null;
-          requestAnimationFrame(function() {
+          var selfHideFrame = this;
+          this._tooltipHideFrame = requestAnimationFrame(function() {
+            selfHideFrame._tooltipHideFrame = null;
             if (!tipEl.classList.contains("is-visible")) tipEl.style.display = "none";
           });
         } else if (docked) {
@@ -20527,6 +20559,19 @@
       }
       shape.metadata = Object.assign({}, shape.metadata || {}, patch);
       this._endTextEdit();
+      // Setting a label is a full stop: that shape is done, so it stops
+      // being the selected one — no handles, no actions in the panel, and
+      // the next click is about whatever it lands on.
+      //
+      // Here rather than at either commit site, because there are three of
+      // them (Enter, a click outside, the blur that a click on Etcher's own
+      // chrome comes through) and they were not ending the same way. The
+      // one you reach for should not decide what you are left holding.
+      //
+      // It also ends the shape's FRESHNESS, which is deliberate: the
+      // draw-tune-keep-drawing window belongs to the shape you just drew,
+      // and naming it is the point at which you are finished with it.
+      this._exitEditMode();
       this._renderShape(shape);
       // The box is sized by the text now, so committing new text moves the
       // label's corners — and the title-edit handles sit ON those corners.
@@ -21178,7 +21223,15 @@
       if (this._connectorDotShape === shape) this._removeConnectorDots();
       this._syncArrangeButtons();
       this._showLinkMenuFor(shape);
-      this._hideTooltip();
+      // Anchored, entering edit mode closes the bubble: it floats over the
+      // drawing, and the drawing is what you are about to work on. Docked,
+      // the section IS the selection's UI — `_syncDockedTooltip` above just
+      // put this shape's actions in the panel, and hiding them here undid
+      // that. It only ever appeared because the show's paint and this
+      // hide's cleanup both waited a frame and the paint happened to land
+      // first; now that each cancels the other properly, the accident is
+      // gone and the guard has to be real.
+      if (!this._tooltipDocked()) this._hideTooltip();
       // Pick up the shape's color into the toolbar (active swatch + the color
       // new shapes draw with), so selecting a shape "switches" to its color.
       this._syncToolbarColorToShape(shape);

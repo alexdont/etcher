@@ -166,4 +166,73 @@ function board(state) {
     "changing tool or leaving annotation mode drops the held press with the drafts");
 }
 
+// ── and setting a label is a full stop for the shape too ─────────────────
+
+{
+  // Three ways to set a label — Enter, a click outside, and the blur that
+  // a click on Etcher's own chrome arrives through — and they were not
+  // ending the same way: one left the shape selected, handles and all,
+  // another did not. Which key you reached for should not decide what you
+  // are left holding. They all funnel through `_commitTextEdit`, so the
+  // deselect lives there, ahead of the early returns below it.
+  const commit = extract("_commitTextEdit");
+
+  function run(opts) {
+    const shape = {
+      uuid: "s1", kind: opts.kind || "dimension",
+      style: {}, metadata: opts.prevTitle ? { title: opts.prevTitle } : null,
+    };
+    const log = { exited: 0 };
+    const ctx = {
+      _textEditor: { shape, input: { value: opts.typed } },
+      editingShape: shape,
+      _snapshotShape: () => ({}),
+      _endTextEdit() {},
+      _exitEditMode() { log.exited++; this.editingShape = null; },
+      _renderShape() {},
+      _syncLabelSection() {},
+      _positionAllTitleHandles() {},
+      _discardEmptyTextShape() { log.discarded = true; },
+      _emitChanged() {},
+      _pushUndo() {},
+      _getPref: () => undefined,
+      _isTextKind: (k) => k === "text" || k === "callout",
+      _labelRidesShaft: (k) => k === "dimension" || k === "arrow",
+    };
+    commit.call(ctx);
+    return { log, shape, ctx };
+  }
+
+  {
+    const { log, shape } = run({ typed: "42" });
+    assert.strictEqual(shape.metadata.title, "42", "the label is set");
+    assert.strictEqual(log.exited, 1, "…and the shape is no longer the selected one");
+  }
+  {
+    // Re-editing to the same text returns early further down; the deselect
+    // must already have happened, or this route keeps the shape.
+    const { log } = run({ typed: "42", prevTitle: "42" });
+    assert.strictEqual(log.exited, 1, "an unchanged label still ends the selection");
+  }
+  {
+    // So must the empty-commit route, which returns earlier still.
+    const { log } = run({ typed: "", kind: "text" });
+    assert.strictEqual(log.exited, 1, "…and so does typing nothing at all");
+  }
+
+  // Ahead of the commit path's own early returns — the empty-text one and
+  // the unchanged-title one — not tacked on the end, where two of the
+  // three routes above would never reach it. (The `if (!ed) return` at the
+  // top is a different thing: no editor, nothing committed, nothing to
+  // deselect.)
+  const body = src.slice(src.indexOf("    _commitTextEdit: function() {"),
+                         src.indexOf("\n    },", src.indexOf("    _commitTextEdit: function() {")));
+  const exitAt = body.indexOf("this._exitEditMode();");
+  assert.notStrictEqual(exitAt, -1, "the commit is what ends the selection");
+  assert.ok(exitAt < body.indexOf('if (newTitle === "" && !prevTitle)'),
+    "placed after the empty-commit return, typing nothing would keep the shape");
+  assert.ok(exitAt < body.indexOf("if (newTitle === prevTitle) return;"),
+    "placed after the unchanged-title return, re-confirming a label would keep it");
+}
+
 console.log("label commit click: all checks passed");

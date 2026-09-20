@@ -654,4 +654,79 @@ console.log("tooltip hover intent: all checks passed");
   assert.strictEqual(already.timers.length, 0);
 }
 
+// ── a show and a hide in one task must not both survive the frame ────────
+
+{
+  // Both halves wait a frame: the show paints its class in on the next one
+  // (so the element is laid out at opacity 0 first, or there is nothing to
+  // transition from), and the docked hide flips `display` on the next one
+  // (so the panel changes shape once). Neither could cancel the other, and
+  // each stands down when it sees the other's mark — so issuing both in
+  // one task left whichever ran second doing nothing, and the element on
+  // screen with `_tooltipShape` already null. Every later sync then saw
+  // nothing to hide, and the section outlived what it described.
+  //
+  // `_enterEditMode` issues exactly that pair, which is why the docked
+  // section appeared at all: by accident, the show's paint winning.
+  const hideTooltip = extract("_hideTooltip");
+
+  const frames = [];
+  const realRaf = global.requestAnimationFrame, realCancel = global.cancelAnimationFrame;
+  global.requestAnimationFrame = (fn) => { frames.push(fn); return frames.length; };
+  global.cancelAnimationFrame = (id) => { frames[id - 1] = null; };
+  try {
+    const classes = new Set(["is-visible"]);
+    const tip = {
+      style: { display: "block" },
+      classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c),
+                   contains: (c) => classes.has(c) },
+    };
+    const board = {
+      tooltipEl: tip,
+      _tooltipShape: { uuid: "u1" },
+      _tooltipDocked: () => true,
+      _tooltipFadeInFrame: 1,          // a show is waiting to paint
+      _cancelHideTooltip() {}, _cancelTooltipAutoClose() {}, _cancelTooltipOpen() {},
+      _removeTooltipOutsideClickHandler() {}, _dispatch() {},
+    };
+    frames.push(() => { throw new Error("the cancelled show must not run"); });
+
+    hideTooltip.call(board);
+    assert.strictEqual(board._tooltipFadeInFrame, null,
+      "hiding has to cancel the paint a show left waiting, or it re-opens " +
+      "what was just closed");
+    assert.strictEqual(frames[0], null, "…actually cancelled, not merely forgotten");
+
+    // Run the frame: with the show gone, the hide lands.
+    frames.filter(Boolean).forEach((fn) => fn());
+    assert.strictEqual(tip.style.display, "none");
+  } finally {
+    global.requestAnimationFrame = realRaf;
+    global.cancelAnimationFrame = realCancel;
+  }
+
+  // The other direction, at its source: a show cancels the hide's frame.
+  const show = src.slice(src.indexOf("    _showTooltipFor: function(shape) {"),
+                         src.indexOf("    _showTooltipFor: function(shape) {") + 1200);
+  assert.ok(show.includes("cancelAnimationFrame(this._tooltipHideFrame)"),
+    "a show must cancel a pending hide, or the hide puts it away unpainted");
+  assert.ok(show.includes("clearTimeout(this._tooltipFadeTimer)"),
+    "…and the anchored fade-out timer, which ends the same way");
+}
+
+// ── selecting a shape keeps its section; only the bubble is dismissed ────
+
+{
+  // `_enterEditMode` asks for the docked section and then hides the
+  // anchored bubble. Unguarded, that second call took the section with it
+  // — invisible only because the race above happened to go the other way.
+  const enter = src.slice(src.indexOf("    _enterEditMode: function(shape) {"),
+                          src.indexOf("\n    },", src.indexOf("    _enterEditMode: function(shape) {")));
+  assert.ok(enter.includes("this._syncDockedTooltip();"),
+    "selecting a shape is what puts its actions in the panel");
+  assert.ok(enter.includes("if (!this._tooltipDocked()) this._hideTooltip();"),
+    "the bubble-dismissing hide must not run for a docked host — the section " +
+    "IS the selection's UI there");
+}
+
 console.log("tooltip docked hide: all checks passed");

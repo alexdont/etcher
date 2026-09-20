@@ -330,6 +330,9 @@ function run(kind, afterCreate) {
     _exitEditMode: () => exits.push(1),
     _exitTitleEditMode: noop, _refreshImageRing: noop, _removeConnectorDots: noop,
     _syncArrangeButtons: noop, _showLinkMenuFor: noop, _hideTooltip: noop,
+    // Anchored host: _enterEditMode still dismisses the floating bubble.
+    // (Docked, the section IS the selection's UI — tooltip_hover_intent_test.)
+    _tooltipDocked: () => false,
     _syncDockedTooltip: noop,
     _syncToolbarColorToShape: noop, _renderHandles: noop,
     _hasMidpointHandles: () => false, _wireMidpointTracker: noop,

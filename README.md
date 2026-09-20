@@ -289,7 +289,7 @@ Payload: `%{"annotations" => [annotation_map, ...]}` — the full current list, 
   "kind"     => "rectangle" | "circle" | "polygon" | "freehand"
               | "callout" | "text" | "dimension" | "line" | "image",
   "geometry" => %{ ... },        # shape-specific, canvas-pixel coords (see below)
-  "style"    => %{ "color" => "#fca5a5" },  # optional
+  "style"    => %{ "color" => "#ef4444" },  # optional
   "metadata" => %{ ... }          # optional, consumer-controlled
 }
 ```
@@ -618,7 +618,7 @@ All extension points beyond the LiveView events listed above. None are required 
 
 ### `window.Etcher.colorSwatches` — palette override
 
-Replace the bundled pastel rainbow + monochrome bookends with your own swatches:
+Replace the bundled full-strength rainbow + monochrome bookends with your own swatches:
 
 ```js
 window.Etcher.colorSwatches = [
@@ -661,8 +661,8 @@ layer.getTool();              // → "rectangle" | null
 
 // Color
 layer.swatches();             // → [{ color, title }, ...]
-layer.setColor("#fca5a5");
-layer.getColor();             // → "#fca5a5" | null
+layer.setColor("#ef4444");
+layer.getColor();             // → "#ef4444" | null
 
 // Line params (global stroke defaults) — parity with the palette;
 // setLineParams does NOT fire etcher:line-params-changed.
@@ -688,7 +688,7 @@ layer.setShapeReadonly("uuid-…", true);  // lock / unlock a shape (see Read-on
 // etc.) changes and `phx-update="ignore"` is blocking a remount.
 layer.patchShape("uuid-…", {
   metadata: { comment_count: 3, comment_author: "Alice" },
-  style:    { color: "#fca5a5" }
+  style:    { color: "#ef4444" }
 });
 
 // Images (see the Images section)

@@ -2277,12 +2277,13 @@
   var HIGHLIGHT_DEFAULT_SLOTS =
     ["#facc15", "#4ade80", "#f472b6", "#fb923c", "#38bdf8"];
 
-  // The pen's own set, and its first colour. Ink colours rather than the
-  // shapes' pastels: black to write with, then strong contrasting hues
-  // that hold up over a photograph. Seeding the marker from the shared
-  // palette (what it used to do) meant the pen came up in whatever the
-  // boxes happened to be drawn in — usually a pale outline colour, which
-  // is the wrong thing to write with.
+  // The pen's own set, and its first colour: black to write with, then
+  // strong contrasting hues that hold up over a photograph. Seeding the
+  // marker from the shared palette (what it used to do) meant the pen came
+  // up in whatever the boxes happened to be drawn in — back when those
+  // were pastels, usually a pale outline colour, which is the wrong thing
+  // to write with. The shapes draw in strong colours too now, so the two
+  // sets agree; what the pen still owns is leading with black.
   // …and the weights the two come up at. A highlighter is a chisel tip: at
   // the pen's weight it was a thin line that happened to be see-through,
   // which reads as a faded marker rather than as highlighting. Three times
@@ -2406,19 +2407,31 @@
     return toolCursorCache;
   }
 
-  // Default color palette — pastel rainbow plus monochrome bookends.
-  // Consumers override via `window.Etcher.colorSwatches`. The default
-  // active color is the blue pastel so the picker has a non-empty
+  // Default color palette — a full-strength rainbow plus monochrome
+  // bookends. The first five are the five slots a new user starts with
+  // (see `_sanitizeColorSlots`), so they carry most of the weight: they
+  // have to be told apart at a glance AND hold up drawn over a
+  // photograph, which is the whole job here.
+  //
+  // These were pastels until 2026-09-20 — Tailwind's 300s, chosen to look
+  // calm in the panel. On a picture they read as washed out, and a thin
+  // outline in one is close to invisible against a light background; the
+  // marker had already been given ink colours of its own for exactly that
+  // reason. Strong hues now, from the same family the marker draws in, so
+  // a rectangle and a scribble around the same thing match.
+  //
+  // Consumers override the set via `window.Etcher.colorSwatches`. The
+  // default active color is the blue so the picker has a non-empty
   // selected state on first open; consumers override via
   // `window.Etcher.defaultColor`.
   var DEFAULT_COLOR_SWATCHES = [
-    { key: "red",    color: "#fca5a5", title: "Red" },
-    { key: "orange", color: "#fdba74", title: "Orange" },
-    { key: "yellow", color: "#fde68a", title: "Yellow" },
-    { key: "green",  color: "#86efac", title: "Green" },
-    { key: "blue",   color: "#93c5fd", title: "Blue" },
-    { key: "indigo", color: "#a5b4fc", title: "Indigo" },
-    { key: "violet", color: "#d8b4fe", title: "Violet" },
+    { key: "red",    color: "#ef4444", title: "Red" },
+    { key: "orange", color: "#f97316", title: "Orange" },
+    { key: "yellow", color: "#facc15", title: "Yellow" },
+    { key: "green",  color: "#16a34a", title: "Green" },
+    { key: "blue",   color: "#2563eb", title: "Blue" },
+    { key: "indigo", color: "#4f46e5", title: "Indigo" },
+    { key: "violet", color: "#9333ea", title: "Violet" },
     { key: "white",  color: "#ffffff", title: "White" },
     { key: "black",  color: "#000000", title: "Black" }
   ];
@@ -2434,7 +2447,8 @@
       return window.Etcher.defaultColor;
     }
     // Prefer the blue swatch (back-compat with the pre-pluggable
-    // default), then fall back to the first swatch.
+    // default — the hue, not the shade: it went from pastel to full
+    // strength with the rest of the set), then fall back to the first.
     var blue = swatches.find(function(s) { return s.key === "blue"; });
     return blue ? blue.color : swatches[0].color;
   }

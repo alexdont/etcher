@@ -67,8 +67,12 @@ for (const key of offered) {
 // ── the bar holds what a first-time user reaches for ──────────────────────
 
 // Marking up a picture: get around it, scribble on things and rub the
-// scribble out, point at them or rule a line between them, label.
-for (const key of ["grabber", "marker", "highlighter", "eraser", "arrow", "line", "text"]) {
+// scribble out, point at them, measure them or rule a line between them,
+// label. Dimension joined the bar on 2026-09-20 — it had been filed with
+// polygon as precise work reached for on purpose, and measuring a
+// photograph turns out to be common enough to meet without hunting.
+for (const key of ["grabber", "marker", "highlighter", "eraser",
+                   "arrow", "dimension", "line", "text"]) {
   assert.ok(essentials.indexOf(key) !== -1,
     `"${key}" should be on the bar without customising`);
 }
@@ -79,7 +83,6 @@ for (const [key, why] of [
   ["rectangle", "a deliberate shape — the marker covers ring-around-the-thing (head dev's call, 2026-09-15)"],
   ["circle", "same call as the rectangle, made together"],
   ["polygon", "precise work, reached for on purpose"],
-  ["dimension", "measurement — a surveyor's tool on a photo annotator's bar"],
   ["freehand", "the marker's exact cousin — an editable curve, graduated to"],
   ["callout", "a leader and a label welded together; an arrow and a text label already are"],
   ["image", "needs host wiring, and a picture inside a picture is not the common job"],
@@ -101,7 +104,14 @@ assert.ok(at("marker") === 1 && at("highlighter") === 2 && at("eraser") === 3,
   "scribble, highlight, correct — the head dev's spec: the highlighter " +
   "sits with the marker it is (same ink at fixed half opacity, its own " +
   "tool so the two jobs never fight over one opacity slider)");
-assert.ok(Math.abs(at("arrow") - at("line")) === 1, "the two lines sit together");
+// The three two-endpoint tools are one run, arrow first: they are drawn
+// with the same gesture, and dimension is the arrow with ticks and a
+// measurement on it.
+{
+  const run = ["arrow", "dimension", "line"].map(at).sort((a, b) => a - b);
+  assert.ok(run[2] - run[0] === 2, "the line tools sit together, uninterrupted");
+  assert.strictEqual(at("arrow"), run[0], "and the arrow leads them");
+}
 assert.ok(at("arrow") > at("eraser"), "the pointed lines follow");
 assert.ok(at("text") === essentials.length - 1, "labelling closes the bar");
 

@@ -1893,8 +1893,12 @@
   //   rectangle, circle   — real shapes, but drawn on purpose; the marker
   //                         covers the "ring around the thing" job they
   //                         were on the bar for.
-  //   polygon, dimension  — precise work. Real tools, reached for on
-  //                         purpose, by someone who knows they want them.
+  //   polygon             — precise work. A real tool, reached for on
+  //                         purpose, by someone who knows they want it.
+  //                         (Dimension was here on the same argument until
+  //                         2026-09-20: measuring a photograph turns out to
+  //                         be a common enough job to meet on the bar, next
+  //                         to the arrow it is drawn like.)
   //   freehand            — the second hand-drawing tool, and the more
   //                         specialised of the two: its stroke is an
   //                         editable curve whose nodes you drag afterwards.
@@ -1917,7 +1921,7 @@
   var ESSENTIAL_TOOLS = [
     "grabber",
     "marker", "highlighter", "eraser",
-    "arrow", "line",
+    "arrow", "dimension", "line",
     "text"
   ];
 
@@ -14516,6 +14520,12 @@
     // -------------------------------------------------------------------------
 
     _onPointerDown: function(e) {
+      // Read and cleared first thing, before any of the early returns
+      // below can skip it: the flag belongs to THIS press (the capture
+      // -phase handler that set it ran moments ago, in the same dispatch)
+      // and must never be left lying around for the next one.
+      var afterLabelCommit = this._drawSuppressedUntilDrag;
+      this._drawSuppressedUntilDrag = false;
       if (!this.annotationMode || !this.activeTool) return;
       if (e.button !== 0) return;
       var pt = this._toImage(e);
@@ -14525,6 +14535,28 @@
       // on top of it.
       if (this._placeArmedDraft(pt)) return;
 
+      // The press that just closed a label editor is a full stop, not a
+      // new sentence. Since a tool stays armed after it draws, typing a
+      // dimension's label and clicking away to set it ALSO started the
+      // next dimension — one click doing two unrelated things, and the
+      // second one unasked for.
+      //
+      // So that press draws nothing by itself. It is held here, and
+      // released by `_onPointerMove` the moment it travels far enough to
+      // be a drag: a drag is a deliberate "draw one here", a click is
+      // just putting the label down. Held rather than dropped, so the
+      // drag that does come still starts from where the finger landed.
+      if (afterLabelCommit) {
+        this._pendingDraw = { pt: pt, shift: !!e.shiftKey };
+        return;
+      }
+
+      this._dispatchToolDown(pt, e);
+    },
+
+    // The per-tool half of `_onPointerDown`, so a press held back until it
+    // becomes a drag can start the same way a plain press does.
+    _dispatchToolDown: function(pt, e) {
       switch (this.activeTool) {
         case "rectangle": this._startRectangle(pt, e); break;
         case "circle":    this._startCircle(pt, e); break;
@@ -14582,6 +14614,16 @@
     },
 
     _onPointerMove: function(e) {
+      // A press held back by `_onPointerDown` (it closed a label editor)
+      // starts drawing here, from where it landed, once it has travelled
+      // far enough to be a drag rather than a click.
+      if (this._pendingDraw) {
+        var from = this._pendingDraw.pt;
+        var now = this._toImage(e);
+        if (this._isClickGesture(from, now)) return;
+        this._pendingDraw = null;
+        this._dispatchToolDown(from, e);
+      }
       if (!this.draftState) {
         if (this.activeTool === "polygon" && this.draftPolygon) {
           this._polygonHover(this._toImage(e));
@@ -14638,6 +14680,9 @@
     },
 
     _onPointerUp: function(e) {
+      // Released without travelling: the press was only ever the click
+      // that set the label, so there is nothing to draw or clean up.
+      this._pendingDraw = null;
       // Eraser commits independently of the draftState flow since it
       // doesn't build a shape — it grays hits during a press-and-drag
       // and flushes them on release.
@@ -20304,6 +20349,13 @@
             return;
           }
         }
+        // This press is closing the editor; whatever tool is armed must
+        // not also treat it as "draw one here" (see `_onPointerDown`).
+        self._drawSuppressedUntilDrag = true;
+        // Belt and braces: if this press never reaches `_onPointerDown`
+        // at all (it landed somewhere that does not draw), the flag still
+        // dies with the gesture rather than eating the next press.
+        setTimeout(function() { self._drawSuppressedUntilDrag = false; }, 0);
         self._commitTextEdit();
       };
       document.addEventListener("pointerdown", self._textEditOutsideDown, true);
@@ -20675,6 +20727,10 @@
     },
 
     _cancelDraft: function() {
+      // A press being held until it becomes a drag is a draft-in-waiting;
+      // anything that cancels drafts cancels it too (tool change, mode
+      // off, Escape).
+      this._pendingDraw = null;
       if (this.draftState && this.draftState.el && this.draftState.el.parentNode) {
         this.draftState.el.parentNode.removeChild(this.draftState.el);
       }

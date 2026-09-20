@@ -187,16 +187,27 @@ function board() {
 }
 
 {
-  for (const [handler, fn] of [
-    ["_onPointerDown", "this._startArrow(pt, e)"],
-    ["_onPointerMove", "this._updateDimension(pt)"],
-    ["_onPointerUp", "this._commitDimension(pt)"],
+  // The press half lives in `_dispatchToolDown`, which `_onPointerDown`
+  // calls — split out so a press that closes a label editor can be held
+  // back and released into the same dispatch only if it becomes a drag
+  // (label_commit_click_test).
+  for (const [handler, sig, fn] of [
+    ["_dispatchToolDown", "function(pt, e) {", "this._startArrow(pt, e)"],
+    ["_onPointerMove", "function(e) {", "this._updateDimension(pt)"],
+    ["_onPointerUp", "function(e) {", "this._commitDimension(pt)"],
   ]) {
-    const body = src.slice(src.indexOf(`    ${handler}: function(e) {`),
-                           src.indexOf("\n    },", src.indexOf(`    ${handler}: function(e) {`)));
+    const at = src.indexOf(`    ${handler}: ${sig}`);
+    assert.notStrictEqual(at, -1, `could not find ${handler}`);
+    const body = src.slice(at, src.indexOf("\n    },", at));
     assert.ok(new RegExp(`case "arrow":\\s+${fn.replace(/[.()]/g, "\\$&")};`).test(body),
       `${handler} must route the arrow tool to ${fn}`);
   }
+
+  // And the press handler still reaches it.
+  const down = src.slice(src.indexOf("    _onPointerDown: function(e) {"),
+                         src.indexOf("\n    },", src.indexOf("    _onPointerDown: function(e) {")));
+  assert.ok(down.includes("this._dispatchToolDown(pt, e);"),
+    "an ordinary press goes straight to the tool");
 }
 
 // ── it is offered by default ──────────────────────────────────────────────

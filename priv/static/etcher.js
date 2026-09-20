@@ -1701,13 +1701,22 @@
       // and a tooltip there covers none of the drawing, which is the whole
       // point of the mode. Wider than the anchored one: it is not sitting
       // on top of anything, so it can afford to be read.
-      // Docked: parked in the bottom-left corner instead of following the
-      // shape. Only the LOOK is here — the corner's coordinates are
-      // computed like the anchored ones, because this element's offset
-      // parent is the stage that pans and zooms, not the viewer the user
-      // sees. Wider than the anchored one: it is not sitting on top of
-      // anything, so it can afford to be read.
-      ".etcher-tooltip.is-docked { max-width: 340px; }",
+      // Docked: the tooltip is a SECTION of the style panel, not a box
+      // floating over the drawing — so it drops the absolute positioning,
+      // the shadow and the dark plate, and wears the panel's own surface.
+      // Full width of the panel, with a rule above it to separate the
+      // shape's actions from the stroke controls they sit under.
+      ".etcher-tooltip.is-docked {",
+      "  position: static; max-width: none; width: 100%;",
+      "  background: transparent; box-shadow: none;",
+      "  color: inherit; border-radius: 0;",
+      "  padding: 8px 0 0; margin-top: 8px;",
+      "  border-top: 1px solid rgba(255, 255, 255, 0.12);",
+      "  transform: none;",
+      "}",
+      // The panel is the anchor now, so the fade is opacity alone — a
+      // transform would shift the rows below it.
+      ".etcher-tooltip.is-docked.is-visible { transform: none; }",
       // Motion is decoration here; the information is the point.
       "@media (prefers-reduced-motion: reduce) {",
       "  .etcher-tooltip { transition: none; transform: none; }",
@@ -15108,6 +15117,17 @@
         this._refreshImageRing(next);
         this._refreshMediaChrome(next);
       }
+      // Docked: leaving the shape is what closes a hover preview, since
+      // neither of the anchored mode's timers applies — and the hit-test
+      // path, not the element's own mouseleave, is what actually reports
+      // the leave on a board where the shapes take no pointer events.
+      // A PINNED tooltip ignores this (`_scheduleHideTooltip` returns
+      // early): clicking a shape is what makes its actions reachable, and
+      // it holds until the user clicks away.
+      if (!next && !this.tooltipPinned && this._tooltipDocked()) {
+        this._cancelTooltipOpen();
+        this._scheduleHideTooltip();
+      }
       if (hideTooltip && !this.tooltipPinned) {
         // Whatever was about to open no longer has anything to describe.
         this._cancelTooltipOpen();
@@ -15140,7 +15160,14 @@
     // unaffected too — it falls back to a fresh hit-test when the hover
     // cache is empty.
     _hoverAllowed: function() {
-      return !(this.annotationMode && this.activeTool != null);
+      if (this.annotationMode && this.activeTool != null) return false;
+      // Panel-docked hosts: the tooltip lives in the style panel, which is
+      // only up in annotation mode — so outside it a hover has nothing to
+      // show, and an outline on a shape nobody can act on reads as the
+      // picture lighting up under the cursor for no reason. The shapes are
+      // part of the image until Etcher is switched on.
+      if (this._tooltipDocked() && !this.annotationMode) return false;
+      return true;
     },
 
     // True iff `pt` (image-px) lies inside `shape`'s title satellite
@@ -15632,21 +15659,20 @@
       var tip = this.tooltipEl;
       if (!tip || !shape || !shape.el) return;
 
-      // Docked: the bottom-left of the VIEWER, which is a fixed place —
-      // the shape is not consulted at all. Same coordinate space the
-      // anchored path writes (container content px, scroll included),
-      // because this element's offset parent is the stage that pans and
-      // zooms: CSS `bottom: 12px` would be the bottom of the drawing,
-      // which is nowhere in particular.
+      // Docked: the tooltip is a section of the style panel, so it has no
+      // coordinates of its own — it sits in the panel's flow under the
+      // stroke and colour rows. Moved rather than copied, so the delete
+      // button, the host's actions and the label editor keep working
+      // exactly as they do anchored; the shape is not consulted at all,
+      // and there is nothing for the per-frame re-anchor to do.
       if (this._tooltipDocked()) {
         tip.classList.add("is-docked");
         tip.style.display = "block";
-        var dockRect = this.handle.container.getBoundingClientRect();
-        var dockTip = tip.getBoundingClientRect();
-        var dockPad = 12;
-        tip.style.left = ((this.handle.container.scrollLeft || 0) + dockPad) + "px";
-        tip.style.top = ((this.handle.container.scrollTop || 0) +
-          Math.max(dockPad, dockRect.height - dockTip.height - dockPad)) + "px";
+        tip.style.left = "";
+        tip.style.top = "";
+        if (this.stylePanel && tip.parentNode !== this.stylePanel) {
+          this.stylePanel.appendChild(tip);
+        }
         return;
       }
       tip.classList.remove("is-docked");
@@ -15785,15 +15811,23 @@
     // chrome check — a move onto the tooltip never reaches here — and the
     // close is the usual 180ms bridge into the usual fade, so a reach that
     // lands on the tooltip cancels it on arrival.
-    // Where a tooltip goes: beside its shape (default), or parked in the
-    // corner. A host whose users are annotating a photograph rather than
-    // inspecting a diagram does not want a box appearing over the picture
-    // at all — but that is a host's call about its own users, not
-    // something Etcher should decide for everyone, so it is an opt-in and
-    // every other consumer keeps exactly what it has.
+    // Where a tooltip goes: beside its shape (default), or in the style
+    // panel, under the stroke and colour controls. A host whose users are
+    // annotating a photograph rather than inspecting a diagram does not
+    // want a box appearing over the picture at all — and the panel is
+    // already the place that answers "what is selected and what can I do
+    // to it", so the shape's own actions belong with the rest of them.
+    // A host's call about its own users, not something Etcher should
+    // decide for everyone: opt-in, and every other consumer keeps exactly
+    // what it has.
+    //
+    // The panel is only up in annotation mode, so this also means a
+    // viewer who has not turned Etcher on hovers nothing and sees
+    // nothing — the shapes are part of the picture until they are being
+    // worked on (see `_hoverAllowed`).
     _tooltipDocked: function() {
       return !!(this.el && this.el.dataset &&
-                this.el.dataset.tooltipDock === "corner");
+                this.el.dataset.tooltipDock === "panel");
     },
 
     _tooltipPeekMove: function(e) {
@@ -15819,6 +15853,17 @@
       // Pinned tooltips never auto-close — only an explicit click action
       // (same shape again, another shape, or outside) closes them.
       if (this.tooltipPinned) return;
+      // Docked: the panel section belongs to whatever is SELECTED, and a
+      // selection outlives the cursor — that is what makes its delete and
+      // comment buttons reachable at all, since they live over in the
+      // panel. Hover previews (nothing selected, or a different shape
+      // selected) still close the moment the cursor leaves. Clicking away
+      // clears the selection, and `_exitEditMode` takes the section with
+      // it.
+      if (this._tooltipDocked() && this.editingShape &&
+          this.editingShape === this._tooltipShape) {
+        return;
+      }
       // Grace window from the most recent `_showTooltipFor` — no-op
       // for hides scheduled within ~250 ms of show (see comment in
       // `_showTooltipFor` for the iOS race this prevents).
@@ -20893,6 +20938,14 @@
       // Leaving the shape ends its freshness for good — a later
       // re-select is a one-time edit (see _freshTargets).
       this._freshShape = null;
+      // Docked: the panel section belongs to the SELECTED shape, so it
+      // goes when the selection does — clicking away leaves the panel as
+      // plain stroke and colour again. (Hover previews close on their own
+      // when the cursor leaves; this is the clicked case.)
+      if (this._tooltipDocked() && this.editingShape &&
+          this._tooltipShape === this.editingShape) {
+        this._hideTooltip();
+      }
       if (!this.editingShape) return;
       this.editingShape.el.classList.remove("is-editing");
       this._refreshImageRing(this.editingShape);

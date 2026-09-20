@@ -395,23 +395,27 @@ defmodule Etcher.Layer do
 
   attr(:tooltip_dock, :atom,
     default: :anchor,
-    values: [:anchor, :corner],
+    values: [:anchor, :panel],
     doc: """
     Where a shape's hover tooltip appears.
 
     `:anchor` (default) floats it beside the shape it describes, which is
-    what every consumer has had. `:corner` parks it in the viewer's
-    bottom-left instead — nothing of the drawing is covered, which is
-    what a host wants when its users are annotating a photograph rather
-    than inspecting a diagram.
-
-    The corner is free by construction: Fresco's nav sits top-left,
-    Etcher's toolbar bottom-centre, its style panel top-right.
+    what every consumer has had. `:panel` puts it in the style panel
+    instead, as a section under the stroke and colour controls: nothing
+    of the drawing is ever covered, and the shape's own actions — edit
+    the label, comment, delete — sit with the rest of what you can do to
+    what is selected. Hovering previews a shape there; clicking one keeps
+    it until you click away, which is what makes the actions reachable.
 
     Docking also changes when the tooltip leaves, because the reasons it
     hurried away no longer apply: it follows the hover and closes when
     the cursor leaves the shape, instead of closing as soon as the cursor
     moves on and after a short dwell.
+
+    And it makes hover itself conditional on annotation mode. The panel
+    is only up while Etcher is on, so a viewer who has not turned it on
+    gets no tooltip and no hover outline — the shapes are part of the
+    picture until someone is working on them.
     """
   )
 
@@ -561,7 +565,7 @@ defmodule Etcher.Layer do
       data-colors={@colors_json}
       data-line-params={@line_params_json}
       data-panel-offset={@panel_offset_json}
-      data-tooltip-dock={@tooltip_dock == :corner && "corner"}
+      data-tooltip-dock={@tooltip_dock == :panel && "panel"}
       class="hidden"
       aria-hidden="true"
       {@rest}

@@ -261,7 +261,7 @@ console.log("tooltip hover intent: all checks passed");
   // picture at all. Docking is that host's call, opt-in, so every other
   // consumer keeps the anchored behaviour above untouched.
   const docked = extract("_tooltipDocked");
-  assert.strictEqual(docked.call({ el: { dataset: { tooltipDock: "corner" } } }), true);
+  assert.strictEqual(docked.call({ el: { dataset: { tooltipDock: "panel" } } }), true);
   assert.strictEqual(docked.call({ el: { dataset: {} } }), false,
     "anchored is the default — a consumer that says nothing keeps what it had");
   assert.strictEqual(docked.call({}), false, "and a layer with no element is not docked");
@@ -277,58 +277,31 @@ console.log("tooltip hover intent: all checks passed");
       contains: (c) => classes.has(c),
     },
   };
-  tip.getBoundingClientRect = () => ({ width: 200, height: 60 });
+  const panel = { children: [], appendChild(el) { this.children.push(el); tip.parent = this; } };
   position.call({
     tooltipEl: tip,
+    stylePanel: panel,
     _tooltipDocked: () => true,
-    // The viewer's own box — 800x600 with nothing scrolled.
-    handle: {
-      container: {
-        scrollLeft: 0,
-        scrollTop: 0,
-        getBoundingClientRect: () => ({ width: 800, height: 600 }),
-      },
-    },
-    // Reaching this would mean the anchor math ran: a docked tooltip
-    // does not consult the shape at all.
+    // Reaching this would mean the anchor math ran: a docked tooltip has
+    // no coordinates of its own — it is a row in the panel's flow.
+    handle: null,
     _isMediaKind: () => { throw new Error("docked must not measure the shape"); },
   }, { el: {} });
   assert.ok(classes.has("is-docked"), "the class carries the look");
-  // Bottom-left of the VIEWER, in the same container-content coordinates
-  // the anchored path writes — the offset parent is the stage that pans
-  // and zooms, so a CSS corner would be the bottom of the drawing.
-  assert.strictEqual(tip.style.left, "12px");
-  assert.strictEqual(tip.style.top, (600 - 60 - 12) + "px");
+  assert.strictEqual(tip.style.left, "", "no coordinates: the panel lays it out");
+  assert.strictEqual(tip.style.top, "");
+  assert.strictEqual(tip.parent, panel,
+    "the element MOVES into the panel, so its delete button, the host's " +
+    "actions and the label editor keep working exactly as they do anchored");
 
-  // A viewer shorter than the tooltip pins it to the top pad rather than
-  // pushing it off the top edge.
+  // Already in the panel: not re-appended on every show.
+  panel.children.length = 0;
+  tip.parentNode = panel;
   position.call({
-    tooltipEl: tip,
-    _tooltipDocked: () => true,
-    handle: {
-      container: {
-        scrollLeft: 0, scrollTop: 0,
-        getBoundingClientRect: () => ({ width: 800, height: 40 }),
-      },
-    },
-    _isMediaKind: () => { throw new Error("docked must not measure the shape"); },
+    tooltipEl: tip, stylePanel: panel, _tooltipDocked: () => true, handle: null,
+    _isMediaKind: () => { throw new Error("no"); },
   }, { el: {} });
-  assert.strictEqual(tip.style.top, "12px");
-
-  // Strip mode scrolls its container, so the corner rides the scroll.
-  position.call({
-    tooltipEl: tip,
-    _tooltipDocked: () => true,
-    handle: {
-      container: {
-        scrollLeft: 30, scrollTop: 500,
-        getBoundingClientRect: () => ({ width: 800, height: 600 }),
-      },
-    },
-    _isMediaKind: () => { throw new Error("docked must not measure the shape"); },
-  }, { el: {} });
-  assert.strictEqual(tip.style.left, (30 + 12) + "px");
-  assert.strictEqual(tip.style.top, (500 + 600 - 60 - 12) + "px");
+  assert.deepStrictEqual(panel.children, []);
 
   // Docked changes WHEN it leaves, too: the peek and the dwell both exist
   // because an anchored tooltip covers the drawing.
@@ -356,6 +329,58 @@ console.log("tooltip hover intent: all checks passed");
     "…nor does a dwell: a readout that vanishes mid-sentence is worse than one that waits");
 }
 
+// ── docked: the panel section belongs to the SELECTED shape ──────────────
+
+{
+  // Hover previews it; clicking keeps it, because its buttons live over in
+  // the panel and a selection outlives the cursor. Clicking away clears the
+  // selection, and the section goes with it.
+  const schedule = extract("_scheduleHideTooltip");
+  const shape = { uuid: "s1" };
+
+  let hidden = 0;
+  const selected = {
+    tooltipPinned: false,
+    _tooltipDocked: () => true,
+    editingShape: shape,
+    _tooltipShape: shape,
+    _cancelHideTooltip() { hidden++; },
+  };
+  schedule.call(selected);
+  assert.strictEqual(hidden, 0,
+    "a selected shape's section survives the cursor leaving — otherwise its " +
+    "delete and comment buttons could never be reached");
+
+  // A hover preview (nothing selected) still closes on leave.
+  let scheduled = false;
+  global.setTimeout = (fn) => { scheduled = true; return 1; };
+  schedule.call({
+    tooltipPinned: false,
+    _tooltipDocked: () => true,
+    editingShape: null,
+    _tooltipShape: shape,
+    _cancelHideTooltip() {},
+  });
+  assert.ok(scheduled, "a hover preview closes when the cursor moves off");
+
+  // …and so does a preview of a DIFFERENT shape than the selected one.
+  scheduled = false;
+  schedule.call({
+    tooltipPinned: false,
+    _tooltipDocked: () => true,
+    editingShape: { uuid: "other" },
+    _tooltipShape: shape,
+    _cancelHideTooltip() {},
+  });
+  assert.ok(scheduled);
+
+  // Clicking away: _exitEditMode takes the section with the selection.
+  const exit = src.slice(src.indexOf("    _exitEditMode: function"),
+                         src.indexOf("    _exitEditMode: function") + 900);
+  assert.ok(exit.includes("this._tooltipDocked()") && exit.includes("this._hideTooltip();"),
+    "clearing the selection must leave the panel as plain stroke and colour");
+}
+
 // ── the placement is a host's choice, not a default change ────────────────
 
 {
@@ -363,8 +388,31 @@ console.log("tooltip hover intent: all checks passed");
     path.join(__dirname, "..", "..", "lib", "etcher", "layer.ex"), "utf8");
   assert.ok(/attr\(:tooltip_dock, :atom,\s*\n\s*default: :anchor/.test(layer),
     "anchored stays the default — other consumers must not be moved by this");
-  assert.ok(layer.includes('values: [:anchor, :corner]'),
-    "…and the only alternative is the corner");
-  assert.ok(layer.includes('data-tooltip-dock={@tooltip_dock == :corner && "corner"}'),
+  assert.ok(layer.includes('values: [:anchor, :panel]'),
+    "…and the only alternative is the style panel");
+  assert.ok(layer.includes('data-tooltip-dock={@tooltip_dock == :panel && "panel"}'),
     "the attr has to actually reach the layer element");
+}
+
+// ── docked: with Etcher off, the shapes are part of the picture ──────────
+
+{
+  // The panel only exists in annotation mode, so outside it a hover has
+  // nothing to show — and an outline on a shape nobody can act on reads as
+  // the image lighting up for no reason. Anchored hosts are untouched:
+  // their tooltip is a viewer feature.
+  const allowed = extract("_hoverAllowed");
+
+  assert.strictEqual(
+    allowed.call({ annotationMode: false, activeTool: null, _tooltipDocked: () => true }),
+    false, "docked + Etcher off: no hover, no outline, no tooltip");
+  assert.strictEqual(
+    allowed.call({ annotationMode: true, activeTool: null, _tooltipDocked: () => true }),
+    true, "docked + Etcher on + cursor tool: hover works");
+  assert.strictEqual(
+    allowed.call({ annotationMode: true, activeTool: "rectangle", _tooltipDocked: () => true }),
+    false, "…but not with a tool armed, as ever");
+  assert.strictEqual(
+    allowed.call({ annotationMode: false, activeTool: null, _tooltipDocked: () => false }),
+    true, "anchored hosts still hover in view mode — that is their whole tooltip");
 }

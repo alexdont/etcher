@@ -167,6 +167,7 @@ console.log("tooltip actions + badge: all checks passed");
       _hoverTooltip(s) { this.shown.push(s); },
       _cancelTooltipOpen() {},
       _scheduleHideTooltip() {},
+      _tooltipDocked: () => false,
       _refreshImageRing() {},
       _refreshMediaChrome() {},
       _syncConnectorDots(s) { this.dots.push(s); },

@@ -94,7 +94,7 @@ const refresh = extract("_refreshTextEditorStyle");
 {
   const down = src.slice(src.indexOf("self._textEditOutsideDown = function"),
                          src.indexOf("document.addEventListener(\"pointerdown\", self._textEditOutsideDown"));
-  assert.ok(down.includes("e.target.closest(CHROME_SELECTOR)) return;"),
+  assert.ok(/closest\(CHROME_SELECTOR\)\) \{[\s\S]*?return;\n        \}/.test(down),
     "a press on the panel/popup/toolbar leaves the editor open — " +
     "committing there threw an empty fresh text box away mid-thought");
 
@@ -180,23 +180,28 @@ const refresh = extract("_refreshTextEditorStyle");
   }
 }
 
-// ── a styled-but-empty box survives the click back to the canvas ──────────
+// ── an empty box survives the click back from the menus ───────────────────
 
 {
   // Start a text box, change its colour and plate, click the canvas to
   // get away from the menus and type — that click used to commit the
   // empty box, which means discard: the freshly-dressed element vanished.
+  // The full round trip (and its other half, a press on the box itself)
+  // is pinned in `dimension_label_return_test.js`; here we only hold the
+  // line that the panel detour is remembered and the box waits for it.
   const down = src.slice(src.indexOf("self._textEditOutsideDown = function"),
                          src.indexOf("document.addEventListener(\"pointerdown\", self._textEditOutsideDown"));
-  assert.ok(down.includes("ed.styledSinceOpen && !(input.value || \"\").trim()"),
-    "scoped to styled-and-still-empty — text present commits as ever, and " +
-    "an unstyled empty box still dismisses (the change-of-mind gesture)");
+  assert.ok(down.includes("ed.chromeSinceFocus && !(input.value || \"\").trim()"),
+    "scoped to just-back-from-the-menus and still empty — text present " +
+    "commits as ever, and a box nobody left still dismisses on " +
+    "click-away (the change-of-mind gesture)");
   assert.ok(/if \(!onShape \|\| onShape === ed\.shape\)/.test(down),
     "and to EMPTY canvas — a press on another shape is about that shape");
   assert.ok(down.includes("input.focus()"),
     "the click puts the cursor back in the box instead of deleting it");
-  assert.ok(src.includes("ed.styledSinceOpen = true;"),
-    "a panel edit landing on the open editor is what marks it styled");
+  assert.ok(src.includes("ed.chromeSinceFocus = true;"),
+    "a panel edit landing on the open editor marks the detour, so a " +
+    "control reached by keyboard counts like a press on the panel");
 }
 
 // ── the editor itself is clickable ────────────────────────────────────────

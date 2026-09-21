@@ -14608,8 +14608,17 @@
       // and must never be left lying around for the next one.
       var afterLabelCommit = this._drawSuppressedUntilDrag;
       this._drawSuppressedUntilDrag = false;
+      // Same story for a press that landed ON an open label editor (set
+      // by `_textEditOutsideDown`): read and cleared here whatever this
+      // press goes on to do.
+      var onEditor = this._pressInsideTextEditor;
+      this._pressInsideTextEditor = false;
       if (!this.annotationMode || !this.activeTool) return;
       if (e.button !== 0) return;
+      // Clicking a dimension's own label, to put the caret back in it,
+      // is not also a place-a-dimension-here. This press belongs to the
+      // words: the tools never see it, not even as a drag.
+      if (onEditor) return;
       var pt = this._toImage(e);
 
       // A draft left waiting for its second click owns this press: the
@@ -20424,6 +20433,13 @@
             // with it. Same exclusion as the pointerdown path above.
             var a = document.activeElement;
             if (a && a.closest && a.closest(CHROME_SELECTOR)) return;
+            // A panel control that takes the press without taking focus
+            // (a button that preventDefaults) leaves focus on <body> —
+            // the same trip to the menus, so the box waits here too. A
+            // real click-away is committed by the pointerdown path
+            // below, which knows where the press landed; this one is
+            // only a backstop for focus leaving the page.
+            if (self._textEditor.chromeSinceFocus && (!a || a === document.body)) return;
             self._commitTextEdit();
           }
         }, 0);
@@ -20436,27 +20452,53 @@
       // do whatever it was for (deselect, draw, pick another shape).
       self._textEditOutsideDown = function(e) {
         if (!self._textEditor || self._textEditor.input !== input) return;
-        if (e.target === input || (fo.contains && fo.contains(e.target))) return;
+        if (e.target === input || (fo.contains && fo.contains(e.target))) {
+          // A press ON the editor is about the words, not the board. The
+          // canvas hears it too (the editor sits inside the overlay), and
+          // with a tool still armed it read a click on a dimension's own
+          // label as "start a dimension here": the caret landed AND a new
+          // shape was born from the middle of the label. Hold this press
+          // off the tools entirely — unlike the commit case below, not
+          // even a drag out of the box should draw, or selecting the
+          // label's own text would start one.
+          self._pressInsideTextEditor = true;
+          setTimeout(function() { self._pressInsideTextEditor = false; }, 0);
+          // Back in the box: the next canvas press is an ordinary
+          // click-away again, not the return trip from the panel.
+          self._textEditor.chromeSinceFocus = false;
+          return;
+        }
         // Etcher's own chrome — the style panel, its popups, the toolbar —
         // does not close the editor. Reaching for a size or a colour is
         // the most natural thing to do with a fresh text box open, and
         // committing here threw the (empty) box away mid-thought. The
         // editor stays; the panel edit lands on it live; typing or a
         // click on the canvas commits as before.
-        if (e.target.closest && e.target.closest(CHROME_SELECTOR)) return;
-        // A canvas click on a box that was STYLED this session but is
-        // still empty means "done with the menus, back to typing" — the
-        // click that used to throw the freshly-dressed element away.
-        // Refocus instead. Scoped three ways so nothing else changes
-        // meaning: only while empty (text present -> click-away commits,
-        // as ever), only after a panel edit (an unstyled empty box still
-        // dismisses on click-away — the change-of-mind gesture), and only
-        // on EMPTY canvas (a press on another shape is about that shape).
+        if (e.target.closest && e.target.closest(CHROME_SELECTOR)) {
+          // Remember the detour. The caret is in the panel now, so the
+          // next press on the canvas is the user coming BACK to the box
+          // (see below) rather than walking away from it.
+          self._textEditor.chromeSinceFocus = true;
+          return;
+        }
+        // The first canvas press after a trip to the panel means "done
+        // with the menus, back to typing": it puts the caret back where
+        // it was instead of throwing the freshly-dressed element away.
+        // Scoped three ways so nothing else changes meaning: only while
+        // empty (text present -> click-away commits, as ever), only
+        // straight after the chrome was touched (a box nobody has been
+        // away from still dismisses on click-away — the change-of-mind
+        // gesture), and only on EMPTY canvas (a press on another shape is
+        // about that shape). One trip back per detour: the flag is spent
+        // here, so the NEXT press away from the box dismisses it — the
+        // only way to abandon a label, and unreachable for a styled box
+        // under the old flag, which was never cleared.
         var ed = self._textEditor;
-        if (ed && ed.styledSinceOpen && !(input.value || "").trim()) {
+        if (ed && ed.chromeSinceFocus && !(input.value || "").trim()) {
           var onShape = null;
           try { onShape = self._shapeAt(self._toImage(e)); } catch (_) {}
           if (!onShape || onShape === ed.shape) {
+            ed.chromeSinceFocus = false;
             e.preventDefault();
             e.stopPropagation();
             setTimeout(function() { try { input.focus(); } catch (_) {} }, 0);
@@ -20545,11 +20587,13 @@
           shape, parseFloat(ed.input.style.fontSize) || 14
         );
       }
-      // Remember that this edit session has been STYLED — the outside-
-      // click handler treats a styled-but-still-empty box differently
-      // (refocus to type, not discard): someone who just picked its
-      // colour has not changed their mind about wanting it.
-      ed.styledSinceOpen = true;
+      // A panel edit landing on the open editor is a trip to the menus,
+      // the same as the press that carried the user there — the outside-
+      // click handler owes an empty box one click back to its caret
+      // rather than discarding it (someone who just picked its colour
+      // has not changed their mind about wanting it). Set here as well
+      // as on the press because a control can be reached by keyboard.
+      ed.chromeSinceFocus = true;
       if (ed.setFontSize) ed.setFontSize(size);
       ed.input.style.fontSize = size + "px";
       var color = this._titleColorFor(shape) || "#000";

@@ -63,6 +63,17 @@ function fakeEl(tag, attrs) {
 }
 global.svgEl = (tag, attrs) => fakeEl(tag, attrs);
 global.SHAFT_GAP_SEQ = 0;
+// The taste dial, read from the source: how much of the computed margin
+// the label actually takes out of the line. It is tuned by eye against
+// real drawings, so the tests follow it rather than pinning it — what
+// they hold is the SHAPE of the margin (proportional to the label,
+// floored at the line's own half-width), which is not a matter of taste.
+{ const m = src.match(/var SHAFT_LABEL_GAP_SCALE = ([\d.]+);/);
+  assert.ok(m, "could not find SHAFT_LABEL_GAP_SCALE");
+  global.SHAFT_LABEL_GAP_SCALE = Number(m[1]); }
+const SCALE = global.SHAFT_LABEL_GAP_SCALE;
+const margin = (labelH, strokePx) =>
+  Math.max(4 + strokePx / 2, labelH * 0.14) * SCALE;
 
 const syncGap = extract("_syncShaftLabelGap");
 const clearGap = extract("_clearShaftLabelGap");
@@ -100,22 +111,26 @@ function board() {
   assert.strictEqual(keep.attrs.fill, "#fff", "everything paints by default");
   assert.strictEqual(cut.attrs.fill, "#000", "…except the label's box");
 
-  // gap = max(4 + 2/2, 20 * 0.14) = 5 — proportional, with a floor that
-  // tracks the line's own weight. A step, not a stride: the plate already
-  // pads the words, and a margin of its own on top of that pushed the
-  // arrowheads so far out that the two halves of a dimension stopped
-  // reading as one measurement.
+  // Proportional to the label, with a floor that tracks the line's own
+  // weight, and the whole thing scaled by the taste dial. A step, not a
+  // stride: the plate already pads the words, and a margin of its own on
+  // top of that pushed the arrowheads so far out that the two halves of
+  // a dimension stopped reading as one measurement.
+  const g1 = margin(20, 2);
   assert.deepStrictEqual(
     [cut.attrs.x, cut.attrs.y, cut.attrs.width, cut.attrs.height],
-    ["95", "45", "90", "30"],
+    [String(100 - g1), String(50 - g1), String(80 + g1 * 2), String(20 + g1 * 2)],
     "the cut is the label rect plus its margin");
   assert.ok(!("transform" in cut.attrs), "an unturned label cuts unturned");
 
-  // A taller label earns a wider margin (60 * 0.14 = 8.4 > the floor).
+  // A taller label earns a wider margin (60 * 0.14 clears the floor).
   rect.setAttribute("height", 60);
   syncGap.call(self, shape, rect);
-  assert.strictEqual(cut.attrs.y, String(50 - 60 * 0.14),
+  assert.strictEqual(cut.attrs.y, String(50 - 60 * 0.14 * SCALE),
     "the margin scales with the label");
+  assert.ok(60 * 0.14 * SCALE > margin(20, 2),
+    "…and a tall label's margin really is the proportional term, not " +
+    "the floor — otherwise the line above proves nothing");
   assert.strictEqual(self._defs.children.length, 1,
     "re-syncing updates the one mask in place, never stacks another");
 
@@ -130,8 +145,10 @@ function board() {
                   style: { width: 14 } };
     syncGap.call(heavy, fat, fakeEl("rect", { x: 100, y: 50, width: 80, height: 20 }));
     const fatCut = heavy._defs.children[0].children[1];
-    assert.strictEqual(fatCut.attrs.x, String(100 - (4 + 7)),
+    assert.strictEqual(fatCut.attrs.x, String(100 - (4 + 7) * SCALE),
       "the floor is the daylight plus half the line's own thickness");
+    assert.ok((4 + 7) * SCALE > 20 * 0.14 * SCALE,
+      "…and for this label the floor is what binds");
   }
 
   // A turned board turns the cut with the label.
@@ -156,9 +173,10 @@ function board() {
   const shape = { uuid: "boxed", el: fakeEl("g"), kind: "dimension" };
   syncGap.call(self, shape, { x: 100, y: 50, w: 80, h: 20 });
   const cut = self._defs.children[0].children[1];
+  const g2 = margin(20, 2);
   assert.deepStrictEqual(
     [cut.attrs.x, cut.attrs.y, cut.attrs.width, cut.attrs.height],
-    ["95", "45", "90", "30"],
+    [String(100 - g2), String(50 - g2), String(80 + g2 * 2), String(20 + g2 * 2)],
     "a plain box cuts exactly as the equivalent rect element does");
 
   syncGap.call(self, shape, { x: 100, y: 50, w: 80, h: 20, transform: "rotate(90 140 60)" });

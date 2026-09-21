@@ -2214,6 +2214,13 @@
   // Same per-instance uniqueness story for the shaft-label gap masks.
   var SHAFT_GAP_SEQ = 0;
 
+  // How much of the computed margin a shaft-riding label actually takes
+  // out of its line. One dial, being tuned by eye against real drawings —
+  // the shape of the margin (proportional to the label, floored at the
+  // line's own half-width) is settled; how much of it reads as neat is
+  // not. See `_syncShaftLabelGap`.
+  var SHAFT_LABEL_GAP_SCALE = 0.25;
+
   var TOOL_DEFS = {
     rectangle: { icon: ICONS.rectangle, title: "Rectangle" },
     circle:    { icon: ICONS.circle,    title: "Circle" },
@@ -6932,7 +6939,7 @@
       var h = Number(live ? rectEl.getAttribute("height") : rectEl.h) || 0;
       var half = 1;
       try { half = this._renderedStrokePx(shape) / 2; } catch (_) { half = 1; }
-      var gap = Math.max(4 + half, h * 0.14);
+      var gap = Math.max(4 + half, h * 0.14) * SHAFT_LABEL_GAP_SCALE;
       var cutEl = mask.querySelector(".etcher-shaft-gap-cut");
       cutEl.setAttribute("x", x - gap);
       cutEl.setAttribute("y", y - gap);

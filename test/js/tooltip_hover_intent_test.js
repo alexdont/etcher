@@ -150,7 +150,7 @@ function board(visible) {
     "hiding must drop a pending open, or it reappears after being dismissed");
 
   const setHovered = src.slice(src.indexOf("      this._hoveredShape = next;"),
-                               src.indexOf("      this._hoveredOnTitle = onTitle;"));
+                               src.indexOf("    // Hover belongs to the cursor tool."));
   assert.ok(setHovered.includes("this._cancelTooltipOpen();"),
     "leaving a shape drops the open it was about to make");
 }
@@ -334,11 +334,11 @@ console.log("tooltip hover intent: all checks passed");
 // ── docked: every close goes through the one decision ────────────────────
 
 {
-  // Hover previews it; clicking keeps it, because its buttons live over in
-  // the panel and a selection outlives the cursor. Nothing here "hides" on
-  // its own: a close asks what the panel should show now, so a preview
-  // ending hands the section back to the selection instead of emptying the
-  // panel — which is what a bare hide would do.
+  // Clicking a shape puts it there; nothing else does. Nothing here
+  // "hides" on its own either: a close asks what the panel should show
+  // now, so a close arriving while a shape is still selected re-asserts
+  // that shape's section instead of emptying the panel — which is what a
+  // bare hide would do.
   const schedule = extract("_scheduleHideTooltip");
   const shape = { uuid: "s1" };
 
@@ -435,10 +435,11 @@ console.log("tooltip hover intent: all checks passed");
 // ── docked: the section is state, not a sequence of timers ───────────────
 
 {
-  // The bug this answers: a hover REPLACED the selected shape's section
-  // and left an empty panel when the cursor moved on, so the promise of
-  // the mode — click a shape and its actions are there while it is
-  // selected — held only until the cursor wandered over something else.
+  // The section is the SELECTION'S, and nothing else puts a shape there.
+  // A hover used to borrow it to preview whatever the cursor crossed,
+  // which on a board of shapes made the panel grow, swap and shrink as
+  // the pointer passed through on its way somewhere else — movement at
+  // the edge of vision for something nobody asked to see.
   const sync = extract("_syncDockedTooltip");
   const selected = { uuid: "sel" };
   const other = { uuid: "other" };
@@ -459,20 +460,22 @@ console.log("tooltip hover intent: all checks passed");
 
   var b = board(null, selected, null);
   sync.call(b);
-  assert.deepStrictEqual(b.shown, ["sel"], "a selection with no hover shows the selection");
+  assert.deepStrictEqual(b.shown, ["sel"], "a selected shape's section is shown");
 
   b = board(other, selected, selected);
   sync.call(b);
-  assert.deepStrictEqual(b.shown, ["other"], "a hover borrows the section to preview");
+  assert.deepStrictEqual(b.shown, [],
+    "a hover over something else changes nothing — the panel holds the " +
+    "shape the user actually clicked");
 
-  b = board(null, selected, other);
+  b = board(other, null, null);
   sync.call(b);
-  assert.deepStrictEqual(b.shown, ["sel"],
-    "…and leaving hands it BACK to the selection — the empty panel was the bug");
+  assert.deepStrictEqual(b.shown, [], "and a hover with nothing selected shows nothing at all");
+  assert.strictEqual(b.hidden, 0, "…with no panel left over to take down");
 
   b = board(null, null, other);
   sync.call(b);
-  assert.strictEqual(b.hidden, 1, "nothing hovered, nothing selected: nothing shown");
+  assert.strictEqual(b.hidden, 1, "nothing selected, something showing: it goes");
 
   b = board(selected, selected, selected);
   sync.call(b);
@@ -486,7 +489,7 @@ console.log("tooltip hover intent: all checks passed");
   assert.strictEqual(b.hidden, 0);
 }
 
-// ── docked: a selection is not on a clock; a preview is ──────────────────
+// ── docked: a section is not on a clock at all ───────────────────────────
 
 {
   const auto = extract("_startTooltipAutoClose");
@@ -502,33 +505,32 @@ console.log("tooltip hover intent: all checks passed");
   assert.strictEqual(armed, 0,
     "a selected shape's section never times out — that is the promise of the mode");
 
-  let fired = null;
-  global.setTimeout = (fn) => { armed++; fired = fn; return 1; };
-  const previewing = {
+  // Nothing docked is on a clock now: the dwell existed for hover
+  // previews, and a section that outlived its shape's selection — or
+  // vanished under one — was the "it doesn't always work" complaint.
+  global.setTimeout = () => { armed++; return 1; };
+  auto.call({
     _tooltipDocked: () => true,
-    editingShape: shape, _tooltipShape: { uuid: "preview" },
+    editingShape: shape, _tooltipShape: { uuid: "something-else" },
     _cancelTooltipAutoClose() {},
-    synced: 0, hidden: 0,
-    _syncDockedTooltip() { this.synced++; },
-    _hideTooltip() { this.hidden++; },
-  };
-  auto.call(previewing);
-  assert.strictEqual(armed, 1, "a hover preview of something else times out, like any glance");
-  fired();
-  assert.strictEqual(previewing.synced, 1,
-    "…and hands the section back to the selection rather than emptying the panel");
-  assert.strictEqual(previewing.hidden, 0);
+  });
+  assert.strictEqual(armed, 0, "…and neither does anything else docked");
+
+  // Anchored hosts keep the dwell they have always had.
+  auto.call({
+    _tooltipDocked: () => false,
+    _cancelTooltipAutoClose() {},
+  });
+  assert.strictEqual(armed, 1, "an anchored tooltip still closes on its own");
 }
 
 // ── docked: entering a shape already shown must not rebuild it ───────────
 
 {
   // The flash. `_showTooltipFor` rewrites the section's markup and re-runs
-  // its fade, and the element's own mouseenter used to call it directly —
-  // so moving the cursor over a shape whose section was ALREADY up
-  // (typically the selected one) rebuilt it, and the panel blinked. The
-  // enter goes through the state function now, which no-ops when nothing
-  // has changed.
+  // its fade, so every shape the cursor crossed cost the panel a rebuild
+  // — and the section it rebuilt was for a shape the user had not chosen.
+  // Hover leaves the panel alone entirely now.
   const hover = extract("_hoverTooltip");
   const shape = { uuid: "sel" };
 
@@ -543,9 +545,9 @@ console.log("tooltip hover intent: all checks passed");
   };
   hover.call(board, shape);
   assert.strictEqual(board.shows, 0,
-    "a docked hover must not re-show — that rebuild IS the flash");
-  assert.deepStrictEqual(board.syncs, ["sel"],
-    "it asks the state function instead, passing the shape the cursor entered");
+    "a docked hover must not show — that rebuild IS the flash");
+  assert.deepStrictEqual(board.syncs, [],
+    "…and it does not even ask: there is nothing for a hover to change");
 
   // The state function's own no-op guard is the other half: same shape,
   // already showing, nothing to do.
@@ -554,7 +556,7 @@ console.log("tooltip hover intent: all checks passed");
     _tooltipDocked: () => true,
     _hoverAllowed: () => true,
     _hoveredShape: shape,
-    editingShape: shape,
+    editingShape: shape,   // the selection, which is what the section is
     _tooltipShape: shape,
     tooltipEl: { style: { display: "block" } },
     shows: 0,

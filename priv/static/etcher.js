@@ -15419,16 +15419,11 @@
         this._refreshImageRing(next);
         this._refreshMediaChrome(next);
       }
-      // Docked: the section is a function of what is hovered and what is
-      // selected, so every hover change — onto a shape, between shapes,
-      // off them entirely — is answered in one place. The anchored mode's
-      // show/hide scheduling is skipped wholesale; there is nothing to
-      // schedule when the answer is simply "show whatever applies now".
+      // Docked: a hover changes nothing about the panel — the section is
+      // the selection's, and the pointer does not select. What a hover
+      // still does here is what it does to the DRAWING: the outline under
+      // the cursor, and the connector dots on the shape it is over.
       if (this._tooltipDocked()) {
-        if (!this.tooltipPinned) {
-          this._cancelTooltipOpen();
-          this._syncDockedTooltip();
-        }
         this._hoveredOnTitle = onTitle;
         if (this.overlayWrapper) {
           this.overlayWrapper.classList.toggle("is-shape-hovered", !!next);
@@ -15672,12 +15667,11 @@
     // waiting for the answer.
     _hoverTooltip: function(shape) {
       if (!shape) return;
-      // Docked: one answer for what the panel shows, and it no-ops when
-      // nothing has changed. Routing this path through _showTooltipFor
-      // instead rebuilt the section every time the cursor entered a shape
-      // that was already showing — including the selected one — and each
-      // rebuild re-ran the fade, which is the flash.
-      if (this._tooltipDocked()) { this._syncDockedTooltip(shape); return; }
+      // Docked: hover shows nothing. The panel's section is the
+      // selection's, and a cursor passing over a shape is not a choice —
+      // see `_syncDockedTooltip`. (The hover OUTLINE stays: that is the
+      // drawing answering the pointer, which costs the panel nothing.)
+      if (this._tooltipDocked()) return;
       var up = this.tooltipEl && this.tooltipEl.style.display !== "none";
       // One already open: switch now. The delay is there to stop tooltips
       // appearing uninvited, not to slow down reading a second one.
@@ -16169,25 +16163,21 @@
     },
 
     // What the panel's shape section should be showing, from state rather
-    // than from a sequence of timers: the hovered shape if there is one,
-    // otherwise the SELECTED shape, otherwise nothing.
+    // than from a sequence of timers: the SELECTED shape, or nothing.
     //
-    // The selected shape is the baseline — that is the promise of the
-    // mode: click a shape and its actions are in the panel for as long as
-    // it is selected, with nothing counting down. A hover borrows the
-    // section to preview another shape, and handing it back is what this
-    // function is for: before, the preview simply replaced the selection's
-    // section and left an empty panel behind when the cursor moved on.
-    _syncDockedTooltip: function(hoveredOverride) {
+    // Selection is the whole rule. Click a shape and its actions are in
+    // the panel for as long as it is selected, with nothing counting
+    // down; click away and the section goes.
+    //
+    // Hover used to borrow the section to preview whatever the cursor
+    // crossed. It read as flicker: pass the pointer over a board on the
+    // way to somewhere else and the panel grows a section, swaps it for
+    // the next shape, then hands it back — movement at the edge of
+    // vision for something nobody asked to see. A preview of a shape you
+    // have not chosen is not worth a change of shape in the panel.
+    _syncDockedTooltip: function() {
       if (!this._tooltipDocked()) return;
-      // `hoveredOverride` is for the element's own mouseenter, which knows
-      // which shape the cursor entered before the hit-test path has said
-      // so — on a board whose shapes take no pointer events the two do not
-      // always agree, and the enter is the earlier of the two.
-      var hovered = hoveredOverride || this._hoveredShape;
-      var want = null;
-      if (hovered && this._hoverAllowed()) want = hovered;
-      else if (this.editingShape) want = this.editingShape;
+      var want = this.editingShape || null;
 
       if (!want) {
         if (this._tooltipShape) this._hideTooltip();
@@ -16262,15 +16252,12 @@
     // window from scratch.
     _startTooltipAutoClose: function() {
       this._cancelTooltipAutoClose();
-      // Docked: a SELECTED shape's section never times out — that is the
-      // promise of the mode, and a panel row that disappears while the
-      // thing it describes is still selected is exactly the "it doesn't
-      // always work" this answers. A hover PREVIEW of something else does
-      // time out, like any glance.
-      if (this._tooltipDocked() &&
-          this.editingShape && this.editingShape === this._tooltipShape) {
-        return;
-      }
+      // Docked: nothing times out. The section is only ever the selected
+      // shape's now, and a panel row that disappeared while the thing it
+      // describes was still selected is exactly the "it doesn't always
+      // work" this mode answers. The dwell clock was for hover previews,
+      // and there are none.
+      if (this._tooltipDocked()) return;
       var self = this;
       this._tooltipAutoCloseTimer = setTimeout(function() {
         self._tooltipAutoCloseTimer = null;

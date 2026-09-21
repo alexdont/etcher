@@ -24,15 +24,24 @@ defmodule Etcher.Raster do
 
       iex> rect = [%{"kind" => "rectangle", "geometry" => %{"x" => 10, "y" => 20, "w" => 30, "h" => 40}}]
       iex> Etcher.Raster.to_draw_args(rect, stroke_width: 4)
-      ["-fill", "none", "-stroke", "#ef4444", "-strokewidth", "4", "-draw", "rectangle 10,20 40,60"]
+      ["-fill", "none", "-fill", "#ef4444", "-stroke", "#ef4444", "-strokewidth", "4", "-draw", "fill-opacity 0.18 rectangle 10,20 40,60"]
+
+      iex> outline = [%{"kind" => "rectangle", "geometry" => %{"x" => 10, "y" => 20, "w" => 30, "h" => 40}, "style" => %{"fill" => "none"}}]
+      iex> Etcher.Raster.to_draw_args(outline, stroke_width: 4)
+      ["-fill", "none", "-fill", "none", "-stroke", "#ef4444", "-strokewidth", "4", "-draw", "rectangle 10,20 40,60"]
 
       iex> rect = [%{"kind" => "rectangle", "geometry" => %{"x" => 10, "y" => 20, "w" => 30, "h" => 40}}]
       iex> Etcher.Raster.to_svg(rect, width: 100, height: 100)
-      ~s(<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice" fill="none"><rect x="10" y="20" width="30" height="40" stroke="#ef4444" stroke-width="2"/></svg>)
+      ~s(<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice" fill="none"><rect x="10" y="20" width="30" height="40" fill="#ef4444" fill-opacity="0.18" stroke="#ef4444" stroke-width="2"/></svg>)
   """
 
   @default_color "#ef4444"
   @default_stroke 2
+
+  # Mirrors the canvas: label sizes (like ink weights) are quoted against a
+  # 1000px reference canvas, and an unsized label is drawn at 16 on it.
+  @reference_canvas_px 1000
+  @default_label_font 16
 
   # Arrow head, in image px. Clamped to half the arrow's length at draw time
   # so a very short connector still reads as an arrow rather than a blob.
@@ -64,9 +73,9 @@ defmodule Etcher.Raster do
 
     draws =
       annotations
-      |> primitives()
+      |> primitives(opts)
       |> Enum.flat_map(fn
-        {{:label, x, y, _w, h, text}, color} ->
+        {{:label, x, y, _w, h, text}, %{color: color}} ->
           # Glyphs, not an outline: filled text, stroke off, then fill reset
           # to `none` so the next outline primitive doesn't inherit it.
           # Sizing mirrors the live canvas (font ≈ 65% of the box height,
@@ -84,8 +93,35 @@ defmodule Etcher.Raster do
             "none"
           ]
 
-        {prim, color} ->
-          ["-stroke", color || default, "-strokewidth", sw, "-draw", im_draw(prim)]
+        {prim, %{color: color, fill: nil}} ->
+          [
+            "-fill",
+            "none",
+            "-stroke",
+            color || default,
+            "-strokewidth",
+            sw,
+            "-draw",
+            im_draw(prim)
+          ]
+
+        {prim, %{color: color, fill: opacity}} ->
+          # `fill-opacity` inside the MVG string rather than an alpha baked
+          # into the colour: it takes whatever colour spec the shape carries
+          # — hex, `rgb()`, a name — without this module having to parse it,
+          # and the state dies with the `-draw` it is in.
+          paint = color || default
+
+          [
+            "-fill",
+            paint,
+            "-stroke",
+            paint,
+            "-strokewidth",
+            sw,
+            "-draw",
+            "fill-opacity #{opacity} " <> im_draw(prim)
+          ]
       end)
 
     if draws == [], do: [], else: ["-fill", "none"] ++ draws
@@ -119,8 +155,10 @@ defmodule Etcher.Raster do
 
     elements =
       annotations
-      |> primitives()
-      |> Enum.map_join("", fn {prim, color} -> svg_element(prim, color || default, sw) end)
+      |> primitives(opts)
+      |> Enum.map_join("", fn {prim, paint} ->
+        svg_element(prim, %{paint | color: paint.color || default}, sw)
+      end)
 
     case elements do
       "" ->
@@ -145,17 +183,61 @@ defmodule Etcher.Raster do
   as glyphs, not outlined. Exposed so callers can add their own backend.
   """
   @spec primitives([annotation()]) :: [{tuple(), String.t() | nil}]
-  def primitives(annotations) when is_list(annotations) do
+  def primitives(annotations, opts \\ []) when is_list(annotations) do
+    base = label_base(opts)
+
     Enum.flat_map(annotations, fn ann ->
       kind = get(ann, "kind")
       geometry = get(ann, "geometry") || %{}
-      color = color(get(ann, "style"))
+      style = get(ann, "style") || %{}
+      color = color(style)
+      paint = %{color: color, fill: fill_opacity(kind, style)}
 
-      kind
-      |> shape_primitives(geometry, label_title(ann))
-      |> Enum.map(&{&1, color})
+      shape =
+        kind
+        |> shape_primitives(geometry, label_title(ann))
+        |> Enum.map(&{&1, paint})
+
+      label =
+        ann
+        |> satellite_label(kind, geometry, base)
+        |> Enum.map(&{&1, %{color: title_color(ann, color), fill: nil}})
+
+      shape ++ label
     end)
   end
+
+  # ── fill ─────────────────────────────────────────────────────────────────
+
+  # What the shape's BODY is painted with, mirroring `_applyFill` on the
+  # canvas: a flat body at the shape's own colour, damped to 18% unless the
+  # user asked for solid, and multiplied by the shape's opacity. `nil` means
+  # outline only.
+  #
+  # Only the kinds the canvas lets you fill — a marker is a stroke and
+  # nothing else, and a shaft (line, dimension, arrow) has no inside.
+  #
+  # "pattern" is the hatch, which is drawn live as a tile of diagonal lines.
+  # It bakes as the flat semi body instead: at thumbnail scale a hatch is
+  # finer than the pixels available to it, so it would read as a muddy tint
+  # at best — and a tint is exactly what this draws.
+  defp fill_opacity(kind, style) when kind in ["rectangle", "circle", "polygon", "freehand"] do
+    case get(style, "fill") || "semi" do
+      "none" ->
+        nil
+
+      mode ->
+        opacity =
+          case get(style, "opacity") do
+            o when is_number(o) -> o
+            _ -> 1
+          end
+
+        Float.round(if(mode == "solid", do: 1.0, else: 0.18) * opacity, 4)
+    end
+  end
+
+  defp fill_opacity(_kind, _style), do: nil
 
   # ── kind → primitive(s) (mirrors the README geometry table) ──────────────
 
@@ -217,7 +299,22 @@ defmodule Etcher.Raster do
   defp shape_primitives(k, g) when k in ["freehand", "marker"],
     do: poly(:polyline, stroke_points(g))
 
-  defp shape_primitives(k, g) when k in ["line", "dimension"], do: ab_line(g)
+  defp shape_primitives("line", g), do: ab_line(g)
+
+  # A dimension is a measurement, and what makes it read as one rather than
+  # as a plain rule is the pair of V-heads facing outward at its ends — the
+  # same arrowheads the canvas draws, one per endpoint, each opening back
+  # toward the other end. Baked as a bare line it was indistinguishable from
+  # `line`, which is what a thumbnail of one looked like.
+  defp shape_primitives("dimension", g) do
+    case ab_line(g) do
+      [{:line, x1, y1, x2, y2} = shaft] ->
+        [shaft] ++ arrow_head([{x2, y2}, {x1, y1}]) ++ arrow_head([{x1, y1}, {x2, y2}])
+
+      other ->
+        other
+    end
+  end
 
   # A connector is the routed path (`a`, any bends the user dropped in
   # `points`, then `b`) plus the V at its head. Every coordinate is written
@@ -373,22 +470,22 @@ defmodule Etcher.Raster do
 
   # ── primitive → SVG element ──────────────────────────────────────────────
 
-  defp svg_element({:rect, x, y, w, h}, color, sw),
-    do: ~s(<rect x="#{x}" y="#{y}" width="#{w}" height="#{h}" #{stroke(color, sw)}/>)
+  defp svg_element({:rect, x, y, w, h}, paint, sw),
+    do: ~s(<rect x="#{x}" y="#{y}" width="#{w}" height="#{h}" #{paint(paint, sw)}/>)
 
-  defp svg_element({:circle, cx, cy, r}, color, sw),
-    do: ~s(<circle cx="#{cx}" cy="#{cy}" r="#{r}" #{stroke(color, sw)}/>)
+  defp svg_element({:circle, cx, cy, r}, paint, sw),
+    do: ~s(<circle cx="#{cx}" cy="#{cy}" r="#{r}" #{paint(paint, sw)}/>)
 
-  defp svg_element({:polygon, points}, color, sw),
-    do: ~s(<polygon points="#{svg_points(points)}" #{stroke(color, sw)}/>)
+  defp svg_element({:polygon, points}, paint, sw),
+    do: ~s(<polygon points="#{svg_points(points)}" #{paint(paint, sw)}/>)
 
-  defp svg_element({:polyline, points}, color, sw),
-    do: ~s(<polyline points="#{svg_points(points)}" #{stroke(color, sw)}/>)
+  defp svg_element({:polyline, points}, paint, sw),
+    do: ~s(<polyline points="#{svg_points(points)}" #{paint(paint, sw)}/>)
 
-  defp svg_element({:line, x1, y1, x2, y2}, color, sw),
-    do: ~s(<line x1="#{x1}" y1="#{y1}" x2="#{x2}" y2="#{y2}" #{stroke(color, sw)}/>)
+  defp svg_element({:line, x1, y1, x2, y2}, paint, sw),
+    do: ~s(<line x1="#{x1}" y1="#{y1}" x2="#{x2}" y2="#{y2}" #{paint(paint, sw)}/>)
 
-  defp svg_element({:label, x, y, _w, h, text}, color, _sw) do
+  defp svg_element({:label, x, y, _w, h, text}, %{color: color}, _sw) do
     ~s(<text x="#{x + label_pad(h)}" y="#{y + label_baseline(h)}") <>
       ~s( font-size="#{label_font_size(h)}") <>
       ~s( font-family="ui-sans-serif, system-ui, sans-serif" font-weight="500") <>
@@ -396,7 +493,263 @@ defmodule Etcher.Raster do
   end
 
   defp svg_points(points), do: Enum.map_join(points, " ", fn {x, y} -> "#{x},#{y}" end)
+
+  defp paint(%{color: color, fill: nil}, sw), do: ~s(fill="none" #{stroke(color, sw)})
+
+  defp paint(%{color: color, fill: opacity}, sw),
+    do: ~s(fill="#{color}" fill-opacity="#{opacity}" #{stroke(color, sw)})
+
   defp stroke(color, sw), do: ~s(stroke="#{color}" stroke-width="#{sw}")
+
+  # ── the label every shape can carry ──────────────────────────────────────
+
+  # `text` and `callout` ARE their text — those are drawn by
+  # `shape_primitives/3` from their own geometry. Every other kind carries
+  # its label as a satellite the canvas positions for it, and baking skipped
+  # them entirely: a board of named rectangles came out as a board of
+  # anonymous rectangles, and a dimension lost the measurement that is the
+  # whole reason it exists.
+  #
+  # The three placements below are the canvas's, in its order of precedence
+  # (`_shapeTitleBoxImage`).
+  defp satellite_label(ann, kind, g, base) do
+    title = label_title(ann)
+    meta = get(ann, "metadata") || %{}
+
+    if title && kind not in ["text", "callout"] do
+      case label_box(kind, g, meta, base, title, label_font_px(ann, base)) do
+        {x, y, w, h} -> [{:label, num(x), num(y), num(w), num(h), title}]
+        nil -> []
+      end
+    else
+      []
+    end
+  end
+
+  # The font a label is drawn at, in image px: a pinned `style.font_size`
+  # (stored canvas-relative, like every other ink measure) or the canvas's
+  # own default, scaled onto this image. The box is then sized to produce
+  # exactly that font back through `label_font_size/1`, so the glyphs come
+  # out at the size the live canvas would draw them.
+  defp label_font_px(ann, base) do
+    case get(get(ann, "style") || %{}, "font_size") do
+      fs when is_number(fs) and fs > 0 -> fs * base / @default_label_font
+      _ -> base
+    end
+  end
+
+  defp label_box(kind, g, meta, base, title, fs) do
+    {w, h} =
+      case get(meta, "title_box") do
+        %{} = box ->
+          case {get(box, "w"), get(box, "h")} do
+            {bw, bh} when is_number(bw) and is_number(bh) -> {bw, bh}
+            _ -> default_label_size(fs, title)
+          end
+
+        _ ->
+          default_label_size(fs, title)
+      end
+
+    cond do
+      # A shaft-riding label is magnetic to its line: centred on the point
+      # `title_offset` along it (the middle by default), never on the box's
+      # own stored position.
+      kind in ["dimension", "arrow"] ->
+        case shaft_point(kind, g, shaft_offset(meta)) do
+          {px, py} -> {px - w / 2, py - h / 2, w, h}
+          nil -> nil
+        end
+
+      align = normalize_align(get(meta, "title_align")) ->
+        case bbox(kind, g) do
+          {bx, by, bw, bh} -> aligned_box({bx, by, bw, bh}, {w, h}, align)
+          nil -> nil
+        end
+
+      match?(%{}, get(meta, "title_box")) ->
+        box = get(meta, "title_box")
+
+        case {get(box, "x"), get(box, "y")} do
+          {bx, by} when is_number(bx) and is_number(by) -> {bx, by, w, h}
+          _ -> nil
+        end
+
+      true ->
+        # The float-above default: centred over the shape's top edge.
+        case bbox(kind, g) do
+          {bx, by, bw, _bh} -> {bx + bw / 2 - w / 2, by - h - base, w, h}
+          nil -> nil
+        end
+    end
+  end
+
+  # Wide enough for the glyphs at this size — the server cannot measure a
+  # font, and 0.6em per character is the usual approximation for a
+  # proportional face. Height is set so `label_font_size/1` reads the font
+  # back out of it exactly.
+  defp default_label_size(fs, title) do
+    {max(fs * 0.6 * String.length(title), fs * 2), fs / 0.65}
+  end
+
+  defp shaft_offset(meta) do
+    case get(meta, "title_offset") do
+      t when is_number(t) -> min(max(t, 0), 1)
+      _ -> 0.5
+    end
+  end
+
+  # The point a fraction `t` along the drawn path — the routed one for an
+  # arrow, so a label on a bent connector sits on the line rather than on
+  # the chord between its ends.
+  defp shaft_point(kind, g, t) do
+    path = if kind == "arrow", do: arrow_path(g), else: ab_points(g)
+
+    case path do
+      [] -> nil
+      [only] -> only
+      pts -> walk(pts, t)
+    end
+  end
+
+  defp ab_points(g) do
+    case ab_line(g) do
+      [{:line, x1, y1, x2, y2}] -> [{x1, y1}, {x2, y2}]
+      _ -> []
+    end
+  end
+
+  defp walk(pts, t) do
+    segs =
+      pts
+      |> Enum.chunk_every(2, 1, :discard)
+      |> Enum.map(fn [{x1, y1} = a, {x2, y2} = b] ->
+        {a, b, :math.sqrt(:math.pow(x2 - x1, 2) + :math.pow(y2 - y1, 2))}
+      end)
+
+    total = Enum.reduce(segs, 0.0, fn {_, _, len}, acc -> acc + len end)
+
+    if total <= 0 do
+      hd(pts)
+    else
+      target = total * t
+
+      Enum.reduce_while(segs, 0.0, fn {{x1, y1}, {x2, y2}, len}, walked ->
+        if walked + len >= target or len == 0 do
+          f = if len > 0, do: (target - walked) / len, else: 0.0
+          {:halt, {x1 + (x2 - x1) * f, y1 + (y2 - y1) * f}}
+        else
+          {:cont, walked + len}
+        end
+      end)
+      |> case do
+        {_, _} = point -> point
+        _ -> List.last(pts)
+      end
+    end
+  end
+
+  # `%{"h" => "left"|"center"|"right", "v" => "top"|"middle"|"bottom"}`,
+  # the same shape `normalizeTitleAlign` accepts on the canvas.
+  defp normalize_align(%{} = align) do
+    h = get(align, "h")
+    v = get(align, "v")
+
+    if h in ["left", "center", "right"] and v in ["top", "middle", "bottom"] do
+      {h, v}
+    else
+      nil
+    end
+  end
+
+  defp normalize_align(_), do: nil
+
+  defp aligned_box({bx, by, bw, bh}, {w, h}, {ah, av}) do
+    x =
+      case ah do
+        "left" -> bx
+        "right" -> bx + bw - w
+        _ -> bx + bw / 2 - w / 2
+      end
+
+    y =
+      case av do
+        "top" -> by
+        "bottom" -> by + bh - h
+        _ -> by + bh / 2 - h / 2
+      end
+
+    {x, y, w, h}
+  end
+
+  # The box a shape occupies, for the label placements that need one.
+  defp bbox("rectangle", g), do: xywh(g)
+  defp bbox(k, g) when k in ["text", "audio", "video", "image"], do: xywh(g)
+
+  defp bbox("circle", g) do
+    case {get(g, "cx"), get(g, "cy"), get(g, "r")} do
+      {cx, cy, r} when is_number(cx) and is_number(cy) and is_number(r) ->
+        {cx - r, cy - r, r * 2, r * 2}
+
+      _ ->
+        nil
+    end
+  end
+
+  defp bbox("polygon", %{"points" => pts}) when is_list(pts),
+    do: points_bbox(Enum.map(pts, &pt/1))
+
+  defp bbox(k, g) when k in ["freehand", "marker"],
+    do: points_bbox(stroke_points(g) |> Enum.map(&pt/1))
+
+  defp bbox("arrow", g), do: points_bbox(arrow_path(g))
+  defp bbox(k, g) when k in ["line", "dimension"], do: points_bbox(ab_points(g))
+  defp bbox(_kind, _g), do: nil
+
+  defp xywh(g) do
+    case {get(g, "x"), get(g, "y"), get(g, "w"), get(g, "h")} do
+      {x, y, w, h} when is_number(x) and is_number(y) and is_number(w) and is_number(h) ->
+        {x, y, w, h}
+
+      _ ->
+        nil
+    end
+  end
+
+  defp points_bbox([]), do: nil
+
+  defp points_bbox(pts) do
+    xs = Enum.map(pts, &elem(&1, 0))
+    ys = Enum.map(pts, &elem(&1, 1))
+    {Enum.min(xs), Enum.min(ys), Enum.max(xs) - Enum.min(xs), Enum.max(ys) - Enum.min(ys)}
+  end
+
+  # A label's own colour when it has one, else the shape's — the same
+  # resolution `_titleColorFor` does, which is what makes a red dimension's
+  # measurement red.
+  defp title_color(ann, shape_color) do
+    case get(get(ann, "metadata") || %{}, "title_color") do
+      c when is_binary(c) and c != "" -> c
+      _ -> shape_color
+    end
+  end
+
+  # Label sizes are stored against a reference canvas, exactly like ink
+  # weights, so a label reads the same size relative to the picture whatever
+  # the picture's resolution. Without the canvas dimensions there is nothing
+  # to scale against and the stored number is used as-is.
+  defp label_base(opts) do
+    w = Keyword.get(opts, :canvas_width) || Keyword.get(opts, :width)
+    h = Keyword.get(opts, :canvas_height) || Keyword.get(opts, :height)
+
+    case {w, h} do
+      {w, h} when is_number(w) and is_number(h) and (w > 0 or h > 0) ->
+        @default_label_font * max(w, h) / @reference_canvas_px
+
+      _ ->
+        @default_label_font
+    end
+  end
 
   # ── label helpers ────────────────────────────────────────────────────────
 
@@ -412,8 +765,7 @@ defmodule Etcher.Raster do
   # here don't wrap, and a thumbnail-scale label reads fine on one line.
   # Blank/absent titles answer nil so the caller falls back to the box.
   defp label_title(ann) do
-    with %{} = meta <- get(ann, "metadata"),
-         t when is_binary(t) <- get(meta, "title"),
+    with t when is_binary(t) <- get(get(ann, "metadata") || %{}, "title") || get(ann, "title"),
          t = t |> String.replace(~r/\s+/u, " ") |> String.trim(),
          false <- t == "" do
       t

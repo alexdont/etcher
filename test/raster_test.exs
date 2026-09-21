@@ -24,12 +24,24 @@ defmodule Etcher.RasterTest do
 
       assert hd(args) == "-fill"
       draws = for ["-draw", v] <- Enum.chunk_every(args, 2, 1), do: v
-      assert "rectangle 10,20 40,60" in draws
-      assert "circle 50,60 50,55" in draws
+
+      # The fillable kinds carry the body the canvas paints on them (semi by
+      # default); a shaft has no inside, so it draws bare.
+      assert "fill-opacity 0.18 rectangle 10,20 40,60" in draws
+      assert "fill-opacity 0.18 circle 50,60 50,55" in draws
+      assert "fill-opacity 0.18 polygon 0,0 10,0 10,10" in draws
+      assert "fill-opacity 0.18 polyline 0,0 5,5" in draws
       assert "line 0,0 10,10" in draws
+
+      # A dimension is its shaft plus a V at each end — that pair is what
+      # tells it apart from a plain line at a glance.
       assert "line 1,1 2,2" in draws
-      assert "polygon 0,0 10,0 10,10" in draws
-      assert "polyline 0,0 5,5" in draws
+
+      heads =
+        Enum.filter(draws, &String.starts_with?(&1, "polyline 1")) ++
+          Enum.filter(draws, &String.starts_with?(&1, "polyline 2"))
+
+      assert length(heads) == 2, "expected a head at each end, got: #{inspect(draws)}"
     end
 
     test "honours per-shape style colour, else the default" do
@@ -62,7 +74,7 @@ defmodule Etcher.RasterTest do
       nodes = [%{"p" => [0, 0]}, %{"p" => [30, 0]}]
       args = Raster.to_draw_args([shape("freehand", %{"nodes" => nodes})])
       [prim] = for ["-draw", v] <- Enum.chunk_every(args, 2, 1), do: v
-      assert prim =~ ~r/^polyline 0,0 /
+      assert prim =~ ~r/^fill-opacity [\d.]+ polyline 0,0 /
       assert prim =~ "30,0"
     end
 
@@ -75,7 +87,227 @@ defmodule Etcher.RasterTest do
 
     test "accepts atom-keyed annotations too" do
       args = Raster.to_draw_args([%{kind: "circle", geometry: %{"cx" => 2, "cy" => 2, "r" => 2}}])
-      assert "circle 2,2 2,0" in for(["-draw", v] <- Enum.chunk_every(args, 2, 1), do: v)
+
+      assert "fill-opacity 0.18 circle 2,2 2,0" in for(
+               ["-draw", v] <- Enum.chunk_every(args, 2, 1),
+               do: v
+             )
+    end
+  end
+
+  describe "a dimension reads as a measurement" do
+    test "shaft plus a V at each end, both opening back along the line" do
+      args = Raster.to_draw_args([shape("dimension", %{"a" => [0, 0], "b" => [100, 0]})])
+      draws = for ["-draw", v] <- Enum.chunk_every(args, 2, 1), do: v
+
+      assert "line 0,0 100,0" in draws
+
+      heads = Enum.filter(draws, &String.starts_with?(&1, "polyline"))
+      assert length(heads) == 2, "a dimension has two ends"
+
+      # Each V has its point ON an endpoint, with its two wings set back
+      # toward the other end — which is what makes the pair read as arrows
+      # rather than as ticks.
+      tips =
+        Enum.map(heads, fn head ->
+          ["polyline", _wing_a, tip, _wing_b] = String.split(head, " ")
+          tip
+        end)
+
+      assert Enum.sort(tips) == ["0,0", "100,0"]
+
+      # Wings set back along the shaft — both at the same distance, on
+      # either side of it.
+      for head <- heads do
+        ["polyline", a, _tip, b] = String.split(head, " ")
+        [ax, ay] = String.split(a, ",") |> Enum.map(&String.to_float/1)
+        [bx, by] = String.split(b, ",") |> Enum.map(&String.to_float/1)
+        assert_in_delta ax, bx, 0.001, "the wings sit level along the line"
+        assert_in_delta ay, -by, 0.001, "and symmetrically across it"
+        assert abs(ay) > 1, "a head with no width is a tick, not an arrow"
+      end
+    end
+
+    test "a line is still a bare line — the heads are the difference" do
+      args = Raster.to_draw_args([shape("line", %{"a" => [0, 0], "b" => [100, 0]})])
+      draws = for ["-draw", v] <- Enum.chunk_every(args, 2, 1), do: v
+      assert draws == ["line 0,0 100,0"]
+    end
+
+    test "a degenerate dimension draws no spike in an arbitrary direction" do
+      args = Raster.to_draw_args([shape("dimension", %{"a" => [5, 5], "b" => [5, 5]})])
+      draws = for ["-draw", v] <- Enum.chunk_every(args, 2, 1), do: v
+      refute Enum.any?(draws, &String.starts_with?(&1, "polyline"))
+    end
+  end
+
+  describe "the label a shape carries" do
+    test "a dimension's measurement rides the middle of its line" do
+      dim = %{
+        "kind" => "dimension",
+        "geometry" => %{"a" => [0, 500], "b" => [1000, 500]},
+        "metadata" => %{"title" => "7cm"}
+      }
+
+      args = Raster.to_draw_args([dim], canvas_width: 1000, canvas_height: 1000)
+      draws = for ["-draw", v] <- Enum.chunk_every(args, 2, 1), do: v
+      text = Enum.find(draws, &String.starts_with?(&1, "text "))
+
+      assert text, "the measurement is the point of a dimension"
+      assert text =~ "'7cm'"
+
+      [x, y] = Regex.run(~r/^text (\d+),(\d+)/, text, capture: :all_but_first)
+      {x, y} = {String.to_integer(x), String.to_integer(y)}
+      # Centred on the shaft's midpoint, give or take the box's own padding.
+      assert abs(x - 500) < 60, "expected the label near the middle, got x=#{x}"
+      assert abs(y - 500) < 30, "expected the label on the line, got y=#{y}"
+    end
+
+    test "title_offset slides it along the line" do
+      near_start = %{
+        "kind" => "dimension",
+        "geometry" => %{"a" => [0, 0], "b" => [1000, 0]},
+        "metadata" => %{"title" => "x", "title_offset" => 0.1}
+      }
+
+      args = Raster.to_draw_args([near_start], canvas_width: 1000, canvas_height: 1000)
+      draws = for ["-draw", v] <- Enum.chunk_every(args, 2, 1), do: v
+      text = Enum.find(draws, &String.starts_with?(&1, "text "))
+      [x] = Regex.run(~r/^text (\d+),/, text, capture: :all_but_first)
+      assert String.to_integer(x) < 200
+    end
+
+    test "title_align centres a label inside its shape" do
+      rect = %{
+        "kind" => "rectangle",
+        "geometry" => %{"x" => 0, "y" => 0, "w" => 1000, "h" => 1000},
+        "metadata" => %{"title" => "door", "title_align" => %{"h" => "center", "v" => "middle"}}
+      }
+
+      args = Raster.to_draw_args([rect], canvas_width: 1000, canvas_height: 1000)
+      draws = for ["-draw", v] <- Enum.chunk_every(args, 2, 1), do: v
+      text = Enum.find(draws, &String.starts_with?(&1, "text "))
+      [x, y] = Regex.run(~r/^text (\d+),(\d+)/, text, capture: :all_but_first)
+
+      assert abs(String.to_integer(x) - 500) < 80
+      assert abs(String.to_integer(y) - 500) < 40
+    end
+
+    test "a title stored beside the annotation is read too" do
+      # PhoenixKit keeps it in its own column rather than inside `metadata`;
+      # a renderer that only looked in one place silently dropped every
+      # label such a host had.
+      args =
+        Raster.to_draw_args(
+          [
+            %{
+              "kind" => "rectangle",
+              "geometry" => %{"x" => 0, "y" => 0, "w" => 100, "h" => 100},
+              "title" => "from the column"
+            }
+          ],
+          canvas_width: 1000,
+          canvas_height: 1000
+        )
+
+      draws = for ["-draw", v] <- Enum.chunk_every(args, 2, 1), do: v
+      assert Enum.any?(draws, &(&1 =~ "'from the column'"))
+    end
+
+    test "label size follows the canvas, like every other ink measure" do
+      shape = %{
+        "kind" => "rectangle",
+        "geometry" => %{"x" => 0, "y" => 0, "w" => 100, "h" => 100},
+        "metadata" => %{"title" => "hi"}
+      }
+
+      small = Raster.to_draw_args([shape], canvas_width: 1000, canvas_height: 1000)
+      big = Raster.to_draw_args([shape], canvas_width: 5000, canvas_height: 3000)
+
+      size = fn args ->
+        [_, v] = Enum.find(Enum.chunk_every(args, 2, 1), &match?(["-pointsize", _], &1))
+        String.to_integer(v)
+      end
+
+      assert size.(big) > size.(small) * 4,
+             "a label on a 5000px photo must not bake at the size it takes on a 1000px one"
+    end
+
+    test "an untitled shape draws no label" do
+      args = Raster.to_draw_args([shape("rectangle", %{"x" => 0, "y" => 0, "w" => 1, "h" => 1})])
+      draws = for ["-draw", v] <- Enum.chunk_every(args, 2, 1), do: v
+      refute Enum.any?(draws, &String.starts_with?(&1, "text "))
+    end
+
+    test "the label takes its own colour when it has one, else the shape's" do
+      base = %{"kind" => "rectangle", "geometry" => %{"x" => 0, "y" => 0, "w" => 10, "h" => 10}}
+
+      own =
+        Raster.to_draw_args([
+          Map.merge(base, %{
+            "style" => %{"color" => "#111111"},
+            "metadata" => %{"title" => "t", "title_color" => "#00ff00"}
+          })
+        ])
+
+      inherited =
+        Raster.to_draw_args([
+          Map.merge(base, %{"style" => %{"color" => "#111111"}, "metadata" => %{"title" => "t"}})
+        ])
+
+      assert "#00ff00" in own
+      refute "#00ff00" in inherited
+      assert "#111111" in inherited
+    end
+  end
+
+  describe "the body a shape is filled with" do
+    test "semi by default, solid when asked, damped by the shape's opacity" do
+      draw = fn style ->
+        args =
+          Raster.to_draw_args([
+            shape("rectangle", %{"x" => 0, "y" => 0, "w" => 1, "h" => 1}, style)
+          ])
+
+        for(["-draw", v] <- Enum.chunk_every(args, 2, 1), do: v) |> hd()
+      end
+
+      assert draw.(nil) =~ "fill-opacity 0.18 "
+      assert draw.(%{"fill" => "semi"}) =~ "fill-opacity 0.18 "
+      assert draw.(%{"fill" => "solid"}) =~ "fill-opacity 1.0 "
+      assert draw.(%{"fill" => "solid", "opacity" => 0.5}) =~ "fill-opacity 0.5 "
+      assert draw.(%{"fill" => "none"}) == "rectangle 0,0 1,1"
+
+      # The hatch has no counterpart at this scale; it bakes as the tint it
+      # would read as anyway.
+      assert draw.(%{"fill" => "pattern"}) =~ "fill-opacity 0.18 "
+    end
+
+    test "the kinds with no inside are never filled" do
+      for kind <- ["line", "dimension", "arrow", "marker"] do
+        geom =
+          case kind do
+            "marker" -> %{"points" => [[0, 0], [5, 5]]}
+            _ -> %{"a" => [0, 0], "b" => [10, 10]}
+          end
+
+        args = Raster.to_draw_args([shape(kind, geom, %{"fill" => "solid"})])
+        draws = for ["-draw", v] <- Enum.chunk_every(args, 2, 1), do: v
+
+        refute Enum.any?(draws, &String.contains?(&1, "fill-opacity")),
+               "#{kind} has no body to fill"
+      end
+    end
+
+    test "the fill colour is the shape's colour" do
+      args =
+        Raster.to_draw_args([
+          shape("circle", %{"cx" => 1, "cy" => 1, "r" => 1}, %{"color" => "#00ff00"})
+        ])
+
+      pairs = Enum.chunk_every(args, 2, 1)
+      assert ["-fill", "#00ff00"] in pairs
+      assert ["-stroke", "#00ff00"] in pairs
     end
   end
 

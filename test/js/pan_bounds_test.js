@@ -3,8 +3,15 @@
 // Fresco clamps panning to the canvas, so a stroke drawn above a wide
 // image was visible at fit zoom and unreachable zoomed in. Whenever
 // annotations change, etcher hands Fresco pan bounds covering the union
-// of the canvas and everything drawn — padded on the spilled sides only
-// — and hands the clamp back when the last outside shape goes.
+// of the canvas and everything drawn, and hands the clamp back when the
+// last outside shape goes.
+//
+// The reach is the same on both sides of each axis — the worst spill on
+// that axis, mirrored — so the rect stays centred on the picture. Fresco
+// clamps to these bounds while the content is pannable and centres the
+// PICTURE below that, so bounds that leaned to one side put the two
+// rules' answers in different places: zooming through the crossover, the
+// board jumped ~200px sideways and back.
 //
 //   node test/js/pan_bounds_test.js
 
@@ -52,7 +59,7 @@ function board(shapes) {
   };
 }
 
-// ── ink above the picture opens the pan upward, and only upward ───────────
+// ── ink above the picture opens the pan upward — and as far down ──────────
 
 {
   const b = board([{ bbox: { x: 200, y: -150, w: 300, h: 100 } }]);
@@ -60,24 +67,29 @@ function board(shapes) {
   assert.strictEqual(b.calls.length, 1);
   const r = b.calls[0];
   assert.strictEqual(r.y, -150 - PAD, "up: past the stroke plus breathing room");
-  assert.strictEqual(r.x, 0, "left edge untouched — nothing spilled there");
-  assert.strictEqual(r.x + r.width, 1000, "right edge untouched");
-  assert.strictEqual(r.y + r.height, 600, "bottom edge untouched");
+  assert.strictEqual(r.y + r.height, 600 + 150 + PAD,
+    "and the same reach below, which nothing needs — except that it " +
+    "keeps the rect centred on the picture, and the pan smooth");
+  assert.ok(r.x === 0, "the other axis is untouched — nothing spilled there");
+  assert.strictEqual(r.x + r.width, 1000, "on either side of it");
 }
 
-// ── each side opens independently ─────────────────────────────────────────
+// ── each AXIS opens to its worst spill ────────────────────────────────────
 
 {
   const b = board([
     { bbox: { x: -80, y: 100, w: 60, h: 60 } },     // left
-    { bbox: { x: 990, y: 100, w: 120, h: 60 } },    // right
+    { bbox: { x: 990, y: 100, w: 120, h: 60 } },    // right, further out
   ]);
   syncPanBounds.call(b);
   const r = b.calls[0];
-  assert.strictEqual(r.x, -80 - PAD, "left opens to the leftmost ink");
-  assert.strictEqual(r.x + r.width, 990 + 120 + PAD, "right opens to the rightmost");
-  assert.strictEqual(r.y, 0, "top stays stock");
-  assert.strictEqual(r.y + r.height, 600, "bottom stays stock");
+  const reach = 110 + PAD;  // the right-hand ink, 110px past the edge
+  assert.strictEqual(r.x, -reach, "left opens to the worse of the two");
+  assert.strictEqual(r.x + r.width, 1000 + reach, "and the right to match");
+  assert.ok(r.x + r.width / 2 === 500,
+    "so the rect is still centred on the picture it surrounds");
+  assert.ok(r.y === 0, "the untouched axis stays stock");
+  assert.strictEqual(r.y + r.height, 600, "top and bottom both");
 }
 
 // ── labels parked outside count too ───────────────────────────────────────
@@ -91,6 +103,7 @@ function board(shapes) {
   const r = b.calls[0];
   assert.strictEqual(r.y + r.height, 650 + 40 + PAD,
     "a label dragged below the picture is reachable like any stroke");
+  assert.strictEqual(r.y, -(650 + 40 - 600 + PAD), "mirrored, as ever");
 }
 
 // ── everything inside: the stock clamp comes back, once ───────────────────

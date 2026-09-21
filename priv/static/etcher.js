@@ -11175,17 +11175,39 @@
         }
         return;
       }
-      // Breathing room on the spilled sides only, so the outermost stroke
-      // isn't glued to the clamp edge; the un-spilled sides keep the exact
-      // default so nothing changes where nothing was drawn.
+      // Breathing room on the spilled sides, so the outermost stroke isn't
+      // glued to the clamp edge — and the SAME room on the opposite side,
+      // which is what keeps zooming smooth.
+      //
+      // The reason is a seam in how a view is positioned. Zoomed in, the
+      // translate is clamped to these bounds; zoomed out past the point
+      // where everything fits, there is nothing to clamp and the viewer
+      // centres the PICTURE instead. Both are right, but they only agree
+      // if this rect is centred on the picture too. Padded on the spilled
+      // side alone it is not, so crossing that point moved the picture by
+      // however lopsided the rect was — measured at 192px on a board with
+      // a note above the photo, and felt as a jump mid-zoom, down on the
+      // way out and back on the way in.
+      //
+      // Mirroring the reach makes the two positions the same number at the
+      // crossover, so the seam disappears. What it costs is being able to
+      // pan into empty space on the side with less ink, which is nothing:
+      // there was never anything to see there, and the clamp still stops
+      // at a fixed edge.
+      //
+      // An axis nothing spilled on keeps the exact default, so a drawing
+      // inside the picture changes nothing at all.
+      var spillX = Math.max(Math.max(0, -minX), Math.max(0, maxX - size.width));
+      var spillY = Math.max(Math.max(0, -minY), Math.max(0, maxY - size.height));
+      var padX = spillX > 0 ? spillX + PAN_BOUNDS_PAD : 0;
+      var padY = spillY > 0 ? spillY + PAN_BOUNDS_PAD : 0;
+
       var rect = {
-        x: minX < 0 ? minX - PAN_BOUNDS_PAD : 0,
-        y: minY < 0 ? minY - PAN_BOUNDS_PAD : 0
+        x: -padX,
+        y: -padY,
+        width: size.width + padX * 2,
+        height: size.height + padY * 2
       };
-      rect.width =
-        (maxX > size.width ? maxX + PAN_BOUNDS_PAD : size.width) - rect.x;
-      rect.height =
-        (maxY > size.height ? maxY + PAN_BOUNDS_PAD : size.height) - rect.y;
       this._panBoundsActive = true;
       try { h.setPanBounds(rect); } catch (_) {}
 

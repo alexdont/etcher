@@ -72,6 +72,9 @@ function board() {
     svg: fakeEl("svg"),
     _defs: null,
     firstChild: null,
+    // The margin's floor is measured from the EDGE of the line, so the
+    // renderer asks how thick this shape's line actually is.
+    _renderedStrokePx: (s) => ((s && s.style && s.style.width) || 2),
   };
 }
 
@@ -97,24 +100,39 @@ function board() {
   assert.strictEqual(keep.attrs.fill, "#fff", "everything paints by default");
   assert.strictEqual(cut.attrs.fill, "#000", "…except the label's box");
 
-  // gap = max(8, 20 * 0.25) = 8 — proportional with a screen-px floor.
-  // The floor is generous on purpose: labels scale down with zoom-out
-  // while the shaft's stroke stays screen-thick, and a tight floor left
-  // the line pressed against the words exactly when the label was at
-  // its least legible.
+  // gap = max(4 + 2/2, 20 * 0.14) = 5 — proportional, with a floor that
+  // tracks the line's own weight. A step, not a stride: the plate already
+  // pads the words, and a margin of its own on top of that pushed the
+  // arrowheads so far out that the two halves of a dimension stopped
+  // reading as one measurement.
   assert.deepStrictEqual(
     [cut.attrs.x, cut.attrs.y, cut.attrs.width, cut.attrs.height],
-    ["92", "42", "96", "36"],
+    ["95", "45", "90", "30"],
     "the cut is the label rect plus its margin");
   assert.ok(!("transform" in cut.attrs), "an unturned label cuts unturned");
 
-  // A taller label earns a wider margin (60 * 0.25 = 15 > the floor).
+  // A taller label earns a wider margin (60 * 0.14 = 8.4 > the floor).
   rect.setAttribute("height", 60);
   syncGap.call(self, shape, rect);
-  assert.strictEqual(cut.attrs.y, String(50 - 60 * 0.25),
+  assert.strictEqual(cut.attrs.y, String(50 - 60 * 0.14),
     "the margin scales with the label");
   assert.strictEqual(self._defs.children.length, 1,
     "re-syncing updates the one mask in place, never stacks another");
+
+  // A heavy line keeps its daylight: half of it is already on the line
+  // before the margin is counted, so the floor grows with the weight.
+  // Without this a 14px shaft ate most of a small label's clearance —
+  // and it is zoomed out, where labels shrink and the stroke does not,
+  // that the difference shows.
+  {
+    const heavy = board();
+    const fat = { uuid: "fat-1", el: fakeEl("g"), kind: "dimension",
+                  style: { width: 14 } };
+    syncGap.call(heavy, fat, fakeEl("rect", { x: 100, y: 50, width: 80, height: 20 }));
+    const fatCut = heavy._defs.children[0].children[1];
+    assert.strictEqual(fatCut.attrs.x, String(100 - (4 + 7)),
+      "the floor is the daylight plus half the line's own thickness");
+  }
 
   // A turned board turns the cut with the label.
   rect.setAttribute("transform", "rotate(90 140 60)");
@@ -140,7 +158,7 @@ function board() {
   const cut = self._defs.children[0].children[1];
   assert.deepStrictEqual(
     [cut.attrs.x, cut.attrs.y, cut.attrs.width, cut.attrs.height],
-    ["92", "42", "96", "36"],
+    ["95", "45", "90", "30"],
     "a plain box cuts exactly as the equivalent rect element does");
 
   syncGap.call(self, shape, { x: 100, y: 50, w: 80, h: 20, transform: "rotate(90 140 60)" });

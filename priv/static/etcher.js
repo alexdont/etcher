@@ -6912,16 +6912,27 @@
       // ends a clean step short of the words instead of touching them.
       // Proportional to the label with a floor: a margin that scaled only
       // with the screen would crowd a large label and drown a small one.
-      // The floor is screen px and deliberately generous — labels scale
-      // down with zoom-out while the shaft's stroke stays screen-thick,
-      // so a small floor left the line pressed against the words exactly
-      // when the label was at its least legible.
+      //
+      // A step, not a stride. The label's own plate already pads the
+      // words, and this margin sits outside that one — measured on the
+      // board, a quarter of the label's height put the arrowheads a long
+      // way out from a dimension that reads as one piece, so the two
+      // halves of the line looked unrelated to the measurement between
+      // them. Enough to see daylight is the whole job.
+      //
+      // The floor tracks the line's own weight rather than being a flat
+      // number: what should be constant is the daylight between the ink
+      // and the words, and half of a heavy shaft is already on the line
+      // before any margin is counted. It matters most zoomed out, where
+      // labels scale down while the stroke stays screen-thick.
       var live = rectEl && typeof rectEl.getAttribute === "function";
       var x = Number(live ? rectEl.getAttribute("x") : rectEl.x) || 0;
       var y = Number(live ? rectEl.getAttribute("y") : rectEl.y) || 0;
       var w = Number(live ? rectEl.getAttribute("width") : rectEl.w) || 0;
       var h = Number(live ? rectEl.getAttribute("height") : rectEl.h) || 0;
-      var gap = Math.max(8, h * 0.25);
+      var half = 1;
+      try { half = this._renderedStrokePx(shape) / 2; } catch (_) { half = 1; }
+      var gap = Math.max(4 + half, h * 0.14);
       var cutEl = mask.querySelector(".etcher-shaft-gap-cut");
       cutEl.setAttribute("x", x - gap);
       cutEl.setAttribute("y", y - gap);

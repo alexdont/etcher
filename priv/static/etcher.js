@@ -11325,6 +11325,16 @@
       // the toolbar is hidden, so the `off` path is a no-op.
       if (on) self._layoutToolbar();
 
+      // Turning the mode on ARMS the cursor tool rather than merely
+      // behaving like it. The board has always started in cursor mode
+      // (`activeTool == null`), but nothing said so: the toolbar opened
+      // with no button lit, and a user reading it had to try one to find
+      // out what the pointer would do. Selecting it for real lights the
+      // button, shows the arrow cursor, and locks drag-pan the same way
+      // reaching for the tool by hand does — one state, arrived at by
+      // one path.
+      if (on) self._selectTool(null);
+
       // In Fresco 0.5 pan/zoom isn't a set of toggleable gesture flags
       // on an OSD viewer — it's the engine's own pointer/wheel handlers
       // on the host. We block them while drawing by:
@@ -11347,13 +11357,11 @@
       // whether the cursor tool is "armed") has changed.
       self._applyPanLock();
 
-      // Entering the mode arms the implicit cursor tool without a
-      // _selectTool call, so sync the container cursor here too: arrow
-      // while pan is locked, Fresco's grab back when the mode turns off.
-      if (self.handleKind !== "strip" && self.handle && self.handle.container &&
-          self.activeTool == null) {
-        self.handle.container.style.cursor = on ? "default" : "";
-      }
+      // The container's cursor is `_selectTool`'s business now, both
+      // ways: entering calls it above (arrow while pan is locked), and
+      // leaving calls it in the `!on` branch, which hands the cursor back
+      // to Fresco's own CSS. The line that used to sit here ran AFTER
+      // both and wrote a plain `default` over the toolbar arrow.
 
       self._dispatch("etcher:mode-changed", { annotationMode: on });
     },

@@ -4,6 +4,84 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.17.0] — 2026-09-21
+
+The server renderer bakes what the canvas actually draws, a label you
+are about to type survives a trip to the style panel, and a panel-docked
+section waits to be asked for.
+
+### Added
+
+- **Baked dimensions look like dimensions.** `Etcher.Raster` gives a
+  dimension the same pair of V-heads the canvas draws, one at each
+  endpoint, opening back along the shaft — a baked one used to be a bare
+  line with nothing to say it measured anything.
+
+- **Every kind bakes its label, not just `text` and `callout`.** A board
+  of named rectangles came out anonymous and a dimension lost the
+  measurement that is its whole point. Labels are placed by the canvas's
+  own rules and in its order of precedence: shaft-riding labels ride the
+  line at `title_offset`, `title_align` places one inside the shape, a
+  dragged `title_box` keeps its spot, the rest float above. Pass
+  `:canvas_width` / `:canvas_height` and a label bakes at the size it is
+  drawn at rather than at 16px on a 5000px photo.
+
+- **`style.fill` is painted when baking** — the shape's own colour,
+  damped to 18% unless solid and multiplied by its opacity, on the kinds
+  the canvas lets you fill. Shapes used to bake hollow. The hatch has no
+  counterpart at this scale and bakes as the tint it reads as anyway.
+
+### Changed
+
+- **A panel-docked section is shown by a click, never by a hover.** The
+  section used to follow the cursor as well as the selection, so passing
+  the pointer across a board on the way somewhere else made the panel
+  grow a section, swap it for the next shape and hand it back — movement
+  at the edge of vision for a shape nobody had asked about. Selection is
+  the whole rule now: click a shape and its section stays for as long as
+  it is selected, click away and it goes. Hover keeps what belongs to
+  the drawing (the outline, the connector dots) and leaves the panel
+  alone; the dwell clock went with the previews it was for. Anchored
+  hosts are untouched — hover is how their tooltip has always been read.
+
+- **Turning annotation mode on arms the cursor tool.** The board was
+  always in cursor mode already, but it got there by setting the field
+  rather than by selecting the tool, so the toolbar opened with nothing
+  lit and the one behaviour you get for free was the one it never
+  mentioned. The button now lights, the pointer wears the toolbar's own
+  arrow, and leaving and re-entering comes back on the cursor rather
+  than on the tool you left with.
+
+- **A label sits closer to the line it rides.** The gap a dimension's or
+  arrow's label cut out of its own line put each arrowhead a long step
+  from the words, and the two halves stopped reading as one measurement.
+  The margin is about a quarter of what it was, and its floor is
+  measured from the edge of the line rather than being a flat number —
+  half of a heavy shaft is already on the line before any margin counts,
+  so a 14px line keeps more clearance than a hairline, which it needed
+  and did not have.
+
+### Fixed
+
+- **A label you are about to type survives the style panel.** Place a
+  dimension's two points, reach for the thickness or the label size
+  before typing, and coming back cost you the label: the click back onto
+  the canvas dismissed the editor, and a click on the label itself put
+  the caret in AND started a second dimension from the middle of the
+  label. A press on the editor now belongs to the words — no tool sees
+  it, not even as a drag — and the trip to the menus is remembered, so
+  the first canvas press after one puts the caret back and the next one
+  dismisses, which is how a label is abandoned. Text already typed still
+  commits on click-away, and a press on a different shape is still about
+  that shape.
+
+- **Zooming no longer jogs sideways when ink sits outside the picture.**
+  Pan bounds were padded only on the sides ink had spilled past, so the
+  rect was not centred on the picture and the clamp disagreed with
+  Fresco's centring at the fit crossover — the board stepped a couple of
+  hundred pixels across and back. The reach is now mirrored on each
+  axis, and the two rules name the same point.
+
 ## [0.16.0] — 2026-09-20
 
 A host can park shape actions in the style panel instead of over the

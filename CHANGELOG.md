@@ -4,6 +4,20 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.17.1] — 2026-09-23
+
+### Changed
+
+- **Fresco 0.13 is admitted.** Each fresco minor is a separate `~> 0.x.0`
+  range here, so one that is not named caps every host at the previous
+  one — with a failure that says nothing about which library did the
+  capping. 0.13 is where a wheel event is read as the three gestures it
+  can be (a notch zooms, two fingers on a trackpad move the view, a pinch
+  zooms) and where deltas that arrive in LINES are converted to the pixels
+  the zoom and pan rates are priced in; on the hardware that reports
+  that way, a notch used to buy a fiftieth of the zoom it should. Nothing
+  in Etcher changed: this release exists so hosts can take that one.
+
 ## [0.17.0] — 2026-09-21
 
 The server renderer bakes what the canvas actually draws, a label you

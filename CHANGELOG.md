@@ -4,6 +4,63 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.17.2] — 2026-09-24
+
+The marker draws where the hand drew, and a click leaves a dot.
+
+### Added
+
+- **A click with a stroke tool leaves a dot.** Marker, highlighter and
+  freehand: the press was being thrown away as too small to be a stroke,
+  which made the one mark a drag cannot make — the dot under a question
+  mark, the dot on an i, a decimal point — impossible to draw at all. It
+  finalises a stroke a hundredth of a px long, which the round cap these
+  kinds already wear paints as a disc; not zero length, because that
+  paints the same but has no hit region, and the dot has to be
+  selectable afterwards like any other stroke.
+
+### Fixed
+
+- **A marker stroke stays on the line it was drawn on.** Measured
+  against the path a hand drew, a deliberate right angle came out 11px
+  off. Two causes in series. The spline read three samples and drew a
+  smooth arc through them — right for a curve, wrong for a corner, and
+  by then the samples are sparse enough that the arc it bows through can
+  be two long chords wide. A sample where the stroke turns sharply is
+  now treated as an END: both segments arrive and leave along their own
+  chord. And the input filter, which carried over half of each new
+  position to damp tremor, lagged a deliberate stride exactly as hard as
+  a wobble — rounding the corner off in the SAMPLES, where nothing
+  downstream can find it again. It fades out across 4 screen px now:
+  tremor still smoothed, movement followed.
+
+  Corner drift, end to end through the shipped sampler: **11.08px →
+  0.48px** where the pointer reports every px, and **3.21px → 0.00px**
+  at the coarser rates a slow hand or a low-rate device produces. A
+  question mark's hook: 1.47px → 0.71px, helped by halving the thinning
+  tolerance now that corners survive it. A straight line was, and stays,
+  exact.
+
+  Curved arrows share that spline and do NOT take the corner rule: their
+  waypoints are placed deliberately, and the helper that answers what is
+  hit, labelled and measured mirrors the plain curve — breaking one and
+  not the other would draw a kink where the measuring still read a bow.
+
+- **Reaching for a drawing tool closes an open label editor.** After
+  placing a dimension, arming the marker meant the first stroke was
+  spent putting the caret back into a label already walked away from —
+  the toolbar is chrome, and a press on chrome is remembered as a trip
+  to the menus. The stroke drew nothing. Typed words are kept, an empty
+  box is dropped, and the stroke that follows is a stroke.
+
+- **`Etcher.Raster` bakes a dot, and bakes strokes with round caps.** A
+  click's dot vanished from the server-side render: ImageMagick refuses
+  a degenerate polyline outright. It bakes as a filled disc of the
+  stroke's own radius now, in both back ends. Baked strokes also wear
+  the round caps and joins the canvas draws them with, which they never
+  had — a baked stroke used to end square and spike at its corners
+  beside the drawing it came from.
+
 ## [0.17.1] — 2026-09-23
 
 ### Changed

@@ -75,7 +75,7 @@ function drawMarker(input) {
     pts.push([end[0], end[1]]);
   }
   return flatten(catmullRomPathD.call(board, smoothStroke.call(board, pts),
-                                      (p) => ({ x: p[0], y: p[1] })));
+                                      (p) => ({ x: p[0], y: p[1] }), { corners: true }));
 }
 
 // The drawn curve as a dense polyline: every cubic in the emitted path,

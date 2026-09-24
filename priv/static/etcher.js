@@ -11428,7 +11428,17 @@
       // means we're done admiring the current edit. Same goes for
       // multi-selection: entering draw mode clears the group so a
       // stray Backspace mid-draw doesn't wipe the selected shapes.
+      //
+      // An open label editor closes here too. The toolbar is chrome, and
+      // a press on chrome is remembered as a trip to the menus — so
+      // without this, placing a dimension and then reaching for a tool
+      // left the editor waiting, and the first stroke drawn afterwards
+      // was spent putting the caret back in a label the user had already
+      // walked away from. Reaching for a drawing tool IS walking away:
+      // whatever was typed is kept, an empty box is dropped, and the
+      // stroke that follows is a stroke.
       if (toolKey != null) {
+        if (self._textEditor) self._commitTextEdit();
         self._exitEditMode();
         self._clearSelection();
       }
@@ -12340,7 +12350,7 @@
             var mp = g.points || [];
             el.setAttribute("d", self._catmullRomPathD(mp, function(p) {
               return self._imageToContainer({ x: p[0], y: p[1] });
-            }));
+            }, { corners: true }));
             var mMinX = Infinity, mMaxX = -Infinity, mMinY = Infinity;
             for (var mi = 0; mi < mp.length; mi++) {
               if (mp[mi][0] < mMinX) mMinX = mp[mi][0];
@@ -19237,7 +19247,13 @@
     // sparse set of control points yet render as a smooth curve (the spline
     // fills in the curvature). Each point is projected via `mapPt` first, so
     // the math runs in container space. Endpoints are clamped (duplicated).
-    _catmullRomPathD: function(points, mapPt) {
+    // `opts.corners` turns on the sharp-turn rule below. It is for a hand's
+    // stroke, where a corner is something the hand did; an arrow's curve is
+    // built from waypoints a user placed deliberately, and its geometry
+    // helper (`_crSample`, which answers what is hit, labelled and
+    // measured) mirrors the plain spline. Breaking one and not the other
+    // would draw a kink where the measuring still read a bow.
+    _catmullRomPathD: function(points, mapPt, opts) {
       var n = points.length;
       if (!n) return "";
       var p = [];
@@ -19274,7 +19290,10 @@
       // both segments meeting there arrive and leave along their own chord,
       // the way the first and last points of the whole stroke already do. A
       // corner stays a corner; anything gentler is still drawn as one curve.
+      var breakCorners = !!(opts && opts.corners);
+
       function sharpAt(i) {
+        if (!breakCorners) return false;
         var a = p[i - 1], b = p[i], c = p[i + 1];
         if (!a || !c) return false;
         var ax = b[0] - a[0], ay = b[1] - a[1];

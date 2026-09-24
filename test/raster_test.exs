@@ -30,7 +30,10 @@ defmodule Etcher.RasterTest do
       assert "fill-opacity 0.18 rectangle 10,20 40,60" in draws
       assert "fill-opacity 0.18 circle 50,60 50,55" in draws
       assert "fill-opacity 0.18 polygon 0,0 10,0 10,10" in draws
-      assert "fill-opacity 0.18 polyline 0,0 5,5" in draws
+
+      assert Enum.any?(draws, &String.contains?(&1, "fill-opacity 0.18 ")) and
+               Enum.any?(draws, &String.contains?(&1, "polyline 0,0 5,5"))
+
       assert "line 0,0 10,10" in draws
 
       # A dimension is its shaft plus a V at each end — that pair is what
@@ -38,8 +41,8 @@ defmodule Etcher.RasterTest do
       assert "line 1,1 2,2" in draws
 
       heads =
-        Enum.filter(draws, &String.starts_with?(&1, "polyline 1")) ++
-          Enum.filter(draws, &String.starts_with?(&1, "polyline 2"))
+        Enum.filter(draws, &String.contains?(&1, "polyline 1")) ++
+          Enum.filter(draws, &String.contains?(&1, "polyline 2"))
 
       assert length(heads) == 2, "expected a head at each end, got: #{inspect(draws)}"
     end
@@ -65,7 +68,7 @@ defmodule Etcher.RasterTest do
     test "marker strokes (point-based) render as a polyline" do
       args = Raster.to_draw_args([shape("marker", %{"points" => [[0, 0], [4, 6], [8, 2]]})])
       draws = for ["-draw", v] <- Enum.chunk_every(args, 2, 1), do: v
-      assert "polyline 0,0 4,6 8,2" in draws
+      assert Enum.any?(draws, &String.contains?(&1, "polyline 0,0 4,6 8,2"))
     end
 
     test "vector freehand (cubic-bezier nodes) is flattened to a polyline through its anchors" do
@@ -74,7 +77,7 @@ defmodule Etcher.RasterTest do
       nodes = [%{"p" => [0, 0]}, %{"p" => [30, 0]}]
       args = Raster.to_draw_args([shape("freehand", %{"nodes" => nodes})])
       [prim] = for ["-draw", v] <- Enum.chunk_every(args, 2, 1), do: v
-      assert prim =~ ~r/^fill-opacity [\d.]+ polyline 0,0 /
+      assert prim =~ ~r/^fill-opacity [\d.]+ .*polyline 0,0 /
       assert prim =~ "30,0"
     end
 
@@ -102,15 +105,21 @@ defmodule Etcher.RasterTest do
 
       assert "line 0,0 100,0" in draws
 
-      heads = Enum.filter(draws, &String.starts_with?(&1, "polyline"))
+      heads = Enum.filter(draws, &String.contains?(&1, "polyline"))
       assert length(heads) == 2, "a dimension has two ends"
 
       # Each V has its point ON an endpoint, with its two wings set back
       # toward the other end — which is what makes the pair read as arrows
       # rather than as ticks.
+      # The draw string opens with the cap and join every baked stroke
+      # wears; the points are what this is about.
+      points = fn head ->
+        head |> String.split("polyline ") |> List.last() |> String.split(" ")
+      end
+
       tips =
         Enum.map(heads, fn head ->
-          ["polyline", _wing_a, tip, _wing_b] = String.split(head, " ")
+          [_wing_a, tip, _wing_b] = points.(head)
           tip
         end)
 
@@ -119,7 +128,7 @@ defmodule Etcher.RasterTest do
       # Wings set back along the shaft — both at the same distance, on
       # either side of it.
       for head <- heads do
-        ["polyline", a, _tip, b] = String.split(head, " ")
+        [a, _tip, b] = points.(head)
         [ax, ay] = String.split(a, ",") |> Enum.map(&String.to_float/1)
         [bx, by] = String.split(b, ",") |> Enum.map(&String.to_float/1)
         assert_in_delta ax, bx, 0.001, "the wings sit level along the line"
@@ -137,7 +146,7 @@ defmodule Etcher.RasterTest do
     test "a degenerate dimension draws no spike in an arbitrary direction" do
       args = Raster.to_draw_args([shape("dimension", %{"a" => [5, 5], "b" => [5, 5]})])
       draws = for ["-draw", v] <- Enum.chunk_every(args, 2, 1), do: v
-      refute Enum.any?(draws, &String.starts_with?(&1, "polyline"))
+      refute Enum.any?(draws, &String.contains?(&1, "polyline"))
     end
   end
 
@@ -431,6 +440,61 @@ defmodule Etcher.RasterTest do
 
     test "empty when nothing drawable" do
       assert Raster.to_svg([shape("eraser", %{})]) == ""
+    end
+  end
+
+  describe "a stroke that went nowhere" do
+    # A click with a pen in hand is a dot — the one under a question mark,
+    # the one on an i. It cannot bake as a polyline: ImageMagick refuses a
+    # degenerate one ("non-conforming drawing primitive") and an SVG one
+    # paints only under a round cap. Both back ends draw the disc the
+    # canvas paints for the same click.
+    @dot %{"points" => [[100.0, 100.0], [100.01, 100.0]]}
+
+    test "bakes as a filled disc of the stroke's own radius, not a polyline" do
+      args = Raster.to_draw_args([shape("marker", @dot)], stroke_width: 6)
+      draw = Enum.at(args, Enum.find_index(args, &(&1 == "-draw")) + 1)
+
+      assert draw == "circle 100,100 100,103.0"
+      refute Enum.any?(args, &String.contains?(&1, "polyline"))
+      assert "none" in args, "stroked as nothing: the disc is filled"
+    end
+
+    test "and as a <circle> in SVG" do
+      svg = Raster.to_svg([shape("marker", @dot, %{"color" => "#ef4444"})], stroke_width: 8)
+
+      assert svg =~ ~s(<circle cx="100" cy="100" r="4.0")
+      assert svg =~ ~s(fill="#ef4444")
+      refute svg =~ "polyline"
+    end
+
+    test "a short stroke is still a stroke" do
+      # The test is "did it move at all", not "is it small": a deliberate
+      # flick of a couple of px still reads as a line.
+      args =
+        Raster.to_draw_args(
+          [shape("marker", %{"points" => [[10.0, 10.0], [12.0, 11.0]]})],
+          stroke_width: 6
+        )
+
+      assert Enum.any?(args, &String.contains?(&1, "polyline 10,10 12,11"))
+    end
+  end
+
+  describe "baked strokes wear the caps the canvas draws" do
+    test "round caps and joins on a polyline" do
+      # Without them a baked stroke ends square and its corners spike,
+      # which shows the moment a baked thumbnail sits beside the drawing.
+      args =
+        Raster.to_draw_args(
+          [shape("marker", %{"points" => [[0.0, 0.0], [10.0, 10.0], [20.0, 0.0]]})],
+          stroke_width: 4
+        )
+
+      draw = Enum.at(args, Enum.find_index(args, &(&1 == "-draw")) + 1)
+      assert draw =~ "stroke-linecap round"
+      assert draw =~ "stroke-linejoin round"
+      assert draw =~ "polyline 0,0 10,10 20,0"
     end
   end
 end

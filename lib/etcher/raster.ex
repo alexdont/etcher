@@ -93,6 +93,21 @@ defmodule Etcher.Raster do
             "none"
           ]
 
+        {{:dot, x, y}, %{color: color}} ->
+          # A disc, not a stroke: filled, no outline, radius from the width
+          # the stroke would have been drawn at. `circle cx,cy px,py` takes
+          # a point ON the circumference rather than a radius.
+          [
+            "-stroke",
+            "none",
+            "-fill",
+            color || default,
+            "-draw",
+            "circle #{x},#{y} #{x},#{y + dot_radius(sw)}",
+            "-fill",
+            "none"
+          ]
+
         {prim, %{color: color, fill: nil}} ->
           [
             "-fill",
@@ -296,8 +311,27 @@ defmodule Etcher.Raster do
 
   defp shape_primitives("polygon", %{"points" => p}) when is_list(p), do: poly(:polygon, p)
 
-  defp shape_primitives(k, g) when k in ["freehand", "marker"],
-    do: poly(:polyline, stroke_points(g))
+  # A stroke with no length is a dot — a click with a pen in hand, which is
+  # how the dot under a question mark or on an i gets drawn. It cannot bake
+  # as a polyline: ImageMagick refuses a degenerate one outright ("non-
+  # conforming drawing primitive"), and an SVG one paints only under a round
+  # cap. Both back ends draw a disc instead, sized from the stroke width at
+  # render time — which is what the canvas paints too, by rounding the cap
+  # of a stroke that goes nowhere.
+  defp shape_primitives(k, g) when k in ["freehand", "marker"] do
+    case stroke_points(g) do
+      [] ->
+        []
+
+      points ->
+        if dot?(points) do
+          {x, y} = pt(hd(points))
+          [{:dot, x, y}]
+        else
+          poly(:polyline, points)
+        end
+    end
+  end
 
   defp shape_primitives("line", g), do: ab_line(g)
 
@@ -411,6 +445,27 @@ defmodule Etcher.Raster do
     end
   end
 
+  # Half the stroke's width — the disc a round cap paints on a stroke that
+  # goes nowhere, which is what the canvas shows for the same click.
+  defp dot_radius(sw) do
+    case sw do
+      n when is_number(n) -> max(n / 2, 0.5)
+      s when is_binary(s) -> max(String.to_float(s <> ".0") / 2, 0.5)
+      _ -> 1.0
+    end
+  end
+
+  # Under a tenth of a pixel across: a click's stroke carries a hundredth,
+  # and nothing a hand draws lands that small.
+  @dot_extent 0.1
+
+  defp dot?(points) do
+    {xs, ys} = points |> Enum.map(&pt/1) |> Enum.unzip()
+
+    Enum.max(xs) - Enum.min(xs) <= @dot_extent and
+      Enum.max(ys) - Enum.min(ys) <= @dot_extent
+  end
+
   defp poly(_tag, []), do: []
   defp poly(tag, points), do: [{tag, Enum.map(points, &pt/1)}]
 
@@ -463,7 +518,13 @@ defmodule Etcher.Raster do
   # IM circle = centre point + a point on the perimeter.
   defp im_draw({:circle, cx, cy, r}), do: "circle #{cx},#{cy} #{cx},#{cy - r}"
   defp im_draw({:polygon, points}), do: "polygon " <> points_str(points)
-  defp im_draw({:polyline, points}), do: "polyline " <> points_str(points)
+
+  defp im_draw({:polyline, points}),
+    # Round caps and joins, as the canvas draws every stroke — without them
+    # a baked stroke ends square and corners spike, which is visible the
+    # moment a baked thumbnail sits beside the drawing it came from.
+    do: "stroke-linecap round stroke-linejoin round polyline " <> points_str(points)
+
   defp im_draw({:line, x1, y1, x2, y2}), do: "line #{x1},#{y1} #{x2},#{y2}"
 
   defp points_str(points), do: Enum.map_join(points, " ", fn {x, y} -> "#{x},#{y}" end)
@@ -481,6 +542,9 @@ defmodule Etcher.Raster do
 
   defp svg_element({:polyline, points}, paint, sw),
     do: ~s(<polyline points="#{svg_points(points)}" #{paint(paint, sw)}/>)
+
+  defp svg_element({:dot, x, y}, %{color: color}, sw),
+    do: ~s(<circle cx="#{x}" cy="#{y}" r="#{dot_radius(sw)}" fill="#{color}" stroke="none"/>)
 
   defp svg_element({:line, x1, y1, x2, y2}, paint, sw),
     do: ~s(<line x1="#{x1}" y1="#{y1}" x2="#{x2}" y2="#{y2}" #{paint(paint, sw)}/>)

@@ -32,7 +32,7 @@ const CORNER = Number((src.match(/var CORNER_COS = ([\d.]+);/) || [])[1]);
 assert.ok(CORNER > 0, "could not read CORNER_COS from etcher.js");
 global.CORNER_COS = CORNER;
 
-const NEEDLE = "    _catmullRomPathD: function(points, mapPt) {";
+const NEEDLE = "    _catmullRomPathD: function(points, mapPt, opts) {";
 const start = src.indexOf(NEEDLE);
 assert.notStrictEqual(start, -1, "could not find _catmullRomPathD in etcher.js");
 const end = src.indexOf("\n    },", start);
@@ -160,6 +160,26 @@ assert.ok(excursion(even, pathD(even, id)) < 0.01,
 // ── degenerate input ────────────────────────────────────────────────────────
 
 assert.strictEqual(pathD([], id), "", "no points, no path");
+
+// ── corners are asked for, not assumed ───────────────────────────────────
+
+{
+  // A hand's stroke wants a sharp turn drawn sharply (see
+  // `marker_accuracy_test.js`). An arrow's curve does not: its waypoints
+  // are placed deliberately, and the helper that answers what is hit,
+  // labelled and measured (`_crSample`) mirrors the plain spline — break
+  // one and not the other and the drawing stops matching the measuring.
+  const bend = [[0, 0], [100, 0], [100, 100]];
+  const smooth = excursion(bend, pathD(bend, id));
+  const sharp = excursion(bend, pathD(bend, id, { corners: true }));
+
+  assert.ok(sharp < smooth / 2,
+    `asking for corners must keep the angle (smooth ${smooth.toFixed(2)}, ` +
+      `sharp ${sharp.toFixed(2)})`);
+  assert.ok(smooth > 2,
+    "…and not asking must leave the old curve alone, which is what an " +
+      "arrow's bow and its geometry helper both still expect");
+}
 assert.strictEqual(pathD([[5, 7]], id), "M 5 7", "a single sample is a move-to");
 
 // Two samples: one cubic, landing exactly on the second.

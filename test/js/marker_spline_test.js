@@ -26,6 +26,12 @@ assert.ok(ALPHA > 0, "could not read CATMULL_ALPHA from etcher.js");
 assert.strictEqual(ALPHA, 0.5, "centripetal is the cusp-free parameterization");
 global.CATMULL_ALPHA = ALPHA;
 
+// The turn at which the spline stops curving and treats a sample as a
+// corner — see `marker_accuracy_test.js`, which measures what it buys.
+const CORNER = Number((src.match(/var CORNER_COS = ([\d.]+);/) || [])[1]);
+assert.ok(CORNER > 0, "could not read CORNER_COS from etcher.js");
+global.CORNER_COS = CORNER;
+
 const NEEDLE = "    _catmullRomPathD: function(points, mapPt) {";
 const start = src.indexOf(NEEDLE);
 assert.notStrictEqual(start, -1, "could not find _catmullRomPathD in etcher.js");

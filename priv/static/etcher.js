@@ -2047,12 +2047,33 @@
   // more prone to cutting corners.
   var MARKER_STREAMLINE = 0.5;
 
+  // …but only over distances a tremor covers. A constant filter cannot
+  // tell a 1px wobble from an 8px stride, so it lags both — and the lag
+  // rounds a corner off in the SAMPLES, before any later rule can see it
+  // was a corner. Measured off a right angle: 3.2px of rounding at a
+  // coarse pointer rate, 0.4px once the filter stands aside for movement
+  // this size. The carry-over fades to nothing across this distance in
+  // SCREEN px, so it behaves the same at every zoom.
+  var MARKER_TREMOR_PX = 4;
+
+  // The length a click's dot is given, in image px. See `_commitFreehand`:
+  // it exists so the browser has something to hit-test, not so anything is
+  // visible — the disc a round cap paints is the whole mark.
+  var DOT_LENGTH = 0.01;
+
   // How far the pointer must travel, in SCREEN px, before the marker takes
   // another sample. Screen rather than image px so a stroke has the same
   // fidelity at every zoom — the old image-px threshold sampled a
   // zoomed-out stroke far more finely than it could ever be drawn, and a
   // zoomed-in one too coarsely to look smooth.
   var MARKER_SAMPLE_PX = 1.5;
+
+  // How sharp a turn has to be before the marker's spline treats it as a
+  // corner rather than a curve: the cosine of the angle between the two
+  // chords meeting at a sample. 0.5 is a 60-degree turn — gentle enough to
+  // leave real curves alone (a circle sampled this finely turns a couple of
+  // degrees a step), sharp enough to catch the angles a hand means.
+  var CORNER_COS = 0.5;
 
   // Default size of an audio card, in image px. Resizable afterwards like
   // any box — this is just what a freshly dropped file lands at.
@@ -18983,7 +19004,12 @@
         return [Math.round(p[0] * 10) / 10, Math.round(p[1] * 10) / 10];
       }
       if (!points || points.length < 3) return (points || []).map(round);
-      var SIMPLIFY_PX = 2;  // RDP tolerance (on-screen px) → control-point spacing
+      // RDP tolerance (on-screen px) → control-point spacing. Halved from 2
+      // once corners stopped being rounded off: with the thinning that
+      // loose, a curve's samples end up far enough apart that the spline
+      // between them wanders off the hand's path — measured at 1.5px on a
+      // question mark's hook, and a third of that at 1.
+      var SIMPLIFY_PX = 1;
       var pts = this._rdpSimplify(points, this._freehandFitTolerance(SIMPLIFY_PX));
       return pts.map(round);
     },
@@ -19236,11 +19262,36 @@
         return Math.max(Math.pow(dx * dx + dy * dy, CATMULL_ALPHA / 2), 1e-6);
       }
 
+      // A deliberate corner is not a curve, and this spline has no way to
+      // know the difference on its own: it reads three points and draws a
+      // smooth arc through them, which on a right angle bows a long way off
+      // the line that was drawn (11px, measured). The samples are sparse by
+      // then — the thinning pass keeps a straight run's endpoints and
+      // nothing between — so the neighbours the tangent is built from can be
+      // the far ends of two long strokes, and the bow is proportional.
+      //
+      // A point where the stroke turns sharply is treated as an END instead:
+      // both segments meeting there arrive and leave along their own chord,
+      // the way the first and last points of the whole stroke already do. A
+      // corner stays a corner; anything gentler is still drawn as one curve.
+      function sharpAt(i) {
+        var a = p[i - 1], b = p[i], c = p[i + 1];
+        if (!a || !c) return false;
+        var ax = b[0] - a[0], ay = b[1] - a[1];
+        var cx = c[0] - b[0], cy = c[1] - b[1];
+        var la = Math.sqrt(ax * ax + ay * ay), lc = Math.sqrt(cx * cx + cy * cy);
+        if (!la || !lc) return false;
+        // cos of the turn: 1 is dead straight, -1 doubles back.
+        return (ax * cx + ay * cy) / (la * lc) < CORNER_COS;
+      }
+
       for (var j = 0; j < n - 1; j++) {
-        var p0 = p[j - 1] || p[j];
+        var startsCorner = sharpAt(j);
+        var endsCorner = sharpAt(j + 1);
+        var p0 = (startsCorner ? null : p[j - 1]) || p[j];
         var p1 = p[j];
         var p2 = p[j + 1];
-        var p3 = p[j + 2] || p2;
+        var p3 = (endsCorner ? null : p[j + 2]) || p2;
 
         var d1 = knot(p0, p1), d2 = knot(p1, p2), d3 = knot(p2, p3);
         // Tangents at the two anchors, in non-uniform Catmull-Rom form.
@@ -19251,8 +19302,8 @@
         // Ends are clamped (p0 === p1, or p3 === p2), where the formula above
         // leaves a tangent pulling off the curve. Fall back to the chord so
         // the first and last segments leave and arrive straight.
-        if (j === 0) { m1x = (p2[0] - p1[0]) / d2; m1y = (p2[1] - p1[1]) / d2; }
-        if (j === n - 2) { m2x = (p2[0] - p1[0]) / d2; m2y = (p2[1] - p1[1]) / d2; }
+        if (j === 0 || startsCorner) { m1x = (p2[0] - p1[0]) / d2; m1y = (p2[1] - p1[1]) / d2; }
+        if (j === n - 2 || endsCorner) { m2x = (p2[0] - p1[0]) / d2; m2y = (p2[1] - p1[1]) / d2; }
 
         var c1x = p1[0] + m1x * d2 / 3;
         var c1y = p1[1] + m1y * d2 / 3;
@@ -19513,8 +19564,13 @@
       // to find.
       if (draft.kind === "marker") {
         var sm = draft._smoothed || (draft._smoothed = [xy[0], xy[1]]);
-        sm[0] += (xy[0] - sm[0]) * (1 - MARKER_STREAMLINE);
-        sm[1] += (xy[1] - sm[1]) * (1 - MARKER_STREAMLINE);
+        // Smooth what is small enough to be tremor; follow what is not.
+        var mdx = xy[0] - sm[0], mdy = xy[1] - sm[1];
+        var reach = this._freehandFitTolerance(MARKER_TREMOR_PX);
+        var moved = Math.sqrt(mdx * mdx + mdy * mdy);
+        var carry = MARKER_STREAMLINE * Math.max(0, 1 - moved / reach);
+        sm[0] += mdx * (1 - carry);
+        sm[1] += mdy * (1 - carry);
         // Where the pointer really is, so the stroke can be pinned to it on
         // release rather than stopping short by the filter's lag.
         draft._rawLast = [xy[0], xy[1]];
@@ -19533,12 +19589,40 @@
 
     _commitFreehand: function(_pt) {
       var pts = this.draftState.geometry.points;
-      if (pts.length < 2 || this._strokeIsClick(pts)) {
-        this._cancelDraft();
-        return;
-      }
       var kind = this.draftState.kind || "freehand";
       var oldEl = this.draftState.el;
+
+      // A click with a pen in hand is a dot, not a mistake.
+      //
+      // It used to be thrown away — the gesture was too small to be a
+      // stroke, so nothing was drawn at all — which made the one mark you
+      // cannot draw with a drag impossible: the dot under a question mark,
+      // an i, a decimal point. The press already knows where it landed, and
+      // a two-point stroke of no length paints as a disc under the round
+      // cap these kinds already wear (the same trick the dotted dash
+      // pattern uses).
+      //
+      // Both stroke tools, because both are drawing tools; every other kind
+      // still treats a click as a cancelled drag, where it means "I changed
+      // my mind" rather than "put one here".
+      if (pts.length < 2 || this._strokeIsClick(pts)) {
+        if (kind !== "marker" && kind !== "freehand") {
+          this._cancelDraft();
+          return;
+        }
+        var at = this.draftState._rawLast || pts[0];
+        // A hair of length, not none. The round cap paints either as the
+        // same disc, but a path of zero length has no hit region: the
+        // browser could not find the dot under a click, so it drew and then
+        // could not be selected, styled or deleted. A hundredth of an image
+        // px is below anything visible at any zoom the canvas allows, and
+        // enough for the stroke to be a thing the pointer can land on.
+        oldEl.classList.remove("is-draft");
+        this._finalizeShape(
+          kind, { points: [[at[0], at[1]], [at[0] + DOT_LENGTH, at[1]]] }, oldEl
+        );
+        return;
+      }
 
       // Markers keep a point-based stroke (no bezier nodes / pen editor), but
       // get a light smoothing pass on release so finger / mouse jitter reads

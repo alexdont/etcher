@@ -5,7 +5,9 @@
 //     minimizer there) moves the whole cluster: the chevron sits at the
 //     anchor, the panel 40px below, via two CSS custom properties.
 //
-//   - styleless tools — the grabber takes no stroke or fill, so the panel
+//   - the gate on all of it — annotation mode, and nothing else (the panel
+//     used to hide behind a `styleless` tool; see below)
+//   - what styleless still says — the grabber takes no stroke or fill, and
 //     (and its chevron) hide while it is armed instead of advertising
 //     swatches that apply to nothing.
 //
@@ -86,19 +88,55 @@ assert.ok(
   "the chevron sits at the anchor itself"
 );
 
-// ── styleless gating ────────────────────────────────────────────────────────
+// ── one gate: is anyone annotating ──────────────────────────────────────────
 
 assert.ok(
   /grabber:\s*\{[^}]*styleless: true/.test(src),
-  "the grabber is declared styleless"
+  "the grabber is still declared styleless — it says something true about " +
+  "the tool, and a host reading TOOL_DEFS may want it"
+);
+// …but nothing hides a panel over it any more. A board opens with the
+// grabber armed, so while the panel, the chevron and the trigger all hung
+// off that flag, a board opened with no panel and no way to ask for one.
+// Reported once per platform: "the whole sidebar button next to the toolbar
+// is gone completely and no more sidebar", then "now desktop is missing the
+// chevron or the sidebar".
+assert.ok(
+  src.includes("var wantsStyle = !!this.annotationMode;"),
+  "the panel asks whether anyone is annotating, not what they are holding"
 );
 assert.ok(
-  src.includes("var wantsStyle = !!this.annotationMode && !(toolDef && toolDef.styleless);"),
-  "_syncStylePanel gates the panel on the active tool wanting style"
+  !src.includes("!(toolDef && toolDef.styleless)"),
+  "…and the tool no longer decides whether a sidebar exists"
 );
 assert.ok(
-  src.match(/is-active", wantsStyle\)/g).length >= 2,
-  "the panel and its chevron both follow the gate"
+  src.includes('this.stylePanel.classList.toggle("is-active", wantsStyle);'),
+  "the panel follows that gate"
+);
+// The chevron follows the gate AND the docking. On a narrow container the
+// panel is a popup opened from beside the tool bar; how much of a DOCKED
+// panel to keep is not a question there, and a chevron over the canvas
+// cycling a setting no popup reads is just in the way.
+assert.ok(
+  src.includes('this.panelToggle.classList.toggle("is-active", wantsStyle && !compact);'),
+  "the chevron shows only where the panel docks"
+);
+assert.ok(
+  src.includes('"is-active", !!this.annotationMode && !this._isCompactLayout());'),
+  "…including when a stored pref is applied, which runs on its own"
+);
+// And the trigger is the same gate, the other way round: it is the door on
+// a narrow container, where the chevron is not shown.
+assert.ok(
+  src.includes('this.styleTrigger.classList.toggle("is-active", compact && wantsStyle);'),
+  "the trigger shows wherever the panel is a popup"
+);
+// A popup is opened one press at a time, so it ignores the size pref for
+// visibility — otherwise a panel hidden on a desktop opens as nothing on a
+// phone, where the chevron that would undo it is no longer shown.
+assert.ok(
+  src.includes('".etcher-stylepanel[data-compact].is-open { display: flex; }"'),
+  "an opened popup shows whatever the size pref says"
 );
 
 // ── the grabber has all five digits ─────────────────────────────────────────

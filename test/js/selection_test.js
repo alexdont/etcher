@@ -234,6 +234,9 @@ const finalize = extract("_finalizeShape");
 // like, and so does every draft creator — that shared answer is what keeps
 // the preview and the committed shape identical.
 const styleForNewShape = extract("_styleForNewShape");
+// Also the real one: a dot is floored to a visible size at render, and
+// `_finalizeShape` asks which strokes are dots on its way through.
+const strokeIsDot = extract("_strokeIsDot");
 
 function run(kind, afterCreate) {
   const calls = [];
@@ -254,6 +257,10 @@ function run(kind, afterCreate) {
     _resolveCanvasImageId: () => null,
     _renderShape: () => {},
     _applyLineParams: () => {},
+    // A dot is floored to a visible size at render; `_finalizeShape` asks
+    // which strokes are dots on its way through. The real one, so the stub
+    // cannot drift from what the layer actually does.
+    _strokeIsDot: strokeIsDot,
     _attachShapeInteractions: () => {},
     _pushUndoCreate: () => {},
     _emitChanged: () => {},

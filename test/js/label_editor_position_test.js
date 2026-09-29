@@ -38,6 +38,9 @@ function extract(name) {
 }
 
 const startTextEdit = extract("_startTextEdit");
+// The constant it reads, lifted from the source so the two cannot drift.
+global.INPUT_PAGE_ZOOM_PX = Number(src.match(/var INPUT_PAGE_ZOOM_PX = (\d+);/)[1]);
+const editorFontPx = extract("_editorFontPx");
 const ridesShaft = extract("_labelRidesShaft");
 
 // Drive _startTextEdit far enough to capture the editor box: the
@@ -66,6 +69,10 @@ function editorBoxFor(shape, floatingBox) {
     _labelRidesShaft: ridesShaft,
     _isTextKind: (k) => k === "text" || k === "callout",
     _hasPinnedFontSize: (s) => !!(s && s.style && s.style.font_size > 0),
+    // The real one: the editor's font is floored on a touch screen so
+    // mobile Safari has no reason to zoom the page. On anything else it
+    // hands the size straight back, which is every case here.
+    _editorFontPx: editorFontPx,
     _defaultLabelFontSize: () => 16,
     _inkScale: () => 1,
     _endTextEdit: noop,
@@ -199,6 +206,10 @@ assert.ok(
     _imageToContainer: (p) => ({ x: p.x * scale, y: p.y * scale }),
     _textEditHost: () => null,
     _hasPinnedFontSize: () => true,
+    // The real one: the editor's font is floored on a touch screen so
+    // mobile Safari has no reason to zoom the page. On anything else it
+    // hands the size straight back, which is every case here.
+    _editorFontPx: editorFontPx,
     _fontSizeFor: (_s, fallback) => 16 * scale,
   };
 

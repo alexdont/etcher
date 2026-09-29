@@ -4,6 +4,128 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.18.0] — 2026-09-29
+
+Everyone watches the stroke happen, and a phone can draw with two hands.
+
+### Added
+
+- **Peers watch a shape being drawn.** A shape was emitted when it was
+  finished, so everyone else on a shared canvas watched nothing happen
+  for the length of a stroke and then a finished stroke appear.
+  In-flight MOVES were already reported for exactly that reason; this
+  is the same idea one step earlier. Three new methods:
+  `onDrawing(onFrame, onEnd)` reports our own draft a frame at a time
+  while a pointer is down, `applyDrawing(key, draft)` shows somebody
+  else's, and `applyDrawingEnd(key)` says they let go. The draft
+  travels whole because it has no uuid yet — it is not a shape — and
+  the host says which peer it came from: one person draws one shape at
+  a time, so that key is all the identity a provisional shape needs.
+
+  What a peer shows is a GHOST: built through the same factory a stored
+  annotation goes through, so it looks like the shape that will replace
+  it, and held out of `shapes` so it cannot be selected, emitted,
+  undone, saved or hit-tested. Every drawing tool reports itself,
+  including the ones drawn across several clicks — a polygon reports
+  from its preview, a callout while its label is being placed.
+
+- **Two fingers pan and pinch whatever tool is in hand.** Moving around
+  a board on a phone meant putting the pen down, switching to the
+  grabber, panning, and switching back — and a second finger landing on
+  an armed canvas fed the stroke instead, so the line whipped back and
+  forth between the two fingers for as long as they both moved. A
+  finger now travels on to the viewer, which counts it; one draws, two
+  are the canvas's. The stroke in progress is abandoned when the second
+  finger lands, an erase under way is let go of rather than committed,
+  and drawing does not resume until the hand is off. The same rule
+  reaches the marquee: box-select used to open one rectangle per finger
+  and then drag it between them.
+
+- **Label size has a plus and a minus.** It is a number box, which a
+  desktop browser draws spinner arrows inside and a phone draws nothing
+  inside — so on a phone the only way to change a label's size was to
+  type a number. The buttons step the same setting typing does, clamped
+  the same way, and stepping an empty box starts from the size actually
+  in use rather than jumping to one nobody chose. 36px under a coarse
+  pointer; stacked into a column in the compact strip, which is one
+  control wide by design.
+
+### Changed
+
+- **The style panel asks whether anyone is annotating, and nothing
+  else.** The grabber is declared `styleless`, and while one was armed
+  the panel went away — on the grounds that swatches beside a hand tool
+  read as "these apply to something". They apply to the next shape
+  drawn, and the price of the rule was that a board, which opens with
+  the grabber armed, opened with no panel AND no control to ask for
+  one, because the chevron and the popup trigger both hung off the same
+  gate. `styleless` stays declared on the tool; nothing hides a panel
+  over it.
+
+- **The chevron belongs to a docked panel.** On a container too narrow
+  to dock one, the panel is a popup opened from beside the tool bar,
+  and a chevron floating over the canvas cycling a size no popup reads
+  was in the way. An opened popup also ignores the size preference for
+  visibility: hiding the panel on a desktop used to leave a phone with
+  a button that opened nothing.
+
+- **A dot is painted with a length the renderer believes in.** Its
+  stored length is a hundredth of an image px — enough to be
+  hit-tested, and at 0.007 zoom seven hundred-thousandths of a screen
+  px, which engines disagree about. Measured through the rasteriser:
+  that path paints one pixel at 64/255 where a real segment gives
+  0/255, and WebKit drops degenerate subpaths outright, so an iPhone
+  placed dots it never drew until you zoomed in far enough to lend the
+  thing some length. It is drawn one DEVICE pixel long now. Its SIZE
+  is unchanged — the round cap, which is the stroke width, which scales
+  with the zoom like every other bit of ink.
+
+- **A marker stroke has the hairline floor the outline kinds have.** It
+  had none at all, and went to 0.2px and below on the way out.
+
+- **A text box minted by a tap is never smaller on screen than it would
+  be at 1:1.** Ink-sizing says it is the same number of image px at
+  every zoom; from far enough out that is half a screen pixel. A box
+  you DREW is untouched — you said how big.
+
+### Fixed
+
+- **A slow stroke on a phone is a drawing, not a long press.** iOS was
+  answering one with the copy / look-up / share bar, over the top of
+  the line being drawn. `user-select: none` does not reach it: WebKit
+  decides what a press means at `touchstart`, before any pointer event
+  runs. The default is refused there now — only while a tool is armed,
+  never over a label editor — and any selection made before the tool
+  was armed is dropped, so the bar has nothing to render from.
+
+- **A tap places a dot on a phone.** The dot is committed on release
+  and has nothing else behind it, so when iOS stopped sending pointer
+  events part-way through a gesture, it was the one gesture that
+  vanished: strokes of any length still landed. The release is taken
+  from `touchend` as well now, which is the model iOS actually
+  implements, and does nothing at all when the pointer events arrived.
+
+- **A new text box asks for its text.** It always dropped straight into
+  the editor; on a phone the editor opened and the keyboard did not,
+  because the focus was deferred by a `setTimeout` and WebKit raises a
+  keyboard only for a focus inside the gesture that asked for it. What
+  you got was a box with a placeholder and no way to type until you
+  tapped it a second time.
+
+- **Typing into a label no longer zooms the page.** Mobile Safari zooms
+  the whole document when an input under 16px takes focus, and the
+  editor's font mirrors the text's size — a fraction of a pixel on a
+  zoomed-out board. On a canvas that is a trap: the pinch that would
+  undo it belongs to the board. The editor's font is floored at 16px on
+  a touch screen. The shape keeps its own size; nothing about the floor
+  is stored.
+
+- **Hover survives a touch.** The finger that owns a stroke is
+  remembered so the other cannot drag it; nothing reports a mouse
+  coming off, so on a laptop with a touch screen the id left behind by
+  the last touch stroke blocked every mouse move after it — and hover
+  is what the tooltips and handles live on.
+
 ## [0.17.2] — 2026-09-24
 
 The marker draws where the hand drew, and a click leaves a dot.

@@ -722,6 +722,13 @@
       "  overflow-y: auto;",
       "}",
       ".etcher-stylepanel[data-compact]:not(.is-open) { display: none; }",
+      // A popup ignores the size pref for VISIBILITY. That pref answers
+      // "how much of the docked panel do I want", and a popup is not docked
+      // — it is opened deliberately, one press at a time. Without this,
+      // someone who hid the panel on a desktop and then opened the board on
+      // a phone would press the style button and get nothing, with the
+      // chevron that would have undone it no longer on screen there.
+      ".etcher-stylepanel[data-compact].is-open { display: flex; }",
       ".etcher-style-trigger {",
       "  position: absolute; z-index: 11; display: none;",
       "  align-items: center; justify-content: center;",
@@ -908,6 +915,55 @@
       "  transition: background 120ms ease, border-color 120ms ease;",
       "}",
       ".etcher-num:hover { background: rgba(255, 255, 255, 0.12); }",
+      // Label size, plus and minus. A number box spins with the arrows a
+      // browser draws inside it — on a desktop. A phone draws none, so the
+      // only way to change a label's size there was to type a number into
+      // it, one hand holding the phone. These are the same step, as a thing
+      // to press.
+      ".etcher-stepper {",
+      "  display: flex; align-items: center; gap: 4px; width: 100%;",
+      "}",
+      ".etcher-stepper .etcher-num { flex: 1 1 auto; min-width: 0; }",
+      // The box keeps its own spinners on a desktop — they are no trouble
+      // there and some people reach for them — but the buttons are the
+      // control that exists everywhere.
+      ".etcher-step {",
+      "  flex: none; width: 30px; height: 30px; padding: 0;",
+      "  display: inline-flex; align-items: center; justify-content: center;",
+      "  border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.25);",
+      "  background: transparent; color: #fff; cursor: pointer;",
+      "  font: 600 15px ui-sans-serif, system-ui, sans-serif; line-height: 1;",
+      "  transition: background 120ms ease, border-color 120ms ease;",
+      "  -webkit-user-select: none; user-select: none;",
+      "  -webkit-touch-callout: none; touch-action: manipulation;",
+      "}",
+      ".etcher-step:hover { background: rgba(255, 255, 255, 0.12); }",
+      ".etcher-step:active { background: rgba(255, 255, 255, 0.22); }",
+      ".etcher-step:disabled { opacity: 0.35; cursor: default; }",
+      // A finger is not a cursor: the same button, big enough to hit.
+      "@media (pointer: coarse) {",
+      "  .etcher-step { width: 36px; height: 36px; font-size: 17px; }",
+      "}",
+      // The compact strip is one column — that is the whole point of it, to
+      // give the board back its width — so the pair stacks instead of
+      // sitting either side of the number and making the strip three
+      // controls wide. Plus on top, minus underneath, the way a stepper
+      // reads when it is vertical.
+      ".etcher-stylepanel[data-size=\"compact\"] .etcher-stepper {",
+      "  flex-direction: column; gap: 2px; width: auto;",
+      "}",
+      // All three ordered, not just the plus: ordering one leaves the other
+      // two in DOM order behind it, which puts the number underneath the
+      // minus instead of between the pair. Laid out by `order` rather than
+      // by reversing the column, so reading and tab order still follow the
+      // DOM.
+      ".etcher-stylepanel[data-size=\"compact\"] .etcher-step-up { order: 1; }",
+      ".etcher-stylepanel[data-size=\"compact\"] .etcher-stepper .etcher-num { order: 2; }",
+      ".etcher-stylepanel[data-size=\"compact\"] .etcher-step-down { order: 3; }",
+      // As wide as the number they belong to, so the column has one edge.
+      ".etcher-stylepanel[data-size=\"compact\"] .etcher-step {",
+      "  width: 30px; height: 22px; font-size: 13px; border-radius: 5px;",
+      "}",
       // On/off for the label plate. Sits where the other rows' read-outs
       // sit, so the row reads as \"setting: value\" like the ones above it.
       ".etcher-toggle {",
@@ -1123,6 +1179,21 @@
       ".etcher-toolbar .etcher-overflow-hidden { display: none !important; }",
       ".etcher-overlay {",
       "  position: absolute; inset: 0; pointer-events: none;",
+      // Said here rather than inherited from the host. A drawing surface has
+      // no text on it to select and nothing to look up, and iOS otherwise
+      // treats a slow stroke as a long press: the copy / look-up / share bar
+      // comes up mid-line. Fresco's viewer carries the same three, but etcher
+      // also hangs off hosts that do not (a strip reader, a bare <img>), and
+      // the surface under the finger is this one.
+      "  -webkit-user-select: none; user-select: none;",
+      "  -webkit-touch-callout: none;",
+      "}",
+      // …except where there IS text to select: a label being edited is a real
+      // input, and selecting inside it is how anyone fixes a typo.
+      ".etcher-overlay input, .etcher-overlay textarea,",
+      ".etcher-overlay [contenteditable] {",
+      "  -webkit-user-select: text; user-select: text;",
+      "  -webkit-touch-callout: default;",
       "}",
       ".etcher-overlay.is-drawing { cursor: crosshair; }",
       // Document-level hit-test marks the overlay with this class
@@ -1885,6 +1956,13 @@
   // A remote pointer with nothing heard from it for this long is dropped, so
   // a closed tab doesn't leave a dot stuck on everyone else's board.
   var POINTER_STALE_MS = 4000;
+  // How long a finished stroke is held on screen while its real shape makes
+  // the round trip to the server and back. The ghost is normally handed over
+  // the instant that shape is built, and this is only the backstop for the
+  // edit that never lands — an undo on the way, a save that failed, a
+  // dropped socket. Long enough to cover a bad connection, short enough that
+  // a stroke nobody can select or move is not left lying there.
+  var GHOST_HANDOVER_MS = 5000;
 
   // What the bar shows, and in what order, before anyone customises it.
   // Everything else the host offers is still there, one press of `⋯` away.
@@ -2060,6 +2138,43 @@
   // it exists so the browser has something to hit-test, not so anything is
   // visible — the disc a round cap paints is the whole mark.
   var DOT_LENGTH = 0.01;
+
+  // The smallest a stroke is allowed to be drawn, in SCREEN px, whatever the
+  // zoom says. `_applyLineParams` has floored the outline kinds at 0.4 for a
+  // while — "a shape you can no longer see is worse than one drawn slightly
+  // heavier than the maths says" — and a marker had no floor at all.
+  var MARKER_MIN_SCREEN_PX = 0.4;
+  // The length a dot's path is DRAWN with, in device px — one pixel, the
+  // smallest a rasteriser must treat as a real subpath.
+  //
+  // It is not a size. A dot's size is its round cap, which is the stroke
+  // width, which scales with the zoom like every other bit of ink: a dot on
+  // the board gets smaller as you pull away from it, exactly as the stroke
+  // beside it does. This is only the hair of LENGTH underneath that cap, and
+  // it exists because `DOT_LENGTH` — a hundredth of an IMAGE px — becomes a
+  // ten-thousandth of a screen px on the way out, and a subpath that short is
+  // one engines disagree about: Chrome paints it as a quarter-covered smudge
+  // (measured, 64/255 against a real segment's 0/255) and WebKit drops
+  // degenerate subpaths altogether, which is why an iPhone placed dots it
+  // never drew until you zoomed in far enough to give the thing some length.
+  // One device pixel is the least that always paints and the least that can
+  // be seen, so the cap — not this — is what anyone is looking at.
+  //
+  // Stored geometry is untouched: this is how a dot is PAINTED, not what it
+  // is.
+  var DOT_RENDER_DEVICE_PX = 1;
+
+  // The smallest a text box minted by a TAP may appear, in SCREEN px.
+  //
+  // The same 16 the ink default is, on purpose: the rule it makes is "never
+  // smaller on screen than it would be at 1:1". A tap at 1:1 or zoomed in is
+  // untouched by it — ink wins there, and boards keep the sizes they have —
+  // and on the way out the box stops shrinking rather than vanishing.
+  var NEW_TEXT_MIN_SCREEN_PX = 16;
+
+  // The font size below which mobile Safari zooms the PAGE when an input is
+  // focused. It is a fixed number in the engine, not a preference.
+  var INPUT_PAGE_ZOOM_PX = 16;
 
   // How far the pointer must travel, in SCREEN px, before the marker takes
   // another sample. Screen rather than image px so a stroke has the same
@@ -3278,6 +3393,46 @@
             return true;
           },
 
+          // ── In-flight drawing ───────────────────────────────────────────
+          //
+          // The same problem as a drag, one step earlier: a shape is emitted
+          // when it is FINISHED, so a peer watches nothing happen for the
+          // length of a stroke and then a finished stroke appears. Register
+          // here and `fn` is called with `{kind, geometry, style}` once a
+          // frame while a shape is being drawn.
+          //
+          // Not an edit, like the move reports: nothing is stored, no undo
+          // entry, no `etcher:annotations-changed`. The real shape still
+          // arrives the usual way when the gesture ends.
+          //
+          // `onDrawEnd` fires once when the pointer goes up — the host's cue
+          // to tell peers to drop the provisional shape and wait for the
+          // edit, so an abandoned draw leaves nothing behind.
+          onDrawing: function(fn, onDrawEnd) {
+            self._liveDrawHandler = typeof fn === "function" ? fn : null;
+            self._liveDrawEndHandler = typeof onDrawEnd === "function" ? onDrawEnd : null;
+            if (self._liveDrawHandler) self._wireLiveMoveTracking();
+            return true;
+          },
+
+          // Show what a peer is drawing, right now. `key` is whatever the
+          // host uses to tell peers apart — one person draws one shape at a
+          // time, so the key is all the identity a provisional shape needs,
+          // and the next report for that key replaces it.
+          //
+          // These shapes are GHOSTS: absent from `getShapes()`, from every
+          // emit, from undo and from hit-testing. They exist on screen and
+          // nowhere else, and `applyDrawingEnd` takes them away.
+          applyDrawing: function(key, draft) {
+            self._applyGhostDraw(key, draft);
+            return true;
+          },
+
+          applyDrawingEnd: function(key) {
+            self._retireGhostDraw(key);
+            return true;
+          },
+
           setLinkUnfurler: function(fn) {
             self._unfurlLinkFn = typeof fn === "function" ? fn : null;
           },
@@ -4302,11 +4457,14 @@
       // tool other than cursor. `pointer-events: auto` is toggled on the
       // wrapper to gate this.
       //
-      // `data-fresco-no-capture` tells Fresco 0.5's pointerdown handler
-      // to bail when an event originates inside the overlay. Combined
-      // with `e.stopPropagation()` in our handler, drawing never
-      // triggers Fresco's pan/zoom even though the wrapper sits inside
-      // the Fresco host's event tree.
+      // `data-fresco-no-capture` tells Fresco's pointerdown handler to bail
+      // when an event originates inside the overlay, so drawing never
+      // triggers Fresco's pan/zoom even though the wrapper sits inside the
+      // Fresco host's event tree. A mouse press is also stopped dead in
+      // our handler; a TOUCH is not, and travels on so Fresco can count
+      // fingers. One claimed finger draws, two are a pinch and Fresco's —
+      // see the press handler below, and the matching exemption in
+      // Fresco's `onPointerDown`.
       wrapper.setAttribute("data-fresco-no-capture", "");
 
       // …but that attribute is read by Fresco's WHEEL handler too, and the
@@ -4370,11 +4528,122 @@
         // middle button, and swallowing it would break Fresco's middle-drag
         // pan everywhere except blank canvas.
         if (e.button != null && e.button !== 0) return;
-        e.stopPropagation();
+
+        // A finger is not just another pointer. Two of them are a pinch, and
+        // that gesture belongs to the canvas whatever tool is armed —
+        // otherwise moving around a board on a phone means putting the pen
+        // down, switching to the grabber, panning, and switching back.
+        //
+        // Swallowing the press here left Fresco holding no pointers at all,
+        // so a second finger had nothing to pinch WITH and simply fed the
+        // same stroke: the line jumped between the two fingers, back and
+        // forth, for as long as they both moved. Touches travel on and
+        // Fresco counts them; `_applyPanLock` is what stops a single finger
+        // panning while a tool is armed, and a pinch is exempt from that
+        // lock by Fresco's own design.
+        //
+        // A mouse still stops here: there is no second pointer coming, and a
+        // drag that draws must not also pan.
+        if (e.pointerType !== "touch") e.stopPropagation();
+
+        self._trackTouch(e, true);
+        // Two fingers down: whatever was being drawn is abandoned, and the
+        // gesture is the canvas's. A half-stroke left on screen while the
+        // board moves under it is worse than no stroke.
+        if (self._multiTouch) {
+          self._cancelDraft();
+          self._cancelErase();
+          return;
+        }
         self._onPointerDown(e);
       });
-      wrapper.addEventListener("pointermove", function(e) { self._onPointerMove(e); });
-      wrapper.addEventListener("pointerup",   function(e) { self._onPointerUp(e); });
+      // iOS decides what a long press MEANS at `touchstart`, before any
+      // pointer event runs — the same ordering that already forces
+      // `touch-action: none` on the handles above. Under that classifier a
+      // stroke drawn slowly is a long press on the page, and it answers with
+      // the selection bar: copy, look up, share, over the top of the drawing.
+      // `user-select: none` does not reach it, because by then the gesture
+      // has already been claimed.
+      //
+      // So the default is refused at the only moment it can be. Only while a
+      // drawing tool is armed — that is the only time this wrapper catches
+      // touches at all — and never over a label editor, where a press is
+      // meant to place a cursor and select words.
+      //
+      // Pointer events are unaffected: they are dispatched separately, so
+      // drawing, the two-finger pan and Fresco's pinch all still see every
+      // finger. Native scroll and double-tap zoom are already off here
+      // (`touch-action: none` on the viewer).
+      //
+      // The text and callout tools open a real input and want the keyboard
+      // with it. Refusing a touch's default does not spend the user gesture
+      // the keyboard needs — `focus()` still runs inside it, on the pointerup
+      // that follows — so those tools are not exempted here. A press that
+      // lands ON an existing editor is, above: that one is the browser's.
+      wrapper.addEventListener("touchstart", function(e) {
+        if (!e.cancelable) return;
+        var t = e.target;
+        if (t && t.closest && t.closest("input, textarea, [contenteditable]")) return;
+        e.preventDefault();
+        // A selection made before the tool was armed would still have a bar
+        // to show. Nothing on a canvas is selectable, so dropping it costs
+        // the user nothing and leaves that bar with nothing to render.
+        self._dropStraySelection();
+      }, { passive: false });
+
+      // iOS stops sending pointer events part-way through a gesture whenever
+      // its own classifier claims the touch — the same classifier the
+      // `touchstart` above is arguing with, and the reason the handles need
+      // `touch-action` set in CSS rather than at `pointerdown`. A press whose
+      // release never arrives leaves the drawing it started uncommitted, and
+      // the gesture with nothing BUT a release to go on is the press that
+      // never moves: the dot under a question mark, the dot on an i. A stroke
+      // of any length still lands, so what the user sees is a marker that
+      // draws lines but will not place a dot.
+      //
+      // Touch events do not have that problem: `touchend` is the model iOS
+      // actually implements, and it fires on the element the touch STARTED
+      // on. So the release is taken from there as well. Both halves below are
+      // no-ops when the pointer events did arrive — the tracking is already
+      // clear, and the draft is already a shape.
+      var onTouchRelease = function(e) {
+        // Not the last finger up: the gesture is still going.
+        if (e.touches && e.touches.length) return;
+        var drawId = self._drawPointerId;
+        // Whatever the pointer stream did or did not send, no fingers are
+        // down now. A `_multiTouch` left standing here would swallow the
+        // next stroke whole.
+        self._resetTouchTracking();
+        // `touchcancel` is the gesture being taken AWAY rather than
+        // finished. Nothing is committed from it; what happens to the draft
+        // is left to the pointer stream, which cancels it in its own time.
+        if (e.type !== "touchend") return;
+        self._commitStrandedDraft(e, drawId);
+      };
+      wrapper.addEventListener("touchend", onTouchRelease);
+      wrapper.addEventListener("touchcancel", onTouchRelease);
+
+      wrapper.addEventListener("pointermove", function(e) {
+        // Only the finger that started the drawing draws it.
+        if (self._multiTouch) return;
+        // Only for a finger. `_drawPointerId` is cleared when a finger comes
+        // off, and a mouse never reports one coming off — so on a laptop with
+        // a touch screen the id left behind by the last touch stroke would
+        // block every mouse move that followed it, and the hover the tooltips
+        // and handles live on would go dead until the next press.
+        if (e.pointerType === "touch" &&
+            self._drawPointerId != null && e.pointerId !== self._drawPointerId) return;
+        self._onPointerMove(e);
+      });
+      wrapper.addEventListener("pointerup", function(e) {
+        // A finger coming off a pinch is not the end of a drawing. Both
+        // drafts and the eraser were abandoned when the second finger
+        // landed, so there is nothing here to finish — and `_onPointerUp`
+        // is where the eraser commits, which is the one thing that must
+        // not happen on the way out of a two-finger gesture.
+        if (self._multiTouch) return;
+        self._onPointerUp(e);
+      });
       wrapper.addEventListener("pointerleave", function() { self._onPointerLeave(); });
       wrapper.addEventListener("dblclick",    function(e) { self._onDoubleClick(e); });
 
@@ -5219,7 +5488,12 @@
         : (mode === "compact" ? "Hide the style panel" : "Show the style panel");
       btn.title = title;
       btn.setAttribute("aria-label", title);
-      btn.classList.toggle("is-active", !!this.annotationMode);
+      // Same rule as `_syncStylePanel`: a panel that does not dock has no
+      // chevron. This path runs on its own (a stored pref arriving, the
+      // toggle being built), so the condition has to be repeated rather
+      // than assumed.
+      btn.classList.toggle(
+        "is-active", !!this.annotationMode && !this._isCompactLayout());
     },
 
     // The button that opens the style panel when it can't be docked. Lives
@@ -5431,22 +5705,41 @@
       if (!borrowed && this.paramsPopup && this.paramsPopup.parentNode !== this.stylePanel) {
         this.stylePanel.appendChild(this.paramsPopup);
       }
-      // A `styleless` tool (the grabber) takes no stroke or fill, so the
-      // panel has nothing to offer while one is armed — showing it anyway
-      // reads as "these swatches apply to something".
-      var toolDef = this.activeTool != null ? TOOL_DEFS[this.activeTool] : null;
-      var wantsStyle = !!this.annotationMode && !(toolDef && toolDef.styleless);
+      // The panel is not gated on the tool in hand.
+      //
+      // It was: the grabber is declared `styleless`, and while one was armed
+      // the panel went away, on the grounds that swatches beside a hand tool
+      // read as "these apply to something". They do apply to something — the
+      // next shape drawn — and the price of the rule was that a board, which
+      // opens with the grabber armed, opened with no panel AND no control to
+      // bring one back, because both the chevron and the trigger hung off
+      // the same gate. It was reported twice, once per platform: "the whole
+      // sidebar button next to the toolbar is gone completely and no more
+      // sidebar" on a phone, and then "now desktop is missing the chevron or
+      // the sidebar".
+      //
+      // `styleless` stays declared on the grabber — it says something true
+      // about the tool, and a host reading TOOL_DEFS may want it — but
+      // nothing here hides a panel over it any more.
+      var wantsStyle = !!this.annotationMode;
       this.stylePanel.classList.toggle("is-active", wantsStyle);
-      // The chevron follows the panel — it is the panel's control, and
-      // without a panel there is nothing to minimize.
-      if (this.panelToggle) {
-        this.panelToggle.classList.toggle("is-active", wantsStyle);
-      }
-
       // Docked on a roomy container, a popup on a narrow one. Re-evaluated
       // on every sync so a rotation or a resized split view moves it without
       // the layer being rebuilt.
       var compact = this._isCompactLayout();
+
+      // The chevron follows the panel — it is the panel's control, and
+      // without a panel there is nothing to minimize.
+      //
+      // It also goes when the panel stops docking. On a narrow container the
+      // panel is a popup opened from beside the tool bar, one press at a
+      // time; how much of a docked panel to keep is not a question there,
+      // and the chevron floating over the canvas cycles a setting that
+      // nothing in a popup reads. Reported as "the chevron does nothing and
+      // is just getting in the way".
+      if (this.panelToggle) {
+        this.panelToggle.classList.toggle("is-active", wantsStyle && !compact);
+      }
       if (compact) {
         this.stylePanel.setAttribute("data-compact", "");
       } else {
@@ -5464,10 +5757,20 @@
       }
 
       if (this.styleTrigger) {
-        this.styleTrigger.classList.toggle(
-          "is-active",
-          compact && wantsStyle
-        );
+        // On a narrow container this button is the only door to the panel,
+        // and a door is worth having even while the tool in hand takes no
+        // style of its own: what the panel sets is what the NEXT tool draws
+        // with. The DOCKED panel keeps the stricter rule — it sits open over
+        // the canvas, and swatches beside a hand tool read as "these apply
+        // to something".
+        //
+        // A board opens with the grabber armed, which is a styleless tool,
+        // so that gate hid this button in the state every board starts in.
+        // It went unnoticed while the chevron was still showing on compact
+        // layouts; the moment that went, the report was "the whole sidebar
+        // button next to the toolbar is gone completely and no more
+        // sidebar".
+        this.styleTrigger.classList.toggle("is-active", compact && wantsStyle);
         this._renderStyleTriggerIcon();
       }
       if (compact) this._positionStyleChrome();
@@ -6444,6 +6747,29 @@
       return DEFAULT_LABEL_FONT_SIZE;
     },
 
+    // What the EDITOR types at, in screen px. The shape keeps its own size:
+    // this is only the box being typed into, and nothing here is stored.
+    //
+    // Floored on a touch screen at the size under which mobile Safari zooms
+    // the PAGE to help you type — focus an input below 16px and the whole
+    // document scales up, toolbar and all. On a canvas that is a trap: the
+    // pinch that would undo it belongs to the board, so the page stays
+    // zoomed and there is no way back short of a reload. Reported as "every
+    // single time I start creating text, it zooms me in… eventually I'm
+    // zoomed into the actual canvas and I can no longer zoom out".
+    //
+    // Only where the pointer is coarse. A desktop browser does no such
+    // thing, and there the editor should look exactly like the result.
+    _editorFontPx: function(px) {
+      if (!(px > 0) || px >= INPUT_PAGE_ZOOM_PX) return px;
+      var coarse = false;
+      try {
+        coarse = !!(window.matchMedia &&
+                    window.matchMedia("(pointer: coarse)").matches);
+      } catch (_) {}
+      return coarse ? INPUT_PAGE_ZOOM_PX : px;
+    },
+
     _hasPinnedFontSize: function(shape) {
       var fs = shape && shape.style && shape.style.font_size;
       return typeof fs === "number" && isFinite(fs) && fs > 0;
@@ -6825,7 +7151,7 @@
         // Floored, or a line becomes sub-pixel and disappears entirely at
         // extreme zoom-out — a shape you can no longer see is worse than one
         // drawn slightly heavier than the maths says.
-        w = Math.max(0.4, w * scale);
+        w = Math.max(MARKER_MIN_SCREEN_PX, w * scale);
       }
       el.style.strokeWidth = w + "px";
       el.removeAttribute("stroke-width");
@@ -7107,8 +7433,16 @@
       fontNum.title =
         "Label size — what new labels start at; clearing it returns " +
         "to the default (" + DEFAULT_LABEL_FONT_SIZE + ")";
+      var fontStep = document.createElement("div");
+      fontStep.className = "etcher-stepper";
+      var fontDown = self._makeStepButton("−", "Smaller", "etcher-step-down");
+      var fontUp = self._makeStepButton("+", "Larger", "etcher-step-up");
+      fontStep.appendChild(fontDown);
+      fontStep.appendChild(fontNum);
+      fontStep.appendChild(fontUp);
+
       fontRow.appendChild(fontHead);
-      fontRow.appendChild(fontNum);
+      fontRow.appendChild(fontStep);
       popup.appendChild(fontRow);
       self._paramsFontRow = fontRow;
       self._paramsFontNum = fontNum;
@@ -7116,6 +7450,22 @@
       function clampFont(n) {
         return Math.max(FONT_SIZE_MIN, Math.min(FONT_SIZE_MAX, Math.round(n)));
       }
+
+      // One step of the same thing typing a number does. An empty box means
+      // the size is coming from somewhere else (a box-sized label, the
+      // default) — stepping starts from the size that is actually in use, so
+      // the first press nudges what is on screen rather than jumping to some
+      // number the user never chose.
+      function stepFont(by) {
+        var n = parseInt(fontNum.value.trim(), 10);
+        if (!isFinite(n)) n = Math.round(self._defaultLabelFontSize());
+        var next = clampFont(n + by);
+        fontNum.value = String(next);
+        self._setFontSize(next, true);
+      }
+
+      fontDown.addEventListener("click", function() { stepFont(-1); });
+      fontUp.addEventListener("click", function() { stepFont(1); });
 
       // Typed, spun, or pasted. An empty box means auto — the one way back
       // to box-sizing once a size has been pinned, short of dragging.
@@ -11651,7 +12001,12 @@
       if (this.handleKind !== "canvas") return;
       if (!this.handle || typeof this.handle.setPanLocked !== "function") return;
       try {
-        this.handle.setPanLocked(!!this.annotationMode && this.activeTool == null);
+        // Locked for every tool that draws or selects on the surface, so one
+        // finger (or one left-drag) belongs to the tool. The grabber is the
+        // exception it exists to be. A two-pointer pinch is exempt from the
+        // lock inside Fresco, which is what lets two fingers move the canvas
+        // without anybody switching tools.
+        this.handle.setPanLocked(!!this.annotationMode && this.activeTool !== "grabber");
       } catch (_) {}
     },
 
@@ -12348,9 +12703,19 @@
             // points — the spline hugs them closely enough for title / box-
             // select. Drives both the live draft and the committed stroke.
             var mp = g.points || [];
+            if (mp.length && self._strokeIsDot(g)) {
+              // A dot: drawn as its own short segment rather than the stored
+              // hair of one, so the round cap has a subpath the renderer
+              // agrees is there. See `DOT_RENDER_DEVICE_PX`.
+              var dc = self._imageToContainer({ x: mp[0][0], y: mp[0][1] });
+              var dlen = self._dotRenderLength();
+              el.setAttribute("d", "M " + dc.x + " " + dc.y +
+                                   " L " + (dc.x + dlen) + " " + dc.y);
+            } else {
             el.setAttribute("d", self._catmullRomPathD(mp, function(p) {
               return self._imageToContainer({ x: p[0], y: p[1] });
             }, { corners: true }));
+            }
             var mMinX = Infinity, mMaxX = -Infinity, mMinY = Infinity;
             for (var mi = 0; mi < mp.length; mi++) {
               if (mp[mi][0] < mMinX) mMinX = mp[mi][0];
@@ -12370,6 +12735,11 @@
               var s = self._imageToContainer({ x: p[0], y: p[1] });
               return s.x + "," + s.y;
             }).join(" ");
+            if ((g.points || []).length && self._strokeIsDot(g)) {
+              var lc = self._imageToContainer({ x: g.points[0][0], y: g.points[0][1] });
+              var llen = self._dotRenderLength();
+              lpts = lc.x + "," + lc.y + " " + (lc.x + llen) + "," + lc.y;
+            }
             el.setAttribute("points", lpts);
             if (isFinite(lMinX) && isFinite(lMinY)) {
               bboxTopImage = { x: (lMinX + lMaxX) / 2, y: lMinY };
@@ -12379,7 +12749,8 @@
           // (and dash) track the current zoom — `_renderShape` runs on every
           // pan/zoom frame. Drafts have no `style` yet → use the tool default.
           if (shape.kind === "marker") {
-            self._applyMarkerStyle(el, shape.style || self._currentMarkerStyle(), self._markerScale());
+            self._applyMarkerStyle(el, shape.style || self._currentMarkerStyle(),
+                                   self._markerScale());
           }
           break;
         }
@@ -12881,6 +13252,14 @@
       // onto each gesture. See `_noteLiveMove`.
       if (self._liveMoveHandler && shape.uuid) self._noteLiveMove(shape);
 
+      // …and the shape being drawn right now, which has no uuid yet — it is
+      // `draftState` until the gesture ends and `_finalizeShape` gives it
+      // one. Same single choke point, same frame batching. See
+      // `_noteLiveDraw`.
+      if (self._liveDrawHandler && self._isLiveDraft(shape)) {
+        self._noteLiveDraw(shape.kind, shape.geometry, shape.style);
+      }
+
       // Same reason as the badge: it traces the geometry this render wrote.
       self._syncHatchOutline(shape);
 
@@ -13087,6 +13466,209 @@
       }
     },
 
+    // ── In-flight drawing ─────────────────────────────────────────────────
+    //
+    // A stroke is one shape that does not exist yet. There is no uuid to
+    // report against and nothing for a peer to update, so the report carries
+    // the draft itself — kind, geometry, style — and the host says which peer
+    // it came from. One person draws one shape at a time, so that is enough
+    // to tell provisional shapes apart.
+    // The shape being drawn right now, whichever tool is drawing it. Most
+    // tools draft into `draftState`; a callout keeps its own while the label
+    // is placed. A polygon is neither — it is drawn vertex by vertex through
+    // `_renderPolygonPreview`, which reports for itself.
+    _isLiveDraft: function(shape) {
+      return !!shape && (shape === this.draftState || shape === this.draftCallout);
+    },
+
+    _noteLiveDraw: function(kind, geometry, style) {
+      if (!kind || !geometry || this._applyingGhostDraw) return;
+
+      this._liveDrawPending = { kind: kind, geometry: geometry, style: style || null };
+      if (this._liveDrawFrame) return;
+
+      var self = this;
+      this._liveDrawFrame = requestAnimationFrame(function() {
+        self._liveDrawFrame = null;
+        self._flushLiveDraw();
+      });
+    },
+
+    // One report per frame, like the moves. A point-based stroke reports its
+    // whole point list each time, which grows as the stroke does: a long
+    // marker line is a few hundred points, so the tail of a slow stroke is
+    // the expensive end of this. Kept whole because a partial protocol needs
+    // resynchronisation for something that is thrown away a moment later —
+    // if it ever costs too much, sending only the points added since the
+    // last report is the change, and the ghost is where it would land.
+    _flushLiveDraw: function() {
+      var draft = this._liveDrawPending;
+      this._liveDrawPending = null;
+      if (!draft || !this._liveDrawHandler) return;
+
+      try {
+        this._liveDrawHandler(draft);
+      } catch (_) {}
+    },
+
+    // A peer's shape, mid-draw. Rendered through the same factory a stored
+    // annotation goes through, so a ghost marker looks exactly like the
+    // marker that will replace it — and then held aside: never in `shapes`,
+    // so it cannot be selected, emitted, undone, hit-tested or saved.
+    _applyGhostDraw: function(key, draft) {
+      if (!key || !draft || !draft.kind || !draft.geometry) return;
+
+      this._ghostDraws = this._ghostDraws || {};
+      var ghost = this._ghostDraws[key];
+
+      // A different kind means a different element: the peer let go and
+      // started something else, and the report for the new shape arrived
+      // before the end of the old one.
+      if (ghost && ghost.kind !== draft.kind) {
+        this._dropGhostDraw(key);
+        ghost = null;
+      }
+
+      this._applyingGhostDraw = true;
+      try {
+        if (!ghost) {
+          ghost = this._renderAnnotation(
+            { uuid: null, kind: draft.kind, geometry: draft.geometry, style: draft.style },
+            { ghost: true }
+          );
+          if (!ghost) return;
+          this._ghostDraws[key] = ghost;
+        } else {
+          ghost.geometry = draft.geometry;
+          this._renderShape(ghost);
+        }
+      } finally {
+        this._applyingGhostDraw = false;
+      }
+    },
+
+    // Anything batched is dropped rather than flushed: the finished shape is
+    // already on its way as a real edit, and one more provisional frame
+    // behind it would only draw the same line twice.
+    _endLiveDraw: function() {
+      if (this._liveDrawFrame) {
+        cancelAnimationFrame(this._liveDrawFrame);
+        this._liveDrawFrame = null;
+      }
+      // The last frame is SENT, not dropped. Reporting is batched a frame at
+      // a time, so the points drawn after the last one had yet to go out —
+      // and a peer holds the ghost on screen now until the real shape lands.
+      // Without this they hold a stroke that stops a few points short of the
+      // one that replaces it, and the tail of it appears at the handover:
+      // the same flash, smaller.
+      this._flushLiveDraw();
+      this._liveDrawPending = null;
+      if (this._liveDrawEndHandler) {
+        try { this._liveDrawEndHandler(); } catch (_) {}
+      }
+    },
+
+    // The peer let go. The shape they drew is on its way as a real edit, but
+    // it has a server round trip to make, and dropping the ghost now leaves a
+    // hole exactly where the stroke was: it vanishes, and reappears when the
+    // edit lands. On this machine that hole is a couple of frames; across a
+    // real network it is however long the trip takes. Either way it reads as
+    // a flash at the end of every stroke — the one thing live drawing was
+    // supposed to get rid of.
+    //
+    // So the ghost is not dropped, it is HANDED OVER: held on screen until
+    // the real shape is built, then retired in that same task, so the frame
+    // in between shows neither a gap nor two copies of the line.
+    _retireGhostDraw: function(key) {
+      if (!this._ghostDraws) return;
+      var ghost = this._ghostDraws[key];
+      if (!ghost) return;
+      // Out of `_ghostDraws` first: the same peer may start their next stroke
+      // before this one's edit arrives, and that stroke needs the key.
+      delete this._ghostDraws[key];
+
+      var self = this;
+      var entry = { ghost: ghost };
+      entry.timer = setTimeout(function() { self._dropRetiredGhost(entry); }, GHOST_HANDOVER_MS);
+      this._retiringGhosts = this._retiringGhosts || [];
+      this._retiringGhosts.push(entry);
+    },
+
+    _dropRetiredGhost: function(entry) {
+      if (!entry || !this._retiringGhosts) return;
+      var at = this._retiringGhosts.indexOf(entry);
+      if (at === -1) return;
+      this._retiringGhosts.splice(at, 1);
+      if (entry.timer) clearTimeout(entry.timer);
+      var el = entry.ghost && entry.ghost.el;
+      if (el && el.parentNode) el.parentNode.removeChild(el);
+    },
+
+    // A real shape has just been built. If it is the one somebody was drawing
+    // a moment ago, its ghost's work is done.
+    //
+    // Matched on the drawing itself rather than on who sent it: the edit
+    // arrives as a shape, and nothing in it says which peer made it. The
+    // geometry is the one the author reported in their last frame, so the two
+    // agree to within whatever rounding the trip did to the numbers.
+    _handOverGhost: function(shape) {
+      if (!shape || !this._retiringGhosts || !this._retiringGhosts.length) return;
+
+      var self = this;
+      var sameKind = this._retiringGhosts.filter(function(e) {
+        return e.ghost && e.ghost.kind === shape.kind;
+      });
+      if (!sameKind.length) return;
+
+      var match = null;
+      for (var i = 0; i < sameKind.length; i++) {
+        if (self._sameGeometry(sameKind[i].ghost.geometry, shape.geometry)) {
+          match = sameKind[i];
+          break;
+        }
+      }
+      // Nothing matched on geometry, but there is exactly one stroke of this
+      // kind waiting to be replaced: that is the one. A shape can be moved or
+      // reshaped between letting go and the edit arriving, and a ghost left
+      // behind by a miss would sit there as a second copy of the line until
+      // it timed out.
+      if (!match && sameKind.length === 1) match = sameKind[0];
+      if (match) this._dropRetiredGhost(match);
+    },
+
+    // Geometry equality, loose enough for a round trip. Numbers are compared
+    // within a small tolerance rather than exactly: the trip encodes them,
+    // stores them and decodes them again, and a coordinate that comes back a
+    // thousandth off is the same point as far as anyone looking at it is
+    // concerned.
+    _sameGeometry: function(a, b) {
+      if (a === b) return true;
+      if (typeof a === "number" && typeof b === "number") return Math.abs(a - b) <= 0.5;
+      if (Array.isArray(a) || Array.isArray(b)) {
+        if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+        for (var i = 0; i < a.length; i++) if (!this._sameGeometry(a[i], b[i])) return false;
+        return true;
+      }
+      if (a && b && typeof a === "object" && typeof b === "object") {
+        var ka = Object.keys(a), kb = Object.keys(b);
+        if (ka.length !== kb.length) return false;
+        for (var j = 0; j < ka.length; j++) {
+          if (!Object.prototype.hasOwnProperty.call(b, ka[j])) return false;
+          if (!this._sameGeometry(a[ka[j]], b[ka[j]])) return false;
+        }
+        return true;
+      }
+      return a === b;
+    },
+
+    _dropGhostDraw: function(key) {
+      if (!this._ghostDraws) return;
+      var ghost = this._ghostDraws[key];
+      if (!ghost) return;
+      delete this._ghostDraws[key];
+      if (ghost.el && ghost.el.parentNode) ghost.el.parentNode.removeChild(ghost.el);
+    },
+
     // Pointer state, tracked only once a host has asked for live moves.
     // `pointerup` is on the document and in the capture phase so a drag that
     // ends outside the canvas still closes.
@@ -13109,6 +13691,12 @@
         if (self._liveMoveEndHandler) {
           try { self._liveMoveEndHandler(); } catch (_) {}
         }
+
+        // The draw ends on the same pointer — unless it does not. A polygon
+        // and a callout are placed across several clicks, and the pointer
+        // comes up after every one of them; ending there would take a peer's
+        // shape away between vertices. Those finish in `_clearDrafts`.
+        if (!self.draftPolygon && !self.draftCallout) self._endLiveDraw();
       };
 
       document.addEventListener("pointerdown", this._liveMoveDown, true);
@@ -14658,6 +15246,114 @@
     // Drawing handlers — dispatch to per-tool state machines
     // -------------------------------------------------------------------------
 
+    // How many fingers are on the overlay, and which one is drawing.
+    //
+    // Pointer events arrive per finger with no notion of "how many are
+    // down"; that has to be counted. The count is what tells a drawing
+    // gesture from a navigation one, and the id is what keeps a second
+    // finger from feeding a stroke the first one started.
+    //
+    // Released on the document rather than the wrapper: Fresco captures the
+    // pointer for a pinch, so the `pointerup` for a finger that started on
+    // the overlay is delivered elsewhere, and a count that only ever went up
+    // would leave the tools switched off for the rest of the session.
+    _resetTouchTracking: function() {
+      this._touchIds = [];
+      this._multiTouch = false;
+      this._drawPointerId = null;
+    },
+
+    // A draft the pointer stream never closed, finished off the touch's own
+    // release. It goes through the same path `pointerup` takes, so a dot
+    // placed this way is the same shape, styled and emitted the same way, as
+    // one placed with a mouse — and when `pointerup` did arrive, the draft is
+    // already a shape and there is nothing here to do.
+    _commitStrandedDraft: function(e, pointerId) {
+      if (!this.draftState) return;
+      var t = e.changedTouches && e.changedTouches[0];
+      if (!t) return;
+
+      this._onPointerUp({
+        clientX: t.clientX,
+        clientY: t.clientY,
+        button: 0,
+        pointerId: pointerId,
+        pointerType: "touch",
+        type: "pointerup"
+      });
+    },
+
+    // A marquee abandoned rather than finished. Nothing is selected by it —
+    // the press became part of a gesture that belongs to the canvas.
+    _cancelBoxSelect: function() {
+      var bs = this._boxSelect;
+      if (!bs) return;
+      this._boxSelect = null;
+      if (bs.el && bs.el.parentNode) bs.el.parentNode.removeChild(bs.el);
+      this._clearBoxSelectPreview(bs);
+    },
+
+    // A press-and-hold-free stepper button: one press, one step. The press
+    // is stopped here so it never reaches the canvas underneath — every
+    // other control in this panel does the same, and without it pressing
+    // "+" would also be an empty-canvas press and clear the selection the
+    // size is being changed for.
+    _makeStepButton: function(glyph, title, mod) {
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = mod ? "etcher-step " + mod : "etcher-step";
+      btn.textContent = glyph;
+      btn.title = title;
+      btn.setAttribute("aria-label", title);
+      btn.addEventListener("pointerdown", function(e) { e.stopPropagation(); });
+      // A number box loses focus to a press on its own stepper otherwise,
+      // which on a phone closes the keyboard between every step.
+      btn.addEventListener("mousedown", function(e) { e.preventDefault(); });
+      return btn;
+    },
+
+    _dropStraySelection: function() {
+      try {
+        var sel = typeof window !== "undefined" && window.getSelection && window.getSelection();
+        if (sel && !sel.isCollapsed) sel.removeAllRanges();
+      } catch (_) {}
+    },
+
+    _trackTouch: function(e, down) {
+      if (!e || e.pointerType !== "touch") {
+        if (down) this._drawPointerId = e ? e.pointerId : null;
+        return;
+      }
+
+      this._touchIds = this._touchIds || [];
+      var at = this._touchIds.indexOf(e.pointerId);
+
+      if (down) {
+        if (at === -1) this._touchIds.push(e.pointerId);
+        this._multiTouch = this._touchIds.length > 1;
+        if (!this._multiTouch) this._drawPointerId = e.pointerId;
+        this._wireTouchRelease();
+        return;
+      }
+
+      if (at !== -1) this._touchIds.splice(at, 1);
+      if (e.pointerId === this._drawPointerId) this._drawPointerId = null;
+      // Still two fingers down? The gesture is still the canvas's. Lifting
+      // to one finger does NOT hand drawing back mid-pinch — that would
+      // draw a line from wherever the remaining finger happens to be.
+      if (this._touchIds.length === 0) this._multiTouch = false;
+    },
+
+    _wireTouchRelease: function() {
+      if (this._touchReleaseWired) return;
+      this._touchReleaseWired = true;
+
+      var self = this;
+      var release = function(e) { self._trackTouch(e, false); };
+      document.addEventListener("pointerup", release, true);
+      document.addEventListener("pointercancel", release, true);
+    },
+
     _onPointerDown: function(e) {
       // Read and cleared first thing, before any of the early returns
       // below can skip it: the flag belongs to THIS press (the capture
@@ -15154,6 +15850,24 @@
         // handles its own event; don't shadow it with a shape tap.
         if (isInputOwner(e.target, self.overlayWrapper)) return;
 
+        // Fingers are counted here as well as on the drawing overlay, because
+        // in cursor mode that overlay takes no events at all — these document
+        // listeners are the whole of the interaction, and the marquee is
+        // drawn from them.
+        //
+        // Two fingers are the canvas's: pan and pinch, the same as under
+        // every drawing tool. Reported from a phone: with the select tool
+        // out, "you put two fingers down and start panning around and it
+        // starts creating a lot of select boxes between the two fingers,
+        // selecting and deselecting non-stop" — because each finger opened a
+        // marquee of its own and then both of them dragged it.
+        self._trackTouch(e, true);
+        if (self._multiTouch) {
+          self._cancelBoxSelect();
+          self._pendingTap = null;
+          return;
+        }
+
         // Grabber (hand) tool: the press is a pan, never a shape tap — with
         // one exception. The grabber is how someone looks around a board
         // they aren't editing, and following a link is a viewing action, so
@@ -15203,6 +15917,9 @@
             if (!e.shiftKey) self._clearSelection();
             self._exitEditMode();
             self._boxSelect = {
+              // Whose marquee this is. A second pointer reporting into it
+              // would drag the box to wherever that one happens to be.
+              pointerId: e.pointerId,
               startX: e.clientX,
               startY: e.clientY,
               startImg: ptDirect,
@@ -15274,6 +15991,7 @@
       self._docPointerMove = function(e) {
         if (self._boxSelect) {
           var bs = self._boxSelect;
+          if (bs.pointerId != null && e.pointerId !== bs.pointerId) return;
           if (!bs.moved) {
             var bdx = e.clientX - bs.startX, bdy = e.clientY - bs.startY;
             if (bdx * bdx + bdy * bdy < 16) return; // 4px before the marquee shows
@@ -15288,6 +16006,13 @@
         if (dx * dx + dy * dy > 25) self._pendingTap = null; // 5px dead-zone
       };
       self._docPointerUp = function(e) {
+        // A finger coming off a pinch finishes nothing: the marquee was
+        // abandoned when the second finger landed, and a tap is not what
+        // two fingers were doing.
+        if (self._multiTouch) {
+          self._pendingTap = null;
+          return;
+        }
         if (self._boxSelect) {
           var bs = self._boxSelect;
           self._boxSelect = null;
@@ -18538,6 +19263,14 @@
         return s.x + "," + s.y;
       }).join(" ");
       this.draftPolygon.el.setAttribute("points", screen);
+
+      // A polygon is placed vertex by vertex and drawn here rather than
+      // through `_renderShape`, so it reports itself. `pts` already carries
+      // the rubber-banded segment following the cursor, which is the part
+      // worth watching.
+      if (this._liveDrawHandler) {
+        this._noteLiveDraw("polygon", { points: pts }, this._styleForNewShape("polygon"));
+      }
     },
 
     _commitPolygon: function() {
@@ -19504,6 +20237,10 @@
       // stroke scales with the content (thicker zoomed in, thinner out) like
       // ink on the image, instead of a fixed on-screen thickness.
       var w = (s.width || 10) * scale;
+      // …down to a floor, past which it stops being ink and starts being
+      // nothing. A dot gets the same one: it is the cap on a stroke of this
+      // width, and it is the same ink.
+      w = Math.max(MARKER_MIN_SCREEN_PX, w);
       el.style.stroke = s.color || this.activeColor || "#3b82f6";
       el.style.fill = "none";
       el.style.fillOpacity = "";
@@ -19759,7 +20496,7 @@
       // Read BEFORE the clamps: whether the user actually drew a box, as
       // opposed to clicking — the clamped defaults are ours, not theirs.
       var drewBox = geom.h >= minImagePx;
-      var boxPx = this._textDefaultBoxInkPx();
+      var boxPx = this._newTextBoxPx();
       if (geom.w < minImagePx) geom.w = boxPx * 4;
       if (geom.h < minImagePx) geom.h = boxPx * 1.2;
 
@@ -19864,6 +20601,23 @@
           if (shape.el) shape.el.classList.add("is-erasing");
           if (shape.titleGroup) shape.titleGroup.classList.add("is-erasing");
         }
+      });
+    },
+
+    _cancelErase: function() {
+      // An erase in flight, abandoned. The eraser greys its hits during the
+      // press and deletes them on release, so abandoning has to un-grey
+      // them AND disarm the release: a second finger landing mid-stroke is
+      // the user reaching for the canvas, not confirming a deletion, and
+      // the pointerup that ends their pan would otherwise commit it.
+      if (!this._erasingActive) return;
+      this._erasingActive = false;
+      var hits = this._erasingHits || [];
+      this._erasingHits = null;
+      this._erasingHitSet = null;
+      hits.forEach(function(shape) {
+        if (shape.el) shape.el.classList.remove("is-erasing");
+        if (shape.titleGroup) shape.titleGroup.classList.remove("is-erasing");
       });
     },
 
@@ -20139,6 +20893,30 @@
     // with the ⋯ zoom toggle on. `_textDefaultBoxImagePx` (screen-
     // relative) remains for GESTURE thresholds and hit tolerances —
     // those are about fingers on glass, not about ink.
+    // How big a text box minted by a TAP comes out, in image px.
+    //
+    // Ink by default, like every other new size: a constant number of image
+    // px, so text minted at any zoom is the same size relative to the board
+    // and a drawing does not end up with text at a dozen different scales.
+    //
+    // But ink alone is unreadable from far enough away. At 0.03 zoom — a
+    // board seen whole — a 16 image px box is half a screen pixel tall,
+    // which is "I just tap anywhere and it creates a super tiny text". So
+    // the ink size is floored at what can be read on the glass. The larger
+    // of the two wins, which is the ink size at 1:1 and anywhere zoomed in,
+    // and a legible one on the way out.
+    //
+    // A box the user DREW is untouched by this: they said how big.
+    _newTextBoxPx: function() {
+      var ink = this._textDefaultBoxInkPx();
+      var readable = ink;
+      try {
+        var scale = this._markerScale();
+        if (scale > 0) readable = NEW_TEXT_MIN_SCREEN_PX / scale;
+      } catch (_) {}
+      return readable > ink ? readable : ink;
+    },
+
     _textDefaultBoxInkPx: function() {
       try {
         return 16 / this._inkScale();
@@ -20179,6 +20957,34 @@
         if (per > 0) return CLICK_PLACE_SIZE_PX / per;
       } catch (_) {}
       return CLICK_PLACE_SIZE_PX;
+    },
+
+    // A stroke that is a dot: every point on top of every other, which is
+    // what `_commitFreehand` stores for a press that never moved. Measured
+    // against `DOT_LENGTH` — the hair of length a dot is given so the browser
+    // has something to hit-test — rather than against a screen distance, so
+    // the answer is the same at every zoom. A stroke small enough to be drawn
+    // by hand is thousands of times longer than this.
+    // One device pixel, expressed in the CSS px the path is written in. On a
+    // phone at 3x that is a third of a CSS px — small enough that what you see
+    // is the cap, which is the ink, which scales with the zoom.
+    _dotRenderLength: function() {
+      var dpr = 1;
+      try { dpr = window.devicePixelRatio || 1; } catch (_) {}
+      return DOT_RENDER_DEVICE_PX / (dpr > 0 ? dpr : 1);
+    },
+
+    _strokeIsDot: function(geometry) {
+      var pts = geometry && geometry.points;
+      if (!pts || !pts.length) return false;
+      var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (var i = 0; i < pts.length; i++) {
+        if (pts[i][0] < minX) minX = pts[i][0];
+        if (pts[i][0] > maxX) maxX = pts[i][0];
+        if (pts[i][1] < minY) minY = pts[i][1];
+        if (pts[i][1] > maxY) maxY = pts[i][1];
+      }
+      return (maxX - minX) <= DOT_LENGTH * 4 && (maxY - minY) <= DOT_LENGTH * 4;
     },
 
     // A stroke whose every sample fits inside the click threshold is a tap,
@@ -20390,6 +21196,7 @@
       if (!(edFontSize > 0)) {
         edFontSize = this._fontSizeFor(shape, Math.max(this._zoomPx(10), h * 0.65));
       }
+      edFontSize = this._editorFontPx(edFontSize);
       // Readability is the label's own problem now, which is the point: a
       // colour that vanishes over the photo vanishes while typing too, and
       // the plate toggle is right there. Pinning black here was the old
@@ -20631,8 +21438,22 @@
         self._commitTextEdit();
       };
       document.addEventListener("pointerdown", self._textEditOutsideDown, true);
-      // Focus on next frame so the foreignObject is attached before
-      // we yank the cursor in.
+      // Focused twice, and both of them matter.
+      //
+      // Now, in the same task as the gesture that asked for it: WebKit opens
+      // the on-screen keyboard only for a focus that happens inside a user
+      // gesture, and a `setTimeout` of nought is already outside it. A phone
+      // was left looking at an empty box it could not type into — the editor
+      // was open, the caret was elsewhere — and the way through was to tap
+      // the box a second time, which is a gesture of its own. Reported as
+      // "it just puts the placeholder there, enough to tap it again to start
+      // typing".
+      //
+      // And again on the next tick, which is what this always did: by then
+      // the foreignObject is attached, and a browser that would not take the
+      // first focus takes this one. Harmless where the first worked — the
+      // caret is already here, and nothing can have been typed in between.
+      try { input.focus(); input.select(); } catch (_) {}
       setTimeout(function() { try { input.focus(); input.select(); } catch (_) {} }, 0);
 
       // The editor's shape just became the panel's target (see
@@ -20681,6 +21502,7 @@
           ed.shape, parseFloat(ed.input.style.fontSize) || 14
         );
       }
+      size = this._editorFontPx(size);
       if (size > 0 && ed.setFontSize) {
         ed.setFontSize(size);
         ed.input.style.fontSize = size + "px";
@@ -20710,6 +21532,7 @@
       // has not changed their mind about wanting it). Set here as well
       // as on the press because a control can be reached by keyboard.
       ed.chromeSinceFocus = true;
+      size = this._editorFontPx(size);
       if (ed.setFontSize) ed.setFontSize(size);
       ed.input.style.fontSize = size + "px";
       var color = this._titleColorFor(shape) || "#000";
@@ -21030,6 +21853,10 @@
         this.draftCallout.el.parentNode.removeChild(this.draftCallout.el);
       }
       this.draftCallout = null;
+      // Committed or abandoned, the drawing is over: peers drop the
+      // provisional shape and wait for the edit. Multi-click tools reach
+      // this and nothing else — their pointer went up several clicks ago.
+      if (this._liveDrawHandler) this._endLiveDraw();
       this._syncDraftHandles();
     },
 
@@ -21150,8 +21977,15 @@
       this._refreshToolbarSwatches();
     },
 
-    _renderAnnotation: function(ann) {
+    // `opts.ghost` builds and paints the shape and stops there: it is not
+    // pushed onto `shapes`, gets no interactions, and is handed back to the
+    // caller to hold on to. That is what a peer's in-progress drawing is —
+    // something to look at, owned by nothing. Everything above the
+    // registration below is the element factory, which is exactly what a
+    // ghost needs in order to look like the shape that will replace it.
+    _renderAnnotation: function(ann, opts) {
       if (!ann || !ann.kind || !ann.geometry) return;
+      var ghost = !!(opts && opts.ghost);
       var el;
 
       switch (ann.kind) {
@@ -21381,7 +22215,16 @@
           this._backfilledImageId = true;
         }
       }
-      this.shapes.push(shape);
+      if (ghost) {
+        // Transient by construction: no uuid to be addressed by, no entry in
+        // `shapes` to be found in, and marked in the DOM so it is obvious in
+        // a debugger and to anything walking the overlay.
+        shape.uuid = null;
+        el.setAttribute("data-etcher-ghost", "");
+        el.style.pointerEvents = "none";
+      } else {
+        this.shapes.push(shape);
+      }
       this._renderShape(shape);
       // Apply persisted appearance. Markers are styled (and zoom-scaled) by
       // `_renderShape` above; other kinds restore their persisted color here.
@@ -21392,6 +22235,13 @@
       // Restore persisted line params (thickness / opacity / dash) on stroke
       // shapes; older annotations without them fall back to the 2px default.
       if (this._isStrokeShape(shape.kind)) this._applyLineParams(el, shape.style, this._markerScale());
+      // A ghost answers to nobody: no drag, no select, no tooltip, no
+      // double-click editor. The real shape replaces it the moment its
+      // author lets go.
+      if (ghost) return shape;
+      // Built a real one: if somebody was watched drawing it, this is where
+      // their ghost steps aside — same task, so the swap costs no frame.
+      this._handOverGhost(shape);
       this._attachShapeInteractions(shape);
     },
 

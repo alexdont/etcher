@@ -34,6 +34,8 @@ for (const [g, v] of [["FONT_SIZE_MIN", /var FONT_SIZE_MIN = (\d+)/],
 }
 
 const commitText = extract("_commitText");
+global.NEW_TEXT_MIN_SCREEN_PX = Number(src.match(/var NEW_TEXT_MIN_SCREEN_PX = (\d+);/)[1]);
+const newTextBoxPx = extract("_newTextBoxPx");
 
 function commit(anchor, pt, over) {
   const finalized = [];
@@ -41,6 +43,10 @@ function commit(anchor, pt, over) {
     draftState: { anchor, el: { classList: { remove() {} } } },
     _textDefaultBoxImagePx: () => 20,
     _textDefaultBoxInkPx: () => 20,
+    // The real one: ink-sized, floored at what can be read on the glass.
+    // At 1:1 (this stub's zoom) the floor does not bite and it is the ink
+    // size, which is what every case below assumes.
+    _newTextBoxPx: newTextBoxPx,
     _markerScale: () => 1,
     _renderShape() {},
     _startTextEdit() {},

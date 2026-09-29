@@ -131,7 +131,7 @@ function board(anchored, zoom, imageSize) {
   for (const [site, what] of [
     ["var basePx = this._textDefaultBoxInkPx();\n      var w = basePx * 6;", "legacy callout box"],
     ["shape._titleBasePx = this._textDefaultBoxInkPx();", "a label's first box"],
-    ["var boxPx = this._textDefaultBoxInkPx();", "a clicked text's minted box"],
+    ["      var ink = this._textDefaultBoxInkPx();", "a clicked text's minted box"],
   ]) {
     assert.ok(s_includes(site), `text-size mint not ink-scaled: ${what}`);
   }
@@ -139,6 +139,56 @@ function board(anchored, zoom, imageSize) {
   // The gesture threshold deliberately stays screen-relative.
   assert.ok(src.includes("var minImagePx = this._textDefaultBoxImagePx();"),
     "click-vs-drag is a finger judgement and keeps the screen-relative unit");
+}
+
+// ── …with a floor, because ink you cannot read is not a size ──────────────
+
+{
+  // Ink-sizing says a tapped text box is the same number of image px at
+  // every zoom. Seen from far enough out that is half a screen pixel:
+  // "when I just tap anywhere it creates a super tiny text. Make it be
+  // bigger by default, depending on the zoom."
+  //
+  // So the ink size is a floor away from being the whole rule. It still
+  // wins at 1:1 and anywhere zoomed in — the policy is intact where it
+  // makes sense — and on the way out the box stops shrinking once it
+  // reaches the size a person can read.
+  const newBox = extract("_newTextBoxPx");
+  const floorPx = Number(src.match(/var NEW_TEXT_MIN_SCREEN_PX = (\d+);/)[1]);
+  global.NEW_TEXT_MIN_SCREEN_PX = floorPx;
+
+  const at = (zoom) => newBox.call({
+    _textDefaultBoxInkPx: () => 16,
+    _markerScale: () => zoom,
+  });
+
+  // The floor IS the ink default at 1:1, deliberately: the rule it makes is
+  // "never smaller on screen than it would be at 1:1", so a tap at or above
+  // 1:1 comes out exactly as it always did and boards keep their sizes.
+  assert.strictEqual(floorPx, 16, "the floor is the ink default, seen at 1:1");
+  assert.strictEqual(at(1), 16, "so a tap at 1:1 is untouched");
+  assert.strictEqual(at(4), 16, "zoomed in, ink wins — text minted anywhere is one size");
+  assert.strictEqual(at(10), 16, "and keeps winning, however far in");
+
+  assert.strictEqual(at(0.5), floorPx / 0.5,
+    "zoomed out, the floor takes over so the box stays readable");
+  assert.strictEqual(at(0.03), floorPx / 0.03,
+    "and a board seen whole mints a box you can actually see");
+
+  // The floor is in SCREEN px, so it is the same size to look at whatever
+  // the zoom — which is the whole point of it.
+  for (const z of [0.03, 0.1, 0.5]) {
+    assert.strictEqual(Math.round(at(z) * z), floorPx,
+      "the floored box is " + floorPx + " screen px at every zoom below 1:1");
+  }
+
+  // A shape with no scale to speak of falls back to the ink size rather
+  // than dividing by nothing.
+  assert.strictEqual(newBox.call({ _textDefaultBoxInkPx: () => 16, _markerScale: () => 0 }), 16);
+  assert.strictEqual(newBox.call({
+    _textDefaultBoxInkPx: () => 16,
+    _markerScale: () => { throw new Error("no viewer"); },
+  }), 16);
 }
 
 // ── the switch lives with the other view toggles ──────────────────────────

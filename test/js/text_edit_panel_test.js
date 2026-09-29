@@ -27,6 +27,9 @@ function extract(name) {
 }
 
 const fontTargets = extract("_fontTargetShapes");
+// The constant it reads, lifted from the source so the two cannot drift.
+global.INPUT_PAGE_ZOOM_PX = Number(src.match(/var INPUT_PAGE_ZOOM_PX = (\d+);/)[1]);
+const editorFontPx = extract("_editorFontPx");
 const inspected = extract("_inspectedShape");
 const refresh = extract("_refreshTextEditorStyle");
 
@@ -74,6 +77,10 @@ const refresh = extract("_refreshTextEditorStyle");
     },
     _textEditHost: () => ({ querySelector: () => ({ getAttribute: () => "28" }) }),
     _fontSizeFor: (s, base) => base,
+    // The real one: the editor's font is floored on a touch screen so
+    // mobile Safari has no reason to zoom the page. On anything else it
+    // hands the size straight back, which is every case here.
+    _editorFontPx: editorFontPx,
     _titleColorFor: () => "#d8b4fe",
     _labelBgFor: () => "#86efac",
   };

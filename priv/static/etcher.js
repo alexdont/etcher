@@ -21403,6 +21403,17 @@
       input.style.overflow = "hidden";
       input.style.whiteSpace = "pre";
       input.style.lineHeight = "1.1";
+      // A text BOX wraps while you type, exactly as the committed render
+      // will — the single-line editor showed one endless line that only
+      // became the wrapped box on Enter, so the editor was not the thing
+      // being made. The walls do the wrapping; Enter still commits and
+      // Shift+Enter still breaks a line by hand.
+      var fixedEd = this._textboxFixed(shape);
+      if (fixedEd) {
+        input.wrap = "soft";
+        input.style.whiteSpace = "pre-wrap";
+        input.style.wordBreak = "break-word";
+      }
 
       // The editor IS the label. It used to be a white box with a dashed
       // border and 14px black text — nothing like what commit would draw,
@@ -21481,6 +21492,21 @@
       var edCy = (Math.min(tl.y, br.y) + Math.max(tl.y, br.y)) / 2;
       var edLeft = Math.min(tl.x, br.x);
       var edFit = function() {
+        // A text BOX neither grows with the text nor recentres: the
+        // editor IS the box, recomputed from the shape each fit so a
+        // pan or zoom mid-edit moves it with the board. The textarea
+        // wraps inside it (see its pre-wrap setup above).
+        if (fixedEd) {
+          var gF = selfEd._textEditBoxImage(shape);
+          if (!gF) return;
+          var tlF = selfEd._imageToContainer({ x: gF.x, y: gF.y });
+          var brF = selfEd._imageToContainer({ x: gF.x + gF.w, y: gF.y + gF.h });
+          fo.setAttribute("x", Math.min(tlF.x, brF.x));
+          fo.setAttribute("y", Math.min(tlF.y, brF.y));
+          fo.setAttribute("width", Math.max(20, Math.abs(brF.x - tlF.x)));
+          fo.setAttribute("height", Math.max(16, Math.abs(brF.y - tlF.y)));
+          return;
+        }
         var linesEd = String(input.value || "").split("\n");
         var maxW = 0;
         for (var li = 0; li < linesEd.length; li++) {

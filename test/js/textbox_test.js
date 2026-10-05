@@ -97,6 +97,23 @@ const handlePositions = lift("_handlePositions", "shape");
     "the box and the font never derive from each other");
 }
 
+// ── the editor is the box: WYSIWYG while typing ──────────────────────────
+//
+// Reported from the field: the committed render wrapped beautifully, but
+// TYPING showed one endless unwrapped line — the single-line editor every
+// label uses. A text box's editor wraps inside the walls instead, and the
+// walls never move with the text.
+
+{
+  const ed = src.slice(src.indexOf("    _startTextEdit: function"),
+                       src.indexOf("    _repositionTextEditor: function"));
+  assert.ok(/var fixedEd = this\._textboxFixed\(shape\);\s*if \(fixedEd\) \{\s*input\.wrap = "soft";\s*input\.style\.whiteSpace = "pre-wrap";/.test(ed),
+    "the box's editor wraps while typing — soft wrap, pre-wrap — like the committed render");
+  assert.ok(/if \(fixedEd\) \{\s*var gF = selfEd\._textEditBoxImage\(shape\);[\s\S]{0,500}?return;\s*\}\s*var linesEd/.test(ed),
+    "and its fit pins the editor to the shape's own box (recomputed per fit, " +
+    "so pan/zoom mid-edit tracks) instead of growing it around the text");
+}
+
 // ── same-tool editing covers the family ──────────────────────────────────
 
 {

@@ -1754,8 +1754,10 @@
       // While a drawing tool is active, vector dots on the in-progress
       // draft are markers, not grab targets — let pointer events fall
       // through to the wrapper so the user can keep dragging the
-      // active tool over them.
-      ".etcher-overlay.is-drawing .etcher-handle {",
+      // active tool over them. Scoped to the inert (draft) dots only:
+      // with same-tool editing, a committed shape selected under its
+      // own tool wears REAL handles, and those must stay grabbable.
+      ".etcher-overlay.is-drawing .etcher-handle--inert {",
       "  pointer-events: none; cursor: crosshair;",
       "}",
       ".etcher-tooltip {",
@@ -14256,15 +14258,24 @@
       if (!tg || tg._etcherWired) return;
       tg._etcherWired = true;
 
+      // Every guard below admits the cursor AND the shape's own tool —
+      // same-tool editing: a dimension's label is double-clickable with
+      // the dimension tool still in hand (see _armedToolEdits).
       tg.addEventListener("mouseenter", function() {
-        if (self.annotationMode && self.activeTool != null) return;
+        if (self.annotationMode && self.activeTool != null &&
+            !self._armedToolEdits(shape)) {
+          return;
+        }
         tg.classList.add("is-hovered");
       });
       tg.addEventListener("mouseleave", function() {
         tg.classList.remove("is-hovered");
       });
       tg.addEventListener("dblclick", function(e) {
-        if (self.annotationMode && self.activeTool != null) return;
+        if (self.annotationMode && self.activeTool != null &&
+            !self._armedToolEdits(shape)) {
+          return;
+        }
         if (!self.annotationMode) return;
         e.stopPropagation();
         e.preventDefault();
@@ -14275,7 +14286,10 @@
         // title-edit-mode, which shows 4 corner handles for resizing
         // the title bbox. Drag the title body (separate pointerdown
         // listener below) still moves the whole bbox.
-        if (self.annotationMode && self.activeTool != null) return;
+        if (self.annotationMode && self.activeTool != null &&
+            !self._armedToolEdits(shape)) {
+          return;
+        }
         if (!self.annotationMode) return;
         e.stopPropagation();
         e.preventDefault();
@@ -14283,8 +14297,14 @@
       });
       tg.addEventListener("pointerdown", function(e) {
         if (e.button !== 0) return;
-        if (self.annotationMode && self.activeTool != null) return;
+        if (self.annotationMode && self.activeTool != null &&
+            !self._armedToolEdits(shape)) {
+          return;
+        }
         if (!self.annotationMode) return;
+        // With the shape's own tool armed the drawing wrapper is live
+        // and would read this press as "draw here" — the label owns it.
+        if (self.activeTool != null) e.stopPropagation();
         self._startTitleDrag(shape, e);
       });
     },
@@ -15357,6 +15377,108 @@
       document.addEventListener("pointercancel", release, true);
     },
 
+    // ── Same-tool editing ─────────────────────────────────────────────
+    //
+    // A tool used to be for drawing only: adjusting what it drew meant a
+    // trip to the cursor. Now the shapes a tool draws stay grabbable
+    // WHILE it is armed — press a rectangle's edge with the rectangle
+    // tool and you are moving that rectangle; a stationary press selects
+    // it (corner dots and all, same as the cursor would); a double-click
+    // opens its label. Everything else on the canvas still belongs to
+    // the tool: pressing it draws.
+    //
+    // The ink tools are deliberately left out. Strokes come in flurries
+    // and routinely start on top of one another, so a marker that
+    // grabbed the previous stroke instead of starting the next would
+    // fight exactly how those tools are used. So is `image`: pictures
+    // get stacked on purpose, and a placement press on one must keep
+    // opening the picker. (The eraser erases what it touches and the
+    // grabber/pointer draw nothing — no shape carries their name, so
+    // the kind test already excludes them.)
+    _armedToolEdits: function(shape) {
+      var t = this.activeTool;
+      if (t == null || !shape) return false;
+      if (shape.readonly || !shape.uuid) return false;
+      if (t === "freehand" || t === "marker" || t === "highlighter" || t === "image") {
+        return false;
+      }
+      return shape.kind === t;
+    },
+
+    // Container px per image px around `pt` — the live zoom, measured by
+    // projecting a unit vector and taking its LENGTH (one axis of it
+    // reads ~0 at 90°/270° — see the rotation test), so the grab
+    // tolerance below means the same distance on screen at every zoom
+    // and rotation.
+    _screenPerImagePx: function(pt) {
+      try {
+        var a = this._imageToContainer({ x: pt.x, y: pt.y });
+        var b = this._imageToContainer({ x: pt.x + 1, y: pt.y });
+        var k = Math.hypot(b.x - a.x, b.y - a.y);
+        return k > 0 ? k : 1;
+      } catch (_) {
+        return 1;
+      }
+    },
+
+    // The shape a tool-armed press GRABS instead of drawing over, or
+    // null when the press is the canvas's and should draw.
+    //
+    // The filled kinds grab by their OUTLINE (within ~8 screen px), not
+    // their footprint: the interior stays canvas, so a rectangle can
+    // still be drawn inside a rectangle and a circle inside a circle.
+    // The stroke-built kinds (line, arrow, dimension) and the text-ish
+    // ones (text, callout) grab anywhere their hit-test lands — their
+    // footprint IS their outline, or close enough that nobody draws
+    // inside it on purpose. A shape's title satellite is a grab zone
+    // whatever the kind: it is how a label is reached, and nothing is
+    // ever deliberately drawn inside a label.
+    _sameToolGrabTarget: function(pt) {
+      var hit = this._shapeAt(pt);
+      if (!this._armedToolEdits(hit)) return null;
+
+      var tol = 8 / this._screenPerImagePx(pt);
+      var g = hit.geometry;
+
+      if (hit.titleGroup && hit._renderedTitleImage) {
+        var tb = hit._renderedTitleImage;
+        if (pt.x >= tb.x && pt.x <= tb.x + tb.w &&
+            pt.y >= tb.y && pt.y <= tb.y + tb.h) {
+          return hit;
+        }
+      }
+
+      function segDist(p, a, b) {
+        var vx = b[0] - a[0], vy = b[1] - a[1];
+        var wx = p.x - a[0], wy = p.y - a[1];
+        var l2 = vx * vx + vy * vy;
+        var t = l2 > 0 ? Math.max(0, Math.min(1, (wx * vx + wy * vy) / l2)) : 0;
+        return Math.hypot(p.x - (a[0] + t * vx), p.y - (a[1] + t * vy));
+      }
+
+      switch (hit.kind) {
+        case "rectangle": {
+          var nearEdge =
+            Math.abs(pt.x - g.x) <= tol || Math.abs(pt.x - (g.x + g.w)) <= tol ||
+            Math.abs(pt.y - g.y) <= tol || Math.abs(pt.y - (g.y + g.h)) <= tol;
+          return nearEdge ? hit : null;
+        }
+        case "circle": {
+          var d = Math.hypot(pt.x - g.cx, pt.y - g.cy);
+          return Math.abs(d - g.r) <= tol ? hit : null;
+        }
+        case "polygon": {
+          var pts = (g && g.points) || [];
+          for (var i = 0; i < pts.length; i++) {
+            if (segDist(pt, pts[i], pts[(i + 1) % pts.length]) <= tol) return hit;
+          }
+          return null;
+        }
+        default:
+          return hit;
+      }
+    },
+
     _onPointerDown: function(e) {
       // Read and cleared first thing, before any of the early returns
       // below can skip it: the flag belongs to THIS press (the capture
@@ -15396,6 +15518,22 @@
       if (afterLabelCommit) {
         this._pendingDraw = { pt: pt, shift: !!e.shiftKey };
         return;
+      }
+
+      // A press on a shape of the armed tool's own kind grabs that shape
+      // instead of drawing — see _sameToolGrabTarget. Skipped mid-polygon
+      // and mid-callout: those presses are vertex placements for the
+      // draft already in flight, wherever they land.
+      if (!this.draftPolygon && !this.draftCallout) {
+        var grab = this._sameToolGrabTarget(pt);
+        if (grab) {
+          // The doc-level tap tracker sees this press too (touch does not
+          // stop propagation at the wrapper) — leave it a note so it does
+          // not ALSO track a tap on the same gesture.
+          this._sameToolGrab = { pointerId: e.pointerId, at: Date.now() };
+          this._startShapeMove(grab, e);
+          return;
+        }
       }
 
       this._dispatchToolDown(pt, e);
@@ -15613,7 +15751,10 @@
         // `_wireGlobalShapeListeners` drives the common path. Kept
         // as a fallback in case a future caller temporarily flips
         // shape pointer events back on.
-        if (self.annotationMode && self.activeTool != null) return;
+        if (self.annotationMode && self.activeTool != null &&
+            !self._armedToolEdits(shape)) {
+          return;
+        }
         // Stop propagation so OSD's canvas (which lives next to us
         // in the container) doesn't also receive the click and
         // trigger a click-to-zoom.
@@ -15630,7 +15771,13 @@
         if (shape.kind !== "text" && shape.kind !== "callout" && shape.kind !== "dimension") {
           return;
         }
-        if (self.annotationMode && self.activeTool != null) return;
+        // Cursor mode, or the shape's own tool armed — a double-click on
+        // a text shape with the text tool out means "edit this one", not
+        // "draw two more here".
+        if (self.annotationMode && self.activeTool != null &&
+            !self._armedToolEdits(shape)) {
+          return;
+        }
         if (!self.annotationMode) return;
         if (shape.readonly) return; // locked → no inline text edit
         e.stopPropagation();
@@ -15649,7 +15796,16 @@
       el.addEventListener("pointerdown", function(e) {
         if (e.button !== 0) return;
         if (!self.annotationMode) return;
-        if (self.activeTool != null) return;
+        if (self.activeTool != null) {
+          // The shape's own tool grabs it like the cursor would; the
+          // multi-select gestures below stay cursor-mode vocabulary.
+          // stopPropagation keeps the live wrapper from reading the
+          // same press as "draw here".
+          if (!self._armedToolEdits(shape)) return;
+          e.stopPropagation();
+          self._startShapeMove(shape, e);
+          return;
+        }
         e.stopPropagation();
         // Shift extends the multi-selection; that lives on the doc-level
         // handler, and swallowing it here would make shift-clicking a
@@ -15981,6 +16137,17 @@
           return;
         }
 
+        // A press the armed tool already routed into a same-kind grab
+        // (`_onPointerDown`) must not also be tracked as a tap here —
+        // touch presses reach both handlers, and two trackers on one
+        // gesture would fire `_onShapeTap` twice on release.
+        var grabbed = self._sameToolGrab;
+        self._sameToolGrab = null;
+        if (grabbed && grabbed.pointerId === e.pointerId &&
+            Date.now() - grabbed.at < 1000) {
+          return;
+        }
+
         // Browse mode (or a draw tool is active): track for click-to-pin
         // only. _pendingTap survives until _docPointerUp; if the pointer
         // didn't move past the dead-zone, _onShapeTap fires.
@@ -16047,7 +16214,7 @@
       // Double-click on text/callout in annotation mode → inline edit.
       // Same container gate + hit-test pattern as the tap handler.
       self._docDblClick = function(e) {
-        if (!self.annotationMode || self.activeTool != null) return;
+        if (!self.annotationMode) return;
         if (!overContainer(e)) return;
         // Skip if the double-click landed inside a modal or other
         // input-owner — clicking in a comment composer that happens
@@ -16070,6 +16237,11 @@
         try { pt = self._toImage(e); } catch (_) { return; }
         var hit = self._shapeAt(pt);
         if (!hit) return;
+        // With a tool armed, a double-click only reaches the shapes that
+        // tool itself edits (same-tool editing — a dimension's label
+        // opens under the dimension tool). On everything else, both
+        // clicks already belonged to the tool.
+        if (self.activeTool != null && !self._armedToolEdits(hit)) return;
         // A link card opens on double-click: the single click that started
         // it selected the card, which is what you need before moving or
         // scaling it. (Under the grabber there is nothing to select, so a
@@ -22530,6 +22702,11 @@
       this.handles = positions.map(function(pt, idx) {
         var h = svgEl("circle", { r: 5 });
         h.classList.add("etcher-handle");
+        // Draft dots are markers, not grab targets — the class is what
+        // the `.is-drawing` stylesheet rule keys on to let the active
+        // tool drag straight over them, while a committed shape's real
+        // handles stay live under its own tool (same-tool editing).
+        if (!opts.interactive) h.classList.add("etcher-handle--inert");
         h.style.color = handleColor;
         h.dataset.index = idx;
         self.svg.appendChild(h);

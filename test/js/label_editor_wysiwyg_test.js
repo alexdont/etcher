@@ -92,6 +92,9 @@ function edit(shape, opts) {
     _titleColorFor: () => opts.color || "#fca5a5",
     _labelBgFor: () => opts.bg || null,
     _hasPinnedFontSize: () => !!opts.pinned,
+    // Plain labels throughout — the text BOX's wrap-inside-the-walls
+    // editor variant is pinned in textbox_test.
+    _textboxFixed: () => false,
     _isTextKind: (k) => k === "text" || k === "callout",
     _defaultLabelFontSize: () => opts.defaultSize || 16,
     _inkScale: () => 1,

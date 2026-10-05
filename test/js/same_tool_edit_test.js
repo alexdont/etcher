@@ -175,4 +175,60 @@ function layerWith(tool, shape) {
     "the doc-level double-click admits the shape's own tool");
 }
 
+// ── 4. the label commit keeps the selection under the shape's own tool ───
+//
+// Reported from the field on the first pass of this feature: make a
+// dimension, type its value — and the end dots were nowhere to be
+// touched. `_commitTextEdit`'s full stop (deliberate for cursor mode:
+// naming a shape is being done with it) exited edit mode, so the label
+// landed and the handles vanished in the same breath. Under the shape's
+// own tool the label is one step of PLACING the thing, so the selection
+// survives the editor now — commit and cancel both.
+
+{
+  const keepOrDrop = lift("_keepOrDropSelection", "shape");
+  const dim = { kind: "dimension", uuid: "d9" };
+
+  function world(tool, editing) {
+    const w = {
+      activeTool: tool,
+      editingShape: editing || null,
+      _armedToolEdits: armedToolEdits,
+      _keepOrDropSelection: keepOrDrop,
+      exited: 0, entered: 0, rendered: 0,
+      _exitEditMode() { this.exited++; },
+      _enterEditMode() { this.entered++; },
+      _renderHandles() { this.rendered++; }
+    };
+    return w;
+  }
+
+  const fresh = world("dimension", null);
+  fresh._keepOrDropSelection(dim);
+  assert.strictEqual(fresh.entered, 1, "own tool, not yet selected → selected");
+  assert.strictEqual(fresh.exited, 0);
+  assert.ok(fresh._suppressEditDismissUntil > Date.now() - 1,
+    "and the commit click still in flight must not tear it down");
+
+  const editing = world("dimension", dim);
+  editing._keepOrDropSelection(dim);
+  assert.strictEqual(editing.rendered, 1,
+    "already selected → the dots rebuild against the committed text");
+  assert.strictEqual(editing.exited, 0);
+
+  const cursor = world(null, dim);
+  cursor._keepOrDropSelection(dim);
+  assert.strictEqual(cursor.exited, 1, "cursor mode keeps its full stop");
+  assert.strictEqual(cursor.entered + cursor.rendered, 0);
+
+  const otherTool = world("rectangle", dim);
+  otherTool._keepOrDropSelection(dim);
+  assert.strictEqual(otherTool.exited, 1, "someone else's tool is a full stop too");
+
+  // Both ends of a label edit route through it.
+  const uses = src.match(/this\._keepOrDropSelection\(shape\);/g) || [];
+  assert.ok(uses.length >= 2,
+    "commit AND cancel decide the selection the same way — found " + uses.length);
+}
+
 console.log("same-tool editing: all checks passed");

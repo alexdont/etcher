@@ -21777,7 +21777,13 @@
       // It also ends the shape's FRESHNESS, which is deliberate: the
       // draw-tune-keep-drawing window belongs to the shape you just drew,
       // and naming it is the point at which you are finished with it.
-      this._exitEditMode();
+      //
+      // EXCEPT under the shape's OWN tool (same-tool editing). There the
+      // label is one step of placing the thing — a dimension gets typed
+      // and then MOVED — so the full stop stranded the user: the end
+      // dots they were about to grab vanished with the editor. The shape
+      // stays selected instead, handles up, ready to pull.
+      this._keepOrDropSelection(shape);
       this._renderShape(shape);
       // The box is sized by the text now, so committing new text moves the
       // label's corners — and the title-edit handles sit ON those corners.
@@ -21822,7 +21828,34 @@
         this._discardEmptyTextShape(shape);
         return;
       }
+      // Escaping the label is not escaping the shape: under its own tool
+      // it stays selected, same as a commit (see _keepOrDropSelection).
+      this._keepOrDropSelection(shape);
       this._renderShape(shape);
+    },
+
+    // The end of a label edit decides what is left selected. Cursor
+    // mode keeps its full stop — the shape is done, the next click is
+    // about whatever it lands on. Under the shape's OWN tool (same-tool
+    // editing) the selection survives: handles back up (the editor may
+    // have replaced them), positioned against the just-committed text,
+    // and the dismiss guard swallows the click that a commit-by-
+    // clicking-away still has in flight — it already did its job.
+    _keepOrDropSelection: function(shape) {
+      if (!this._armedToolEdits(shape)) {
+        this._exitEditMode();
+        return;
+      }
+      this._suppressEditDismissUntil = Date.now() + 400;
+      if (this.editingShape === shape) {
+        // Already in edit mode (the created-flow: selected, then the
+        // editor on top) — but the editor's lifetime may have torn the
+        // dots down, and the text just resized the shape's box, so
+        // rebuild rather than trust what is there.
+        this._renderHandles(shape);
+      } else {
+        this._enterEditMode(shape);
+      }
     },
 
     _endTextEdit: function() {

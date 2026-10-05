@@ -39,8 +39,10 @@ function commit(shape, typed, remembered) {
     _labelRidesShaft: (k) => k === "dimension" || k === "arrow",
     _snapshotShape: () => ({}),
     _endTextEdit: () => {},
-    // Committing a label ends the shape's selection (label_commit_click_test).
-    _exitEditMode: () => {},
+    // Committing a label decides the selection's fate — cursor mode's
+    // full stop, or survival under the shape's own tool
+    // (label_commit_click_test / same_tool_edit_test).
+    _keepOrDropSelection: () => {},
     _renderShape: () => {},
     _syncLabelSection: () => {},
     _discardEmptyTextShape: () => {},

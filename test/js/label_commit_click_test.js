@@ -174,8 +174,13 @@ function board(state) {
   // ending the same way: one left the shape selected, handles and all,
   // another did not. Which key you reached for should not decide what you
   // are left holding. They all funnel through `_commitTextEdit`, so the
-  // deselect lives there, ahead of the early returns below it.
+  // decision lives there, ahead of the early returns below it — made by
+  // `_keepOrDropSelection`, which keeps the cursor's full stop and lets
+  // the selection survive under the shape's OWN tool (same-tool editing;
+  // the armed-tool half is pinned in same_tool_edit_test).
   const commit = extract("_commitTextEdit");
+  const keepOrDrop = extract("_keepOrDropSelection");
+  const armedToolEdits = extract("_armedToolEdits");
 
   function run(opts) {
     const shape = {
@@ -184,11 +189,16 @@ function board(state) {
     };
     const log = { exited: 0 };
     const ctx = {
+      activeTool: null, // cursor mode — the full-stop half
       _textEditor: { shape, input: { value: opts.typed } },
       editingShape: shape,
+      _armedToolEdits: armedToolEdits,
+      _keepOrDropSelection: keepOrDrop,
       _snapshotShape: () => ({}),
       _endTextEdit() {},
       _exitEditMode() { log.exited++; this.editingShape = null; },
+      _enterEditMode() { log.entered = (log.entered || 0) + 1; },
+      _renderHandles() {},
       _renderShape() {},
       _syncLabelSection() {},
       _positionAllTitleHandles() {},
@@ -227,8 +237,8 @@ function board(state) {
   // deselect.)
   const body = src.slice(src.indexOf("    _commitTextEdit: function() {"),
                          src.indexOf("\n    },", src.indexOf("    _commitTextEdit: function() {")));
-  const exitAt = body.indexOf("this._exitEditMode();");
-  assert.notStrictEqual(exitAt, -1, "the commit is what ends the selection");
+  const exitAt = body.indexOf("this._keepOrDropSelection(shape);");
+  assert.notStrictEqual(exitAt, -1, "the commit is what decides the selection");
   assert.ok(exitAt < body.indexOf('if (newTitle === "" && !prevTitle)'),
     "placed after the empty-commit return, typing nothing would keep the shape");
   assert.ok(exitAt < body.indexOf("if (newTitle === prevTitle) return;"),

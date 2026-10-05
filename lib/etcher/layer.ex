@@ -330,6 +330,7 @@ defmodule Etcher.Layer do
       :highlighter,
       :callout,
       :text,
+      :textbox,
       :dimension,
       :arrow,
       :line,
@@ -342,7 +343,9 @@ defmodule Etcher.Layer do
     and why. Drawing tools: `:grabber`,
     `:rectangle`, `:circle`, `:polygon`, `:freehand`, `:marker`,
     `:highlighter` (the marker at a fixed half opacity), `:callout`,
-    `:text`, `:dimension`, `:arrow`, `:line`, `:eraser`. Add `:image` for the image
+    `:text`, `:textbox` (a fixed box the text wraps and sizes inside —
+    stored as a `text` shape with `style.box: "fixed"`, so no consumer
+    schema changes), `:dimension`, `:arrow`, `:line`, `:eraser`. Add `:image` for the image
     tool — a one-shot action (not a drawing mode) that inserts an image via
     the OS file picker or a host uploader (see `:image_source`).
 

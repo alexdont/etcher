@@ -37,7 +37,11 @@ defmodule Etcher.JsLabelStepperTest do
 
   describe "a text box you have just drawn" do
     test "takes the caret inside the gesture that made it" do
-      body = fn_body("document.addEventListener(\"pointerdown\", self._textEditOutsideDown, true);", 1800)
+      body =
+        fn_body(
+          "document.addEventListener(\"pointerdown\", self._textEditOutsideDown, true);",
+          1800
+        )
 
       # On the CALL, not the word: the comment beside it explains why a
       # `setTimeout` is the wrong place for this focus.
@@ -49,9 +53,14 @@ defmodule Etcher.JsLabelStepperTest do
     end
 
     test "and again on the next tick, as it always did" do
-      body = fn_body("document.addEventListener(\"pointerdown\", self._textEditOutsideDown, true);", 1800)
+      body =
+        fn_body(
+          "document.addEventListener(\"pointerdown\", self._textEditOutsideDown, true);",
+          1800
+        )
 
-      assert body =~ "setTimeout(function() { try { input.focus(); input.select(); } catch (_) {} }, 0);",
+      assert body =~
+               "setTimeout(function() { try { input.focus(); input.select(); } catch (_) {} }, 0);",
              "the foreignObject is attached by then — a browser that ignored " <>
                "the first focus takes this one"
     end
@@ -73,6 +82,7 @@ defmodule Etcher.JsLabelStepperTest do
       body = fn_body("_editorFontPx: function", 700)
 
       assert body =~ "px >= INPUT_PAGE_ZOOM_PX) return px;"
+
       assert body =~ ~s|window.matchMedia("(pointer: coarse)")|,
              "a desktop browser does no such thing, and there the editor " <>
                "should look exactly like the result"
@@ -131,6 +141,7 @@ defmodule Etcher.JsLabelStepperTest do
       body = fn_body("_commitText: function", 1400)
 
       assert body =~ "var drewBox = geom.h >= minImagePx;"
+
       assert body =~ "if (geom.w < minImagePx) geom.w = boxPx * 4;",
              "the default size is only reached when nothing was drawn"
     end
@@ -189,7 +200,8 @@ defmodule Etcher.JsLabelStepperTest do
     test "a press on one does not reach the canvas underneath" do
       body = fn_body("_makeStepButton: function", 900)
 
-      assert body =~ ~s|btn.addEventListener("pointerdown", function(e) { e.stopPropagation(); });|,
+      assert body =~
+               ~s|btn.addEventListener("pointerdown", function(e) { e.stopPropagation(); });|,
              "an empty-canvas press clears the selection — the selection whose " <>
                "size is being changed"
 

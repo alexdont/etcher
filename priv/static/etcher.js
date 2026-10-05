@@ -232,6 +232,7 @@
     // toolbar sizes (the previous version had pinched serifs that
     // muddied the silhouette).
     text:     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 6 L19 6 M12 6 L12 18"/></svg>',
+    textbox:  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="15" rx="2"/><path d="M7 9.5h10M7 13.5h6"/></svg>',
     // Dimension — horizontal shaft with V-arrows on both ends. Mirrors
     // the architectural dimension-line annotation the tool draws (line
     // + 2 arrows + black label sliding along the shaft).
@@ -2377,6 +2378,12 @@
     grabber:   { icon: ICONS.grabber,   title: "Grab (pan only)", styleless: true },
     callout:   { icon: ICONS.callout,   title: "Callout (point at something, write a label)" },
     text:      { icon: ICONS.text,      title: "Text label (drag a box, then type)" },
+    // Distinct from `text`, whose box hugs its content: this one's box is
+    // the user's — drawn once, resized only by its handles. The text wraps
+    // and sizes INSIDE it (Label size in the panel), and typing more or
+    // picking a bigger font never moves the walls. Same kind on the wire
+    // (`text` + `style.box: "fixed"`), so every consumer stores it today.
+    textbox:   { icon: ICONS.textbox,   title: "Text box (a fixed box; the text wraps and sizes inside it)" },
     dimension: { icon: ICONS.dimension, title: "Dimension (line with arrows + slidable label)" },
     line:      { icon: ICONS.line,      title: "Line" },
     // Distinct from `dimension`, which is a MEASUREMENT: two heads and a
@@ -13017,21 +13024,32 @@
             var measured =
               self._fillTextWithWrappedTspans(ttext, titleText, tw - pad * 2, fontSize);
 
-            var actualW = Math.max(measured.width + pad * 2, fontSize);
-            var actualH = Math.max(measured.height + pad * 2, fontSize * 1.2);
-            if (trect) {
-              trect.setAttribute("width",  actualW);
-              trect.setAttribute("height", actualH);
+            if (self._textboxFixed(shape)) {
+              // A text BOX: the rect stays exactly the box the user drew
+              // (set above from the geometry) — the text wraps and sizes
+              // inside it, and neither typing more nor a bigger Label
+              // size moves the walls. `_renderedBox` stays null so the
+              // handles, the editor and every hit-test work the storage
+              // geometry, which IS the visible box here.
+              self._applyLabelBg(trect, shape);
+              shape._renderedBox = null;
+            } else {
+              var actualW = Math.max(measured.width + pad * 2, fontSize);
+              var actualH = Math.max(measured.height + pad * 2, fontSize * 1.2);
+              if (trect) {
+                trect.setAttribute("width",  actualW);
+                trect.setAttribute("height", actualH);
+              }
+              self._applyLabelBg(trect, shape);
+              var sx = tw > 0 ? tw / g.w : 1;
+              var sy = th > 0 ? th / g.h : sx;
+              shape._renderedBox = {
+                x: g.x,
+                y: g.y,
+                w: sx > 0 ? actualW / sx : g.w,
+                h: sy > 0 ? actualH / sy : g.h
+              };
             }
-            self._applyLabelBg(trect, shape);
-            var sx = tw > 0 ? tw / g.w : 1;
-            var sy = th > 0 ? th / g.h : sx;
-            shape._renderedBox = {
-              x: g.x,
-              y: g.y,
-              w: sx > 0 ? actualW / sx : g.w,
-              h: sy > 0 ? actualH / sy : g.h
-            };
           } else {
             shape._renderedBox = null;
           }
@@ -15402,6 +15420,10 @@
       if (t === "freehand" || t === "marker" || t === "highlighter" || t === "image") {
         return false;
       }
+      // The textbox tool draws `text` shapes (style.box: "fixed"), so the
+      // text family is one kind for editing purposes — either tool grabs
+      // either shape.
+      if (t === "textbox") return shape.kind === "text";
       return shape.kind === t;
     },
 
@@ -15551,6 +15573,7 @@
         case "highlighter": this._startMarker(pt, e); break;
         case "callout":   this._calloutClick(pt); break;
         case "text":      this._startText(pt, e); break;
+        case "textbox":   this._startText(pt, e, true); break;
         case "dimension": this._startDimension(pt, e); break;
         case "line":      this._startLine(pt, e); break;
         case "arrow":     this._startArrow(pt, e); break;
@@ -20608,7 +20631,19 @@
     // a title with a custom bbox."
     // -------------------------------------------------------------------------
 
-    _startText: function(pt, e) {
+    // Is this text shape a TEXT BOX — a box the user drew that stays the
+    // size they drew it, with the text wrapping and sizing inside? The
+    // flag rides `style.box` on committed shapes (so it persists over the
+    // wire as plain style data) and `fixedBox` on the draft, which has no
+    // style of its own yet.
+    _textboxFixed: function(shape) {
+      return !!(shape &&
+        ((shape.style && shape.style.box === "fixed") || shape.fixedBox));
+    },
+
+    // `fixedBox` is the textbox tool's variant: same draft, same element,
+    // but the committed shape keeps the drawn box fixed (see TOOL_DEFS).
+    _startText: function(pt, e, fixedBox) {
       var g = svgEl("g");
       g.classList.add("etcher-shape", "etcher-text", "is-draft");
       // Hit-zone rect — invisible by default, dashed border while
@@ -20635,7 +20670,9 @@
       this.svg.appendChild(g);
 
       var geom = { x: pt.x, y: pt.y, w: 0, h: 0 };
-      this.draftState = { kind: "text", anchor: pt, geometry: geom, el: g };
+      this.draftState = {
+        kind: "text", anchor: pt, geometry: geom, el: g, fixedBox: !!fixedBox
+      };
       this._renderShape(this.draftState);
       this._syncDraftHandles();
       try { e.target.setPointerCapture(e.pointerId); } catch (_) {}
@@ -20652,6 +20689,9 @@
     },
 
     _commitText: function(pt) {
+      // The textbox tool's draft carries the flag (the commit switch keys
+      // on the draft KIND, which is "text" for both tools).
+      var fixedBox = !!this.draftState.fixedBox;
       var a = this.draftState.anchor;
       var geom = {
         x: Math.min(a.x, pt.x),
@@ -20679,6 +20719,20 @@
       el.classList.remove("is-draft");
       var self = this;
       this._finalizeShape("text", geom, el, function(shape) {
+        // The textbox tool: the box is the user's and the font is its
+        // own, stamped at the default label size (the same formula
+        // _startTextEdit uses). The two never derive from each other
+        // again — resizing the box leaves the text, resizing the text
+        // leaves the box.
+        if (fixedBox) {
+          shape.style = Object.assign({}, shape.style || {}, {
+            box: "fixed",
+            font_size: self._defaultLabelFontSize() / self._inkScale()
+          });
+          self._renderShape(shape);
+          self._startTextEdit(shape);
+          return;
+        }
         // A DRAWN box is a size request: small box, small text; big box,
         // big text — the way every drawing program's text tool works. The
         // drawn height pins the font (the same 0.65 the box-drives-font
@@ -23658,7 +23712,11 @@
           // (the ⋯ toggle, same as a label's): the Label size input is
           // the primary way to size text, and dots that only duplicate a
           // number the panel already offers stay hidden until asked for.
-          if (!this._titleHandlesOn()) return [];
+          //
+          // A text BOX is the exception: its box and its font are
+          // independent (style.box: "fixed"), so the corners are the only
+          // way to resize the box at all — they always show.
+          if (!this._textboxFixed(shape) && !this._titleHandlesOn()) return [];
           // Handles ride the shrunk-to-text bbox so users grab where
           // they see the box, not the (often wider) storage envelope.
           var tBox = shape._renderedBox || g;
@@ -24394,8 +24452,13 @@
           if (nh < 0) { ny += nh; nh = -nh; }
           shape.geometry = { x: nx, y: ny, w: nw, h: nh };
           // A text shape IS its box, so resizing it is the drag-to-size
-          // gesture and takes over from a pinned font size.
-          if (shape.kind === "text") this._unpinFontSize(shape);
+          // gesture and takes over from a pinned font size. A text BOX is
+          // the opposite contract: the box and the font never derive from
+          // each other, so dragging its corners reflows the text at the
+          // size it already has.
+          if (shape.kind === "text" && !this._textboxFixed(shape)) {
+            this._unpinFontSize(shape);
+          }
           break;
         }
         case "circle": {

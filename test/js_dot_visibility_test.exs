@@ -53,8 +53,9 @@ defmodule Etcher.JsDotVisibilityTest do
       # dot is not a different size: it is this width, seen end-on.
       src = File.read!(@source)
 
-      assert src =~ "self._applyMarkerStyle(el, shape.style || self._currentMarkerStyle(),\n" <>
-                      "                                   self._markerScale());"
+      assert src =~
+               "self._applyMarkerStyle(el, shape.style || self._currentMarkerStyle(),\n" <>
+                 "                                   self._markerScale());"
     end
 
     test "and no stroke styling anywhere takes a dot flag" do
@@ -94,7 +95,8 @@ defmodule Etcher.JsDotVisibilityTest do
     test "and the same for a legacy freehand polyline" do
       src = File.read!(@source)
 
-      [_, branch] = String.split(src, "if ((g.points || []).length && self._strokeIsDot(g)) {", parts: 2)
+      [_, branch] =
+        String.split(src, "if ((g.points || []).length && self._strokeIsDot(g)) {", parts: 2)
 
       assert String.slice(branch, 0, 400) =~ "self._dotRenderLength()"
     end

@@ -231,7 +231,12 @@ function board(targets) {
 {
   const sites = [
     ["_startTitleHandleDrag", "self._unpinFontSize(shape);", "a label's own box"],
-    ["_applyHandleDrag", 'if (shape.kind === "text") this._unpinFontSize(shape);',
+    // The text-shape release carves out the text BOX (style.box: "fixed"),
+    // whose contract is the opposite: its box and font never derive from
+    // each other, so a corner drag reflows at the size the text already
+    // has (textbox_test pins that half).
+    ["_applyHandleDrag",
+     'if (shape.kind === "text" && !this._textboxFixed(shape)) {',
      "a text shape's box"],
   ];
   for (const [fn, needle, what] of sites) {

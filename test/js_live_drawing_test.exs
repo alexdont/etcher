@@ -49,7 +49,9 @@ defmodule Etcher.JsLiveDrawingTest do
 
       assert tail =~ "this._handOverGhost(shape);"
 
-      assert String.split(tail, "_handOverGhost") |> hd() |> String.contains?("_attachShapeInteractions") ==
+      assert String.split(tail, "_handOverGhost")
+             |> hd()
+             |> String.contains?("_attachShapeInteractions") ==
                false,
              "the hand-over comes first — a ghost still on screen while its " <>
                "replacement is being wired up is two copies of the line"

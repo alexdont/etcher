@@ -559,15 +559,9 @@
       ".etcher-stylepanel[data-size=\"compact\"] .etcher-num {",
       "  width: 30px; padding: 0 2px; text-align: center; font-size: 11px;",
       "}",
-      // Spinners would leave about 17px for the digits, which "200" does not
-      // fit in. Typing still works, and the full panel keeps its steppers.
-      ".etcher-stylepanel[data-size=\"compact\"] .etcher-num {",
-      "  -moz-appearance: textfield; appearance: textfield;",
-      "}",
-      ".etcher-stylepanel[data-size=\"compact\"] .etcher-num::-webkit-outer-spin-button,",
-      ".etcher-stylepanel[data-size=\"compact\"] .etcher-num::-webkit-inner-spin-button {",
-      "  -webkit-appearance: none; margin: 0;",
-      "}",
+      // (Native spinners are off for every .etcher-num in the base rules —
+      // the compact strip used to carry its own copy of that, from when the
+      // full panel still showed them.)
       ".etcher-stylepanel[data-size=\"compact\"] .etcher-stylepanel-divider { display: none; }",
       // Everything is off in compact, then the chosen parts are put back.
       // Written this way round so a part nobody asked for cannot appear
@@ -904,8 +898,7 @@
       // The font row's number box. Full width and the same 30px height as
       // the dash buttons below it, so the row carries the same weight as
       // every other control rather than reading as an afterthought tucked
-      // into a corner. Its own spinners are the increase / decrease —
-      // Firefox draws them always, WebKit on hover.
+      // into a corner.
       ".etcher-num {",
       "  width: 100%; box-sizing: border-box; height: 30px;",
       "  padding: 0 8px; border-radius: 6px;",
@@ -913,6 +906,17 @@
       "  background: transparent; color: #fff;",
       "  font: 500 13px ui-sans-serif, system-ui, sans-serif;",
       "  transition: background 120ms ease, border-color 120ms ease;",
+      "}",
+      // No native spinners, anywhere. The stepper's − / + beside the box
+      // ARE the increase / decrease, so the arrows a desktop browser draws
+      // inside the box (Firefox always, WebKit on hover) were the same two
+      // buttons twice — and the second pair cramped the digits. A phone
+      // never drew them, which is why the box only looked wrong on
+      // desktop.
+      ".etcher-num { -moz-appearance: textfield; appearance: textfield; }",
+      ".etcher-num::-webkit-outer-spin-button,",
+      ".etcher-num::-webkit-inner-spin-button {",
+      "  -webkit-appearance: none; margin: 0;",
       "}",
       ".etcher-num:hover { background: rgba(255, 255, 255, 0.12); }",
       // Label size, plus and minus. A number box spins with the arrows a
@@ -924,9 +928,8 @@
       "  display: flex; align-items: center; gap: 4px; width: 100%;",
       "}",
       ".etcher-stepper .etcher-num { flex: 1 1 auto; min-width: 0; }",
-      // The box keeps its own spinners on a desktop — they are no trouble
-      // there and some people reach for them — but the buttons are the
-      // control that exists everywhere.
+      // The − / + buttons are the one stepping control, on every device —
+      // the box's native spinners are suppressed above.
       ".etcher-step {",
       "  flex: none; width: 30px; height: 30px; padding: 0;",
       "  display: inline-flex; align-items: center; justify-content: center;",

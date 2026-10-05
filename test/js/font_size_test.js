@@ -475,13 +475,21 @@ assert.ok(!src.includes("_paramsFontInput"),
   const rule = src.slice(src.indexOf(show), src.indexOf('"}"', src.indexOf(show)));
   assert.ok(rule.includes("display: flex;"), "shown in the strip");
 
-  // Its caption has nowhere to go at that width, and the spinners would
-  // leave too little room for the digits.
+  // Its caption has nowhere to go at that width.
   assert.ok(src.includes(
     '".etcher-stylepanel[data-size=\\"compact\\"] .etcher-font-row .etcher-marker-row-head {"'),
     "the caption folds away instead of wrapping");
-  assert.ok(src.includes('"  -moz-appearance: textfield; appearance: textfield;"'),
-    "and the spinners do too, so three digits fit");
+
+  // The browser's own spinners are off for EVERY .etcher-num, not just the
+  // compact strip's: the stepper's − / + beside the box are the same two
+  // buttons, so the desktop-drawn pair was a duplicate that cramped the
+  // digits. (The compact strip used to carry its own copy of this rule,
+  // from when the full panel still showed them.)
+  assert.ok(src.includes('".etcher-num { -moz-appearance: textfield; appearance: textfield; }"'),
+    "native spinners are suppressed everywhere — the stepper is the one stepping control");
+  assert.ok(src.includes('".etcher-num::-webkit-inner-spin-button,"') ||
+            src.includes('".etcher-num::-webkit-outer-spin-button,"'),
+    "WebKit's pair goes the same way");
 }
 
 

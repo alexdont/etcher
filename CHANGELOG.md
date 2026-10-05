@@ -4,6 +4,59 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.19.0] — 2026-10-05
+
+The tool you drew with can fix what it drew, and text gets a box of
+its own.
+
+### Added
+
+- **Same-tool editing.** A tool used to be for drawing only — adjusting
+  what it drew meant a trip to the cursor. Now the shapes a tool draws
+  stay grabbable while it is armed: press a rectangle's edge (or
+  corner) with the rectangle tool and you are moving that rectangle; a
+  stationary press selects it, handles and all, exactly as the cursor
+  would; double-click a dimension's label with the dimension tool and
+  the label editor opens. Everything else on the canvas still belongs
+  to the tool — pressing it draws.
+
+  Where the grab zone is, is the whole trick. The filled kinds grab by
+  their OUTLINE (~8 screen px, zoom- and rotation-correct), never their
+  footprint, so a rectangle can still be drawn inside a rectangle and a
+  circle inside a circle. The stroke-built kinds (line, arrow,
+  dimension) and the text-ish ones grab anywhere they are hit; a
+  shape's title satellite grabs whatever the kind. The ink tools and
+  `image` are left out entirely — strokes and pictures land on top of
+  one another by design — and a polygon or callout mid-placement owns
+  every click as a vertex.
+
+  Committing a label under the shape's own tool keeps it selected
+  (cursor mode keeps its full stop): a dimension gets typed and then
+  MOVED, so the end dots are standing right there when Enter lands.
+  And a committed shape's handles stay live while its tool is armed —
+  the `.is-drawing` pointer-events kill now applies only to a draft's
+  inert dots.
+
+- **The text box tool (`:textbox`).** The text tool's box hugs its
+  content; this is the OTHER text — a box you draw once that stays the
+  size you drew it. The text wraps and sizes inside it (Label size in
+  the panel), typing more never moves the walls, and dragging a corner
+  resizes the box without re-deriving the font: the two never derive
+  from each other, which is also why its corner dots show without the
+  `⋯` opt-in (they are the only way to resize the box). The editor
+  wraps against the walls WHILE TYPING, wearing the label's plate and
+  ink, so what is on screen mid-word is what Enter keeps. On the wire
+  it is a plain `text` shape carrying `style.box: "fixed"` — no
+  consumer schema changes; every host stores and bakes it today.
+
+### Changed
+
+- The label-size number box no longer draws the browser's own spinner
+  arrows on desktop (Firefox always drew them, WebKit on hover). The
+  stepper's − / + beside the box are the same two buttons, everywhere;
+  the native pair only cramped the digits. The compact strip already
+  suppressed them — now every panel behaves like the strip.
+
 ## [0.18.0] — 2026-09-29
 
 Everyone watches the stroke happen, and a phone can draw with two hands.

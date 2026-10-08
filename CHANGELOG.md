@@ -4,6 +4,30 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.20.0] — 2026-10-08
+
+The host decides where SortableJS comes from — or that it comes from
+nowhere.
+
+### Added
+
+- **`window.Etcher.sortableUrl` and `window.Etcher.loadSortableFromCdn`.**
+  The Customise dialog fetched SortableJS from jsDelivr the first time it
+  opened: the one hardcoded third-party library load left in Etcher. A host
+  with `script-src 'self'`, an offline install or a no-third-party rule
+  could preload `window.Sortable`, but a failed preload still sent the
+  dialog to the CDN. Now `sortableUrl` loads it from the host's own URL —
+  authoritatively: a 404, a CSP block or a file without a usable `Sortable`
+  constructor sends the dialog to native drag-and-drop, never to the CDN —
+  and `loadSortableFromCdn = false` makes no request at all. Both are read
+  when the library is needed, so they can be set before or after
+  `etcher.js` loads. Defaults are unchanged.
+
+### Changed
+
+- A script that loads but leaves no usable `Sortable` constructor now takes
+  the native drag-and-drop path instead of failing the enhanced one.
+
 ## [0.19.0] — 2026-10-05
 
 The tool you drew with can fix what it drew, and text gets a box of

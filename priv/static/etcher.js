@@ -5213,9 +5213,27 @@
     // Etcher does not depend on it: the list falls back to the browser's own
     // drag-and-drop if it cannot be fetched, so customising still works
     // offline or behind a proxy that blocks the CDN.
+    //
+    // A host decides where it comes from, through `window.Etcher` (read at
+    // the moment it is needed, so values set before or after etcher.js
+    // loads both count):
+    //
+    //   sortableUrl          — load SortableJS from this URL instead. It is
+    //                          authoritative: if it fails, the list uses
+    //                          native drag-and-drop and the CDN is NOT tried.
+    //   loadSortableFromCdn  — `false` means no request at all; the list
+    //                          uses native drag-and-drop straight away.
+    //
+    // Defaults keep the CDN, so nothing changes for a host that sets
+    // neither. A strict-CSP, offline or no-third-party host sets the first
+    // to its own copy, or the second to false. A script that loads but
+    // leaves no usable `Sortable` constructor takes the native path too.
     _withSortable: function(cb) {
-      if (window.Sortable) { cb(window.Sortable); return; }
+      if (typeof window.Sortable === "function") { cb(window.Sortable); return; }
       if (this._sortableFailed) { cb(null); return; }
+      var cfg = window.Etcher || {};
+      var custom = typeof cfg.sortableUrl === "string" ? cfg.sortableUrl.trim() : "";
+      if (!custom && cfg.loadSortableFromCdn === false) { cb(null); return; }
       var self = this;
       if (self._sortableWaiting) { self._sortableWaiting.push(cb); return; }
       self._sortableWaiting = [cb];
@@ -5225,8 +5243,12 @@
         waiting.forEach(function(fn) { try { fn(lib); } catch (_) {} });
       };
       var script = document.createElement("script");
-      script.src = SORTABLE_CDN;
-      script.onload = function() { done(window.Sortable || null); };
+      script.src = custom || SORTABLE_CDN;
+      script.onload = function() {
+        if (typeof window.Sortable === "function") { done(window.Sortable); return; }
+        self._sortableFailed = true;
+        done(null);
+      };
       script.onerror = function() { self._sortableFailed = true; done(null); };
       document.head.appendChild(script);
     },

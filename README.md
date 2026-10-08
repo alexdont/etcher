@@ -655,6 +655,23 @@ window.Etcher.defaultColor = "#ff6f00";
 
 Falls back to the "blue" swatch in the active palette (back-compat) or the first swatch.
 
+### `window.Etcher.sortableUrl` / `loadSortableFromCdn` — where SortableJS comes from
+
+The Customise dialog uses [SortableJS](https://sortablejs.github.io/Sortable/) to reorder tools when it is available, and fetches it from jsDelivr the first time the dialog opens. A host with a strict Content-Security-Policy, an offline install, or a no-third-party-requests rule can change that:
+
+```js
+window.Etcher = window.Etcher || {};          // safe before etcher.js loads
+window.Etcher.sortableUrl = "/assets/sortable.min.js"; // load this instead
+window.Etcher.loadSortableFromCdn = false;            // or: make no request at all
+```
+
+- `window.Sortable` already on the page always wins; nothing is requested.
+- `sortableUrl` is authoritative: if it fails (404, CSP, a file without a usable `Sortable`), the dialog reorders with native drag-and-drop and the CDN is **not** tried.
+- `loadSortableFromCdn = false` with no `sortableUrl` makes no request; native drag-and-drop from the start.
+- Neither set: the CDN, as before.
+
+Both are read when the dialog needs the library, so they can be set before or after `etcher.js` loads.
+
 ### `window.Etcher.layerFor(frescoId)` — programmatic control
 
 Returns the layer's control surface, or `null` if no layer is mounted for that fresco id. Every built-in button (toolbar tools, color swatches, undo/redo, the eye visibility toggle, the pencil annotation-mode toggle) delegates to a method on this object — so you can drive Etcher headlessly (custom toolbar, keyboard shortcuts, command palette, URL handlers, automated tests):

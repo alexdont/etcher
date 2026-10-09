@@ -4,6 +4,63 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.21.0] — 2026-10-09
+
+The style panel's switch joins the viewer's controls, a callout is
+readable at any rotation, and clicking away from a shape just deselects
+it.
+
+### Added
+
+- **`panel_toggle: :nav`** on `<Etcher.layer>` (`data-panel-toggle="nav"`).
+  The style panel's minimize control becomes a button in the Fresco
+  viewer's own nav, right after the pencil, instead of a chevron pinned in
+  the corner — one strip of controls instead of two clusters, which on a
+  small screen is most of the difference. It shows the panel's state rather
+  than an arrow: a window with a wide filled side (full panel), a thin
+  strip (one column) or an empty dashed edge (hidden), lit while any of the
+  panel shows, and cycles full → one column → hidden like the chevron.
+  `:corner` (the chevron) stays the default.
+- **Nav slots.** The pencil, the panel switch and the eye ask Fresco
+  (0.13.3+) for slots 0, 1 and 2, so they lead the viewer's nav in that
+  order whichever attaches first. A host adding its own pencil or eye to
+  the same nav can use the same numbers. Older Fresco ignores the slot and
+  appends, as before.
+- **`panel_offset` takes `left`** to hang the panel from the top-left.
+
+### Changed
+
+- **A callout's label stays upright on a rotated board.** It keeps its own
+  size and sits centred where its box lands, so it rides the board round
+  without lying on its side or turning upside down; its corner dots and
+  resize drags work in screen directions. Other text — text boxes,
+  dimension labels, titles — still turns with the picture: those are drawn
+  on it, a callout is a note about it.
+- **A callout lands beside the cursor on a rotated board.** The label was
+  placed in image directions, so "to the right of the cursor" pointed down
+  or left on a turned board and the label landed away from the pointer
+  placing it. It is now laid out on screen, as on an unturned one.
+- **Clicking away from a selected shape only deselects it.** With a shape
+  tool armed, that click also click-placed a new default-sized shape, so
+  finishing one square left a second behind. A drag from there still
+  draws, and with nothing selected a click places a shape as before. The
+  eraser is unchanged.
+- **With the shape's section docked in the panel (`tooltip_dock: :panel`)
+  and the panel at one column,** the section is just the shape's action
+  buttons, stacked; the name, date and comment preview stretched the strip
+  to full width. Nothing floats over the drawing instead.
+
+### Fixed
+
+- **A callout drag that ended over the style panel** (or any chrome outside
+  the overlay) never finished: the release did not come back to the tool,
+  and the callout was left as a draft — not saved, not undoable. The
+  callout press now captures the pointer, like every other drag tool.
+- **A panel anchored left jumped back to the right** the moment a shape was
+  selected: the side was marked on the host's container, and a LiveView
+  re-render of it strips attributes it did not render. It is marked on the
+  panel itself now.
+
 ## [0.20.0] — 2026-10-08
 
 The host decides where SortableJS comes from — or that it comes from

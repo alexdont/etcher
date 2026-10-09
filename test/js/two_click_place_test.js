@@ -66,6 +66,9 @@ const NEAR = { x: 112, y: 100 };
 
 function board(over) {
   return Object.assign({
+    _calloutBoxAt: extract("_calloutBoxAt"),
+    _calloutBoxBeside: extract("_calloutBoxBeside"),
+    _canvasRotation: () => 0,
     committed: [],
     calloutCommits: [],
     _isClickGesture: isClickGesture,

@@ -344,3 +344,83 @@ setRotateTransform(null, { deg: 90, cx: 0, cy: 0 });
 }
 
 console.log("rotation: all checks passed");
+
+// ── callout labels stand upright on a turned board ─────────────────────────
+// A callout is a note ABOUT the picture and has to be readable from any
+// rotation; text drawn ON the picture (text boxes, dimension labels) still
+// turns with it.
+assert.ok(
+  src.includes("var coTurn = { deg: 0, cx: bx + bw / 2, cy: by + bh / 2 };"),
+  "the callout label is drawn unturned"
+);
+{
+  // At 90° (image x → screen y, image y → screen -x, about the origin with
+  // the picture offset to keep it on screen), dragging the label's top-right
+  // dot 20 screen px to the RIGHT widens the label by 20 — it does not
+  // stretch it along the image's own axes.
+  const apply = lift("_applyHandleDrag", "shape, idx, pt, startGeom, startPt, freeform");
+  const toC = (p) => ({ x: 1000 - p.y, y: p.x });       // image → container at 90°
+  const toI = (c) => ({ x: c.y, y: 1000 - c.x });       // container → image
+  const self = {
+    _canvasRotation: () => 90,
+    _markerScale: () => 1,
+    _imageToContainer: toC,
+    _containerToImage: toI,
+    _calloutTextBoxImage: (g) => g.text_box,
+    _unpinFontSize: () => {},
+    _orientedBox: lift("_orientedBox", "g"),
+  };
+  // _orientedBox reads these too.
+  self._orientedBox = self._orientedBox.bind(self);
+  const startGeom = { anchor: [0, 0], text_box: { x: 100, y: 200, w: 80, h: 20 } };
+  const shape = { kind: "callout", geometry: startGeom };
+  const startC = { x: 900, y: 140 };                   // somewhere on the label, in container px
+  const endC = { x: startC.x + 20, y: startC.y };      // 20px to the right on screen
+  apply.call(self, shape, 2, toI(endC), startGeom, toI(startC), false);
+  const tb = shape.geometry.text_box;
+  assert.strictEqual(Math.round(tb.w), 100, "wider by the screen drag");
+  assert.strictEqual(Math.round(tb.h), 20, "and no taller");
+  // The label's screen centre moved right by half the drag (its left edge
+  // stayed put), and the stored box is centred on it.
+  const c0 = toC({ x: 100 + 40, y: 200 + 10 });
+  const c1 = toC({ x: tb.x + tb.w / 2, y: tb.y + tb.h / 2 });
+  assert.strictEqual(Math.round(c1.x - c0.x), 10);
+  assert.strictEqual(Math.round(c1.y - c0.y), 0);
+}
+
+// ── a callout's label lands beside the cursor on screen ────────────────────
+// Placed relative to the cursor in IMAGE axes, "to the right" pointed down
+// (or left) on a turned board and the label landed away from the pointer
+// placing it — the "twisted" drawing on a rotated canvas.
+{
+  const at = lift("_calloutBoxAt", "pt, dx, dy, w, h");
+  const beside = lift("_calloutBoxBeside", "pt, w, h");
+  const toC = (p) => ({ x: 1000 - p.y, y: p.x });
+  const toI = (c) => ({ x: c.y, y: 1000 - c.x });
+  const self = {
+    _canvasRotation: () => 90, _markerScale: () => 1,
+    _imageToContainer: toC, _containerToImage: toI, _calloutBoxAt: at,
+  };
+  const cursor = { x: 300, y: 400 };
+  const box = beside.call(self, cursor, 80, 20);
+  const centre = toC({ x: box.x + box.w / 2, y: box.y + box.h / 2 });
+  const cur = toC(cursor);
+  assert.strictEqual(Math.round(centre.x - cur.x), 40, "to the right of the cursor by half its width");
+  assert.strictEqual(Math.round(centre.y - cur.y), 0, "and level with it");
+  assert.deepStrictEqual([box.w, box.h], [80, 20], "its own size, not swapped");
+  // Unturned, the same call is the plain image-axis box it always was.
+  const flat = beside.call(Object.assign({}, self, { _canvasRotation: () => 0 }), cursor, 80, 20);
+  assert.deepStrictEqual(flat, { x: 300, y: 390, w: 80, h: 20 });
+}
+
+// ── a callout drag keeps its release ───────────────────────────────────────
+// Without pointer capture a drag that ended over the style panel never
+// reached `_onPointerUp`: the callout stayed a draft nobody could finish.
+{
+  const i = src.indexOf('        case "callout":\n          this._calloutClick(pt);');
+  assert.notStrictEqual(i, -1, "the callout press is dispatched");
+  assert.ok(
+    src.slice(i, i + 900).includes("e.target.setPointerCapture(e.pointerId)"),
+    "and captures the pointer, like every other press-drag tool"
+  );
+}

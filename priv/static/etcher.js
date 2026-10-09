@@ -163,6 +163,13 @@
   var ARROW_PATH =
     '<path stroke-linecap="round" stroke-linejoin="round" d="M4 4 11.07 21l2.51-7.39L20.97 11.1 4 4Z"/>';
 
+  // Where Etcher's buttons sit at the start of the viewer's nav (Fresco's
+  // `slot`), in this order whichever attaches first: the pencil, the style
+  // panel's chevron beside it, then the eye. A host adding its own pencil or
+  // eye to the same nav (phoenix_kit does, on the finished picture) uses the
+  // same numbers so the row reads the same in both modes.
+  var NAV_SLOTS = { pencil: 0, chevron: 1, eye: 2 };
+
   var ICONS = {
     pencil:   '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125"/></svg>',
     trash:    '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/></svg>',
@@ -212,6 +219,14 @@
     grip: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>',
     // Heroicons chevron-up / chevron-down — the style panel's size control.
     chevronUp:   '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 15.75 7.5-7.5 7.5 7.5"/></svg>',
+    // The style panel's switch in the viewer's nav: a window with the panel
+    // down its right side — wide and filled at full size, a thin filled
+    // strip for the one-column mode, an empty dashed edge when folded away.
+    // It shows the state, rather than which way an arrow would move
+    // something it is no longer next to.
+    panelCompact: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.6" stroke="currentColor" aria-hidden="true"><rect x="3.75" y="4.5" width="16.5" height="15" rx="2.25"/><path d="M15.75 4.5v15"/><path fill="currentColor" stroke="none" d="M15.75 4.5h2.25a2.25 2.25 0 0 1 2.25 2.25v10.5a2.25 2.25 0 0 1-2.25 2.25h-2.25z"/></svg>',
+    panelShown:  '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.6" stroke="currentColor" aria-hidden="true"><rect x="3.75" y="4.5" width="16.5" height="15" rx="2.25"/><path d="M9 4.5v15"/><path fill="currentColor" stroke="none" d="M9 4.5h9a2.25 2.25 0 0 1 2.25 2.25v10.5a2.25 2.25 0 0 1-2.25 2.25h-9z"/></svg>',
+    panelHidden: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.6" stroke="currentColor" aria-hidden="true"><rect x="3.75" y="4.5" width="16.5" height="15" rx="2.25"/><path stroke-dasharray="2 2" d="M15.75 4.5v15"/></svg>',
     chevronDown: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5"/></svg>',
     // Heroicons cursor-arrow-rays — a pointer with rays coming off it, which
     // is what a laser pointer looks like when you are trying to draw one.
@@ -605,13 +620,21 @@
       "  display: grid; grid-template-columns: 1fr; gap: 6px;",
       "}",
       ".etcher-stylepanel[data-size=\"hidden\"] { display: none; }",
+      // Hung from the top-left (`panel_offset` with `left`). The popup on a
+      // narrow container positions itself inline and is unaffected.
+      ".etcher-stylepanel[data-side=\"left\"] {",
+      "  right: auto; left: var(--etcher-panel-anchor-left, 12px);",
+      "}",
       // The chevron that cycles the three. Pinned above the panel rather
       // than attached to its edge so it stays exactly where it was when the
       // panel goes away — a control that moves when you use it is one you
       // have to hunt for the second time.
       // The nav pencil while annotation mode is on. The button itself is
       // Fresco's chrome; this class is Etcher's, toggled by _syncNavPencil.
-      ".etcher-pencil-active, .etcher-pencil-active:hover {",
+      // The style panel's switch in the nav while the panel shows — lit the
+      // same way, so "on" looks like "on" across the row.
+      ".etcher-pencil-active, .etcher-pencil-active:hover,",
+      ".etcher-nav-on, .etcher-nav-on:hover {",
       "  background: #3b82f6 !important; color: #fff !important;",
       "}",
       ".etcher-panel-toggle {",
@@ -1804,6 +1827,24 @@
       // The panel is the anchor now, so the fade is opacity alone — a
       // transform would shift the rows below it.
       ".etcher-tooltip.is-docked.is-visible { transform: none; }",
+      // In the one-column strip the section is just the shape's action
+      // buttons, stacked like everything else in the strip. The name, date
+      // and comment preview stretched the strip to full width; the full
+      // panel is where they are read. Never floated over the drawing
+      // instead — the whole point of docking is a clear picture.
+      ".etcher-stylepanel[data-size=\"compact\"] .etcher-tooltip.is-docked {",
+      "  padding: 6px 0 0; margin-top: 6px; width: auto;",
+      "}",
+      ".etcher-stylepanel[data-size=\"compact\"] .etcher-tooltip.is-docked > :not(.etcher-tooltip-header),",
+      ".etcher-stylepanel[data-size=\"compact\"] .etcher-tooltip.is-docked .etcher-tooltip-kind {",
+      "  display: none;",
+      "}",
+      ".etcher-stylepanel[data-size=\"compact\"] .etcher-tooltip.is-docked .etcher-tooltip-header {",
+      "  flex-direction: column; gap: 6px;",
+      "}",
+      ".etcher-stylepanel[data-size=\"compact\"] .etcher-tooltip.is-docked .etcher-tooltip-btn {",
+      "  width: 30px; height: 30px;",
+      "}",
       // Motion is decoration here; the information is the point.
       "@media (prefers-reduced-motion: reduce) {",
       "  .etcher-tooltip { transition: none; transform: none; }",
@@ -3523,6 +3564,11 @@
       }
       if (this.removeNavBtn) { try { this.removeNavBtn(); } catch (_) {} }
       if (this.visibilityBtn) { try { this.visibilityBtn(); } catch (_) {} }
+      if (this.removePanelToggleBtn) {
+        try { this.removePanelToggleBtn(); } catch (_) {}
+        this.removePanelToggleBtn = null;
+        this.panelToggle = null;
+      }
       if (this.toolbar && this.toolbar.parentNode) {
         this.toolbar.parentNode.removeChild(this.toolbar);
       }
@@ -5116,6 +5162,7 @@
       self.handle.container.appendChild(panel);
       self._applyPanelOffset();
       self.stylePanel = panel;
+      if (self._panelSide) panel.setAttribute("data-side", self._panelSide);
       self._buildStyleTrigger();
       self._buildPanelToggle();
 
@@ -5133,6 +5180,21 @@
     _buildPanelToggle: function() {
       var self = this;
       if (self.panelToggle) return;
+      // In the viewer's own nav, when the host asks (`panel_toggle: :nav`):
+      // one strip of controls instead of two clusters, which on a small
+      // screen is the difference between seeing the picture and not. The
+      // panel then drops from the top-left (see `_applyPanelOffset`).
+      if (self._panelToggleInNav()) {
+        // Right after the pencil: it folds away the pencil's panel.
+        var remove = self.handle.appendNavButton(ICONS.panelShown, "Narrow the style panel to one column", function() {
+          self._cyclePanelSize();
+        }, { slot: NAV_SLOTS.chevron });
+        self.removePanelToggleBtn = remove;
+        self.panelToggle = remove.el;
+        self.panelToggle.hidden = true;
+        self._applyPanelPref(self._getPref("panel"));
+        return;
+      }
       var btn = document.createElement("button");
       btn.type = "button";
       btn.className = "etcher-panel-toggle";
@@ -5501,6 +5563,22 @@
       this.customiseBackdrop = null;
     },
 
+    // The host's choice, and only where the viewer has a nav to join.
+    _panelToggleInNav: function() {
+      return !!(this.el && this.el.dataset && this.el.dataset.panelToggle === "nav" &&
+        this.handle && typeof this.handle.appendNavButton === "function");
+    },
+
+    // Shown with the docked panel and gone without it. The corner chevron
+    // does that with a class its own CSS reads; one in the viewer's nav is
+    // Fresco's button and is simply hidden, so the nav closes up behind it.
+    _setPanelToggleActive: function(on) {
+      var btn = this.panelToggle;
+      if (!btn) return;
+      if (this.removePanelToggleBtn) btn.hidden = !on;
+      else btn.classList.toggle("is-active", on);
+    },
+
     _cyclePanelSize: function() {
       var order = ["full", "compact", "hidden"];
       var now = this._getPref("panel");
@@ -5513,6 +5591,21 @@
       if (this.stylePanel) this.stylePanel.setAttribute("data-size", mode);
       var btn = this.panelToggle;
       if (!btn) return;
+      if (this.removePanelToggleBtn) {
+        // Same three steps as the corner chevron (full → one column →
+        // hidden), told by the icon instead of an arrow. Lit while any of
+        // the panel is showing.
+        var shown = mode !== "hidden";
+        btn.innerHTML = mode === "full" ? ICONS.panelShown
+          : (mode === "compact" ? ICONS.panelCompact : ICONS.panelHidden);
+        var label = mode === "full" ? "Narrow the style panel to one column"
+          : (mode === "compact" ? "Hide the style panel" : "Show the style panel");
+        btn.title = label;
+        btn.setAttribute("aria-label", label);
+        btn.classList.toggle("etcher-nav-on", shown);
+        this._setPanelToggleActive(!!this.annotationMode && !this._isCompactLayout());
+        return;
+      }
       // The chevron points at what pressing it does: up while there is still
       // something to fold away, down once there is nothing left but to bring
       // it all back.
@@ -5526,8 +5619,7 @@
       // chevron. This path runs on its own (a stored pref arriving, the
       // toggle being built), so the condition has to be repeated rather
       // than assumed.
-      btn.classList.toggle(
-        "is-active", !!this.annotationMode && !this._isCompactLayout());
+      this._setPanelToggleActive(!!this.annotationMode && !this._isCompactLayout());
     },
 
     // The button that opens the style panel when it can't be docked. Lives
@@ -5727,6 +5819,18 @@
         this.handle.container.style.setProperty(
           "--etcher-panel-anchor-right", offset.right + "px");
       }
+      // Anchored on the left instead: the panel hangs from the top-left,
+      // under a chevron that has joined the viewer's nav there.
+      if (typeof offset.left === "number") {
+        this.handle.container.style.setProperty(
+          "--etcher-panel-anchor-left", offset.left + "px");
+        // Marked on the panel itself, never the container: the container is
+        // the host's element, and a LiveView re-render of it (selecting a
+        // shape is enough) strips attributes it did not render — the panel
+        // jumped back to the right the moment a shape was clicked.
+        this._panelSide = "left";
+        if (this.stylePanel) this.stylePanel.setAttribute("data-side", "left");
+      }
     },
 
     _syncStylePanel: function() {
@@ -5771,9 +5875,7 @@
       // and the chevron floating over the canvas cycles a setting that
       // nothing in a popup reads. Reported as "the chevron does nothing and
       // is just getting in the way".
-      if (this.panelToggle) {
-        this.panelToggle.classList.toggle("is-active", wantsStyle && !compact);
-      }
+      this._setPanelToggleActive(wantsStyle && !compact);
       if (compact) {
         this.stylePanel.setAttribute("data-compact", "");
       } else {
@@ -8973,9 +9075,12 @@
 
     _buildNavButton: function() {
       var self = this;
+      // Slot 0: the pencil leads the viewer's nav — it is what people come
+      // to press, and it belongs at the end the "more" button is not.
+      // (Fresco before 0.13.3 ignores the slot and appends.)
       self.removeNavBtn = self.handle.appendNavButton(ICONS.pencil, "Annotate", function() {
         self._setAnnotationMode(!self.annotationMode);
-      });
+      }, { slot: NAV_SLOTS.pencil });
       self._syncNavPencil();
     },
 
@@ -9000,7 +9105,8 @@
       self.visibilityBtn = self.handle.appendNavButton(
         self.annotationsVisible ? ICONS.eye : ICONS.eyeSlash,
         self.annotationsVisible ? "Hide annotations" : "Show annotations",
-        function() { self._toggleAnnotationsVisible(); }
+        function() { self._toggleAnnotationsVisible(); },
+        { slot: NAV_SLOTS.eye }
       );
     },
 
@@ -12549,6 +12655,27 @@
       return { x: cx + dx * c - dy * s, y: cy + dx * s + dy * c };
     },
 
+    // The inverse of `_imageToContainer`: a container-px point back to image
+    // px. Used where something is laid out on SCREEN and its geometry has to
+    // be written back to the image — a callout label stands upright whatever
+    // the board's rotation, so its corners are screen facts.
+    _containerToImage: function(pt) {
+      if (this.handleKind === "strip") return pt;
+      var r = this.handle.container.getBoundingClientRect();
+      var img = this.handle.screenToImage({ x: pt.x + r.left, y: pt.y + r.top });
+      return { x: img.x, y: img.y };
+    },
+
+    // A callout's label on screen: upright at every rotation, its own size,
+    // centred where the stored box's centre lands. Container px, or null
+    // when the board is not turned (the stored box then IS the screen box,
+    // and every existing path keeps working on it unchanged).
+    _calloutLabelScreen: function(shape) {
+      if (!shape || shape.kind !== "callout") return null;
+      if (!this._canvasRotation()) return null;
+      return shape._labelRect || null;
+    },
+
     _imageToContainer: function(pt) {
       // Strip mode: each shape's SVG element lives inside a per-image
       // overlay whose `viewBox` is set to that image's natural pixel
@@ -12921,13 +13048,19 @@
             coUnderline.setAttribute("y2", byBottom);
           }
 
-          // The label — box, text and underline — turns with the board, about
-          // its own centre. That centre is taken AFTER the shrink-wrap above
-          // resized the box, so the label pivots on what is actually drawn
-          // rather than on the storage envelope it started from.
-          var coTurn = {
-            deg: cobox.deg, cx: bx + bw / 2, cy: by + bh / 2
-          };
+          // The label — box, text and underline — stays UPRIGHT whatever
+          // the board's rotation: a callout exists to be read, and one lying
+          // on its side (or upside down at 180°) is not. It keeps its own
+          // size and sits centred where its stored box's centre lands, so it
+          // rides the board round without turning with it. Every other text
+          // (text boxes, dimension labels, titles) still turns: those are
+          // drawn ON the picture, a callout is a note ABOUT it. The leader
+          // already meets whichever corner is nearest, so it simply attaches
+          // to the upright label.
+          var coTurn = { deg: 0, cx: bx + bw / 2, cy: by + bh / 2 };
+          // The label as drawn, for the handles, the hit-test and handle
+          // drags — which all have to agree with what is on screen.
+          shape._labelRect = { x: bx, y: by, w: bw, h: bh };
           self._setRotateTransform(coRect, coTurn);
           self._setRotateTransform(coText, coTurn);
           self._setRotateTransform(coUnderline, coTurn);
@@ -15580,7 +15713,29 @@
         }
       }
 
+      // Something is selected — usually the shape just drawn — and the
+      // press is somewhere else. That press is "I'm done with it": it
+      // deselects, and draws only if it goes on to be a drag. A plain click
+      // used to ALSO click-place a fresh default-sized shape where it
+      // landed, so finishing one square left a second one behind every
+      // time. Held the same way as the press that closes a label editor,
+      // so a drag that does come draws from where it started. Not the
+      // eraser (a tap on a shape is how it erases one) and not mid-polygon
+      // or mid-callout (those presses are vertices of the draft).
+      if (this._hasSelection() && this.activeTool !== "eraser" &&
+          !this.draftPolygon && !this.draftCallout) {
+        this._exitEditMode();
+        if (typeof this._clearSelection === "function") this._clearSelection();
+        this._pendingDraw = { pt: pt, shift: !!e.shiftKey };
+        return;
+      }
+
       this._dispatchToolDown(pt, e);
+    },
+
+    // A shape being edited, or any shapes selected.
+    _hasSelection: function() {
+      return !!this.editingShape || !!(this.selectedShapes && this.selectedShapes.length);
     },
 
     // The per-tool half of `_onPointerDown`, so a press held back until it
@@ -15593,7 +15748,17 @@
         case "freehand":  this._startFreehand(pt, e); break;
         case "marker":    this._startMarker(pt, e); break;
         case "highlighter": this._startMarker(pt, e); break;
-        case "callout":   this._calloutClick(pt); break;
+        case "callout":
+          this._calloutClick(pt);
+          // Held like every other press-drag tool, so the release comes back
+          // here wherever it lands. Without it a drag that ended over the
+          // style panel (or any chrome outside the overlay) never reached
+          // `_onPointerUp`, and the callout was left as a draft that nothing
+          // finished — not saved, not undoable, just stuck on screen.
+          if (e && e.target && e.pointerId != null) {
+            try { e.target.setPointerCapture(e.pointerId); } catch (_) {}
+          }
+          break;
         case "text":      this._startText(pt, e); break;
         case "textbox":   this._startText(pt, e, true); break;
         case "dimension": this._startDimension(pt, e); break;
@@ -19614,7 +19779,7 @@
       }
       var geom = {
         anchor: anchor,
-        text_box: { x: pt.x, y: pt.y - box.h / 2, w: box.w, h: box.h }
+        text_box: this._calloutBoxBeside(pt, box.w, box.h)
       };
       var el = draft.el;
       el.classList.remove("is-draft");
@@ -19631,12 +19796,39 @@
     _calloutDefaultBox: function(pt) {
       var basePx = this._textDefaultBoxInkPx();
       var h = basePx * 1.4;
-      return {
-        x: pt.x + basePx * 4,
-        y: pt.y - basePx * 3.5 - h,
-        w: basePx * 6,
-        h: h
-      };
+      // Up-and-right on SCREEN, so the label starts where it would on an
+      // unturned board. Laid out as the label's left edge at a point that
+      // far up and over, the same box the image-axis formula gave at 0°.
+      return this._calloutBoxAt(
+        pt, basePx * 4, -(basePx * 3.5 + h), basePx * 6, h
+      );
+    },
+
+    // A callout label's stored box, for a label laid out on SCREEN: its top-
+    // left `dx`,`dy` image-px-at-this-zoom away from `pt` in screen
+    // directions, `w` × `h` in size. The label stands upright whatever the
+    // board's rotation (see the callout case in `_renderShape`), so where it
+    // goes relative to the cursor has to be worked out on screen and then
+    // carried back: in image axes, "to the right of the cursor" pointed
+    // down, or left, on a turned board, and the label landed away from the
+    // pointer that was placing it. Stored as the box with the same centre
+    // and size — the inverse of `_orientedBox`. At 0° this is exactly
+    // `{x: pt.x + dx, y: pt.y + dy, w, h}`.
+    _calloutBoxAt: function(pt, dx, dy, w, h) {
+      if (!this._canvasRotation()) return { x: pt.x + dx, y: pt.y + dy, w: w, h: h };
+      var scl = this._markerScale() || 1;
+      var p = this._imageToContainer(pt);
+      var c = this._containerToImage({
+        x: p.x + (dx + w / 2) * scl,
+        y: p.y + (dy + h / 2) * scl
+      });
+      return { x: c.x - w / 2, y: c.y - h / 2, w: w, h: h };
+    },
+
+    // The label to the right of `pt`, vertically centred on it — where a drag
+    // or a placing click puts it.
+    _calloutBoxBeside: function(pt, w, h) {
+      return this._calloutBoxAt(pt, 0, -h / 2, w, h);
     },
 
     _calloutHover: function(pt) {
@@ -19646,7 +19838,7 @@
       // gives the user a live preview of where the label will land.
       this.draftCallout.geometry = {
         anchor: this.draftCallout.geometry.anchor,
-        text_box: { x: pt.x, y: pt.y - box.h / 2, w: box.w, h: box.h }
+        text_box: this._calloutBoxBeside(pt, box.w, box.h)
       };
       this._renderShape(this.draftCallout);
       this._positionAllHandles(this.draftCallout);
@@ -20973,7 +21165,14 @@
           return this._shapeContainsImagePoint(shape, pt);
         case "callout": {
           var box = shape._renderedBox || this._calloutTextBoxImage(g);
-          if (inRect(box)) return true;
+          var labHit = this._calloutLabelScreen(shape);
+          if (labHit) {
+            // Upright on a turned board: test on screen, where it is drawn.
+            var at;
+            try { at = this._imageToContainer(pt); } catch (_) { at = null; }
+            if (at && at.x >= labHit.x && at.x <= labHit.x + labHit.w &&
+                at.y >= labHit.y && at.y <= labHit.y + labHit.h) return true;
+          } else if (inRect(box)) return true;
           var ax = g.anchor[0], ay = g.anchor[1];
           var dax = pt.x - ax, day = pt.y - ay;
           // Small radius around the anchor dot so the user can erase
@@ -23784,6 +23983,7 @@
           // 4 text-corner handles snap to what's drawn, not the wider
           // storage envelope.
           var cbox = shape._renderedBox || this._calloutTextBoxImage(g);
+          var lab = this._calloutLabelScreen(shape);
           // The anchor dot is POSITIONAL — where the callout points — and
           // always stays. The four text corners are text-resize dots and
           // ride the same ⋯ opt-in as every other text-sizing dot; index
@@ -23791,6 +23991,18 @@
           // mapping is untouched.
           if (!this._titleHandlesOn()) {
             return [{ x: g.anchor[0], y: g.anchor[1] }];
+          }
+          // On a turned board the label stands upright, so its corners are
+          // screen corners — taken from the label as drawn and carried back
+          // into image px, so the dots land exactly on them.
+          if (lab) {
+            return [
+              { x: g.anchor[0], y: g.anchor[1] },
+              this._containerToImage({ x: lab.x,         y: lab.y }),
+              this._containerToImage({ x: lab.x + lab.w, y: lab.y }),
+              this._containerToImage({ x: lab.x + lab.w, y: lab.y + lab.h }),
+              this._containerToImage({ x: lab.x,         y: lab.y + lab.h })
+            ];
           }
           return [
             { x: g.anchor[0],            y: g.anchor[1]            },  // 0: anchor
@@ -24615,6 +24827,34 @@
               anchor: [pt.x, pt.y],
               text_box: { x: startBox.x, y: startBox.y, w: startBox.w, h: startBox.h }
             };
+          } else if (this._canvasRotation() && startPt) {
+            // Turned board: the label stands upright, so its corners move in
+            // SCREEN directions — drag the right-hand dot right and the label
+            // widens, whatever the rotation. Resize the upright screen box by
+            // the screen delta, then write it back as an image box with the
+            // same centre and size (`_orientedBox` is that mapping, inverted).
+            var sb = this._orientedBox(startBox);
+            var p0 = this._imageToContainer(startPt);
+            var p1 = this._imageToContainer(pt);
+            var dxS = p1.x - p0.x, dyS = p1.y - p0.y;
+            var sx = sb.x, sy = sb.y, sw = sb.w, sh = sb.h;
+            switch (idx) {
+              case 1: sx += dxS; sy += dyS; sw -= dxS; sh -= dyS; break;
+              case 2:            sy += dyS; sw += dxS; sh -= dyS; break;
+              case 3:                       sw += dxS; sh += dyS; break;
+              case 4: sx += dxS;            sw -= dxS; sh += dyS; break;
+              default: return;
+            }
+            if (sw < 0) { sx += sw; sw = -sw; }
+            if (sh < 0) { sy += sh; sh = -sh; }
+            var scl = this._markerScale() || 1;
+            var cImg = this._containerToImage({ x: sx + sw / 2, y: sy + sh / 2 });
+            var iw = sw / scl, ih = sh / scl;
+            shape.geometry = {
+              anchor: startGeom.anchor,
+              text_box: { x: cImg.x - iw / 2, y: cImg.y - ih / 2, w: iw, h: ih }
+            };
+            this._unpinFontSize(shape);
           } else {
             var dxC = startPt ? pt.x - startPt.x : 0;
             var dyC = startPt ? pt.y - startPt.y : 0;

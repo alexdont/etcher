@@ -134,6 +134,7 @@ function tooltipFor(shape, opts) {
   const self = {
     // Anchored is the default; the docked mode has its own checks below.
     _tooltipDocked: () => false,
+    _tooltipInPanel: () => false,
     tooltipEl: tip,
     handleKind: opts.handleKind || "canvas",
     handle: {

@@ -61,7 +61,7 @@ function board(visible) {
     tooltipEl: { style: { display: visible ? "" : "none" } },
     tooltipPinned: false,
     // Anchored: the docked branch has its own checks further down.
-    _tooltipDocked: () => false,
+    _tooltipDocked: () => false, _tooltipInPanel: () => false,
     _hoveredShape: null,
     _showTooltipFor(s) { this.shown.push(s && s.uuid); },
     _cancelTooltipOpen: cancelOpen,
@@ -202,7 +202,7 @@ function board(visible) {
       _tooltipCursorOrigin: { x: 100, y: 100 },
       hides: 0,
       _scheduleHideTooltip() { this.hides++; },
-      _tooltipDocked: () => false,
+      _tooltipDocked: () => false, _tooltipInPanel: () => false,
     }, extra || {});
   }
 
@@ -283,7 +283,7 @@ console.log("tooltip hover intent: all checks passed");
   position.call({
     tooltipEl: tip,
     stylePanel: panel,
-    _tooltipDocked: () => true,
+    _tooltipDocked: () => true, _tooltipInPanel: () => true,
     // Reaching this would mean the anchor math ran: a docked tooltip has
     // no coordinates of its own — it is a row in the panel's flow.
     handle: null,
@@ -300,7 +300,7 @@ console.log("tooltip hover intent: all checks passed");
   panel.children.length = 0;
   tip.parentNode = panel;
   position.call({
-    tooltipEl: tip, stylePanel: panel, _tooltipDocked: () => true, handle: null,
+    tooltipEl: tip, stylePanel: panel, _tooltipDocked: () => true, _tooltipInPanel: () => true, handle: null,
     _isMediaKind: () => { throw new Error("no"); },
   }, { el: {} });
   assert.deepStrictEqual(panel.children, []);
@@ -310,7 +310,7 @@ console.log("tooltip hover intent: all checks passed");
   const peek = extract("_tooltipPeekMove");
   const peeked = {
     tooltipPinned: false,
-    _tooltipDocked: () => true,
+    _tooltipDocked: () => true, _tooltipInPanel: () => true,
     tooltipEl: { style: { display: "" } },
     _tooltipTimer: null,
     _tooltipCursorOrigin: { x: 0, y: 0 },
@@ -324,7 +324,7 @@ console.log("tooltip hover intent: all checks passed");
   const auto = extract("_startTooltipAutoClose");
   let armed = false;
   auto.call({
-    _tooltipDocked: () => true,
+    _tooltipDocked: () => true, _tooltipInPanel: () => true,
     _cancelTooltipAutoClose() {},
   });
   assert.strictEqual(armed, false,
@@ -346,7 +346,7 @@ console.log("tooltip hover intent: all checks passed");
   global.setTimeout = () => { scheduled++; return 1; };
   const docked = {
     tooltipPinned: false,
-    _tooltipDocked: () => true,
+    _tooltipDocked: () => true, _tooltipInPanel: () => true,
     editingShape: shape,
     _tooltipShape: shape,
     _cancelHideTooltip() {},
@@ -367,7 +367,7 @@ console.log("tooltip hover intent: all checks passed");
   scheduled = 0;
   schedule.call({
     tooltipPinned: false,
-    _tooltipDocked: () => false,
+    _tooltipDocked: () => false, _tooltipInPanel: () => false,
     _cancelHideTooltip() {},
   });
   assert.strictEqual(scheduled, 1);
@@ -403,7 +403,7 @@ console.log("tooltip hover intent: all checks passed");
 
   let acted = 0;
   tap.call({
-    _tooltipDocked: () => true,
+    _tooltipDocked: () => true, _tooltipInPanel: () => true,
     annotationMode: false,
     _enterEditMode() { acted++; },
     _pinTooltipFor() { acted++; },
@@ -415,7 +415,7 @@ console.log("tooltip hover intent: all checks passed");
   // With Etcher on it selects, as ever.
   let entered = 0;
   tap.call({
-    _tooltipDocked: () => true,
+    _tooltipDocked: () => true, _tooltipInPanel: () => true,
     annotationMode: true,
     _enterEditMode() { entered++; },
   }, shape);
@@ -424,7 +424,7 @@ console.log("tooltip hover intent: all checks passed");
   // And an anchored host still pins in browse mode — that is its tooltip.
   let pinned = 0;
   tap.call({
-    _tooltipDocked: () => false,
+    _tooltipDocked: () => false, _tooltipInPanel: () => false,
     annotationMode: false,
     tooltipPinned: false,
     _pinTooltipFor() { pinned++; },
@@ -447,7 +447,7 @@ console.log("tooltip hover intent: all checks passed");
   function board(hovered, editing, showing) {
     return {
       shown: [], hidden: 0,
-      _tooltipDocked: () => true,
+      _tooltipDocked: () => true, _tooltipInPanel: () => true,
       _hoverAllowed: () => true,
       _hoveredShape: hovered,
       editingShape: editing,
@@ -498,7 +498,7 @@ console.log("tooltip hover intent: all checks passed");
   global.setTimeout = () => { armed++; return 1; };
 
   auto.call({
-    _tooltipDocked: () => true,
+    _tooltipDocked: () => true, _tooltipInPanel: () => true,
     editingShape: shape, _tooltipShape: shape,
     _cancelTooltipAutoClose() {},
   });
@@ -510,7 +510,7 @@ console.log("tooltip hover intent: all checks passed");
   // vanished under one — was the "it doesn't always work" complaint.
   global.setTimeout = () => { armed++; return 1; };
   auto.call({
-    _tooltipDocked: () => true,
+    _tooltipDocked: () => true, _tooltipInPanel: () => true,
     editingShape: shape, _tooltipShape: { uuid: "something-else" },
     _cancelTooltipAutoClose() {},
   });
@@ -518,7 +518,7 @@ console.log("tooltip hover intent: all checks passed");
 
   // Anchored hosts keep the dwell they have always had.
   auto.call({
-    _tooltipDocked: () => false,
+    _tooltipDocked: () => false, _tooltipInPanel: () => false,
     _cancelTooltipAutoClose() {},
   });
   assert.strictEqual(armed, 1, "an anchored tooltip still closes on its own");
@@ -535,7 +535,7 @@ console.log("tooltip hover intent: all checks passed");
   const shape = { uuid: "sel" };
 
   const board = {
-    _tooltipDocked: () => true,
+    _tooltipDocked: () => true, _tooltipInPanel: () => true,
     shows: 0, syncs: [],
     _showTooltipFor() { this.shows++; },
     _syncDockedTooltip(s) { this.syncs.push(s && s.uuid); },
@@ -553,7 +553,7 @@ console.log("tooltip hover intent: all checks passed");
   // already showing, nothing to do.
   const sync = extract("_syncDockedTooltip");
   const quiet = {
-    _tooltipDocked: () => true,
+    _tooltipDocked: () => true, _tooltipInPanel: () => true,
     _hoverAllowed: () => true,
     _hoveredShape: shape,
     editingShape: shape,   // the selection, which is what the section is
@@ -686,7 +686,7 @@ console.log("tooltip hover intent: all checks passed");
     const board = {
       tooltipEl: tip,
       _tooltipShape: { uuid: "u1" },
-      _tooltipDocked: () => true,
+      _tooltipDocked: () => true, _tooltipInPanel: () => true,
       _tooltipFadeInFrame: 1,          // a show is waiting to paint
       _cancelHideTooltip() {}, _cancelTooltipAutoClose() {}, _cancelTooltipOpen() {},
       _removeTooltipOutsideClickHandler() {}, _dispatch() {},

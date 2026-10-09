@@ -68,6 +68,62 @@ function fakeSelf(raw) {
 }
 
 {
+  // `left` hangs the panel from the top-left instead. The side is marked on
+  // the PANEL, never the host's container: a LiveView re-render of the
+  // container (selecting a shape is enough) strips data attributes it did
+  // not render, and the panel jumped back to the right on the first click.
+  const { props, self } = fakeSelf(JSON.stringify({ top: 12, left: 12 }));
+  const panelAttrs = {};
+  self.handle.container.setAttribute = () => assert.fail("nothing goes on the host's element");
+  self.stylePanel = { setAttribute: (k, v) => (panelAttrs[k] = v) };
+  applyPanelOffset.call(self);
+  assert.strictEqual(props["--etcher-panel-anchor-left"], "12px");
+  assert.strictEqual(panelAttrs["data-side"], "left");
+  assert.strictEqual(self._panelSide, "left", "remembered for a panel built later");
+  assert.ok(
+    src.includes('".etcher-stylepanel[data-side=\\"left\\"] {",') &&
+      src.includes('"  right: auto; left: var(--etcher-panel-anchor-left, 12px);",'),
+    "a left anchor moves the docked panel to the left edge"
+  );
+}
+
+{
+  // In the viewer's nav the panel's button keeps all three steps — the
+  // one-column strip matters — and shows each with its own icon.
+  const cycle = lift("_cyclePanelSize", "");
+  let pref = "full";
+  const self = { removePanelToggleBtn: () => {}, _getPref: () => pref, _setPref: (k, v) => (pref = v) };
+  cycle.call(self); assert.strictEqual(pref, "compact");
+  cycle.call(self); assert.strictEqual(pref, "hidden");
+  cycle.call(self); assert.strictEqual(pref, "full");
+  assert.ok(src.includes("btn.innerHTML = mode === \"full\" ? ICONS.panelShown"), "full has its icon");
+  assert.ok(src.includes(": (mode === \"compact\" ? ICONS.panelCompact : ICONS.panelHidden);"), "and so do the other two");
+}
+
+{
+  // A chevron in the viewer's nav is Fresco's button: shown and hidden with
+  // `hidden`, not the corner chevron's class.
+  const setActive = lift("_setPanelToggleActive", "on");
+  const btn = { hidden: false, classList: { toggle: () => assert.fail("not the class") } };
+  setActive.call({ panelToggle: btn, removePanelToggleBtn: () => {} }, false);
+  assert.strictEqual(btn.hidden, true);
+  setActive.call({ panelToggle: btn, removePanelToggleBtn: () => {} }, true);
+  assert.strictEqual(btn.hidden, false);
+  const corner = { classList: { on: null, toggle: (c, v) => (corner.classList.on = v) } };
+  setActive.call({ panelToggle: corner }, true);
+  assert.strictEqual(corner.classList.on, true);
+}
+
+{
+  // …and the nav keeps the pencil first, the chevron beside it and the eye
+  // after, by Fresco slot — whichever attaches first.
+  assert.ok(src.includes("var NAV_SLOTS = { pencil: 0, chevron: 1, eye: 2 };"));
+  assert.ok(src.includes("}, { slot: NAV_SLOTS.pencil });"), "the pencil asks for slot 0");
+  assert.ok(src.includes("}, { slot: NAV_SLOTS.chevron });"), "the chevron for the one beside it");
+  assert.ok(src.includes("{ slot: NAV_SLOTS.eye }"), "the eye after them");
+}
+
+{
   // Garbage input must be inert, never a crash.
   const { props, self } = fakeSelf("{not json");
   applyPanelOffset.call(self);
@@ -118,11 +174,11 @@ assert.ok(
 // panel to keep is not a question there, and a chevron over the canvas
 // cycling a setting no popup reads is just in the way.
 assert.ok(
-  src.includes('this.panelToggle.classList.toggle("is-active", wantsStyle && !compact);'),
+  src.includes('this._setPanelToggleActive(wantsStyle && !compact);'),
   "the chevron shows only where the panel docks"
 );
 assert.ok(
-  src.includes('"is-active", !!this.annotationMode && !this._isCompactLayout());'),
+  src.includes('this._setPanelToggleActive(!!this.annotationMode && !this._isCompactLayout());'),
   "…including when a stored pref is applied, which runs on its own"
 );
 // And the trigger is the same gate, the other way round: it is the door on
@@ -181,8 +237,9 @@ const syncNavPencil = lift("_syncNavPencil", "");
 }
 
 assert.ok(
-  src.includes('".etcher-pencil-active, .etcher-pencil-active:hover {'),
-  "the lit state has a stylesheet rule"
+  src.includes('".etcher-pencil-active, .etcher-pencil-active:hover,",') &&
+    src.includes('".etcher-nav-on, .etcher-nav-on:hover {",'),
+  "the lit state has a stylesheet rule — shared with the panel switch while it is on"
 );
 
 // ── the label swatch retargets the picker ───────────────────────────────────
@@ -612,3 +669,53 @@ assert.ok(
     src.includes("cursorToolCursor() : \"\""),
   "grabber and cursor tool keep their own full-size pointers"
 );
+
+// ── selected shape, then a click elsewhere ─────────────────────────────────
+// Drawing a square leaves it selected. The next click on empty canvas used
+// to deselect it AND click-place a fresh default square where it landed. It
+// now only deselects; a drag from there still draws.
+{
+  const down = lift("_onPointerDown", "e");
+  const hasSel = lift("_hasSelection", "");
+  function fake(selected) {
+    const calls = [];
+    const self = {
+      annotationMode: true, activeTool: "rectangle",
+      editingShape: selected ? { uuid: "a" } : null, selectedShapes: [],
+      _toImage: () => ({ x: 10, y: 10 }),
+      _placeArmedDraft: () => false,
+      _sameToolGrabTarget: () => null,
+      _hasSelection: hasSel,
+      _exitEditMode() { calls.push("deselect"); this.editingShape = null; },
+      _clearSelection() { calls.push("clear"); },
+      _dispatchToolDown() { calls.push("draw"); },
+    };
+    return { self, calls };
+  }
+  const ev = { button: 0, pointerId: 1, shiftKey: false };
+
+  const a = fake(true);
+  down.call(a.self, ev);
+  assert.deepStrictEqual(a.calls, ["deselect", "clear"], "the click only deselects");
+  assert.ok(a.self._pendingDraw, "held: a drag from here still draws");
+
+  const b = fake(false);
+  down.call(b.self, ev);
+  assert.deepStrictEqual(b.calls, ["draw"], "nothing selected: the tool acts as before");
+
+  const c = fake(true);
+  c.self.activeTool = "eraser";
+  down.call(c.self, ev);
+  assert.deepStrictEqual(c.calls, ["draw"], "the eraser still erases on a tap");
+}
+
+// ── a selected shape's section in the one-column strip ──────────────────
+// Stays IN the panel (never floats over the drawing) and keeps only its
+// action buttons, stacked — the name and date stretched the strip wide.
+assert.ok(
+  src.includes('".etcher-stylepanel[data-size=\\"compact\\"] .etcher-tooltip.is-docked > :not(.etcher-tooltip-header),",') &&
+    src.includes('"  flex-direction: column; gap: 6px;",'),
+  "the strip shows the actions alone, stacked"
+);
+assert.ok(src.includes("if (this._tooltipDocked()) {\n        tip.classList.add(\"is-docked\");"),
+  "docked means in the panel, whatever its size");

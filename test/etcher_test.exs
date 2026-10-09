@@ -20,6 +20,18 @@ defmodule EtcherTest do
       assert html =~ ~s(aria-hidden="true")
     end
 
+    test "the panel chevron stays in its corner unless the host puts it in the nav" do
+      assigns = %{}
+
+      refute rendered_to_string(~H"""
+             <Etcher.Layer.layer fresco_id="board" />
+             """) =~ "data-panel-toggle"
+
+      assert rendered_to_string(~H"""
+             <Etcher.Layer.layer fresco_id="board" panel_toggle={:nav} />
+             """) =~ ~s(data-panel-toggle="nav")
+    end
+
     test "connector anchors are off unless the host opts in" do
       assigns = %{}
 

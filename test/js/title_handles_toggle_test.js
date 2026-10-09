@@ -48,6 +48,7 @@ const renderHandles = extract("_renderTitleHandles");
   let removed = 0;
   const self = {
     _titleHandlesOn: () => false,
+    _calloutLabelScreen: () => null,
     _removeTitleHandles() { removed++; },
     _shapeTitleBoxImage: () => { throw new Error("must not get this far"); },
   };
@@ -77,6 +78,7 @@ const renderHandles = extract("_renderTitleHandles");
     return {
       _titleHandlesOn: () => on,
       _calloutTextBoxImage: (g) => g.text_box,
+      _calloutLabelScreen: () => null,
       // Plain shapes throughout — the text BOX bypasses the opt-in (its
       // corners are the only way to resize it; textbox_test pins that).
       _textboxFixed: () => false,

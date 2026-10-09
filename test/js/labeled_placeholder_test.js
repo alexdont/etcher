@@ -63,6 +63,9 @@ function ctx(draft) {
     _isClickGesture: isClickGesture,
     _clickPlaceSizeImagePx: clickPlaceSize,
     _calloutDefaultBox: calloutDefaultBox,
+    _calloutBoxAt: extract("_calloutBoxAt"),
+    _calloutBoxBeside: extract("_calloutBoxBeside"),
+    _canvasRotation: () => 0,
     // A shaft draft commits the geometry it was carrying, so an arrow keeps
     // its route — see arrow_tool_test.js.
     _shaftGeometry: extract("_shaftGeometry"),
@@ -179,7 +182,9 @@ function ctx(draft) {
 // one. Driven through the real helper: with basePx = 16, the box must
 // clear the anchor by a visible margin on both axes.
 {
-  const box = calloutDefaultBox.call({ _textDefaultBoxInkPx: () => 16 }, { x: 0, y: 0 });
+  const box = calloutDefaultBox.call({
+    _textDefaultBoxInkPx: () => 16, _canvasRotation: () => 0, _calloutBoxAt: extract("_calloutBoxAt")
+  }, { x: 0, y: 0 });
   assert.ok(box.x >= 16 * 3,
     `the box starts only ${box.x / 16} basePx right of the anchor — the leader reads as a nudge, not a diagonal`);
   assert.ok(box.y + box.h <= -(16 * 2.5),

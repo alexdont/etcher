@@ -393,6 +393,22 @@ defmodule Etcher.Layer do
     Use it when the host's own chrome lives in that corner — a details
     minimizer, a close button — and the default `top: 12` collides with
     it. Omitted keys keep their defaults (`top: 12`, `right: 12`).
+
+    Pass `left` instead of `right` to hang the panel from the top-left —
+    with `panel_toggle: :nav`, under the viewer's nav row:
+    `%{top: 12, left: 12}`.
+    """
+  )
+
+  attr(:panel_toggle, :atom,
+    default: :corner,
+    values: [:corner, :nav],
+    doc: """
+    Where the style panel's minimize chevron lives. `:corner` (default)
+    pins it above the panel. `:nav` makes it a button in the Fresco
+    viewer's own nav, so the viewer's controls and the panel's are one
+    strip — pair it with Fresco's `nav_layout: :row` and a `left` in
+    `:panel_offset` so the panel drops from under that row.
     """
   )
 
@@ -568,6 +584,7 @@ defmodule Etcher.Layer do
       data-colors={@colors_json}
       data-line-params={@line_params_json}
       data-panel-offset={@panel_offset_json}
+      data-panel-toggle={@panel_toggle == :nav && "nav"}
       data-tooltip-dock={@tooltip_dock == :panel && "panel"}
       class="hidden"
       aria-hidden="true"

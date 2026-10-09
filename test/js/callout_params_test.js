@@ -146,6 +146,7 @@ const isShaftKind = (k) => ["line", "arrow", "dimension"].indexOf(k) !== -1;
   };
   const self = {
     _calloutTextBoxImage: (g) => g.text_box,
+    _calloutLabelScreen: () => null,
     _textDefaultBoxImagePx: () => 16,
     _imageToContainer: (p) => ({ x: p.x, y: p.y }),
     _nearSegment: nearSegment,

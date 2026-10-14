@@ -80,6 +80,16 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   plate sits square on the underline — padded in as the corners need,
   with its own remembered default (the controls show with the callout
   tool armed). Callouts made before this show sharp.
+- **The style panel shows only what applies.** With a shape selected, the
+  label colour chips (Text / Behind) show only if it has words; the label
+  placement grid only for a label on a shape (not text, callouts, or a
+  label riding an arrow or dimension); nothing selected still shows every
+  default for the next shape. Rows are grouped in working order — line
+  (thickness, opacity, type, fill), label (size, background), corners,
+  placement — with a thin rule only between groups that are showing. The
+  corners are one block: heading and reading, the five shapes, and a
+  slider that appears once there are corners. Colour swatches are rounded
+  squares instead of pills.
 - **Handles follow a colour change, side grabbers included.** Recolouring a
   shape (or a text box's text) repainted its corner dots but not its side
   grabbers, which kept the colour the shape was drawn in — a text box

@@ -473,7 +473,7 @@
       // swatch gets a white ring so the choice is visible even when
       // the swatch is pastel-blue and the highlight is subtle.
       ".etcher-swatch {",
-      "  width: 22px; height: 22px; border-radius: 999px;",
+      "  width: 22px; height: 22px; border-radius: 6px;",
       "  border: 1px solid rgba(255, 255, 255, 0.4); padding: 0;",
       "  cursor: pointer; transition: transform 80ms ease;",
       "}",
@@ -831,7 +831,9 @@
       ".etcher-stylepanel-swatches {",
       "  display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px;",
       "}",
-      ".etcher-stylepanel .etcher-swatch { width: 100%; height: 24px; }",
+      // Rounded squares, not pills: one tile per colour, square like the
+      // chips beside them.
+      ".etcher-stylepanel .etcher-swatch { width: 100%; height: auto; aspect-ratio: 1 / 1; border-radius: 8px; }",
       // The label-colour row: full menu width under the palette - a colour
       // chip (the "A" in the remembered colour) beside a text label, so it
       // reads as "the colour labels get", not as a sixth palette slot.
@@ -896,14 +898,18 @@
       ".etcher-stylepanel .etcher-marker-dash > * { width: 100%; min-width: 0; }",
       // Five corner choices: sharp, then the four shaped kinds.
       ".etcher-stylepanel .etcher-corner-row { grid-template-columns: repeat(5, 1fr); }",
-      ".etcher-corner-row svg { width: 22px; height: 16px; }",
+      ".etcher-corner-row svg { width: 20px; height: 14px; }",
+      ".etcher-stylepanel .etcher-corner-row { margin: 2px 0; }",
+      ".etcher-stylepanel .etcher-corner-row button { height: 30px; }",
+      // The thin rule between the panel's groups.
+      ".etcher-panel-sep { height: 1px; background: rgba(255, 255, 255, 0.14); margin: 2px 0; flex: 0 0 auto; }",
+      ".etcher-stylepanel[data-size=\"compact\"] .etcher-panel-sep { display: none; }",
       // Horizontal label alignment is three choices, not four.
       ".etcher-stylepanel .etcher-align-row {",
       "  grid-template-columns: repeat(3, 1fr);",
       "}",
       ".etcher-label-section {",
       "  display: flex; flex-direction: column; gap: 4px;",
-      "  border-top: 1px solid rgba(255, 255, 255, 0.18); padding-top: 8px;",
       "}",
       ".etcher-params-label {",
       "  color: #fff; font-size: 11px; opacity: 0.85;",
@@ -7818,10 +7824,13 @@
         cornerTypeRow.appendChild(b);
         return b;
       });
-      popup.appendChild(cornerTypeRow);
       self._paramsCornerTypeRow = cornerTypeRow;
 
+      // One block: the heading with its reading, the five shapes, and the
+      // slider — which only shows once there are corners to size.
       var cs = sliderRow("Corners");
+      cs.row.classList.add("etcher-corner-section");
+      cs.row.insertBefore(cornerTypeRow, cs.input);
       cs.input.min = "0"; cs.input.max = String(TEXTBOX_CORNER_MAX); cs.input.step = "1";
       self._paramsCornerRow = cs.row;
       self._paramsCornerInput = cs.input;
@@ -8005,6 +8014,23 @@
       popup.appendChild(labelSection);
       self._labelSection = labelSection;
 
+      // Grouped, in the order you work: the line (thickness, opacity, type,
+      // fill), the label (size, background), the box's corners, then where
+      // the label sits. A thin rule between groups — only between groups
+      // that are showing (see `_syncPanelSeps`).
+      self._panelSeps = [];
+      [w.row, o.row, dashRow, fillRow, "|", fontRow, bgRow, "|", cs.row, "|", labelSection]
+        .forEach(function(item) {
+          if (item === "|") {
+            var sep = document.createElement("div");
+            sep.className = "etcher-panel-sep";
+            popup.appendChild(sep);
+            self._panelSeps.push(sep);
+          } else if (item) {
+            popup.appendChild(item);
+          }
+        });
+
       self.handle.container.appendChild(popup);
       self.paramsPopup = popup;
     },
@@ -8022,8 +8048,12 @@
       } else if (this.editingTitleShape) {
         shapes = [this.editingTitleShape];
       }
+      // Placing a label inside its shape means nothing for text and
+      // callouts (the words ARE the shape) or for a label riding its line.
+      var self = this;
       return shapes.filter(function(s) {
-        return s && s.metadata && String(s.metadata.title || "").trim() !== "";
+        return s && s.metadata && String(s.metadata.title || "").trim() !== "" &&
+          !self._isTextKind(s.kind) && !self._labelRidesShaft(s.kind);
       });
     },
 
@@ -8210,6 +8240,28 @@
       this._syncCornerRows();
       this._syncLabelSection();
       this._refreshLabelSwatch();
+      this._syncPanelSeps();
+    },
+
+    // A rule shows before a group only when that group is showing and
+    // something above it is too — never a rule on its own, never two in a
+    // row, never one at the top or the bottom.
+    _syncPanelSeps: function() {
+      var seps = this._panelSeps;
+      if (!seps || !seps.length || !this.paramsPopup) return;
+      var shown = function(el) { return el.style.display !== "none"; };
+      var anyAbove = false, group = [], groups = [];
+      var kids = this.paramsPopup.children;
+      for (var i = 0; i < kids.length; i++) {
+        if (seps.indexOf(kids[i]) >= 0) { groups.push({ items: group, sep: kids[i] }); group = []; }
+        else group.push(kids[i]);
+      }
+      groups.push({ items: group, sep: null });
+      for (var g = 0; g < groups.length; g++) {
+        var vis = groups[g].items.some(shown);
+        if (g > 0) groups[g - 1].sep.style.display = vis && anyAbove ? "" : "none";
+        anyAbove = anyAbove || vis;
+      }
     },
 
     // Text boxes the corner controls act on: the one being typed into, the
@@ -8266,6 +8318,7 @@
         type = d.corner; px = Math.round(d.size);
       }
       px = Math.min(TEXTBOX_CORNER_MAX, px);
+      this._paramsCornerInput.style.display = px > 0 ? "" : "none";
       this._paramsCornerInput.value = String(px);
       this._paramsCornerVal.textContent = px ? String(px) : "Sharp";
       // Sharp lights when there are no corners; a type only once they reach.
@@ -8920,9 +8973,13 @@
       // With a pure-ink tool armed and no label in focus, the chips
       // describe nothing the next stroke can have — hide the row with
       // the other label controls.
+      // A shape in focus with no words on it has no label colours to set
+      // either; they come back with nothing focused (the defaults).
+      var focused = !!(this._textEditor || this.editingShape || this.editingTitleShape ||
+        (this.selectedShapes && this.selectedShapes.length));
       if (this._labelChipsRow) {
         this._labelChipsRow.style.display =
-          onLabel || !this._armedInkTool() ? "" : "none";
+          onLabel || (!focused && !this._armedInkTool()) ? "" : "none";
       }
       var color = this._currentLabelColor();
       var forWhat = onLabel ? "this label" : "new labels";

@@ -84,7 +84,7 @@ const syncFontRow = extract("_syncFontRow");
   for (const [needle, what] of [
     ["var global = !targets.length && !this._paramsTargetShapes().length &&\n        !this._armedInkTool();", "size and plate rows"],
     ["!this._armedInkTool()) ||\n          targets.some(function(s) { return self._isStrokeShape(s.kind); });", "the fill buttons"],
-    ["onLabel || !this._armedInkTool() ? \"\" : \"none\";", "the Text/Behind chips"],
+    ["onLabel || (!focused && !this._armedInkTool()) ? \"\" : \"none\";", "the Text/Behind chips"],
   ]) {
     assert.ok(src.includes(needle), `gate missing on ${what}`);
   }

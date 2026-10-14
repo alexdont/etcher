@@ -51,31 +51,32 @@ const make = (n) => eval(body(n));
 
 assert.ok(body("_refreshLabelSwatch").includes('onLabel || (!focused && !this._armedInkTool()) ? "" : "none";'),
   "Text/Behind only with words in focus, or nothing focused");
-assert.ok(src.includes('[w.row, o.row, "|", fontRow, bgRow, "|", chipsRow, dashRow, fillRow, cs.row, labelSection]'),
-  "line, label, then the choice buttons");
-// The choice rows fold into one slim row of buttons with pop-ups.
-assert.ok(src.includes('[dashRow, fillRow, cs.row, labelSection].forEach(function(r) { r.classList.add("etcher-in-chips"); });'));
+// Affinity-style: every setting is a small button showing its value; its
+// controls open in a pop-up (the real rows, moved in and back out).
+assert.ok(src.includes('[w.row, o.row, fontRow, bgRow, dashRow, fillRow, cs.row, labelSection]\n        .forEach(function(r) { r.classList.add("etcher-in-chips"); });'),
+  "every setting row folds into a button");
+assert.ok(src.includes('[chipsRow, w.row, o.row, fontRow, bgRow, dashRow, fillRow, cs.row, labelSection]'), "the button row leads");
 assert.ok(src.includes('".etcher-stylepanel:not([data-size=\\"compact\\"]) .etcher-in-chips { display: none !important; }",'),
   "hidden as rows in the full panel, kept inline in the compact strip");
 {
   const syncChips = make("_syncStyleChips");
-  const btn = (sel, html) => ({ classList: { contains: (c) => c === "is-selected" && sel }, innerHTML: html, style: {} });
-  const chip = (shown, btns) => ({ row: { style: { display: shown ? "" : "none" } }, btns: () => btns, el: { style: {}, innerHTML: "" } });
-  const a = chip(true, [btn(false, "<i>a</i>"), btn(true, "<i>b</i>")]);
-  const b = chip(false, [btn(true, "<i>c</i>")]);
+  const row = (shown, head) => ({ style: { display: shown ? "" : "none" }, classList: { contains: (c) => !!head && c === "etcher-marker-row-head" } });
+  const a = { rows: [row(true)], face: () => "<b>3</b>", el: { style: {}, innerHTML: "" } };
+  const b = { rows: [row(false, false), row(true, true)], face: () => "x", el: { style: {}, innerHTML: "" } };
   const ctx = { _chips: [a, b], _chipsRow: { style: {} } };
   syncChips.call(ctx);
-  assert.ok(a.el.innerHTML.includes("<i>b</i>"), "a button wears its current choice");
-  assert.strictEqual(b.el.style.display, "none", "and hides when its row would");
+  assert.ok(a.el.innerHTML.includes("<b>3</b>"), "a button shows its current value");
+  assert.strictEqual(b.el.style.display, "none", "and hides when its controls would (a heading alone does not count)");
   assert.strictEqual(ctx._chipsRow.style.display, "");
 }
-assert.ok(body("_openChipPop").includes("orig.click();"), "a pop-up option presses the real button");
+assert.ok(body("_openChipPop").includes("pop.appendChild(row);") && body("_closeChipPop").includes("ph.parentNode.insertBefore(row, ph);"),
+  "the pop-up holds the real controls and gives them back");
 assert.ok(body("_syncCornerRows").includes('this._paramsCornerInput.style.display = px > 0 ? "" : "none";'),
   "the corner slider shows once there are corners");
 assert.ok(src.includes('".etcher-stylepanel .etcher-swatch { width: 100%; height: auto; aspect-ratio: 1 / 1; border-radius: 8px; }",'),
   "square colour tiles with soft corners");
 // The background switch is folded into the Behind chip.
-assert.ok(src.includes('bgRow.classList.add("etcher-in-chips");'), "no separate switch row in the full panel");
+assert.ok(!/key: "[a-z]+"[^\n]*rows: \[[^\]]*bgRow/.test(src), "no button opens the old switch row — it is the Behind chip's now");
 assert.ok(body("_syncBgChoices").includes("self._setLabelBg(null, true);"), "the chip's popup offers No background");
 assert.ok(body("_syncBgChoices").includes('row.style.display = this._labelBgPickTarget ? "" : "none";'), "only when aimed at the plate");
 

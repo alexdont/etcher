@@ -100,6 +100,13 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 - **The label background switch is folded into the Behind chip.** Its
   colour popup leads with "No background"; any colour turns the plate on.
   The separate On/Off row is gone from the full panel.
+- **The panel is one row of value buttons, Affinity-style.** Thickness and
+  line type, opacity, fill, label size, corners and label position are
+  each a small button showing the current value ("— 3", "70%", "Aa 12",
+  the corner shape and size…); a click opens that setting's own controls
+  in a pop-up under the row. Below the colours and the Text/Behind chips
+  the panel is just that row (the full panel went from ~350 to ~170 px
+  tall). The compact strip keeps its inline controls.
 - **Handles follow a colour change, side grabbers included.** Recolouring a
   shape (or a text box's text) repainted its corner dots but not its side
   grabbers, which kept the colour the shape was drawn in — a text box

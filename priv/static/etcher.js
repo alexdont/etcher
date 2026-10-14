@@ -905,21 +905,22 @@
       // current pick with a caret, opening a pop-up of the options.
       ".etcher-stylepanel:not([data-size=\"compact\"]) .etcher-in-chips { display: none !important; }",
       ".etcher-stylepanel[data-size=\"compact\"] .etcher-chips, .etcher-stylepanel[data-size=\"compact\"] .etcher-chip-pop { display: none !important; }",
-      ".etcher-chips { display: flex; gap: 6px; }",
+      ".etcher-chips { display: flex; flex-wrap: wrap; gap: 6px; }",
       ".etcher-chip {",
-      "  flex: 1 1 0; min-width: 0; max-width: 54px; height: 32px; padding: 0 6px;",
+      "  flex: 0 0 auto; min-width: 36px; height: 30px; padding: 0 8px;",
       "  display: inline-flex; align-items: center; justify-content: center; gap: 4px;",
       "  border: 0; border-radius: 8px; cursor: pointer; color: #fff;",
       "  background: rgba(255, 255, 255, 0.08); transition: background 120ms ease;",
       "}",
       ".etcher-chip:hover { background: rgba(255, 255, 255, 0.16); }",
       ".etcher-chip.is-open { background: rgba(255, 255, 255, 0.24); }",
-      ".etcher-chip-icon { display: inline-flex; align-items: center; justify-content: center; }",
-      ".etcher-chip-icon svg { max-width: 22px; max-height: 18px; }",
-      ".etcher-chip-caret { opacity: 0.6; flex: 0 0 auto; }",
+      ".etcher-chip-face { display: inline-flex; align-items: center; gap: 5px; pointer-events: none; }",
+      ".etcher-chip-face svg { max-width: 20px; max-height: 16px; }",
+      ".etcher-chip-face b { font: 600 12px/1 ui-sans-serif, system-ui, sans-serif; font-variant-numeric: tabular-nums; }",
+      ".etcher-chip-aa { font: 600 12px/1 ui-sans-serif, system-ui, sans-serif; opacity: 0.75; }",
       ".etcher-chip-pop {",
       "  position: absolute; left: 8px; right: 8px; z-index: 13; display: none;",
-      "  flex-direction: column; gap: 8px; padding: 10px;",
+      "  flex-direction: column; gap: 10px; padding: 12px;",
       "  background: rgba(24, 24, 27, 0.97); border-radius: 10px;",
       "  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45); color: #fff;",
       "}",
@@ -5753,6 +5754,7 @@
 
     _applyPanelPref: function(mode) {
       if (mode !== "compact" && mode !== "hidden") mode = "full";
+      if (this._openChip) this._closeChipPop();
       if (this.stylePanel) this.stylePanel.setAttribute("data-size", mode);
       var btn = this.panelToggle;
       if (!btn) return;
@@ -8103,16 +8105,46 @@
       chipPop.className = "etcher-chip-pop";
       chipPop.setAttribute("data-fresco-no-capture", "");
       self._chipPop = chipPop;
-      [dashRow, fillRow, cs.row, labelSection].forEach(function(r) { r.classList.add("etcher-in-chips"); });
-      // The background switch is the Behind chip's now ("No background" or
-      // a colour in its popup).
-      bgRow.classList.add("etcher-in-chips");
+      // Affinity's context-toolbar idea: every setting is a small button
+      // showing its current value; a click opens its controls. The rows are
+      // the controls themselves, moved into the pop-up while it is open and
+      // back after, so their wiring and sync are untouched. The compact
+      // strip keeps them inline.
+      [w.row, o.row, fontRow, bgRow, dashRow, fillRow, cs.row, labelSection]
+        .forEach(function(r) { r.classList.add("etcher-in-chips"); });
+      var fillHead = document.createElement("div");
+      fillHead.className = "etcher-marker-row-head";
+      fillHead.innerHTML = "<span>Fill</span>";
+      var lineHead = document.createElement("div");
+      lineHead.className = "etcher-marker-row-head";
+      lineHead.innerHTML = "<span>Line type</span>";
+      var selIcon = function(btns) {
+        var list = btns || [];
+        var sel = list.filter(function(b) { return b && b.classList.contains("is-selected"); })[0] || list[0];
+        return sel ? sel.innerHTML : "";
+      };
       var CHIPS = [
-        { key: "line", title: "Line type", row: dashRow, btns: function() { return self._paramsDashBtns || []; } },
-        { key: "fill", title: "Fill", row: fillRow, btns: function() { return self._paramsFillBtns || []; } },
-        { key: "corners", title: "Corners", row: cs.row, btns: function() { return self._paramsCornerBtns || []; }, slider: true, stay: true },
-        { key: "position", title: "Label position", row: labelSection, stay: true,
-          btns: function() { return (self._titleAlignBtns || []).concat(self._titleFreeBtn ? [self._titleFreeBtn] : []); } }
+        { key: "stroke", title: "Line — thickness and type", rows: [w.row, lineHead, dashRow],
+          face: function() { return selIcon(self._paramsDashBtns) + '<b>' + (self._paramsWeightVal.textContent || "") + '</b>'; } },
+        { key: "opacity", title: "Opacity", rows: [o.row],
+          face: function() {
+            return '<svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="5.5" fill="none" stroke="currentColor" stroke-width="1.3"/>' +
+              '<path d="M7 1.5 A5.5 5.5 0 0 1 7 12.5 Z" fill="currentColor"/></svg><b>' + (self._paramsOpacityVal.textContent || "") + '</b>';
+          } },
+        { key: "fill", title: "Fill", rows: [fillHead, fillRow], face: function() { return selIcon(self._paramsFillBtns); } },
+        { key: "size", title: "Label size", rows: [fontRow],
+          face: function() { return '<span class="etcher-chip-aa">Aa</span><b>' + (self._paramsFontNum.value || "–") + '</b>'; } },
+        { key: "corners", title: "Corners", rows: [cs.row],
+          face: function() {
+            var v = self._paramsCornerInput && self._paramsCornerInput.style.display !== "none" ? self._paramsCornerInput.value : "";
+            return selIcon(self._paramsCornerBtns) + (v ? '<b>' + v + '</b>' : "");
+          } },
+        { key: "position", title: "Label position", rows: [labelSection],
+          face: function() {
+            var list = (self._titleAlignBtns || []).concat(self._titleFreeBtn ? [self._titleFreeBtn] : []);
+            var sel = list.filter(function(b) { return b.classList.contains("is-selected"); });
+            return sel.length ? sel[sel.length - 1].innerHTML : (self._titleFreeBtn ? self._titleFreeBtn.innerHTML : "");
+          } }
       ];
       self._chips = CHIPS;
       CHIPS.forEach(function(chip) {
@@ -8137,7 +8169,7 @@
       // between groups — only between groups that are showing (see
       // `_syncPanelSeps`).
       self._panelSeps = [];
-      [w.row, o.row, "|", fontRow, bgRow, "|", chipsRow, dashRow, fillRow, cs.row, labelSection]
+      [chipsRow, w.row, o.row, fontRow, bgRow, dashRow, fillRow, cs.row, labelSection]
         .forEach(function(item) {
           if (item === "|") {
             var sep = document.createElement("div");
@@ -8156,87 +8188,74 @@
       self.paramsPopup = popup;
     },
 
-    // Open a choice button's pop-up under the button row: copies of the
-    // row's option buttons (pressing one presses the original), and for
-    // the corners the size slider, mirrored the same way.
+    // Open a button's pop-up under the button row, holding that setting's
+    // own controls (moved in, and back out on close).
     _openChipPop: function(chip) {
       var self = this;
       var pop = this._chipPop;
       if (!pop || !chip) return;
+      this._closeChipPop();
       this._openChip = chip;
-      (this._chips || []).forEach(function(c) { c.el.classList.toggle("is-open", c === chip); });
-      var render = function() {
-        while (pop.firstChild) pop.removeChild(pop.firstChild);
-        var head = document.createElement("div");
-        head.className = "etcher-chip-pop-head";
-        var name = document.createElement("span");
-        name.textContent = chip.title;
-        head.appendChild(name);
-        var reading = document.createElement("span");
-        head.appendChild(reading);
-        pop.appendChild(head);
-        var grid = document.createElement("div");
-        grid.className = "etcher-chip-pop-grid";
-        var originals = chip.btns();
-        // Position: across, then up and down, then "float above".
-        grid.style.gridTemplateColumns = "repeat(" + (chip.key === "position" ? 3 : originals.length) + ", 1fr)";
-        originals.forEach(function(orig) {
-          if (!orig || orig.style.display === "none") return;
-          var copy = orig.cloneNode(true);
-          copy.addEventListener("click", function(e) {
-            e.preventDefault();
-            orig.click();
-            if (chip.stay) render(); else self._closeChipPop();
-            self._syncStyleChips();
-          });
-          grid.appendChild(copy);
-        });
-        pop.appendChild(grid);
-        if (chip.slider && self._paramsCornerInput) {
-          var orig = self._paramsCornerInput;
-          reading.textContent = self._paramsCornerVal ? self._paramsCornerVal.textContent : "";
-          if (orig.style.display !== "none") {
-            var sl = document.createElement("input");
-            sl.type = "range";
-            sl.min = orig.min; sl.max = orig.max; sl.step = orig.step; sl.value = orig.value;
-            ["input", "change"].forEach(function(t) {
-              sl.addEventListener(t, function() {
-                orig.value = sl.value;
-                orig.dispatchEvent(new Event(t, { bubbles: true }));
-                reading.textContent = self._paramsCornerVal ? self._paramsCornerVal.textContent : "";
-                if (t === "change") render();
-                self._syncStyleChips();
-              });
-            });
-            pop.appendChild(sl);
-          }
+      chip.el.classList.add("is-open");
+      chip._moved = [];
+      chip.rows.forEach(function(row) {
+        var isHead = !row.parentNode || row.classList.contains("etcher-marker-row-head");
+        if (!isHead && row.style.display === "none") return;
+        if (row.parentNode) {
+          var ph = document.createComment("chip");
+          row.parentNode.insertBefore(ph, row);
+          chip._moved.push([row, ph]);
+        } else {
+          chip._moved.push([row, null]);
         }
-      };
-      render();
+        row.classList.remove("etcher-in-chips");
+        pop.appendChild(row);
+      });
       pop.classList.add("is-open");
-      // Under the button row, inside the panel's own box.
       var row = this._chipsRow;
       var host = pop.offsetParent || pop.parentNode;
       if (row && host && host.getBoundingClientRect) {
         var rr = row.getBoundingClientRect(), hr = host.getBoundingClientRect();
         pop.style.top = (rr.bottom - hr.top + 6) + "px";
       }
-      if (!this._chipPopOutside) {
-        this._chipPopOutside = function(e) {
-          if (!self._openChip) return;
-          if (pop.contains(e.target) || (self._chipsRow && self._chipsRow.contains(e.target))) return;
-          self._closeChipPop();
-        };
-        this._chipPopKey = function(e) { if (e.key === "Escape" && self._openChip) self._closeChipPop(); };
-        document.addEventListener("pointerdown", this._chipPopOutside, true);
-        document.addEventListener("keydown", this._chipPopKey, true);
-      }
+      // The button's face follows the controls as they move.
+      this._chipPopLive = function() { setTimeout(function() { self._syncStyleChips(); }, 0); };
+      pop.addEventListener("input", this._chipPopLive);
+      pop.addEventListener("click", this._chipPopLive);
+      this._chipPopOutside = function(e) {
+        if (!self._openChip) return;
+        if (pop.contains(e.target) || (self._chipsRow && self._chipsRow.contains(e.target))) return;
+        // The colour popup opened from inside belongs to the panel too.
+        if (e.target.closest && e.target.closest(".etcher-popup[data-kind=\"colors\"]")) return;
+        self._closeChipPop();
+      };
+      this._chipPopKey = function(e) { if (e.key === "Escape" && self._openChip) self._closeChipPop(); };
+      document.addEventListener("pointerdown", this._chipPopOutside, true);
+      document.addEventListener("keydown", this._chipPopKey, true);
     },
 
     _closeChipPop: function() {
+      var chip = this._openChip;
+      var pop = this._chipPop;
       this._openChip = null;
-      if (this._chipPop) this._chipPop.classList.remove("is-open");
-      (this._chips || []).forEach(function(c) { c.el.classList.remove("is-open"); });
+      if (chip) {
+        chip.el.classList.remove("is-open");
+        (chip._moved || []).forEach(function(pair) {
+          var row = pair[0], ph = pair[1];
+          row.classList.add("etcher-in-chips");
+          if (ph && ph.parentNode) { ph.parentNode.insertBefore(row, ph); ph.parentNode.removeChild(ph); }
+          else if (row.parentNode) row.parentNode.removeChild(row);
+        });
+        chip._moved = [];
+      }
+      if (pop) {
+        pop.classList.remove("is-open");
+        if (this._chipPopLive) {
+          pop.removeEventListener("input", this._chipPopLive);
+          pop.removeEventListener("click", this._chipPopLive);
+          this._chipPopLive = null;
+        }
+      }
       if (this._chipPopOutside) {
         document.removeEventListener("pointerdown", this._chipPopOutside, true);
         document.removeEventListener("keydown", this._chipPopKey, true);
@@ -8245,22 +8264,20 @@
       }
     },
 
-    // Each button wears its current choice and shows only when its row
-    // would; the row of buttons shows when any does. An open pop-up whose
-    // button just went away closes with it.
+    // Each button shows its current value and only when its controls would
+    // show; the row shows when any does. An open pop-up whose button went
+    // away closes with it.
     _syncStyleChips: function() {
       var chips = this._chips;
       if (!chips) return;
       var any = false;
       chips.forEach(function(chip) {
-        var show = chip.row.style.display !== "none";
+        var show = chip.rows.some(function(r) {
+          return r.classList && !r.classList.contains("etcher-marker-row-head") && r.style.display !== "none";
+        });
         chip.el.style.display = show ? "" : "none";
         any = any || show;
-        var sel = chip.btns().filter(function(b) { return b && b.classList.contains("is-selected"); })[0];
-        var icon = sel ? sel.innerHTML : (chip.btns()[0] ? chip.btns()[0].innerHTML : "");
-        chip.el.innerHTML = '<span class="etcher-chip-icon">' + icon + '</span>' +
-          '<svg class="etcher-chip-caret" width="8" height="8" viewBox="0 0 8 8" aria-hidden="true">' +
-          '<path d="M1.5 3 L4 5.5 L6.5 3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+        try { chip.el.innerHTML = '<span class="etcher-chip-face">' + chip.face() + '</span>'; } catch (_) {}
       });
       if (this._chipsRow) this._chipsRow.style.display = any ? "" : "none";
       if (this._openChip && this._openChip.el.style.display === "none") this._closeChipPop();

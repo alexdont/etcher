@@ -22,8 +22,8 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   corner about the opposite corner, an edge about the middle of the
   opposite edge. Shift frees it (a corner scales each way on its own, an
   edge stretches one axis). Pressing a handle mid-sentence does not end
-  the edit. The dashed outline is a grip while typing: drag it (a
-  move cursor shows over it) and the text moves, the caret coming back
+  the edit. The dashed outline is a grip while typing: drag it (the grab hand
+  shows over it) and the text moves, the caret coming back
   where it was. Double-clicking a text opens it with the caret at its
   start, not the text selected, so a keystroke adds instead of replacing. While typing, what shows is the text itself,
   re-rendered on every keystroke under an invisible caret layer, so Enter

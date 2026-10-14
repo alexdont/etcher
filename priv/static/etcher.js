@@ -1342,10 +1342,12 @@
       // Point text, selected or being typed into: a thin black dashed box,
       // as Affinity draws one, matching its black handles. The same width
       // whatever the zoom or the text's stretch.
-      // The grip over point text's outline while it is typed into, and the
-      // move cursor held for the whole drag once it is taken.
-      ".etcher-overlay svg .etcher-text-grip { fill: transparent; fill-rule: evenodd; stroke: none; pointer-events: all; cursor: move; }",
-      ".etcher-overlay svg.is-over-text-frame, .etcher-overlay svg.is-over-text-frame * { cursor: move !important; }",
+      // The grip over point text's outline while it is typed into: the open
+      // hand a selected shape shows, closed for the whole drag once taken.
+      // Not `move` — many Linux cursor themes have none, and Firefox there
+      // falls back to the plain arrow.
+      ".etcher-overlay svg .etcher-text-grip { fill: transparent; fill-rule: evenodd; stroke: none; pointer-events: all; cursor: grab; }",
+      ".etcher-overlay svg.is-over-text-frame, .etcher-overlay svg.is-over-text-frame * { cursor: grabbing !important; }",
       ".etcher-text.is-point.is-selected .etcher-text-rect,",
       ".etcher-text.is-point.is-editing .etcher-text-rect,",
       ".etcher-text.is-typing .etcher-text-rect {",

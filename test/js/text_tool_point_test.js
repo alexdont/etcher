@@ -402,7 +402,10 @@ console.log("text tool (point text): all checks passed");
   const press = body("_startTextEdit");
   assert.ok(/grip = svgEl\("path", \{\}\);\s*grip\.classList\.add\("etcher-text-grip"\);\s*this\.svg\.insertBefore\(grip, fo\.nextSibling\);/.test(press),
     "laid over the editor, under the handles");
-  assert.ok(src.includes('".etcher-overlay svg .etcher-text-grip { fill: transparent; fill-rule: evenodd; stroke: none; pointer-events: all; cursor: move; }",'));
+  assert.ok(src.includes('".etcher-overlay svg .etcher-text-grip { fill: transparent; fill-rule: evenodd; stroke: none; pointer-events: all; cursor: grab; }",'),
+    "the open hand a selected shape shows (Linux themes often have no `move` cursor)");
+  assert.ok(src.includes('".etcher-overlay svg.is-over-text-frame, .etcher-overlay svg.is-over-text-frame * { cursor: grabbing !important; }",'),
+    "closed while dragging");
   assert.ok(body("_endTextEdit").includes("ed.grip.parentNode.removeChild(ed.grip)"), "and gone with the editor");
   const fitGrip = make("_fitPointGrip");
   const grip = fakeEl("path");

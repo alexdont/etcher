@@ -129,6 +129,9 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   toggle are gone: connecting is the arrow tool's job. Only a host's
   `connectors={:off}` turns anchors off; `connectors={true}` and the
   default now mean the same (on).
+- **The ⋯ "label dots" toggle is gone.** Labels, text and callouts always
+  show their corner dots (older ones convert to point text when picked
+  up), so the opt-in had nothing left to switch.
 - **Handles follow a colour change, side grabbers included.** Recolouring a
   shape (or a text box's text) repainted its corner dots but not its side
   grabbers, which kept the colour the shape was drawn in — a text box

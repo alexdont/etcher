@@ -234,8 +234,6 @@
     // A 3x3 of dots for the background grid, and a square with anchor dots on
     // its corners for the connector anchors — each says what it switches.
     grid: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="6" cy="6" r="1.6"/><circle cx="12" cy="6" r="1.6"/><circle cx="18" cy="6" r="1.6"/><circle cx="6" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="18" cy="12" r="1.6"/><circle cx="6" cy="18" r="1.6"/><circle cx="12" cy="18" r="1.6"/><circle cx="18" cy="18" r="1.6"/></svg>',
-    connectors: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5"/><circle cx="7" cy="7" r="2" fill="currentColor" stroke="none"/><circle cx="17" cy="7" r="2" fill="currentColor" stroke="none"/><circle cx="7" cy="17" r="2" fill="currentColor" stroke="none"/><circle cx="17" cy="17" r="2" fill="currentColor" stroke="none"/></svg>',
-    titleHandles: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M9 16l3-8 3 8M10.2 13.4h5.6"/><circle cx="5.5" cy="5.5" r="1.8" fill="currentColor" stroke="none"/><circle cx="18.5" cy="5.5" r="1.8" fill="currentColor" stroke="none"/><circle cx="5.5" cy="18.5" r="1.8" fill="currentColor" stroke="none"/><circle cx="18.5" cy="18.5" r="1.8" fill="currentColor" stroke="none"/></svg>',
     inkZoom: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="10" cy="10" r="6"/><path d="M14.5 14.5 20 20"/><path stroke-width="3" stroke-linecap="round" d="M7 10h6"/></svg>',
     // Two boxes centered on a shared dashed guide — the snap toggle.
     snap: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><line x1="12" y1="2.5" x2="12" y2="21.5" stroke-dasharray="2.4 2.2" stroke-opacity="0.6"/><rect x="5" y="5.5" width="14" height="5" rx="1.2"/><rect x="8" y="14" width="8" height="5" rx="1.2"/></svg>',
@@ -6665,18 +6663,9 @@
       );
       popup.appendChild(self.gridBtn);
 
-      // No toggle on a hard-off surface (`connectors={:off}`) — the pref
-      // could never win there, and a switch that can't switch reads as
-      // broken. `self.connectorsBtn` stays undefined; the sync block is
-      // already null-safe.
-      // (The connector-anchors toggle that sat here is gone: the arrow tool
-      // connects shapes itself.)
-
-      self.titleHandlesBtn = self._makePopupAction(
-        ICONS.titleHandles, self._titleHandlesTitle(),
-        function() { self._setPref("title_handles", !self._titleHandlesOn()); }
-      );
-      popup.appendChild(self.titleHandlesBtn);
+      // (The connector-anchors and label-dots toggles that sat here are
+      // gone: the arrow tool connects shapes itself, and every label, text
+      // and callout shows its dots.)
 
       self.zoomAnchorBtn = self._makePopupAction(
         ICONS.inkZoom, self._zoomAnchorTitle(),
@@ -9843,23 +9832,11 @@
         this.gridBtn.setAttribute("aria-label", this.gridBtn.title);
         this.gridBtn.setAttribute("aria-pressed", gridOn ? "true" : "false");
       }
-      if (this.connectorsBtn) {
-        var conOn = this._connectorsOn();
-        this.connectorsBtn.title = this._connectorsTitle();
-        this.connectorsBtn.setAttribute("aria-label", this.connectorsBtn.title);
-        this.connectorsBtn.setAttribute("aria-pressed", conOn ? "true" : "false");
-      }
       if (this.snapBtn) {
         var snapOn = this._snapOn();
         this.snapBtn.title = this._snapTitle();
         this.snapBtn.setAttribute("aria-label", this.snapBtn.title);
         this.snapBtn.setAttribute("aria-pressed", snapOn ? "true" : "false");
-      }
-      if (this.titleHandlesBtn) {
-        var thOn = this._titleHandlesOn();
-        this.titleHandlesBtn.title = this._titleHandlesTitle();
-        this.titleHandlesBtn.setAttribute("aria-label", this.titleHandlesBtn.title);
-        this.titleHandlesBtn.setAttribute("aria-pressed", thOn ? "true" : "false");
       }
       if (this.zoomAnchorBtn) {
         var zaOn = this._zoomAnchorOn();
@@ -9873,20 +9850,11 @@
       return this._getPref("grid") === false ? "Show background dots" : "Hide background dots";
     },
 
-    _connectorsTitle: function() {
-      return this._connectorsOn()
-        ? "Hide connector anchors"
-        : "Show connector anchors";
-    },
-
-    // The four corner dots on a focused label. OFF unless the user turns
-    // them on: the Label size input is the primary way to size a label —
-    // one number, applied exactly — and the dots are the freehand
-    // alternative for whoever prefers dragging. The preference persists
-    // with the rest (host-stored), so the choice holds across sessions
-    // and surfaces.
+    // The four corner dots on a focused label: always shown now — there is
+    // no toggle. Labels, text and callouts all show their dots (older ones convert to point text when picked up, and those
+    // always had them); kept as a function so the call sites read the same.
     _titleHandlesOn: function() {
-      return this._getPref("title_handles") === true;
+      return true;
     },
 
     // A tool that draws pure ink — its strokes are not labelled at
@@ -9971,12 +9939,6 @@
       if (!this._paletteAppliedKey || !this._colorSlots) return;
       this._paletteBank = this._paletteBank || {};
       this._paletteBank[this._paletteAppliedKey] = this._colorSlots.slice();
-    },
-
-    _titleHandlesTitle: function() {
-      return this._titleHandlesOn()
-        ? "Hide label resize dots"
-        : "Show label resize dots";
     },
 
     // The scale between the panel's numbers and stored canvas units — the

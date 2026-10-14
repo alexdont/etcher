@@ -107,6 +107,8 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   in a pop-up under the row. Below the colours and the Text/Behind chips
   the panel is just that row (the full panel went from ~350 to ~170 px
   tall). The compact strip keeps its inline controls.
+  Thickness and label size stay out as one slim line each (an icon, the
+  slider or the − / + box, the value); the rest are the buttons.
 - **Handles follow a colour change, side grabbers included.** Recolouring a
   shape (or a text box's text) repainted its corner dots but not its side
   grabbers, which kept the colour the shape was drawn in — a text box

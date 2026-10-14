@@ -53,9 +53,12 @@ assert.ok(body("_refreshLabelSwatch").includes('onLabel || (!focused && !this._a
   "Text/Behind only with words in focus, or nothing focused");
 // Affinity-style: every setting is a small button showing its value; its
 // controls open in a pop-up (the real rows, moved in and back out).
-assert.ok(src.includes('[w.row, o.row, fontRow, bgRow, dashRow, fillRow, cs.row, labelSection]\n        .forEach(function(r) { r.classList.add("etcher-in-chips"); });'),
-  "every setting row folds into a button");
-assert.ok(src.includes('[chipsRow, w.row, o.row, fontRow, bgRow, dashRow, fillRow, cs.row, labelSection]'), "the button row leads");
+assert.ok(src.includes('[o.row, bgRow, dashRow, fillRow, cs.row, labelSection]\n        .forEach(function(r) { r.classList.add("etcher-in-chips"); });'),
+  "the less-used settings fold into buttons");
+assert.ok(src.includes('[w.row, fontRow, chipsRow, o.row, bgRow, dashRow, fillRow, cs.row, labelSection]'),
+  "thickness and label size stay out as slim lines, the buttons below");
+assert.ok(src.includes('row.classList.add("etcher-inline-row");') && src.includes('"Thickness");') && src.includes('"Label size");'),
+  "each with its icon");
 assert.ok(src.includes('".etcher-stylepanel:not([data-size=\\"compact\\"]) .etcher-in-chips { display: none !important; }",'),
   "hidden as rows in the full panel, kept inline in the compact strip");
 {

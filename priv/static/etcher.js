@@ -936,6 +936,27 @@
       ".etcher-chip-pop-grid button.is-selected { background: rgba(255, 255, 255, 0.22); border-color: rgba(255, 255, 255, 0.6); }",
       ".etcher-chip-pop-grid svg { max-width: 22px; max-height: 18px; }",
       ".etcher-chip-pop input[type=\"range\"] { width: 100%; }",
+      // Thickness and label size, one slim line each: icon, control, value.
+      ".etcher-inline-icon { display: none; }",
+      ".etcher-stylepanel:not([data-size=\"compact\"]) .etcher-inline-row {",
+      "  display: grid; grid-template-columns: 22px 1fr auto; align-items: center; gap: 8px;",
+      "}",
+      ".etcher-stylepanel:not([data-size=\"compact\"]) .etcher-inline-row .etcher-marker-row-head { display: contents; }",
+      ".etcher-stylepanel:not([data-size=\"compact\"]) .etcher-inline-row .etcher-marker-row-head > span:not(.etcher-inline-icon) { display: none; }",
+      ".etcher-stylepanel:not([data-size=\"compact\"]) .etcher-inline-row .etcher-marker-row-head > span:nth-child(3) {",
+      "  display: inline; order: 3; min-width: 22px; text-align: right;",
+      "  font: 600 12px/1 ui-sans-serif, system-ui, sans-serif; font-variant-numeric: tabular-nums; opacity: 0.9;",
+      "}",
+      ".etcher-stylepanel:not([data-size=\"compact\"]) .etcher-inline-row input[type=\"range\"] { order: 2; }",
+      ".etcher-stylepanel:not([data-size=\"compact\"]) .etcher-inline-icon {",
+      "  display: inline-flex; align-items: center; justify-content: center; color: #fff; opacity: 0.8; order: 0;",
+      "}",
+      ".etcher-stylepanel:not([data-size=\"compact\"]) .etcher-font-row.etcher-inline-row { grid-template-columns: 22px 1fr; }",
+      ".etcher-stylepanel:not([data-size=\"compact\"]) .etcher-inline-row .etcher-stepper { order: 2; }",
+      ".etcher-stylepanel:not([data-size=\"compact\"]) .etcher-inline-row .etcher-step,",
+      ".etcher-stylepanel:not([data-size=\"compact\"]) .etcher-inline-row .etcher-num { height: 26px; }",
+      ".etcher-stylepanel:not([data-size=\"compact\"]) .etcher-inline-row .etcher-step { width: 26px; border-color: rgba(255, 255, 255, 0.18); }",
+      ".etcher-stylepanel:not([data-size=\"compact\"]) .etcher-inline-row .etcher-num { border-color: rgba(255, 255, 255, 0.18); }",
       // The Behind chip's quick row in the colour popup.
       ".etcher-bg-choices { display: flex; flex-wrap: wrap; gap: 6px; width: 100%; padding-bottom: 6px; border-bottom: 1px solid rgba(255, 255, 255, 0.14); }",
       ".etcher-bg-none { flex: 1 1 auto; height: 28px; padding: 0 10px; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 7px; cursor: pointer; color: #fff;",
@@ -8110,8 +8131,24 @@
       // the controls themselves, moved into the pop-up while it is open and
       // back after, so their wiring and sync are untouched. The compact
       // strip keeps them inline.
-      [w.row, o.row, fontRow, bgRow, dashRow, fillRow, cs.row, labelSection]
+      [o.row, bgRow, dashRow, fillRow, cs.row, labelSection]
         .forEach(function(r) { r.classList.add("etcher-in-chips"); });
+      // Thickness and label size stay out, each one slim line — an icon,
+      // the control, its value — since they are the two reached for most.
+      var inlineIcon = function(row, svg, title) {
+        var head = row.querySelector(".etcher-marker-row-head");
+        var ic = document.createElement("span");
+        ic.className = "etcher-inline-icon";
+        ic.title = title;
+        ic.innerHTML = svg;
+        (head || row).insertBefore(ic, (head || row).firstChild);
+        row.classList.add("etcher-inline-row");
+      };
+      inlineIcon(w.row, '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">' +
+        '<path d="M2 4H14" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>' +
+        '<path d="M2 8H14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>' +
+        '<path d="M2 12.5H14" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>', "Thickness");
+      inlineIcon(fontRow, '<span class="etcher-chip-aa">Aa</span>', "Label size");
       var fillHead = document.createElement("div");
       fillHead.className = "etcher-marker-row-head";
       fillHead.innerHTML = "<span>Fill</span>";
@@ -8124,16 +8161,14 @@
         return sel ? sel.innerHTML : "";
       };
       var CHIPS = [
-        { key: "stroke", title: "Line — thickness and type", rows: [w.row, lineHead, dashRow],
-          face: function() { return selIcon(self._paramsDashBtns) + '<b>' + (self._paramsWeightVal.textContent || "") + '</b>'; } },
+        { key: "stroke", title: "Line type", rows: [lineHead, dashRow],
+          face: function() { return selIcon(self._paramsDashBtns); } },
         { key: "opacity", title: "Opacity", rows: [o.row],
           face: function() {
             return '<svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="5.5" fill="none" stroke="currentColor" stroke-width="1.3"/>' +
               '<path d="M7 1.5 A5.5 5.5 0 0 1 7 12.5 Z" fill="currentColor"/></svg><b>' + (self._paramsOpacityVal.textContent || "") + '</b>';
           } },
         { key: "fill", title: "Fill", rows: [fillHead, fillRow], face: function() { return selIcon(self._paramsFillBtns); } },
-        { key: "size", title: "Label size", rows: [fontRow],
-          face: function() { return '<span class="etcher-chip-aa">Aa</span><b>' + (self._paramsFontNum.value || "–") + '</b>'; } },
         { key: "corners", title: "Corners", rows: [cs.row],
           face: function() {
             var v = self._paramsCornerInput && self._paramsCornerInput.style.display !== "none" ? self._paramsCornerInput.value : "";
@@ -8169,7 +8204,7 @@
       // between groups — only between groups that are showing (see
       // `_syncPanelSeps`).
       self._panelSeps = [];
-      [chipsRow, w.row, o.row, fontRow, bgRow, dashRow, fillRow, cs.row, labelSection]
+      [w.row, fontRow, chipsRow, o.row, bgRow, dashRow, fillRow, cs.row, labelSection]
         .forEach(function(item) {
           if (item === "|") {
             var sep = document.createElement("div");

@@ -83,4 +83,8 @@ assert.ok(!/key: "[a-z]+"[^\n]*rows: \[[^\]]*bgRow/.test(src), "no button opens 
 assert.ok(body("_syncBgChoices").includes("self._setLabelBg(null, true);"), "the chip's popup offers No background");
 assert.ok(body("_syncBgChoices").includes('row.style.display = this._labelBgPickTarget ? "" : "none";'), "only when aimed at the plate");
 
+assert.ok(src.includes('".etcher-chips { display: flex; flex-wrap: nowrap; gap: 6px; }",') &&
+  src.includes('"  flex: 1 1 0; min-width: 0; height: 30px; padding: 0 4px; overflow: hidden;",'),
+  "the buttons share one row evenly and never wrap");
+
 console.log("panel relevance: all checks passed");

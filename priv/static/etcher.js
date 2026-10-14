@@ -905,9 +905,11 @@
       // current pick with a caret, opening a pop-up of the options.
       ".etcher-stylepanel:not([data-size=\"compact\"]) .etcher-in-chips { display: none !important; }",
       ".etcher-stylepanel[data-size=\"compact\"] .etcher-chips, .etcher-stylepanel[data-size=\"compact\"] .etcher-chip-pop { display: none !important; }",
-      ".etcher-chips { display: flex; flex-wrap: wrap; gap: 6px; }",
+      // One row, always: the buttons share its width, growing to fill it
+      // and shrinking (never wrapping) when four are up.
+      ".etcher-chips { display: flex; flex-wrap: nowrap; gap: 6px; }",
       ".etcher-chip {",
-      "  flex: 0 0 auto; min-width: 36px; height: 30px; padding: 0 8px;",
+      "  flex: 1 1 0; min-width: 0; height: 30px; padding: 0 4px; overflow: hidden;",
       "  display: inline-flex; align-items: center; justify-content: center; gap: 4px;",
       "  border: 0; border-radius: 8px; cursor: pointer; color: #fff;",
       "  background: rgba(255, 255, 255, 0.08); transition: background 120ms ease;",
@@ -8164,10 +8166,9 @@
         { key: "stroke", title: "Line type", rows: [lineHead, dashRow],
           face: function() { return selIcon(self._paramsDashBtns); } },
         { key: "opacity", title: "Opacity", rows: [o.row],
-          face: function() {
-            return '<svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="5.5" fill="none" stroke="currentColor" stroke-width="1.3"/>' +
-              '<path d="M7 1.5 A5.5 5.5 0 0 1 7 12.5 Z" fill="currentColor"/></svg><b>' + (self._paramsOpacityVal.textContent || "") + '</b>';
-          } },
+          // Just the number: "70%" says what it is, and an icon beside it
+          // would not fit when four buttons share the row.
+          face: function() { return '<b>' + (self._paramsOpacityVal.textContent || "") + '</b>'; } },
         { key: "fill", title: "Fill", rows: [fillHead, fillRow], face: function() { return selIcon(self._paramsFillBtns); } },
         { key: "corners", title: "Corners", rows: [cs.row],
           face: function() {

@@ -50,6 +50,7 @@ function commit(anchor, pt, over) {
     _newTextBoxPx: newTextBoxPx,
     _markerScale: () => 1,
     _defaultLabelFontSize: () => 16,
+    _textboxCornerDefaults: () => ({ corner: "round", size: 0 }),
     _inkScale: () => 1,
     _renderShape() {},
     _enterEditMode(shape) { shape._selected = true; shape._guarded = this._suppressEditDismissUntil > Date.now(); },

@@ -90,6 +90,13 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   corners are one block: heading and reading, the five shapes, and a
   slider that appears once there are corners. Colour swatches are rounded
   squares instead of pills.
+- **Choices fold into small buttons with pop-ups; point text gets corners.**
+  Line type, fill, corners and label position are each one small button
+  in a single row, showing the current choice; a click opens a pop-up with
+  the options (the corners' with the size slider too). The compact strip
+  keeps its inline rows. Text made with the text tool takes corners like a
+  text box and a callout (its own remembered default, `point_corner`),
+  padded in as they bite.
 - **Handles follow a colour change, side grabbers included.** Recolouring a
   shape (or a text box's text) repainted its corner dots but not its side
   grabbers, which kept the colour the shape was drawn in — a text box

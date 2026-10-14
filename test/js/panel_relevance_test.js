@@ -51,8 +51,25 @@ const make = (n) => eval(body(n));
 
 assert.ok(body("_refreshLabelSwatch").includes('onLabel || (!focused && !this._armedInkTool()) ? "" : "none";'),
   "Text/Behind only with words in focus, or nothing focused");
-assert.ok(src.includes('[w.row, o.row, dashRow, fillRow, "|", fontRow, bgRow, "|", cs.row, "|", labelSection]'),
-  "line, label, corners, placement — in that order");
+assert.ok(src.includes('[w.row, o.row, "|", fontRow, bgRow, "|", chipsRow, dashRow, fillRow, cs.row, labelSection]'),
+  "line, label, then the choice buttons");
+// The choice rows fold into one slim row of buttons with pop-ups.
+assert.ok(src.includes('[dashRow, fillRow, cs.row, labelSection].forEach(function(r) { r.classList.add("etcher-in-chips"); });'));
+assert.ok(src.includes('".etcher-stylepanel:not([data-size=\\"compact\\"]) .etcher-in-chips { display: none !important; }",'),
+  "hidden as rows in the full panel, kept inline in the compact strip");
+{
+  const syncChips = make("_syncStyleChips");
+  const btn = (sel, html) => ({ classList: { contains: (c) => c === "is-selected" && sel }, innerHTML: html, style: {} });
+  const chip = (shown, btns) => ({ row: { style: { display: shown ? "" : "none" } }, btns: () => btns, el: { style: {}, innerHTML: "" } });
+  const a = chip(true, [btn(false, "<i>a</i>"), btn(true, "<i>b</i>")]);
+  const b = chip(false, [btn(true, "<i>c</i>")]);
+  const ctx = { _chips: [a, b], _chipsRow: { style: {} } };
+  syncChips.call(ctx);
+  assert.ok(a.el.innerHTML.includes("<i>b</i>"), "a button wears its current choice");
+  assert.strictEqual(b.el.style.display, "none", "and hides when its row would");
+  assert.strictEqual(ctx._chipsRow.style.display, "");
+}
+assert.ok(body("_openChipPop").includes("orig.click();"), "a pop-up option presses the real button");
 assert.ok(body("_syncCornerRows").includes('this._paramsCornerInput.style.display = px > 0 ? "" : "none";'),
   "the corner slider shows once there are corners");
 assert.ok(src.includes('".etcher-stylepanel .etcher-swatch { width: 100%; height: auto; aspect-ratio: 1 / 1; border-radius: 8px; }",'),

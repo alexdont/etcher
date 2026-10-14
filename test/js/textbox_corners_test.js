@@ -108,7 +108,8 @@ assert.ok(body("_startTextEdit").includes("if (point || fixedEd) input.setSelect
   assert.ok(calloutCase.includes("var coPad = self._textboxPadPx(shape, coM.pad, coM.natW * coStr.x, coM.natH * coStr.y);"));
   assert.ok(calloutCase.includes("self._drawTextboxFrame(shape, el, bx, by, bw, bh);"));
   assert.ok(body("_cornerTargetShapes").includes("self._isPointCallout(s)"));
-  assert.ok(body("_cornerPrefKey").includes('kind === "callout" ? "callout_corner" : "textbox_corner"'));
+  assert.ok(body("_cornerPrefKey").includes('return which === "callout" ? "callout_corner"'));
+  assert.ok(body("_cornerPrefKey").includes(': which === "text" ? "point_corner" : "textbox_corner";'), "point text remembers its own");
   assert.ok(body("_ensurePointCallout").includes('this._textboxCornerDefaults("callout")'), "new callouts are sharp unless chosen");
 }
 

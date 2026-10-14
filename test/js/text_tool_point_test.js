@@ -103,6 +103,8 @@ function board(over) {
     _ensurePointCallout: ensurePointCallout,
     _ensurePointLabel: ensurePointLabel,
     _pointEdgeSegments: pointEdgeSegments,
+    _textboxPadPx: (s, pad) => pad,
+    _drawTextboxFrame() {},
     _isTextKind: (k) => k === "text" || k === "callout",
     _labelRidesShaft: (k) => k === "arrow" || k === "dimension",
     // Letters reach 0.75em up and 0.25em down: 1em in all, for easy sums.

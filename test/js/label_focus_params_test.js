@@ -51,6 +51,7 @@ function panel(over) {
     _syncLabelBgRow() {},
     _syncCornerRows() {},
     _syncPanelSeps() {},
+    _syncStyleChips() {},
     _syncLabelSection() {},
     _paramsWeightRow: row(),
     _paramsOpacityRow: row(),

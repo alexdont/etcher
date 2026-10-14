@@ -901,6 +901,40 @@
       ".etcher-corner-row svg { width: 20px; height: 14px; }",
       ".etcher-stylepanel .etcher-corner-row { margin: 2px 0; }",
       ".etcher-stylepanel .etcher-corner-row button { height: 30px; }",
+      // The choice buttons: one slim row, each a small square showing its
+      // current pick with a caret, opening a pop-up of the options.
+      ".etcher-stylepanel:not([data-size=\"compact\"]) .etcher-in-chips { display: none !important; }",
+      ".etcher-stylepanel[data-size=\"compact\"] .etcher-chips, .etcher-stylepanel[data-size=\"compact\"] .etcher-chip-pop { display: none !important; }",
+      ".etcher-chips { display: flex; gap: 6px; }",
+      ".etcher-chip {",
+      "  flex: 1 1 0; min-width: 0; max-width: 54px; height: 32px; padding: 0 6px;",
+      "  display: inline-flex; align-items: center; justify-content: center; gap: 4px;",
+      "  border: 0; border-radius: 8px; cursor: pointer; color: #fff;",
+      "  background: rgba(255, 255, 255, 0.08); transition: background 120ms ease;",
+      "}",
+      ".etcher-chip:hover { background: rgba(255, 255, 255, 0.16); }",
+      ".etcher-chip.is-open { background: rgba(255, 255, 255, 0.24); }",
+      ".etcher-chip-icon { display: inline-flex; align-items: center; justify-content: center; }",
+      ".etcher-chip-icon svg { max-width: 22px; max-height: 18px; }",
+      ".etcher-chip-caret { opacity: 0.6; flex: 0 0 auto; }",
+      ".etcher-chip-pop {",
+      "  position: absolute; left: 8px; right: 8px; z-index: 13; display: none;",
+      "  flex-direction: column; gap: 8px; padding: 10px;",
+      "  background: rgba(24, 24, 27, 0.97); border-radius: 10px;",
+      "  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45); color: #fff;",
+      "}",
+      ".etcher-chip-pop.is-open { display: flex; }",
+      ".etcher-chip-pop-head { display: flex; justify-content: space-between; font-size: 11px; opacity: 0.85; }",
+      ".etcher-chip-pop-grid { display: grid; gap: 4px; }",
+      ".etcher-chip-pop-grid button {",
+      "  height: 30px; min-width: 0; border: 1px solid rgba(255, 255, 255, 0.2);",
+      "  background: transparent; border-radius: 6px; cursor: pointer; color: #fff;",
+      "  display: inline-flex; align-items: center; justify-content: center;",
+      "}",
+      ".etcher-chip-pop-grid button:hover { background: rgba(255, 255, 255, 0.12); }",
+      ".etcher-chip-pop-grid button.is-selected { background: rgba(255, 255, 255, 0.22); border-color: rgba(255, 255, 255, 0.6); }",
+      ".etcher-chip-pop-grid svg { max-width: 22px; max-height: 18px; }",
+      ".etcher-chip-pop input[type=\"range\"] { width: 100%; }",
       // The thin rule between the panel's groups.
       ".etcher-panel-sep { height: 1px; background: rgba(255, 255, 255, 0.14); margin: 2px 0; flex: 0 0 auto; }",
       ".etcher-stylepanel[data-size=\"compact\"] .etcher-panel-sep { display: none; }",
@@ -8014,12 +8048,50 @@
       popup.appendChild(labelSection);
       self._labelSection = labelSection;
 
-      // Grouped, in the order you work: the line (thickness, opacity, type,
-      // fill), the label (size, background), the box's corners, then where
-      // the label sits. A thin rule between groups — only between groups
-      // that are showing (see `_syncPanelSeps`).
+      // The choice rows — line type, fill, corners, label position — fold
+      // into one slim row of buttons, each showing its current choice and
+      // opening a small pop-up with the options. The rows themselves stay
+      // (hidden) as the source of truth: the pop-up's options are copies of
+      // their buttons and press the originals, so wiring, selection and
+      // sync are exactly theirs. The compact strip keeps the rows inline.
+      var chipsRow = document.createElement("div");
+      chipsRow.className = "etcher-chips";
+      var chipPop = document.createElement("div");
+      chipPop.className = "etcher-chip-pop";
+      chipPop.setAttribute("data-fresco-no-capture", "");
+      self._chipPop = chipPop;
+      [dashRow, fillRow, cs.row, labelSection].forEach(function(r) { r.classList.add("etcher-in-chips"); });
+      var CHIPS = [
+        { key: "line", title: "Line type", row: dashRow, btns: function() { return self._paramsDashBtns || []; } },
+        { key: "fill", title: "Fill", row: fillRow, btns: function() { return self._paramsFillBtns || []; } },
+        { key: "corners", title: "Corners", row: cs.row, btns: function() { return self._paramsCornerBtns || []; }, slider: true, stay: true },
+        { key: "position", title: "Label position", row: labelSection, stay: true,
+          btns: function() { return (self._titleAlignBtns || []).concat(self._titleFreeBtn ? [self._titleFreeBtn] : []); } }
+      ];
+      self._chips = CHIPS;
+      CHIPS.forEach(function(chip) {
+        var b = document.createElement("button");
+        b.type = "button";
+        b.className = "etcher-chip";
+        b.dataset.chip = chip.key;
+        b.title = chip.title;
+        b.setAttribute("aria-label", chip.title);
+        b.setAttribute("aria-haspopup", "true");
+        b.addEventListener("click", function(e) {
+          e.preventDefault();
+          if (self._openChip === chip) self._closeChipPop();
+          else self._openChipPop(chip);
+        });
+        chip.el = b;
+        chipsRow.appendChild(b);
+      });
+
+      // Grouped, in the order you work: the line (thickness, opacity), the
+      // label (size, background), then the choice buttons. A thin rule
+      // between groups — only between groups that are showing (see
+      // `_syncPanelSeps`).
       self._panelSeps = [];
-      [w.row, o.row, dashRow, fillRow, "|", fontRow, bgRow, "|", cs.row, "|", labelSection]
+      [w.row, o.row, "|", fontRow, bgRow, "|", chipsRow, dashRow, fillRow, cs.row, labelSection]
         .forEach(function(item) {
           if (item === "|") {
             var sep = document.createElement("div");
@@ -8031,8 +8103,121 @@
           }
         });
 
+      popup.appendChild(chipPop);
+      self._chipsRow = chipsRow;
+
       self.handle.container.appendChild(popup);
       self.paramsPopup = popup;
+    },
+
+    // Open a choice button's pop-up under the button row: copies of the
+    // row's option buttons (pressing one presses the original), and for
+    // the corners the size slider, mirrored the same way.
+    _openChipPop: function(chip) {
+      var self = this;
+      var pop = this._chipPop;
+      if (!pop || !chip) return;
+      this._openChip = chip;
+      (this._chips || []).forEach(function(c) { c.el.classList.toggle("is-open", c === chip); });
+      var render = function() {
+        while (pop.firstChild) pop.removeChild(pop.firstChild);
+        var head = document.createElement("div");
+        head.className = "etcher-chip-pop-head";
+        var name = document.createElement("span");
+        name.textContent = chip.title;
+        head.appendChild(name);
+        var reading = document.createElement("span");
+        head.appendChild(reading);
+        pop.appendChild(head);
+        var grid = document.createElement("div");
+        grid.className = "etcher-chip-pop-grid";
+        var originals = chip.btns();
+        // Position: across, then up and down, then "float above".
+        grid.style.gridTemplateColumns = "repeat(" + (chip.key === "position" ? 3 : originals.length) + ", 1fr)";
+        originals.forEach(function(orig) {
+          if (!orig || orig.style.display === "none") return;
+          var copy = orig.cloneNode(true);
+          copy.addEventListener("click", function(e) {
+            e.preventDefault();
+            orig.click();
+            if (chip.stay) render(); else self._closeChipPop();
+            self._syncStyleChips();
+          });
+          grid.appendChild(copy);
+        });
+        pop.appendChild(grid);
+        if (chip.slider && self._paramsCornerInput) {
+          var orig = self._paramsCornerInput;
+          reading.textContent = self._paramsCornerVal ? self._paramsCornerVal.textContent : "";
+          if (orig.style.display !== "none") {
+            var sl = document.createElement("input");
+            sl.type = "range";
+            sl.min = orig.min; sl.max = orig.max; sl.step = orig.step; sl.value = orig.value;
+            ["input", "change"].forEach(function(t) {
+              sl.addEventListener(t, function() {
+                orig.value = sl.value;
+                orig.dispatchEvent(new Event(t, { bubbles: true }));
+                reading.textContent = self._paramsCornerVal ? self._paramsCornerVal.textContent : "";
+                if (t === "change") render();
+                self._syncStyleChips();
+              });
+            });
+            pop.appendChild(sl);
+          }
+        }
+      };
+      render();
+      pop.classList.add("is-open");
+      // Under the button row, inside the panel's own box.
+      var row = this._chipsRow;
+      var host = pop.offsetParent || pop.parentNode;
+      if (row && host && host.getBoundingClientRect) {
+        var rr = row.getBoundingClientRect(), hr = host.getBoundingClientRect();
+        pop.style.top = (rr.bottom - hr.top + 6) + "px";
+      }
+      if (!this._chipPopOutside) {
+        this._chipPopOutside = function(e) {
+          if (!self._openChip) return;
+          if (pop.contains(e.target) || (self._chipsRow && self._chipsRow.contains(e.target))) return;
+          self._closeChipPop();
+        };
+        this._chipPopKey = function(e) { if (e.key === "Escape" && self._openChip) self._closeChipPop(); };
+        document.addEventListener("pointerdown", this._chipPopOutside, true);
+        document.addEventListener("keydown", this._chipPopKey, true);
+      }
+    },
+
+    _closeChipPop: function() {
+      this._openChip = null;
+      if (this._chipPop) this._chipPop.classList.remove("is-open");
+      (this._chips || []).forEach(function(c) { c.el.classList.remove("is-open"); });
+      if (this._chipPopOutside) {
+        document.removeEventListener("pointerdown", this._chipPopOutside, true);
+        document.removeEventListener("keydown", this._chipPopKey, true);
+        this._chipPopOutside = null;
+        this._chipPopKey = null;
+      }
+    },
+
+    // Each button wears its current choice and shows only when its row
+    // would; the row of buttons shows when any does. An open pop-up whose
+    // button just went away closes with it.
+    _syncStyleChips: function() {
+      var chips = this._chips;
+      if (!chips) return;
+      var any = false;
+      chips.forEach(function(chip) {
+        var show = chip.row.style.display !== "none";
+        chip.el.style.display = show ? "" : "none";
+        any = any || show;
+        var sel = chip.btns().filter(function(b) { return b && b.classList.contains("is-selected"); })[0];
+        var icon = sel ? sel.innerHTML : (chip.btns()[0] ? chip.btns()[0].innerHTML : "");
+        chip.el.innerHTML = '<span class="etcher-chip-icon">' + icon + '</span>' +
+          '<svg class="etcher-chip-caret" width="8" height="8" viewBox="0 0 8 8" aria-hidden="true">' +
+          '<path d="M1.5 3 L4 5.5 L6.5 3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+      });
+      if (this._chipsRow) this._chipsRow.style.display = any ? "" : "none";
+      if (this._openChip && this._openChip.el.style.display === "none") this._closeChipPop();
     },
 
     // Shapes in the current selection that carry a label. Distinct from
@@ -8240,6 +8425,7 @@
       this._syncCornerRows();
       this._syncLabelSection();
       this._refreshLabelSwatch();
+      this._syncStyleChips();
       this._syncPanelSeps();
     },
 
@@ -8249,7 +8435,14 @@
     _syncPanelSeps: function() {
       var seps = this._panelSeps;
       if (!seps || !seps.length || !this.paramsPopup) return;
-      var shown = function(el) { return el.style.display !== "none"; };
+      // Rows folded into the choice buttons count as hidden, except in the
+      // compact strip, which still lays them out inline.
+      var compact = this.stylePanel && this.stylePanel.getAttribute("data-size") === "compact";
+      var shown = function(el) {
+        if (!compact && el.classList && el.classList.contains("etcher-in-chips")) return false;
+        if (compact && el.classList && el.classList.contains("etcher-chips")) return false;
+        return el.style.display !== "none";
+      };
       var anyAbove = false, group = [], groups = [];
       var kids = this.paramsPopup.children;
       for (var i = 0; i < kids.length; i++) {
@@ -8269,7 +8462,8 @@
     _cornerTargetShapes: function() {
       var self = this;
       var box = function(s) {
-        return !!s && ((s.kind === "text" && self._textboxFixed(s)) || self._isPointCallout(s));
+        return !!s && ((s.kind === "text" && self._textboxFixed(s)) ||
+          self._isPointCallout(s) || self._isPointText(s));
       };
       if (this._textEditor && this._textEditor.shape) {
         return box(this._textEditor.shape) ? [this._textEditor.shape] : [];
@@ -8281,18 +8475,25 @@
     // With the text box tool armed and nothing focused, the controls set
     // the corners new boxes are drawn with.
     _cornerDefaultsShown: function() {
-      return (this.activeTool === "textbox" || this.activeTool === "callout") && !this._textEditor &&
+      return (this.activeTool === "textbox" || this.activeTool === "callout" ||
+        this.activeTool === "text") && !this._textEditor &&
         !(this.selectedShapes && this.selectedShapes.length) &&
         !this.editingShape && !this.editingTitleShape;
     },
 
-    // Text boxes and callouts each remember their own.
-    _cornerPrefKey: function(kind) {
-      return kind === "callout" ? "callout_corner" : "textbox_corner";
+    // Text boxes, callouts and point text each remember their own corners.
+    // `which` is a tool name ("textbox", "callout", "text") or a shape.
+    _cornerPrefKey: function(which) {
+      if (which && typeof which === "object") {
+        which = which.kind === "callout" ? "callout"
+          : (which.kind === "text" && this._textboxFixed(which)) ? "textbox" : "text";
+      }
+      return which === "callout" ? "callout_corner"
+        : which === "text" ? "point_corner" : "textbox_corner";
     },
 
-    _textboxCornerDefaults: function(kind) {
-      var key = this._cornerPrefKey(kind || (this.activeTool === "callout" ? "callout" : "text"));
+    _textboxCornerDefaults: function(which) {
+      var key = this._cornerPrefKey(which || this.activeTool);
       var type = this._getPref(key);
       var px = this._getPref(key + "_size");
       return {
@@ -8335,8 +8536,7 @@
     _setTextboxCorner: function(prop, value, commit) {
       var self = this;
       var shapes = this._cornerTargetShapes();
-      var key = this._cornerPrefKey(shapes.length ? shapes[0].kind
-        : (this.activeTool === "callout" ? "callout" : "text"));
+      var key = this._cornerPrefKey(shapes.length ? shapes[0] : this.activeTool);
       if (!shapes.length) {
         // Saved once, on release — not on every step of the slider.
         if (prop === "corner") {
@@ -21600,6 +21800,14 @@
       try { scale = self._markerScale() || 1; } catch (_) { scale = 1; }
       var str = self._pointStretch(shape, "text");
       var M = self._pointMeasure(shape);
+      // Corners, as a text box and a callout have them (see the callout
+      // render): padded in as far as they bite, the box growing to suit.
+      var ptPad = self._textboxPadPx(shape, M.pad, M.natW * str.x, M.natH * str.y);
+      if (ptPad > M.pad) {
+        M.natW += 2 * (ptPad - M.pad);
+        M.natH += 2 * (ptPad - M.pad);
+        M.pad = ptPad;
+      }
       // The geometry IS the box, always: written here so whatever reads it
       // (hit-tests, handles, the turn below, the server) agrees with what
       // is drawn.
@@ -21608,6 +21816,7 @@
       var tbox = self._orientedBox(g);
       self._setRotateTransform(el, tbox);
       self._pointDraw(shape, M, tbox.x, tbox.y, str, trect, ttext, null);
+      self._drawTextboxFrame(shape, el, tbox.x, tbox.y, M.natW * str.x, M.natH * str.y);
       shape._pointLayout.turn = el.getAttribute("transform");
       shape._renderedBox = { x: g.x, y: g.y, w: g.w, h: g.h };
       self._fitPointEditor(shape);
@@ -22068,7 +22277,7 @@
         if (fixedBox) {
           // Sharp corners unless the user has chosen otherwise (the corner
           // controls with the tool armed, or tuning the last fresh box).
-          var cornerDef = self._textboxCornerDefaults("text");
+          var cornerDef = self._textboxCornerDefaults("textbox");
           shape.style = Object.assign({}, shape.style || {}, {
             box: "fixed",
             font_size: self._defaultLabelFontSize() / self._inkScale(),
@@ -22108,9 +22317,12 @@
             w: 0, h: 0
           };
         }
+        var ptCorner = self._textboxCornerDefaults("text");
         shape.style = Object.assign({}, shape.style || {}, {
           font_size: target,
-          point: true
+          point: true,
+          corner: ptCorner.corner,
+          corner_size: ptCorner.size > 0 ? ptCorner.size / self._inkScale() : 0
         });
         self._renderShape(shape);
         // Selected AND typing: the box and its eight handles are up while

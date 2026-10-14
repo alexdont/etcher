@@ -5,7 +5,8 @@
 // height pins the font (the box-drives-font 0.65, in image units), and
 // that pin beats the remembered label-size default, which otherwise made
 // every new text the same size no matter what was dragged. A plain click
-// keeps the default: nothing was asked.
+// starts text at the default label size, centred on the click. Either way
+// the result is point text, selected and being typed into.
 //
 //   node test/js/text_drag_size_test.js
 
@@ -48,8 +49,11 @@ function commit(anchor, pt, over) {
     // size, which is what every case below assumes.
     _newTextBoxPx: newTextBoxPx,
     _markerScale: () => 1,
+    _defaultLabelFontSize: () => 16,
+    _inkScale: () => 1,
     _renderShape() {},
-    _startTextEdit() {},
+    _enterEditMode(shape) { shape._selected = true; },
+    _startTextEdit(shape) { shape._typing = true; },
     _finalizeShape(kind, geom, el, cb) {
       const shape = { kind, geometry: geom, style: {} };
       finalized.push(shape);
@@ -75,14 +79,31 @@ function commit(anchor, pt, over) {
     "big box, bigger text; small box, smaller text");
 }
 
-// ── a plain click asks for nothing ────────────────────────────────────────
+// ── a plain click starts default-size text where it landed ───────────────
 
 {
-  const clicked = commit({ x: 50, y: 50 }, { x: 52, y: 51 });
-  assert.strictEqual(clicked.style.font_size, undefined,
-    "no box was drawn, so the remembered default (or the box rule) stands");
-  assert.ok(clicked.geometry.w > 2 && clicked.geometry.h > 2,
-    "…and the click still gets the usable minimum box, as before");
+  const clicked = commit({ x: 50, y: 50 }, { x: 50, y: 50 });
+  assert.strictEqual(clicked.style.font_size, 16,
+    "no box was drawn: the default label size");
+  assert.strictEqual(clicked.style.point, true, "point text");
+  // Zoomed far out, the default would be a few pixels on the glass: it
+  // is floored at 12 screen px (3/4 of NEW_TEXT_MIN_SCREEN_PX).
+  const far = commit({ x: 50, y: 50 }, { x: 50, y: 50 }, { _markerScale: () => 0.25 });
+  assert.strictEqual(far.style.font_size, 48, "12 px on screen at a quarter zoom");
+  // The middle of the first line (pad 0.2em, line box 1.4em) on the click.
+  assert.ok(Math.abs(clicked.geometry.x - (50 - 16 * 0.2)) < 1e-9);
+  assert.ok(Math.abs(clicked.geometry.y - (50 - 16 * 0.7)) < 1e-9);
+}
+
+// ── either way it is point text, selected AND being typed into ───────────
+
+{
+  const drawn = commit({ x: 0, y: 0 }, { x: 300, y: 100 });
+  assert.strictEqual(drawn.style.point, true);
+  assert.ok(drawn._selected, "its eight handles are up while typing");
+  assert.ok(drawn._typing, "and the caret is in it");
+  assert.deepStrictEqual([drawn.geometry.x, drawn.geometry.y], [0, 0],
+    "a drawn text starts at the drag's top-left");
 }
 
 // ── the pin respects the same clamps as the panel's input ─────────────────

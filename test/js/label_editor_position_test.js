@@ -68,6 +68,10 @@ function editorBoxFor(shape, floatingBox) {
     _textDefaultBoxInkPx: () => 16,
     _labelRidesShaft: ridesShaft,
     _isTextKind: (k) => k === "text" || k === "callout",
+    // Labels and text from before point text — point text's editor is
+    // pinned in text_tool_point_test.
+    _ensurePointText: () => false,
+    _isPointText: () => false,
     _hasPinnedFontSize: (s) => !!(s && s.style && s.style.font_size > 0),
     // The real one: the editor's font is floored on a touch screen so
     // mobile Safari has no reason to zoom the page. On anything else it

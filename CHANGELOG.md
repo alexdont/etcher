@@ -6,6 +6,28 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+### Changed
+
+- **The text tool makes point text, the way Affinity's Artistic Text
+  works.** A click starts text at the default label size, the first line
+  centred on the click (never smaller than 12 px on screen); a drag sets
+  the size from the drag's height. Lines are the author's — Shift+Enter
+  breaks one — and nothing ever wraps them; spaces are kept; the box is
+  always exactly the text. The text stays selected while it is typed into,
+  with all eight handles up: a corner scales it evenly about the opposite
+  corner (Shift scales each way on its own), an edge stretches it along
+  one axis about the opposite edge, and pressing a handle mid-sentence
+  does not end the edit. While typing, what shows is the text itself,
+  re-rendered on every keystroke under an invisible caret layer, so Enter
+  or a click away leaves it exactly as it was. The stretch is stored as
+  `style.scale_x` / `style.scale_y` next to `style.font_size`, and
+  `style.point` marks the shape. Text from before becomes point text when
+  it is picked up, looking the same — its showing lines become its lines.
+  Previously the editor never wrapped but the committed text wrapped at a
+  box set by the click (so a typed line folded on Enter), the editor grew
+  from its middle while the result grew down, and plain text had no
+  handles while being typed into. The text box tool is unchanged.
+
 ### Added
 
 - **Fresco's zoom control is lifted clear of the bars.** A Fresco viewer

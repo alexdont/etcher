@@ -1775,7 +1775,7 @@
       "}",
       ".etcher-handle-edge--h { cursor: ns-resize; }",
       ".etcher-handle-edge--v { cursor: ew-resize; }",
-      ".etcher-handle-edge.is-active {",
+      ".etcher-handle-edge.is-active, .etcher-handle-edge.is-shown {",
       "  fill-opacity: 0.35; stroke-opacity: 0.9;",
       "}",
       ".etcher-handle-edge:hover {",
@@ -2434,7 +2434,7 @@
     // nothing to offer while one is armed — _syncStylePanel hides it.
     grabber:   { icon: ICONS.grabber,   title: "Grab (pan only)", styleless: true },
     callout:   { icon: ICONS.callout,   title: "Callout (point at something, write a label)" },
-    text:      { icon: ICONS.text,      title: "Text label (drag a box, then type)" },
+    text:      { icon: ICONS.text,      title: "Text (click and type, or drag to set the size)" },
     // Distinct from `text`, whose box hugs its content: this one's box is
     // the user's — drawn once, resized only by its handles. The text wraps
     // and sizes INSIDE it (Label size in the panel), and typing more or
@@ -13188,6 +13188,10 @@
           // the visible rect, not the storage envelope.
           var trect = el.querySelector(".etcher-text-rect");
           var ttext = el.querySelector(".etcher-text-content");
+          if (self._isPointText(shape)) {
+            self._renderPointText(shape, el, g, trect, ttext);
+            break;
+          }
           // The whole <g> turns, so the rect and the text inside it are
           // still laid out against an upright box and carried round
           // together — a label stays readable relative to the board
@@ -20921,6 +20925,208 @@
 
     // `fixedBox` is the textbox tool's variant: same draft, same element,
     // but the committed shape keeps the drawn box fixed (see TOOL_DEFS).
+    // ── Point text ──────────────────────────────────────────────────────
+    //
+    // What the text tool makes, the way Affinity's Artistic Text works: the
+    // text is a graphic, not a box the words flow into. Its lines are the
+    // ones the author typed (Shift+Enter) and nothing ever wraps them; the
+    // box is always exactly the text. It has a size (`style.font_size`, in
+    // canvas units like every pinned size) and a stretch along each axis
+    // (`style.scale_x` / `style.scale_y`, absent = 1). Corner handles scale
+    // it evenly, edge handles stretch it one way, the opposite side holding
+    // still — and all of that works while it is being typed into.
+    //
+    // `style.point` marks it. Text from before keeps rendering as it did
+    // until someone picks it up (`_ensurePointText`).
+    _isPointText: function(shape) {
+      return !!(shape && shape.kind === "text" && shape.style &&
+        shape.style.point === true && !this._textboxFixed(shape));
+    },
+
+    _pointStretch: function(shape) {
+      var st = (shape && shape.style) || {};
+      var sx = typeof st.scale_x === "number" && isFinite(st.scale_x) && st.scale_x > 0 ? st.scale_x : 1;
+      var sy = typeof st.scale_y === "number" && isFinite(st.scale_y) && st.scale_y > 0 ? st.scale_y : 1;
+      return { x: sx, y: sy };
+    },
+
+    // The lines exactly as typed — spaces kept, nothing folded. While the
+    // editor is open the draft is what shows, so the text on screen is the
+    // text being made, keystroke by keystroke.
+    _pointTextLines: function(shape) {
+      var t = shape._draftTitle != null
+        ? shape._draftTitle
+        : ((shape.metadata && shape.metadata.title) || "");
+      return String(t).split("\n");
+    },
+
+    _renderPointText: function(shape, el, g, trect, ttext) {
+      var self = this;
+      var scale = 1;
+      try { scale = self._markerScale() || 1; } catch (_) { scale = 1; }
+      var fontPx = self._fontSizeFor(shape, self._zoomPx(DEFAULT_LABEL_FONT_SIZE));
+      var pad = fontPx * 0.2;
+      var str = self._pointStretch(shape);
+      var family = "ui-sans-serif, system-ui, -apple-system, sans-serif";
+      var lines = self._pointTextLines(shape);
+      var widest = 0;
+      for (var i = 0; i < lines.length; i++) {
+        var lw = lines[i] ? self._measureTextWidth(lines[i], fontPx, family, "500") : 0;
+        if (lw > widest) widest = lw;
+      }
+      var empty = lines.length === 1 && !lines[0];
+      // Unstretched size in container px. Lines step 1.1em, as everywhere;
+      // an empty text keeps one line's room so the caret has a home.
+      var natW = Math.max(widest, empty ? fontPx * 0.5 : 0) + pad * 2;
+      var natH = fontPx + Math.max(0, lines.length - 1) * fontPx * 1.1 + pad * 2;
+      // The geometry IS the box, always: written here so whatever reads it
+      // (hit-tests, handles, the turn below, the server) agrees with what
+      // is drawn.
+      g.w = natW * str.x / scale;
+      g.h = natH * str.y / scale;
+      var tbox = self._orientedBox(g);
+      self._setRotateTransform(el, tbox);
+      var tx = tbox.x, ty = tbox.y;
+      // Stretch about the top-left, where the geometry is anchored.
+      var stretch = (str.x !== 1 || str.y !== 1)
+        ? "matrix(" + str.x + " 0 0 " + str.y + " " + tx * (1 - str.x) + " " + ty * (1 - str.y) + ")"
+        : null;
+      if (trect) {
+        trect.setAttribute("x", tx);
+        trect.setAttribute("y", ty);
+        trect.setAttribute("width", natW);
+        trect.setAttribute("height", natH);
+        if (stretch) trect.setAttribute("transform", stretch);
+        else trect.removeAttribute("transform");
+        self._applyLabelBg(trect, shape);
+      }
+      if (ttext) {
+        ttext.setAttribute("x", tx + pad);
+        ttext.setAttribute("y", ty + pad);
+        ttext.setAttribute("font-size", fontPx);
+        ttext.setAttribute("font-family", family);
+        ttext.setAttribute("font-weight", "500");
+        ttext.setAttribute("dominant-baseline", "alphabetic");
+        // Spaces are the author's: kept, not collapsed.
+        ttext.setAttribute("xml:space", "preserve");
+        ttext.style.whiteSpace = "pre";
+        if (stretch) ttext.setAttribute("transform", stretch);
+        else ttext.removeAttribute("transform");
+        while (ttext.firstChild) ttext.removeChild(ttext.firstChild);
+        if (!empty) {
+          lines.forEach(function(line, idx) {
+            var tspan = svgEl("tspan", { x: tx + pad, dy: idx === 0 ? "1em" : "1.1em" });
+            tspan.textContent = line || "\u00A0";
+            ttext.appendChild(tspan);
+          });
+        }
+      }
+      shape._renderedBox = { x: g.x, y: g.y, w: g.w, h: g.h };
+      shape._pointLayout = {
+        tx: tx, ty: ty, pad: pad, fontPx: fontPx,
+        sx: str.x, sy: str.y, natW: natW, natH: natH,
+        turn: el.getAttribute("transform")
+      };
+      // An open editor rides the text: typing, a handle drag, a pan or a
+      // panel edit all come through here.
+      var ed = self._textEditor;
+      if (ed && ed.shape === shape && ed.point && ed.fit) ed.fit();
+    },
+
+    // Text from before point text — wrapped at its box, its size often
+    // derived from the box — becomes point text the moment someone picks
+    // it up, looking exactly as it did: the lines it was showing become
+    // the author's lines, and the size it was showing becomes its size.
+    // Nothing is sent until the user actually changes something.
+    _ensurePointText: function(shape) {
+      if (!shape || shape.kind !== "text" || this._textboxFixed(shape)) return false;
+      if (this._isPointText(shape)) return false;
+      var textEl = shape.el && shape.el.querySelector && shape.el.querySelector(".etcher-text-content");
+      var fontPx = textEl && parseFloat(textEl.getAttribute("font-size"));
+      var scale = 1;
+      try { scale = this._markerScale() || 1; } catch (_) { scale = 1; }
+      var lines = [];
+      if (textEl) {
+        var spans = textEl.querySelectorAll("tspan");
+        for (var i = 0; i < spans.length; i++) {
+          lines.push(String(spans[i].textContent || "").replace(/\u00A0/g, ""));
+        }
+      }
+      var style = Object.assign({}, shape.style || {}, { point: true });
+      if (fontPx > 0) style.font_size = fontPx / scale;
+      else if (!this._hasPinnedFontSize(shape)) style.font_size = this._defaultLabelFontSize() / this._inkScale();
+      shape.style = style;
+      if (lines.length) {
+        shape.metadata = Object.assign({}, shape.metadata || {}, { title: lines.join("\n") });
+      }
+      this._renderShape(shape);
+      return true;
+    },
+
+    // A handle pulled on point text. Corners scale it evenly about the
+    // opposite corner (its size changes); with Shift they scale each way on
+    // its own. Edges stretch it along one axis about the opposite edge.
+    // `start` is the text as the drag found it; `handle` is a corner index
+    // 0-3 (TL, TR, BR, BL) or an edge "top" / "right" / "bottom" / "left".
+    _resizePointText: function(shape, start, handle, pt, freeform) {
+      var b = start.box;
+      var right = b.x + b.w, bottom = b.y + b.h;
+      var MIN_K = 0.05;
+      var scale = 1;
+      try { scale = this._markerScale() || 1; } catch (_) { scale = 1; }
+      var font = start.font, sx = start.sx, sy = start.sy;
+      var nx = b.x, ny = b.y, nw = b.w, nh = b.h;
+      if (typeof handle === "string") {
+        if (handle === "left" || handle === "right") {
+          var kx = Math.max(MIN_K, (handle === "right" ? pt.x - b.x : right - pt.x) / b.w);
+          sx = start.sx * kx;
+          nw = b.w * kx;
+          if (handle === "left") nx = right - nw;
+        } else {
+          var ky = Math.max(MIN_K, (handle === "bottom" ? pt.y - b.y : bottom - pt.y) / b.h);
+          sy = start.sy * ky;
+          nh = b.h * ky;
+          if (handle === "top") ny = bottom - nh;
+        }
+      } else {
+        // The anchor is the corner across from the one being pulled.
+        var ax = (handle === 0 || handle === 3) ? right : b.x;
+        var ay = (handle === 0 || handle === 1) ? bottom : b.y;
+        var dirX = (handle === 0 || handle === 3) ? -1 : 1;
+        var dirY = (handle === 0 || handle === 1) ? -1 : 1;
+        var dx = (pt.x - ax) * dirX, dy = (pt.y - ay) * dirY;
+        var k;
+        if (freeform) {
+          var fx = Math.max(MIN_K, dx / b.w), fy = Math.max(MIN_K, dy / b.h);
+          // Height through the size (crisper than a stretch), width as the
+          // stretch that is left over.
+          font = start.font * fy;
+          sx = start.sx * fx / fy;
+          nw = b.w * fx; nh = b.h * fy;
+        } else {
+          // Projected onto the box's diagonal, so the pull tracks the
+          // pointer smoothly whichever way it leans.
+          k = Math.max(MIN_K, (dx * b.w + dy * b.h) / (b.w * b.w + b.h * b.h));
+          font = start.font * k;
+          nw = b.w * k; nh = b.h * k;
+        }
+        nx = dirX < 0 ? ax - nw : ax;
+        ny = dirY < 0 ? ay - nh : ay;
+      }
+      // Never so small it cannot be found again.
+      if (font * scale < 2) font = 2 / scale;
+      shape.style = Object.assign({}, shape.style || {}, { font_size: font, scale_x: sx, scale_y: sy });
+      shape.geometry = { x: nx, y: ny, w: nw, h: nh };
+    },
+
+    _pointTextDragStart: function(shape) {
+      var str = this._pointStretch(shape);
+      return {
+        box: Object.assign({}, shape._renderedBox || shape.geometry),
+        font: shape.style.font_size, sx: str.x, sy: str.y
+      };
+    },
+
     _startText: function(pt, e, fixedBox) {
       var g = svgEl("g");
       g.classList.add("etcher-shape", "etcher-text", "is-draft");
@@ -21018,23 +21224,36 @@
         // that pin beats the remembered label-size default, which
         // otherwise made every new text the same size no matter what was
         // dragged. A plain CLICK keeps the default: nothing was asked.
+        var scale = 1;
+        try { scale = self._markerScale() || 1; } catch (_) { scale = 1; }
+        if (!(scale > 0)) scale = 1;
+        var target;
         if (drewBox) {
-          var scale = 1;
-          try { scale = self._markerScale() || 1; } catch (_) { scale = 1; }
-          if (!(scale > 0)) scale = 1;
-          var target = geom.h * 0.65; // image units
+          target = geom.h * 0.65; // image units
           target = Math.max(FONT_SIZE_MIN / scale,
             Math.min(FONT_SIZE_MAX / scale, target));
-          shape.style = Object.assign({}, shape.style || {}, {
-            font_size: target
-          });
-          self._renderShape(shape);
+        } else {
+          // Floored at what can be read on the glass, as the old clicked
+          // box was: on a picture zoomed far out (a phone, a big photo) the
+          // default size in canvas units comes out a few pixels tall.
+          target = Math.max(self._defaultLabelFontSize() / self._inkScale(),
+            NEW_TEXT_MIN_SCREEN_PX * 0.75 / scale);
+          // A click puts the middle of the first line on the click, the
+          // way a caret lands where you click.
+          shape.geometry = {
+            x: pt.x - target * 0.2,
+            y: pt.y - target * 0.7,
+            w: 0, h: 0
+          };
         }
-        // Drop straight into inline-edit mode so the user can type
-        // immediately. `_startTextEdit` waits for the server-assigned
-        // uuid (via `etcher:annotation-saved`) before flushing the
-        // first `etcher:updated` so we don't try to PATCH an uncommitted
-        // shape.
+        shape.style = Object.assign({}, shape.style || {}, {
+          font_size: target,
+          point: true
+        });
+        self._renderShape(shape);
+        // Selected AND typing: the box and its eight handles are up while
+        // the words go in, so it can be scaled or stretched mid-sentence.
+        self._enterEditMode(shape);
         self._startTextEdit(shape);
       });
     },
@@ -21658,6 +21877,10 @@
       }
 
       var self = this;
+      // Point text is typed into in place: older text is converted first,
+      // so the editor below only ever meets the one model.
+      this._ensurePointText(shape);
+      var point = this._isPointText(shape);
       var g = this._textEditBoxImage(shape);
       if (!g) return;
       var tl = this._imageToContainer({ x: g.x, y: g.y });
@@ -21699,6 +21922,18 @@
         input.style.whiteSpace = "pre-wrap";
         input.style.wordBreak = "break-word";
       }
+      // Point text: the words on screen while typing are the text itself,
+      // rendered live from the draft on every keystroke (see
+      // `_renderPointText`). The textarea lies exactly over them, wearing
+      // their font, padding and stretch, with its own glyphs invisible — it
+      // is only there for the caret, the selection and the keyboard. So
+      // nothing can differ at commit: there is nothing to swap.
+      if (point) {
+        input.classList.add("etcher-point-editor");
+        input.maxLength = 5000;
+        input.placeholder = "";
+        fo.style.overflow = "visible";
+      }
 
       // The editor IS the label. It used to be a white box with a dashed
       // border and 14px black text — nothing like what commit would draw,
@@ -21734,8 +21969,9 @@
         input.style.borderRadius =
           Math.round(LABEL_BG_RADIUS_RATIO * Math.min(w, h)) + "px";
       }
-      input.style.color = edColor;
+      input.style.color = point ? "transparent" : edColor;
       input.style.caretColor = edColor;
+      if (point) input.style.background = "transparent";
       // The render's own padding rule: a fraction of the box, or of the
       // font once a size is pinned (0.13 / 0.65 = 0.2 — same proportion).
       var edPad = this._hasPinnedFontSize(shape)
@@ -21777,6 +22013,37 @@
       var edCy = (Math.min(tl.y, br.y) + Math.max(tl.y, br.y)) / 2;
       var edLeft = Math.min(tl.x, br.x);
       var edFit = function() {
+        // Point text: lie over the rendered text, exactly. Its layout is
+        // in container px; the textarea types at the editor font (floored
+        // on touch screens, see `_editorFontPx`) and is scaled back to the
+        // text's real size, then stretched as the text is.
+        if (point) {
+          var L = shape._pointLayout;
+          if (!L) return;
+          var edPx = selfEd._editorFontPx(L.fontPx);
+          var k = L.fontPx / edPx;
+          // A character's room past the widest line for the caret, and no
+          // more: anything wider would sit over the canvas (and the handles)
+          // catching presses meant for them.
+          var roomW = L.natW + L.fontPx, roomH = L.natH + L.fontPx * 0.2;
+          fo.setAttribute("x", L.tx);
+          fo.setAttribute("y", L.ty);
+          fo.setAttribute("width", roomW * L.sx);
+          fo.setAttribute("height", roomH * L.sy);
+          if (L.turn) fo.setAttribute("transform", L.turn);
+          else fo.removeAttribute("transform");
+          input.style.font = "500 " + edPx + "px " + edFamily;
+          input.style.padding = (L.pad / k) + "px";
+          input.style.width = (roomW / k) + "px";
+          input.style.height = (roomH / k) + "px";
+          input.style.transformOrigin = "0 0";
+          input.style.transform = "scale(" + (L.sx * k) + ", " + (L.sy * k) + ")";
+          // A wider room than the text, so the caret at the end of the
+          // longest line never scrolls the textarea out from under it.
+          input.scrollLeft = 0;
+          input.scrollTop = 0;
+          return;
+        }
         // A text BOX neither grows with the text nor recentres: the
         // editor IS the box, recomputed from the shape each fit so a
         // pan or zoom mid-edit moves it with the board. The textarea
@@ -21840,11 +22107,27 @@
           });
         }
       };
-      input.addEventListener("input", edFit);
+      input.addEventListener("input", function() {
+        if (point) {
+          shape._draftTitle = input.value;
+          // Renders the text and re-fits this editor over it.
+          selfEd._renderShape(shape);
+          if (selfEd.editingShape === shape) selfEd._positionAllHandles(shape);
+          return;
+        }
+        edFit();
+      });
+      if (point) {
+        shape._draftTitle = input.value;
+        this._renderShape(shape);
+      }
       edFit();
 
       fo.appendChild(input);
-      this.svg.appendChild(fo);
+      // Under the handles, which are what a press on the box's edge is for.
+      var firstHandle = point && this.svg.querySelector(":scope > .etcher-grab, :scope > .etcher-handle");
+      if (firstHandle) this.svg.insertBefore(fo, firstHandle);
+      else this.svg.appendChild(fo);
       this._textEditor = {
         fo: fo,
         input: input,
@@ -21852,6 +22135,7 @@
         // For _refreshTextEditorStyle: re-fit after a panel edit, and
         // swap the closure's font size so the fit measures at the new one.
         fit: edFit,
+        point: point,
         setFontSize: function(s) { edFontSize = s; },
         // For _repositionTextEditor: the board moves under an open editor
         // on every pan/zoom frame, so its anchor and its metrics have to
@@ -21864,19 +22148,28 @@
       // For title edits, the visible text lives on the title group
       // (not the parent shape's element).
       var hostEl = this._textEditHost(shape);
-      var existing = hostEl && hostEl.querySelector(".etcher-text-content");
+      var existing = !point && hostEl && hostEl.querySelector(".etcher-text-content");
       if (existing) existing.setAttribute("visibility", "hidden");
       // The rect too — the input wears the plate and the box now, and the
       // committed rect frozen at its old extent behind a live-resizing
       // editor reads as two labels fighting.
-      var exRect = hostEl && hostEl.querySelector(".etcher-text-rect");
+      var exRect = !point && hostEl && hostEl.querySelector(".etcher-text-rect");
       if (exRect) exRect.setAttribute("visibility", "hidden");
 
       input.addEventListener("keydown", function(e) {
         if (e.key === "Enter") {
-          // Shift+Enter is the author's line break — let the textarea
-          // take it; plain Enter commits, as it always has.
-          if (e.shiftKey) return;
+          // Shift+Enter is the author's line break; plain Enter commits, as
+          // it always has. Point text puts the break in itself rather than
+          // trusting the textarea's default, which a host's key handling
+          // or an IME can swallow.
+          if (e.shiftKey) {
+            if (!point) return;
+            e.preventDefault();
+            var a0 = input.selectionStart, b0 = input.selectionEnd;
+            input.setRangeText("\n", a0, b0, "end");
+            input.dispatchEvent(new Event("input", { bubbles: true }));
+            return;
+          }
           e.preventDefault();
           self._commitTextEdit();
         } else if (e.key === "Escape") {
@@ -21891,6 +22184,8 @@
         // Defer so synchronous Enter/Esc handling above wins.
         setTimeout(function() {
           if (self._textEditor && self._textEditor.input === input) {
+            // A handle of this text is being pulled: still editing.
+            if (self._textEditor.resizing) return;
             // Focus moved into the panel (a number input, a slider): the
             // user is styling the text they are about to type, not done
             // with it. Same exclusion as the pointerdown path above.
@@ -21929,6 +22224,26 @@
           // Back in the box: the next canvas press is an ordinary
           // click-away again, not the return trip from the panel.
           self._textEditor.chromeSinceFocus = false;
+          return;
+        }
+        // One of this text's own handles: scaling or stretching it is part
+        // of making it, Affinity-style — the editor stays open through the
+        // drag and the caret comes back after it.
+        if (point && self.editingShape === shape && e.target.closest &&
+            e.target.closest(".etcher-handle, .etcher-grab")) {
+          var edR = self._textEditor;
+          edR.resizing = true;
+          var back = function() {
+            document.removeEventListener("pointerup", back, true);
+            document.removeEventListener("pointercancel", back, true);
+            setTimeout(function() {
+              if (self._textEditor !== edR) return;
+              edR.resizing = false;
+              try { input.focus({ preventScroll: true }); } catch (_) {}
+            }, 0);
+          };
+          document.addEventListener("pointerup", back, true);
+          document.addEventListener("pointercancel", back, true);
           return;
         }
         // Etcher's own chrome — the style panel, its popups, the toolbar —
@@ -22014,6 +22329,7 @@
     // handles, connector dots and the tooltip.
     _repositionTextEditor: function() {
       var ed = this._textEditor;
+      if (ed && ed.point) { ed.fit(); return; }
       if (!ed || !ed.shape || !ed.fo || !ed.setAnchor) return;
       var g = this._textEditBoxImage(ed.shape);
       if (!g) return;
@@ -22072,6 +22388,14 @@
       // has not changed their mind about wanting it). Set here as well
       // as on the press because a control can be reached by keyboard.
       ed.chromeSinceFocus = true;
+      if (ed.point) {
+        // The text re-renders in its new dress and the editor re-fits over
+        // it; only the caret's colour is the editor's own.
+        ed.input.style.caretColor = this._titleColorFor(shape) || "#000";
+        this._renderShape(shape);
+        if (this.editingShape === shape) this._positionAllHandles(shape);
+        return;
+      }
       size = this._editorFontPx(size);
       if (ed.setFontSize) ed.setFontSize(size);
       ed.input.style.fontSize = size + "px";
@@ -22092,7 +22416,11 @@
       // metadata-mutation block below) so the snapshot still reflects
       // the previous title even on no-op commits we early-return on.
       var historyBefore = this._snapshotShape(shape);
-      var newTitle = ed.input.value.trim();
+      // Point text keeps the author's spaces and lines exactly; only blank
+      // space trailing off the end goes, as it draws nothing.
+      var newTitle = ed.point
+        ? ed.input.value.replace(/\s+$/, "")
+        : ed.input.value.trim();
       var prevTitle = (shape.metadata && shape.metadata.title) || "";
 
       // Mirror the new title locally so the <text> renders with it
@@ -22231,6 +22559,7 @@
         this._textEditOutsideDown = null;
       }
       if (ed.fo && ed.fo.parentNode) ed.fo.parentNode.removeChild(ed.fo);
+      if (ed.shape) delete ed.shape._draftTitle;
       var hostEl = ed.shape && this._textEditHost(ed.shape);
       var existing = hostEl && hostEl.querySelector(".etcher-text-content");
       if (existing) existing.removeAttribute("visibility");
@@ -22842,6 +23171,8 @@
       if (this.editingShape === shape) return;
       this._exitEditMode();
       this._exitTitleEditMode();
+      // Older text becomes point text as it is picked up, looking the same.
+      this._ensurePointText(shape);
 
       this.editingShape = shape;
       shape.el.classList.add("is-editing");
@@ -23126,7 +23457,7 @@
       if (opts.interactive) {
         if (shape.kind === "polygon" || shape.kind === "arrow") {
           self._renderMidpointHandles(shape);
-        } else if (shape.kind === "rectangle") {
+        } else if (shape.kind === "rectangle" || self._isPointText(shape)) {
           self._renderRectEdgeHandles(shape);
         }
       }
@@ -23179,8 +23510,9 @@
     // work without per-kind branching at the call sites.
     _renderRectEdgeHandles: function(shape) {
       this._removeMidpointHandles();
-      if (!shape || shape.kind !== "rectangle") return;
-      var g = shape.geometry;
+      var point = this._isPointText(shape);
+      if (!shape || (shape.kind !== "rectangle" && !point)) return;
+      var g = point ? (shape._renderedBox || shape.geometry) : shape.geometry;
       var positions = this._rectEdgeMidpoints(g);
       var self = this;
       var handleColor = self._handleColor(shape);
@@ -23196,6 +23528,9 @@
         );
         rect.style.color = handleColor;
         rect.dataset.edgeIndex = idx;
+        // On point text all eight show, as in Affinity — the edges are half
+        // of what the text can do, not a hidden extra.
+        if (point) rect.classList.add("is-shown");
         self.svg.appendChild(rect);
         self._positionHandle(rect, pt);
         (function(edgeIdx, handleEl) {
@@ -23237,6 +23572,8 @@
       var self = this;
       var historyBefore = self._snapshotShape(shape);
       var g0 = JSON.parse(JSON.stringify(shape.geometry));
+      var pointStart = self._isPointText(shape) ? self._pointTextDragStart(shape) : null;
+      var EDGE_NAMES = ["top", "right", "bottom", "left"];
       var startTitleBox =
         shape.metadata && shape.metadata.title_box
           ? Object.assign({}, shape.metadata.title_box)
@@ -23244,6 +23581,12 @@
 
       function onMove(ev) {
         var pt = self._toImage(ev);
+        if (pointStart) {
+          self._resizePointText(shape, pointStart, EDGE_NAMES[edgeIdx], pt, false);
+          self._renderShape(shape);
+          self._positionAllHandles(shape);
+          return;
+        }
         var nx = g0.x, ny = g0.y, nw = g0.w, nh = g0.h;
         switch (edgeIdx) {
           case 0: ny = pt.y;        nh = (g0.y + g0.h) - pt.y; break; // top
@@ -23356,6 +23699,9 @@
       }
       if (shape.kind === "rectangle") {
         return this._rectEdgeMidpoints(shape.geometry);
+      }
+      if (this._isPointText(shape)) {
+        return this._rectEdgeMidpoints(shape._renderedBox || shape.geometry);
       }
       // Open path, so segments rather than a closed ring — no wrap from the
       // head back round to the tail.
@@ -24027,7 +24373,10 @@
           // A text BOX is the exception: its box and its font are
           // independent (style.box: "fixed"), so the corners are the only
           // way to resize the box at all — they always show.
-          if (!this._textboxFixed(shape) && !this._titleHandlesOn()) return [];
+          // Point text always has its eight: scaling and stretching it is
+          // what its handles are for (see `_resizePointText`).
+          if (!this._textboxFixed(shape) && !this._isPointText(shape) &&
+              !this._titleHandlesOn()) return [];
           // Handles ride the shrunk-to-text bbox so users grab where
           // they see the box, not the (often wider) storage envelope.
           var tBox = shape._renderedBox || g;
@@ -24136,6 +24485,7 @@
       // pointer DELTA against startGeom; visual continues to
       // shrink-fit independently. Text shapes still snap geometry to
       // the rendered box on release (existing 0.2.x behavior).
+      var pointStart = self._isPointText(shape) ? self._pointTextDragStart(shape) : null;
       var startGeom;
       if (shape.kind === "text" && shape._renderedBox) {
         startGeom = JSON.parse(JSON.stringify(shape._renderedBox));
@@ -24164,7 +24514,8 @@
         }
         // Read live rather than from the pointerdown: the user can press or
         // release Shift part-way through a drag and expect it to take.
-        self._applyHandleDrag(shape, idx, pt, startGeom, startPt, !!ev.shiftKey);
+        if (pointStart) self._resizePointText(shape, pointStart, idx, pt, !!ev.shiftKey);
+        else self._applyHandleDrag(shape, idx, pt, startGeom, startPt, !!ev.shiftKey);
         self._renderShape(shape);
         self._positionAllHandles(shape);
       }

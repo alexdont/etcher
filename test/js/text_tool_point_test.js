@@ -1,0 +1,261 @@
+// The text tool makes POINT text, the way Affinity's Artistic Text works.
+//
+//   - A click starts default-size text; a drag sets the size from its height
+//     (text_drag_size_test). Either way it is selected and being typed into.
+//   - Lines are the author's (Shift+Enter) and never wrap; spaces are kept;
+//     the box is always exactly the text.
+//   - Corner handles scale it evenly about the opposite corner (Shift: each
+//     way on its own); edge handles stretch it one way about the opposite
+//     edge. All eight show, and they work WHILE typing.
+//   - What is on screen while typing is the text itself, rendered live, so
+//     Enter or a click away changes nothing.
+//   - Text from before becomes point text when picked up, looking the same.
+//
+//   node test/js/text_tool_point_test.js
+
+const fs = require("fs");
+const path = require("path");
+const assert = require("assert");
+
+const src = fs.readFileSync(path.join(__dirname, "..", "..", "priv", "static", "etcher.js"), "utf8");
+
+function body(name) {
+  const start = src.indexOf(`    ${name}: function`);
+  assert.notStrictEqual(start, -1, `could not find ${name}`);
+  const end = src.indexOf("\n    },", start);
+  return src.slice(start, end + "\n    }".length).replace(`${name}: function`, "function");
+}
+
+// Minimal SVG element stand-in: attributes, children, style.
+function fakeEl(tag) {
+  const attrs = {};
+  return {
+    tag, attrs, children: [], style: {}, textContent: "",
+    setAttribute(k, v) { attrs[k] = String(v); },
+    getAttribute(k) { return k in attrs ? attrs[k] : null; },
+    removeAttribute(k) { delete attrs[k]; },
+    appendChild(c) { this.children.push(c); return c; },
+    removeChild(c) { this.children.splice(this.children.indexOf(c), 1); },
+    get firstChild() { return this.children[0] || null; },
+    querySelectorAll() { return this.children; }
+  };
+}
+const DEFAULT_LABEL_FONT_SIZE = Number(src.match(/var DEFAULT_LABEL_FONT_SIZE = (\d+)/)[1]);
+const make = (name) => new Function("svgEl", "DEFAULT_LABEL_FONT_SIZE", "return " + body(name))(
+  (tag, a) => { const e = fakeEl(tag); Object.entries(a || {}).forEach(([k, v]) => e.setAttribute(k, v)); return e; },
+  DEFAULT_LABEL_FONT_SIZE
+);
+
+const isPointText = make("_isPointText");
+const pointStretch = make("_pointStretch");
+const pointTextLines = make("_pointTextLines");
+const renderPointText = make("_renderPointText");
+const resizePointText = make("_resizePointText");
+const ensurePointText = make("_ensurePointText");
+
+// A board at 2 container px per image px; text 10 px wide per character at
+// font 20 (0.5em a character), so the arithmetic below is readable.
+function board(over) {
+  return Object.assign({
+    _markerScale: () => 2,
+    _zoomPx: (n) => n * 2,
+    _fontSizeFor: (shape) => shape.style.font_size * 2,
+    _measureTextWidth: (t, size) => t.length * size * 0.5,
+    _orientedBox: (g) => ({ x: g.x * 2, y: g.y * 2, w: g.w * 2, h: g.h * 2, deg: 0 }),
+    _setRotateTransform() {},
+    _applyLabelBg() {},
+    _textboxFixed: (s) => !!(s.style && s.style.box === "fixed"),
+    _isPointText: isPointText,
+    _pointStretch: pointStretch,
+    _pointTextLines: pointTextLines,
+    _textEditor: null
+  }, over || {});
+}
+function render(shape, over) {
+  const el = fakeEl("g"), trect = fakeEl("rect"), ttext = fakeEl("text");
+  renderPointText.call(board(over), shape, el, shape.geometry, trect, ttext);
+  return { trect, ttext };
+}
+
+// ── what counts as point text ─────────────────────────────────────────────
+
+assert.strictEqual(isPointText.call(board(), { kind: "text", style: { point: true } }), true);
+assert.strictEqual(isPointText.call(board(), { kind: "text", style: {} }), false, "text from before");
+assert.strictEqual(isPointText.call(board(), { kind: "text", style: { point: true, box: "fixed" } }), false,
+  "a text BOX is its own thing");
+assert.strictEqual(isPointText.call(board(), { kind: "callout", style: { point: true } }), false);
+
+// ── the box is exactly the text: no wrap, spaces kept ─────────────────────
+
+{
+  // font 10 image = 20 container px; pad 4; "Hello  there" is 12 chars = 120.
+  const shape = { kind: "text", style: { point: true, font_size: 10 },
+    metadata: { title: "Hello  there\nsecond line that is much longer than the box" },
+    geometry: { x: 5, y: 7, w: 3, h: 3 } };
+  const { ttext, trect } = render(shape);
+  const lines = ttext.children.map((t) => t.textContent);
+  assert.deepStrictEqual(lines, ["Hello  there", "second line that is much longer than the box"],
+    "the author's two lines, never folded, the double space kept");
+  assert.strictEqual(ttext.getAttribute("xml:space"), "preserve");
+  const widest = "second line that is much longer than the box".length * 10;
+  assert.strictEqual(Number(trect.getAttribute("width")), widest + 8, "box = widest line + padding");
+  assert.strictEqual(Number(trect.getAttribute("height")), 20 + 22 + 8, "box = 1em + 1.1em + padding");
+  assert.deepStrictEqual([shape.geometry.w, shape.geometry.h], [(widest + 8) / 2, 50 / 2],
+    "and the geometry IS that box, in image units");
+  assert.deepStrictEqual(shape._renderedBox, { x: 5, y: 7, w: shape.geometry.w, h: shape.geometry.h });
+}
+
+// ── while typing, the draft is what shows ─────────────────────────────────
+
+{
+  const shape = { kind: "text", style: { point: true, font_size: 10 },
+    metadata: { title: "old" }, _draftTitle: "new text", geometry: { x: 0, y: 0 } };
+  const { ttext } = render(shape);
+  assert.deepStrictEqual(ttext.children.map((t) => t.textContent), ["new text"]);
+}
+
+// ── an open editor rides the render ───────────────────────────────────────
+
+{
+  let fits = 0;
+  const shape = { kind: "text", style: { point: true, font_size: 10 }, metadata: { title: "x" }, geometry: { x: 0, y: 0 } };
+  render(shape, { _textEditor: { shape, point: true, fit: () => fits++ } });
+  assert.strictEqual(fits, 1, "every render re-fits the editor over the text");
+  assert.ok(shape._pointLayout && shape._pointLayout.fontPx === 20, "with the layout it lies over");
+}
+
+// ── stretch is drawn about the top-left ───────────────────────────────────
+
+{
+  const shape = { kind: "text", style: { point: true, font_size: 10, scale_x: 2, scale_y: 0.5 },
+    metadata: { title: "ab" }, geometry: { x: 10, y: 10 } };
+  const { ttext, trect } = render(shape);
+  // tx = 20, ty = 20 in container px.
+  assert.strictEqual(ttext.getAttribute("transform"), "matrix(2 0 0 0.5 -20 10)");
+  assert.strictEqual(trect.getAttribute("transform"), ttext.getAttribute("transform"));
+  assert.strictEqual(shape.geometry.w, (20 + 8) * 2 / 2, "the box is stretched too");
+  assert.strictEqual(shape.geometry.h, 28 * 0.5 / 2);
+}
+
+// ── resizing ──────────────────────────────────────────────────────────────
+
+function start() {
+  return { box: { x: 100, y: 100, w: 200, h: 50 }, font: 20, sx: 1, sy: 1 };
+}
+function pull(handle, pt, freeform) {
+  const shape = { kind: "text", style: { point: true, font_size: 20 } };
+  resizePointText.call(board(), shape, start(), handle, pt, freeform);
+  return shape;
+}
+
+{
+  // Bottom-right pulled out to twice the size: the top-left holds.
+  const s = pull(2, { x: 500, y: 200 });
+  assert.strictEqual(s.style.font_size, 40, "a corner scales the size");
+  assert.deepStrictEqual([s.style.scale_x, s.style.scale_y], [1, 1], "evenly");
+  assert.deepStrictEqual(s.geometry, { x: 100, y: 100, w: 400, h: 100 });
+
+  // Top-left pulled in to half: the bottom-right holds.
+  const t = pull(0, { x: 200, y: 125 });
+  assert.strictEqual(t.style.font_size, 10);
+  assert.deepStrictEqual(t.geometry, { x: 200, y: 125, w: 100, h: 25 });
+
+  // A pull that leans one way still scales evenly (projected on the diagonal).
+  const lean = pull(2, { x: 500, y: 150 });
+  assert.ok(lean.style.font_size > 20 && lean.style.font_size < 40);
+  assert.strictEqual(lean.geometry.w / lean.geometry.h, 4, "proportions kept");
+}
+
+{
+  // Shift: each way on its own — height through the size, width as stretch.
+  const s = pull(2, { x: 700, y: 200 }, true);
+  assert.strictEqual(s.style.font_size, 40, "twice as tall");
+  assert.strictEqual(s.style.scale_x, 1.5, "three times as wide = 2× size × 1.5 stretch");
+  assert.deepStrictEqual(s.geometry, { x: 100, y: 100, w: 600, h: 100 });
+}
+
+{
+  const r = pull("right", { x: 500, y: 0 });
+  assert.deepStrictEqual([r.style.font_size, r.style.scale_x, r.style.scale_y], [20, 2, 1],
+    "the right edge stretches it wider, nothing else");
+  assert.deepStrictEqual(r.geometry, { x: 100, y: 100, w: 400, h: 50 }, "the left edge holds");
+
+  const l = pull("left", { x: 200, y: 0 });
+  assert.strictEqual(l.style.scale_x, 0.5);
+  assert.deepStrictEqual(l.geometry, { x: 200, y: 100, w: 100, h: 50 }, "the right edge holds");
+
+  const t = pull("top", { x: 0, y: 50 });
+  assert.deepStrictEqual([t.style.scale_x, t.style.scale_y], [1, 2]);
+  assert.deepStrictEqual(t.geometry, { x: 100, y: 50, w: 200, h: 100 }, "the bottom holds");
+
+  const b = pull("bottom", { x: 0, y: 125 });
+  assert.strictEqual(b.style.scale_y, 0.5);
+  assert.deepStrictEqual(b.geometry, { x: 100, y: 100, w: 200, h: 25 }, "the top holds");
+}
+
+{
+  const flat = pull("right", { x: 0, y: 0 });
+  assert.ok(flat.style.scale_x > 0, "pulled past its other edge it stays a sliver, never inside out");
+  const tiny = pull(2, { x: 100, y: 100 });
+  assert.ok(tiny.style.font_size * 2 >= 2, "never so small it cannot be found again");
+}
+
+// ── older text becomes point text, looking the same ───────────────────────
+
+{
+  const textEl = fakeEl("text");
+  textEl.setAttribute("font-size", "26");
+  ["Wrapped at", "its old box", "\u00A0"].forEach((t) => { const sp = fakeEl("tspan"); sp.textContent = t; textEl.children.push(sp); });
+  const shape = { kind: "text", style: {}, metadata: { title: "Wrapped at its old box" },
+    el: { querySelector: () => textEl } };
+  let rendered = 0;
+  const converted = ensurePointText.call(board({
+    _hasPinnedFontSize: () => false, _renderShape: () => rendered++
+  }), shape);
+  assert.strictEqual(converted, true);
+  assert.strictEqual(shape.style.point, true);
+  assert.strictEqual(shape.style.font_size, 13, "the size it was showing (26 px at 2×)");
+  assert.strictEqual(shape.metadata.title, "Wrapped at\nits old box\n", "the lines it was showing");
+  assert.strictEqual(rendered, 1);
+  assert.strictEqual(ensurePointText.call(board(), shape), false, "only once");
+  assert.strictEqual(ensurePointText.call(board(), { kind: "text", style: { box: "fixed" } }), false,
+    "a text box stays a text box");
+}
+
+// ── handles: all eight, always ────────────────────────────────────────────
+
+{
+  const handlePositions = make("_handlePositions");
+  const ctx = board({ _titleHandlesOn: () => false });
+  const shape = { kind: "text", style: { point: true }, geometry: { x: 0, y: 0, w: 1, h: 1 },
+    _renderedBox: { x: 10, y: 20, w: 100, h: 30 } };
+  assert.deepStrictEqual(handlePositions.call(ctx, shape),
+    [{ x: 10, y: 20 }, { x: 110, y: 20 }, { x: 110, y: 50 }, { x: 10, y: 50 }],
+    "four corners on the text's own box, no opt-in needed");
+  assert.ok(/\} else if \(shape\.kind === "rectangle" \|\| self\._isPointText\(shape\)\) \{\s*self\._renderRectEdgeHandles\(shape\);/.test(src),
+    "and the four edge grabbers rectangles have");
+  assert.ok(src.includes('if (point) rect.classList.add("is-shown");'), "shown, not hidden until hovered");
+}
+
+// ── the editor: the text itself, with a caret ─────────────────────────────
+
+{
+  const ed = body("_startTextEdit");
+  assert.ok(ed.includes('input.style.color = point ? "transparent" : edColor;'),
+    "the textarea's own glyphs are invisible — the live render is what shows");
+  assert.ok(ed.includes("var existing = !point &&"), "so the text is not hidden while typing");
+  assert.ok(/shape\._draftTitle = input\.value;\s*\/\/ Renders the text and re-fits this editor over it\.\s*selfEd\._renderShape\(shape\);/.test(ed),
+    "every keystroke renders the real text");
+  assert.ok(/if \(e\.shiftKey\) \{\s*if \(!point\) return;\s*e\.preventDefault\(\);[\s\S]*?input\.setRangeText\("\\n"/.test(ed),
+    "Shift+Enter puts the line break in");
+  assert.ok(/if \(point && self\.editingShape === shape && e\.target\.closest &&\s*e\.target\.closest\("\.etcher-handle, \.etcher-grab"\)\) \{/.test(ed),
+    "pressing one of its handles does not end the edit");
+  assert.ok(ed.includes("if (self._textEditor.resizing) return;"), "nor does the blur that press may cause");
+  assert.ok(ed.includes("this.svg.insertBefore(fo, firstHandle)"), "the editor lies under the handles");
+  const commit = body("_commitTextEdit");
+  assert.ok(commit.includes('? ed.input.value.replace(/\\s+$/, "")'),
+    "commit keeps the author's spaces and lines; only trailing blank goes");
+  assert.ok(body("_endTextEdit").includes("delete ed.shape._draftTitle"), "and the draft is gone after");
+}
+
+console.log("text tool (point text): all checks passed");

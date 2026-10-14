@@ -335,7 +335,7 @@ function run(kind, afterCreate) {
     editingShape: null,
     svg: { querySelectorAll: () => [] },
     _exitEditMode: () => exits.push(1),
-    _exitTitleEditMode: noop, _refreshImageRing: noop, _removeConnectorDots: noop,
+    _exitTitleEditMode: noop, _refreshImageRing: noop, _removeConnectorDots: noop, _ensurePointText: noop,
     _syncArrangeButtons: noop, _showLinkMenuFor: noop, _hideTooltip: noop,
     // Anchored host: _enterEditMode still dismisses the floating bubble.
     // (Docked, the section IS the selection's UI — tooltip_hover_intent_test.)

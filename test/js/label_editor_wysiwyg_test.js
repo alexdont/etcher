@@ -96,6 +96,10 @@ function edit(shape, opts) {
     // editor variant is pinned in textbox_test.
     _textboxFixed: () => false,
     _isTextKind: (k) => k === "text" || k === "callout",
+    // Labels and text from before point text — point text's editor is
+    // pinned in text_tool_point_test.
+    _ensurePointText: () => false,
+    _isPointText: () => false,
     _defaultLabelFontSize: () => opts.defaultSize || 16,
     _inkScale: () => 1,
     _zoomPx: (n) => n,
@@ -239,15 +243,15 @@ function edit(shape, opts) {
 {
   assert.ok(src.includes('document.createElement("textarea")'),
     "the editor is a textarea — an input cannot hold the author's newline");
-  assert.ok(/if \(e\.shiftKey\) return;/.test(src),
-    "Shift+Enter falls through to insert the line; Enter alone commits");
+  assert.ok(/if \(e\.shiftKey\) \{\s*if \(!point\) return;/.test(src),
+    "Shift+Enter falls through to insert the line in a label; Enter alone commits");
   const titleRender = src.slice(src.indexOf("_renderTitleSibling: function"));
   assert.ok(titleRender.includes("textEl, trimmed, Infinity, fontSize"),
     "the title render never wraps — multi-line is the author's newlines");
   assert.ok(!src.includes("widthAtHeightFont > availWidth"),
     "and never caps the font to the box");
   const commit = src.slice(
-    src.indexOf("var newTitle = ed.input.value"),
+    src.indexOf("var newTitle = ed.point"),
     src.indexOf("_cancelTextEdit: function")
   );
   assert.ok(/if \(this\.editingTitleShape === shape\) this\._positionAllTitleHandles\(shape\);/.test(commit),

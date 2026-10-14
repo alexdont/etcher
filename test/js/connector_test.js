@@ -196,7 +196,7 @@ const midpointPositions = lift("_midpointPositionsForShape", "shape");
 
 // The layer method dispatches by kind and reaches back for `_arrowPath`, so
 // the stand-in has to carry it.
-const midLayer = { _arrowPath: arrowPath, _crSample: crSample, _arrowSegMidImage: arrowSegMid };
+const midLayer = { _arrowPath: arrowPath, _crSample: crSample, _arrowSegMidImage: arrowSegMid, _isPointText: () => false };
 
 // One ghost per segment — an arrow is an open path, so a straight one has a
 // single midpoint and there is no wrap from head back round to tail. (A

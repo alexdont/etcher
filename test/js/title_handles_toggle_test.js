@@ -82,6 +82,9 @@ const renderHandles = extract("_renderTitleHandles");
       // Plain shapes throughout — the text BOX bypasses the opt-in (its
       // corners are the only way to resize it; textbox_test pins that).
       _textboxFixed: () => false,
+      // Text from before point text — point text always has its handles
+      // (text_tool_point_test pins that).
+      _isPointText: () => false,
     };
   }
 

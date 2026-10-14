@@ -80,7 +80,7 @@ const handlePositions = lift("_handlePositions", "shape");
     kind: "text", style: { box: "fixed" },
     geometry: { x: 10, y: 20, w: 200, h: 100 }
   };
-  const ctx = { _titleHandlesOn: () => false, _textboxFixed: textboxFixed };
+  const ctx = { _titleHandlesOn: () => false, _textboxFixed: textboxFixed, _isPointText: () => false };
   const dots = handlePositions.call(ctx, fixedShape);
   assert.strictEqual(dots.length, 4,
     "a text box's corners are the only way to resize it — they show without the ⋯ opt-in");
@@ -88,7 +88,7 @@ const handlePositions = lift("_handlePositions", "shape");
 
   const plain = { kind: "text", style: {}, geometry: { x: 0, y: 0, w: 50, h: 20 } };
   assert.strictEqual(handlePositions.call(ctx, plain).length, 0,
-    "a plain text label keeps its corners behind the opt-in, as before");
+    "a plain text label from before point text keeps its corners behind the opt-in");
 }
 
 {

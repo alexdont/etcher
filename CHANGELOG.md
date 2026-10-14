@@ -118,6 +118,7 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   line type and the whole label-position grid inline, running a labelled
   rectangle's strip to ~880 px. Escape with a pop-up open now closes just
   the pop-up.
+  In the strip a button's caption appears beside it on hover.
 - **Handles follow a colour change, side grabbers included.** Recolouring a
   shape (or a text box's text) repainted its corner dots but not its side
   grabbers, which kept the colour the shape was drawn in — a text box

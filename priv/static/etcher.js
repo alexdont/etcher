@@ -910,11 +910,21 @@
       // a slider, stays out of the strip as it always has.
       ".etcher-stylepanel[data-size=\"compact\"] .etcher-chips { flex-direction: column; gap: 6px; }",
       ".etcher-stylepanel[data-size=\"compact\"] .etcher-chip { flex: 0 0 auto; width: 30px; height: 30px; padding: 0; }",
-      ".etcher-stylepanel[data-size=\"compact\"] .etcher-chip-caption,",
       ".etcher-stylepanel[data-size=\"compact\"] .etcher-chip-face b,",
       ".etcher-stylepanel[data-size=\"compact\"] .etcher-chip[data-chip=\"opacity\"],",
       ".etcher-stylepanel[data-size=\"compact\"]:not([data-compact-parts~=\"dash\"]) .etcher-chip[data-chip=\"stroke\"],",
       ".etcher-stylepanel[data-size=\"compact\"]:not([data-compact-parts~=\"fills\"]) .etcher-chip[data-chip=\"fill\"] { display: none !important; }",
+      // A strip button's caption appears beside it on hover, a small tag
+      // pointing at what the square is for; hidden otherwise, and while
+      // its pop-up is open (the pop-up says it).
+      ".etcher-stylepanel[data-size=\"compact\"] .etcher-chip { position: relative; overflow: visible; }",
+      ".etcher-stylepanel[data-size=\"compact\"] .etcher-chip-caption {",
+      "  display: none; position: absolute; top: 50%; right: calc(100% + 8px); transform: translateY(-50%);",
+      "  padding: 5px 8px; border-radius: 6px; background: rgba(24, 24, 27, 0.97); color: #fff;",
+      "  font-size: 11px; opacity: 1; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35); z-index: 14;",
+      "}",
+      ".etcher-stylepanel[data-size=\"compact\"][data-side=\"left\"] .etcher-chip-caption { right: auto; left: calc(100% + 8px); }",
+      ".etcher-stylepanel[data-size=\"compact\"] .etcher-chip:hover:not(.is-open) .etcher-chip-caption { display: block; }",
       ".etcher-stylepanel[data-size=\"compact\"] .etcher-chip-pop { left: auto; right: calc(100% + 8px); width: 190px; box-sizing: border-box; }",
       ".etcher-stylepanel[data-size=\"compact\"][data-side=\"left\"] .etcher-chip-pop { right: auto; left: calc(100% + 8px); }",
       // Inside a pop-up the strip's own hiding rules stand down: the

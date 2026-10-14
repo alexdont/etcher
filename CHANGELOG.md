@@ -97,6 +97,9 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   keeps its inline rows. Text made with the text tool takes corners like a
   text box and a callout (its own remembered default, `point_corner`),
   padded in as they bite.
+- **The label background switch is folded into the Behind chip.** Its
+  colour popup leads with "No background"; any colour turns the plate on.
+  The separate On/Off row is gone from the full panel.
 - **Handles follow a colour change, side grabbers included.** Recolouring a
   shape (or a text box's text) repainted its corner dots but not its side
   grabbers, which kept the colour the shape was drawn in — a text box

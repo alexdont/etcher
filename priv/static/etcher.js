@@ -935,6 +935,12 @@
       ".etcher-chip-pop-grid button.is-selected { background: rgba(255, 255, 255, 0.22); border-color: rgba(255, 255, 255, 0.6); }",
       ".etcher-chip-pop-grid svg { max-width: 22px; max-height: 18px; }",
       ".etcher-chip-pop input[type=\"range\"] { width: 100%; }",
+      // The Behind chip's quick row in the colour popup.
+      ".etcher-bg-choices { display: flex; flex-wrap: wrap; gap: 6px; width: 100%; padding-bottom: 6px; border-bottom: 1px solid rgba(255, 255, 255, 0.14); }",
+      ".etcher-bg-none { flex: 1 1 auto; height: 28px; padding: 0 10px; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 7px; cursor: pointer; color: #fff;",
+      "  background: transparent; display: inline-flex; align-items: center; gap: 8px; font: 500 12px ui-sans-serif, system-ui, sans-serif; }",
+      ".etcher-bg-none:hover { background: rgba(255, 255, 255, 0.1); }",
+      ".etcher-bg-none.is-selected { background: rgba(255, 255, 255, 0.2); border-color: rgba(255, 255, 255, 0.6); }",
       // The thin rule between the panel's groups.
       ".etcher-panel-sep { height: 1px; background: rgba(255, 255, 255, 0.14); margin: 2px 0; flex: 0 0 auto; }",
       ".etcher-stylepanel[data-size=\"compact\"] .etcher-panel-sep { display: none; }",
@@ -6413,6 +6419,34 @@
     // state each pass; the row + its divider hide when every slot is
     // inline. Clicking one selects that slot (it then pins back onto the
     // toolbar) and keeps the picker open so it can be tweaked.
+    // The Behind chip's "No background" button, above the popup's own
+    // colours (any of which turns the plate on), marked when there is none.
+    // Shown only while the popup is aimed at the plate.
+    _syncBgChoices: function() {
+      var self = this;
+      var row = this._bgChoicesRow;
+      if (!row) return;
+      row.style.display = this._labelBgPickTarget ? "" : "none";
+      if (!this._labelBgPickTarget) return;
+      while (row.firstChild) row.removeChild(row.firstChild);
+      var current = this._currentLabelBg();
+      var none = document.createElement("button");
+      none.type = "button";
+      none.className = "etcher-bg-none" + (current ? "" : " is-selected");
+      none.title = "No background";
+      none.setAttribute("aria-label", "No background");
+      none.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">' +
+        '<rect x="2" y="2" width="12" height="12" rx="3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-dasharray="2 2"/>' +
+        '<path d="M4 12 L12 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>' +
+        '<span>No background</span>';
+      none.addEventListener("click", function(e) {
+        e.preventDefault();
+        self._setLabelBg(null, true);
+        self._syncBgChoices();
+      });
+      row.appendChild(none);
+    },
+
     _syncColorsPopup: function() {
       var self = this;
       var row = self.colorsPopupSlotsRow;
@@ -6641,6 +6675,15 @@
       // them in the popup would just be redundant chrome. The static
       // preset row stays inside the picker as a quick way back to
       // default colors even after the user's palette has drifted.
+      // Opened from the Behind chip, the popup leads with the plate's own
+      // "none" choice ahead of the colours — the background switch folded
+      // into the chip (see `_syncBgChoices`).
+      var bgChoices = document.createElement("div");
+      bgChoices.className = "etcher-bg-choices";
+      bgChoices.style.display = "none";
+      popup.appendChild(bgChoices);
+      self._bgChoicesRow = bgChoices;
+
       var picker = document.createElement("div");
       picker.className = "etcher-picker";
 
@@ -8061,6 +8104,9 @@
       chipPop.setAttribute("data-fresco-no-capture", "");
       self._chipPop = chipPop;
       [dashRow, fillRow, cs.row, labelSection].forEach(function(r) { r.classList.add("etcher-in-chips"); });
+      // The background switch is the Behind chip's now ("No background" or
+      // a colour in its popup).
+      bgRow.classList.add("etcher-in-chips");
       var CHIPS = [
         { key: "line", title: "Line type", row: dashRow, btns: function() { return self._paramsDashBtns || []; } },
         { key: "fill", title: "Fill", row: fillRow, btns: function() { return self._paramsFillBtns || []; } },
@@ -9214,7 +9260,7 @@
       bgEl.title = bg
         ? "Label background (" + forWhat + "): " + bg
         : "Label background — off for " + forWhat +
-          "; pick a colour, or use the toggle beside the label size";
+          "; click to pick one";
       bgEl.setAttribute("aria-label", bgEl.title);
     },
 
@@ -9380,6 +9426,7 @@
         self._openPopup("colors");
         // _openPopup is target-agnostic; re-arm after the generic close.
         self._labelPickTarget = true;
+        self._syncBgChoices();
       });
       labelRow.appendChild(lb);
 
@@ -9402,6 +9449,7 @@
         self._openPopup("colors");
         // _openPopup is target-agnostic; re-arm after the generic close.
         self._labelBgPickTarget = true;
+        self._syncBgChoices();
       });
       labelRow.appendChild(bgSwatch);
 
@@ -9543,6 +9591,7 @@
     _closePopup: function() {
       this._labelPickTarget = false;
       this._labelBgPickTarget = false;
+      if (this._bgChoicesRow) this._bgChoicesRow.style.display = "none";
       this._slotPickTarget = null;
       if (this.toolsPopup) this.toolsPopup.classList.remove("is-open");
       if (this.colorsPopup) this.colorsPopup.classList.remove("is-open");

@@ -74,4 +74,9 @@ assert.ok(body("_syncCornerRows").includes('this._paramsCornerInput.style.displa
   "the corner slider shows once there are corners");
 assert.ok(src.includes('".etcher-stylepanel .etcher-swatch { width: 100%; height: auto; aspect-ratio: 1 / 1; border-radius: 8px; }",'),
   "square colour tiles with soft corners");
+// The background switch is folded into the Behind chip.
+assert.ok(src.includes('bgRow.classList.add("etcher-in-chips");'), "no separate switch row in the full panel");
+assert.ok(body("_syncBgChoices").includes("self._setLabelBg(null, true);"), "the chip's popup offers No background");
+assert.ok(body("_syncBgChoices").includes('row.style.display = this._labelBgPickTarget ? "" : "none";'), "only when aimed at the plate");
+
 console.log("panel relevance: all checks passed");

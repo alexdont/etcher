@@ -1342,6 +1342,9 @@
       // Point text, selected or being typed into: a thin black dashed box,
       // as Affinity draws one, matching its black handles. The same width
       // whatever the zoom or the text's stretch.
+      // The grip over point text's outline while it is typed into, and the
+      // move cursor held for the whole drag once it is taken.
+      ".etcher-overlay svg .etcher-text-grip { fill: transparent; fill-rule: evenodd; stroke: none; pointer-events: all; cursor: move; }",
       ".etcher-overlay svg.is-over-text-frame, .etcher-overlay svg.is-over-text-frame * { cursor: move !important; }",
       ".etcher-text.is-point.is-selected .etcher-text-rect,",
       ".etcher-text.is-point.is-editing .etcher-text-rect,",
@@ -21085,6 +21088,23 @@
       return !inside;
     },
 
+    // Lay the editor's grip band over point text's outline: the same band
+    // `_onPointTextFrame` reads, as a ring (box grown by the outside reach,
+    // less the box shrunk by the inside one) in the overlay's own px.
+    _fitPointGrip: function(shape) {
+      var grip = this._textEditor && this._textEditor.shape === shape && this._textEditor.grip;
+      var rect = grip && shape.el && shape.el.querySelector(".etcher-text-rect");
+      if (!rect || !this.svg) return;
+      var r = rect.getBoundingClientRect();
+      var o = this.svg.getBoundingClientRect();
+      var x = r.left - o.left, y = r.top - o.top, w = r.width, h = r.height;
+      var O = POINT_FRAME_OUT_PX, I = POINT_FRAME_IN_PX;
+      var iw = Math.max(0, w - 2 * I), ih = Math.max(0, h - 2 * I);
+      grip.setAttribute("d",
+        "M" + (x - O) + " " + (y - O) + "h" + (w + 2 * O) + "v" + (h + 2 * O) + "h" + -(w + 2 * O) + "Z" +
+        "M" + (x + I) + " " + (y + I) + "v" + ih + "h" + iw + "v" + -ih + "Z");
+    },
+
     // Point text dragged by its outline while being typed into. The editor
     // stays open (the handles' `resizing` hold), the text and its handles
     // follow the pointer, Shift keeps it on one axis, and release saves
@@ -21119,6 +21139,7 @@
         document.removeEventListener("pointerup", onUp, true);
         document.removeEventListener("pointercancel", onUp, true);
         self._resumeMidpointHighlight();
+        if (self.svg) self.svg.classList.remove("is-over-text-frame");
         if (moved && shape.uuid) {
           self._emitChanged();
           self._pushUndo(shape.uuid, historyBefore, self._snapshotShape(shape));
@@ -22218,6 +22239,7 @@
           // longest line never scrolls the textarea out from under it.
           input.scrollLeft = 0;
           input.scrollTop = 0;
+          selfEd._fitPointGrip(shape);
           return;
         }
         // A text BOX neither grows with the text nor recentres: the
@@ -22305,7 +22327,19 @@
       var firstHandle = point && this.svg.querySelector(":scope > .etcher-grab, :scope > .etcher-handle");
       if (firstHandle) this.svg.insertBefore(fo, firstHandle);
       else this.svg.appendChild(fo);
+      // The dashed outline's grip: an invisible band over it, on top of the
+      // editor and under the handles, wearing the move cursor. A real
+      // element rather than a cursor swapped on hover, because a browser
+      // (Safari above all) repaints the cursor when the pointer crosses
+      // into another element, not when a style changes under it.
+      var grip = null;
+      if (point) {
+        grip = svgEl("path", {});
+        grip.classList.add("etcher-text-grip");
+        this.svg.insertBefore(grip, fo.nextSibling);
+      }
       this._textEditor = {
+        grip: grip,
         fo: fo,
         input: input,
         shape: shape,
@@ -22320,6 +22354,7 @@
         setAnchor: function(cx, cy, left) { edCx = cx; edCy = cy; edLeft = left; },
         setPad: function(p) { edPad = p; }
       };
+      if (grip) this._fitPointGrip(shape);
       // Hide the visible <text> while editing — the input shows the
       // current content live, and overlapping them blurs the readout.
       // For title edits, the visible text lives on the title group
@@ -22480,16 +22515,6 @@
         self._commitTextEdit();
       };
       document.addEventListener("pointerdown", self._textEditOutsideDown, true);
-      // A move cursor over that outline, so the grip can be found.
-      if (point) {
-        self._textEditFrameHover = function(e) {
-          if (!self._textEditor || self._textEditor.input !== input) return;
-          var on = !e.buttons && self.editingShape === shape && self._onPointTextFrame(shape, e) &&
-            !(e.target.closest && e.target.closest(".etcher-handle, .etcher-grab"));
-          if (self.svg) self.svg.classList.toggle("is-over-text-frame", !!on);
-        };
-        document.addEventListener("pointermove", self._textEditFrameHover, true);
-      }
       // Focused twice, and both of them matter.
       //
       // Now, in the same task as the gesture that asked for it: WebKit opens
@@ -22760,11 +22785,8 @@
     _endTextEdit: function() {
       var ed = this._textEditor;
       if (!ed) return;
-      if (this._textEditFrameHover) {
-        document.removeEventListener("pointermove", this._textEditFrameHover, true);
-        this._textEditFrameHover = null;
-        if (this.svg) this.svg.classList.remove("is-over-text-frame");
-      }
+      if (this.svg) this.svg.classList.remove("is-over-text-frame");
+      if (ed.grip && ed.grip.parentNode) ed.grip.parentNode.removeChild(ed.grip);
       if (this._textEditOutsideDown) {
         document.removeEventListener("pointerdown", this._textEditOutsideDown, true);
         this._textEditOutsideDown = null;

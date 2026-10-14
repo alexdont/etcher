@@ -394,3 +394,24 @@ console.log("text tool (point text): all checks passed");
   assert.ok(mover.includes("ed.resizing = true") && mover.includes("input.setSelectionRange(caret[0], caret[1])"),
     "the edit stays open and the caret comes back where it was");
 }
+
+{
+  // The grip is a real element over the outline, wearing the move cursor —
+  // a browser repaints the cursor on crossing into an element, not on a
+  // style swapped under a still pointer.
+  const press = body("_startTextEdit");
+  assert.ok(/grip = svgEl\("path", \{\}\);\s*grip\.classList\.add\("etcher-text-grip"\);\s*this\.svg\.insertBefore\(grip, fo\.nextSibling\);/.test(press),
+    "laid over the editor, under the handles");
+  assert.ok(src.includes('".etcher-overlay svg .etcher-text-grip { fill: transparent; fill-rule: evenodd; stroke: none; pointer-events: all; cursor: move; }",'));
+  assert.ok(body("_endTextEdit").includes("ed.grip.parentNode.removeChild(ed.grip)"), "and gone with the editor");
+  const fitGrip = make("_fitPointGrip");
+  const grip = fakeEl("path");
+  const rect = { getBoundingClientRect: () => ({ left: 110, top: 120, width: 100, height: 50 }) };
+  const shape = { el: { querySelector: () => rect } };
+  fitGrip.call({ _textEditor: { shape, grip }, svg: { getBoundingClientRect: () => ({ left: 10, top: 20 }) } }, shape);
+  const O = POINT_FRAME_OUT_PX, I = POINT_FRAME_IN_PX;
+  assert.strictEqual(grip.getAttribute("d"),
+    `M${100 - O} ${100 - O}h${100 + 2 * O}v${50 + 2 * O}h${-(100 + 2 * O)}Z` +
+    `M${100 + I} ${100 + I}v${50 - 2 * I}h${100 - 2 * I}v${-(50 - 2 * I)}Z`,
+    "a ring: the box grown by the outside reach, less the box shrunk by the inside one");
+}

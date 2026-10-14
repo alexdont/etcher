@@ -80,7 +80,7 @@ const handlePositions = lift("_handlePositions", "shape");
     kind: "text", style: { box: "fixed" },
     geometry: { x: 10, y: 20, w: 200, h: 100 }
   };
-  const ctx = { _titleHandlesOn: () => false, _textboxFixed: textboxFixed, _isPointText: () => false };
+  const ctx = { _titleHandlesOn: () => false, _textboxFixed: textboxFixed, _isPointText: () => false, _isPointFrame: () => false };
   const dots = handlePositions.call(ctx, fixedShape);
   assert.strictEqual(dots.length, 4,
     "a text box's corners are the only way to resize it — they show without the ⋯ opt-in");

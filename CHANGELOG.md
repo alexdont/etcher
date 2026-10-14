@@ -35,6 +35,25 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   box set by the click (so a typed line folded on Enter), the editor grew
   from its middle while the result grew down, and plain text had no
   handles while being typed into. The text box tool is unchanged.
+- **Shape labels and callouts work the same way.** A label on a
+  rectangle, circle, polygon, arrow, dimension or line, and a callout's
+  words, are point text too: typed in place (the words on screen are the
+  label, keystroke by keystroke), never wrapped, the box exactly the text.
+  Clicked, a label shows the thin black dash with black corner dots and
+  side grabbers that come up as the cursor nears; corners and sides scale
+  it, Shift stretches, all of it while typing. Double-click puts the caret
+  at the start; the dashed outline is a grip while typing. A label still
+  goes where labels go — dragged anywhere, aligned in its shape, or riding
+  its line (a dimension's or arrow's label keeps its place on the shaft
+  and only changes size) — and a callout's anchor stays put while its
+  words scale. Scaling updates the panel's Label size as it goes. A
+  label's stretch is `style.title_scale_x` / `title_scale_y` and
+  `style.title_point` marks it; a callout uses `style.point`, `scale_x`,
+  `scale_y` like text. Older labels and callouts convert when picked up,
+  looking the same. A point label's and callout's dots always show — the
+  label-dots switch now only governs older ones.
+- **The text tool's icon is a typeset T** (a bar with dropped ends on a
+  footed stem) instead of two round-capped strokes that read as ⊤.
 
 ### Added
 

@@ -100,6 +100,9 @@ function edit(shape, opts) {
     // pinned in text_tool_point_test.
     _ensurePointText: () => false,
     _isPointText: () => false,
+    _typesAsPoint: () => false,
+    _isPointLabel: () => false,
+    _isPointFrame: () => false,
     _defaultLabelFontSize: () => opts.defaultSize || 16,
     _inkScale: () => 1,
     _zoomPx: (n) => n,
@@ -254,7 +257,7 @@ function edit(shape, opts) {
     src.indexOf("var newTitle = ed.point"),
     src.indexOf("_cancelTextEdit: function")
   );
-  assert.ok(/if \(this\.editingTitleShape === shape\) this\._positionAllTitleHandles\(shape\);/.test(commit),
+  assert.ok(/if \(this\.editingTitleShape === shape\) \{\s*\/\/[^\n]*\n\s*if \(shape\.titleGroup\) this\._positionAllTitleHandles\(shape\);/.test(commit),
     "committing text re-seats the corner handles — the text sizes the box " +
     "now, so new text moves the corners they sit on");
 }

@@ -267,10 +267,10 @@
     // tool now draws (leader + underline + text bbox) so the toolbar
     // button matches the on-canvas output.
     callout:  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="3.5" cy="20" r="1.5" fill="currentColor" stroke="none"/><path d="M4 19.5 L8.5 14 L21 14"/><text x="9" y="13" font-size="9.5" font-weight="700" fill="currentColor" stroke="none">Aa</text></svg>',
-    // Text tool — bold, serif-less "T" so the button reads cleanly at
-    // toolbar sizes (the previous version had pinched serifs that
-    // muddied the silhouette).
-    text:     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 6 L19 6 M12 6 L12 18"/></svg>',
+    // Text tool — a typeset "T", filled: a full-width bar with its ends
+    // dropped and a stem standing on a foot. Two round-capped strokes read
+    // as the ⊤ symbol (or an intersection), not as a letter.
+    text:     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><path d="M4 4H20V9H18.6L18.1 6.9H13.5V18.4H15.6V20H8.4V18.4H10.5V6.9H5.9L5.4 9H4Z"/></svg>',
     textbox:  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="15" rx="2"/><path d="M7 9.5h10M7 13.5h6"/></svg>',
     // Dimension — horizontal shaft with V-arrows on both ends. Mirrors
     // the architectural dimension-line annotation the tool draws (line
@@ -13029,104 +13029,124 @@
           var cobox = self._orientedBox(box);
           var bx = cobox.x, by = cobox.y, bw = cobox.w, bh = cobox.h;
 
-          if (coRect) {
-            coRect.setAttribute("x", bx);
-            coRect.setAttribute("y", by);
-            coRect.setAttribute("width",  bw);
-            coRect.setAttribute("height", bh);
-          }
-          if (coText) {
-            var calloutText = (shape.metadata && shape.metadata.title) || "";
-            // A fraction of the box rather than a fixed screen length: the font is
-            // already `height * 0.65`, so a proportional pad keeps the label
-            // self-similar at every size. A px-at-1:1 pad would crowd the text
-            // against the edge on a zoomed-out board and balloon on a zoomed-in
-            // one. 0.13 reproduces the original 4px at a typical label height.
-            var coPad = bh * 0.13;
-            var coFontFamily = "ui-sans-serif, system-ui, -apple-system, sans-serif";
-            var coFontWeight = "500";
-            var coFontSizeByHeight = self._fontSizeFor(
-              shape, Math.max(self._zoomPx(10), bh * 0.65)
-            );
-            // Padding is a fraction of the BOX while the box drives the
-            // font. A pinned size inverts that — the text drives the box —
-            // so it comes off the font instead, or a small size in a box
-            // that was dragged large keeps the big box's padding. The 0.2
-            // is the same proportion: pad was 0.13 of the height, the font
-            // 0.65 of it, and 0.13 / 0.65 = 0.2.
-            if (self._hasPinnedFontSize(shape)) coPad = coFontSizeByHeight * 0.2;
-
-            // Width-fit cap: same fix `_renderTitleSibling` got in
-            // 0.2.3 — without it, callout text that overflows the box
-            // width at the height-derived font-size wraps onto
-            // multiple lines, `coActualH` exceeds `bh`, the snap on
-            // body-drag release writes that taller height back into
-            // `geometry.text_box`, the next render derives an even
-            // larger font, more lines wrap, and the callout grows
-            // exponentially per interaction. Capping the font-size so
-            // the text fits the box width on a single line bounds
-            // `coActualH` to one line of text and breaks the cycle.
-            var coWidthAtHeightFont = self._measureTextWidth(
-              calloutText, coFontSizeByHeight, coFontFamily, coFontWeight
-            );
-            var coAvailWidth = Math.max(1, bw - coPad * 2);
-            var coFontSize = coFontSizeByHeight;
-            // The cap exists to break a feedback loop: box height drives the
-            // font, the font drives the measured height, and the measured
-            // height gets written back to the box. A PINNED size is not in
-            // that loop — it comes from the user, not from the box — so it
-            // is honoured as given and the box grows to hold it instead.
-            if (!self._hasPinnedFontSize(shape) && coWidthAtHeightFont > coAvailWidth) {
-              coFontSize = Math.max(self._zoomPx(10), coFontSizeByHeight * coAvailWidth / coWidthAtHeightFont);
-            }
-
-            coText.setAttribute("x", bx + coPad);
-            coText.setAttribute("y", by + coPad);
-            coText.setAttribute("font-size", coFontSize);
-            coText.setAttribute("font-family", coFontFamily);
-            coText.setAttribute("font-weight", coFontWeight);
-            // Cross-browser baseline fix: override the factory-default
-            // `dominant-baseline: hanging` with `alphabetic` (the
-            // default for SVG text). Safari's `hanging` interpretation
-            // renders text ABOVE the hanging baseline, Firefox's
-            // renders text BELOW per spec — so a callout that fits in
-            // Safari shows its text below the rect in Firefox. Both
-            // browsers honor `alphabetic` identically, and the wrap
-            // helper's `dy="1em"` on the first tspan still positions
-            // the line one em below the text element's y (the
-            // alphabetic baseline lands at by + coPad + coFontSize).
-            coText.setAttribute("dominant-baseline", "alphabetic");
-            var coMeasured = self._fillTextWithWrappedTspans(
-              coText, calloutText, coAvailWidth, coFontSize
-            );
-
-            // Shrink-wrap the callout's text bbox the same way text
-            // shapes and titles do — keeps the underline + leader
-            // attached to the visible text edge. `_renderedBox` is
-            // the shrunk visual; geometry.text_box stays at the
-            // user-set size. Handle drag math (in _startHandleDrag
-            // / _applyHandleDrag) uses delta from startPt against
-            // the FULL geometry, so dragging a handle never bakes
-            // the visual shrink back into the storage box.
-            var coActualW = Math.max(coMeasured.width + coPad * 2, coFontSize);
-            var coActualH = Math.max(coMeasured.height + coPad * 2, coFontSize * 1.2);
-            if (coRect) {
-              coRect.setAttribute("width",  coActualW);
-              coRect.setAttribute("height", coActualH);
-            }
-            self._applyLabelBg(coRect, shape);
-            var cosx = bw > 0 ? bw / box.w : 1;
-            var cosy = bh > 0 ? bh / box.h : cosx;
-            shape._renderedBox = {
-              x: box.x,
-              y: box.y,
-              w: cosx > 0 ? coActualW / cosx : box.w,
-              h: cosy > 0 ? coActualH / cosy : box.h
-            };
-            bw = coActualW;
-            bh = coActualH;
+          var coPoint = self._isPointCallout(shape);
+          if (coPoint) {
+            // The words as point text: their own size and stretch, the
+            // box written back from them. Upright, as every callout is.
+            el.classList.add("is-point");
+            var coScale = self._markerScale() || 1;
+            var coStr = self._pointStretch(shape, "callout");
+            var coM = self._pointMeasure(shape);
+            if (!g.text_box) g.text_box = Object.assign({}, box);
+            box = g.text_box;
+            box.w = coM.natW * coStr.x / coScale;
+            box.h = coM.natH * coStr.y / coScale;
+            cobox = self._orientedBox(box);
+            bx = cobox.x; by = cobox.y;
+            bw = coM.natW * coStr.x; bh = coM.natH * coStr.y;
+            self._pointDraw(shape, coM, bx, by, coStr, coRect, coText, null);
+            shape._renderedBox = { x: box.x, y: box.y, w: box.w, h: box.h };
           } else {
-            shape._renderedBox = null;
+            if (coRect) {
+              coRect.setAttribute("x", bx);
+              coRect.setAttribute("y", by);
+              coRect.setAttribute("width",  bw);
+              coRect.setAttribute("height", bh);
+            }
+            if (coText) {
+              var calloutText = (shape.metadata && shape.metadata.title) || "";
+              // A fraction of the box rather than a fixed screen length: the font is
+              // already `height * 0.65`, so a proportional pad keeps the label
+              // self-similar at every size. A px-at-1:1 pad would crowd the text
+              // against the edge on a zoomed-out board and balloon on a zoomed-in
+              // one. 0.13 reproduces the original 4px at a typical label height.
+              var coPad = bh * 0.13;
+              var coFontFamily = "ui-sans-serif, system-ui, -apple-system, sans-serif";
+              var coFontWeight = "500";
+              var coFontSizeByHeight = self._fontSizeFor(
+                shape, Math.max(self._zoomPx(10), bh * 0.65)
+              );
+              // Padding is a fraction of the BOX while the box drives the
+              // font. A pinned size inverts that — the text drives the box —
+              // so it comes off the font instead, or a small size in a box
+              // that was dragged large keeps the big box's padding. The 0.2
+              // is the same proportion: pad was 0.13 of the height, the font
+              // 0.65 of it, and 0.13 / 0.65 = 0.2.
+              if (self._hasPinnedFontSize(shape)) coPad = coFontSizeByHeight * 0.2;
+
+              // Width-fit cap: same fix `_renderTitleSibling` got in
+              // 0.2.3 — without it, callout text that overflows the box
+              // width at the height-derived font-size wraps onto
+              // multiple lines, `coActualH` exceeds `bh`, the snap on
+              // body-drag release writes that taller height back into
+              // `geometry.text_box`, the next render derives an even
+              // larger font, more lines wrap, and the callout grows
+              // exponentially per interaction. Capping the font-size so
+              // the text fits the box width on a single line bounds
+              // `coActualH` to one line of text and breaks the cycle.
+              var coWidthAtHeightFont = self._measureTextWidth(
+                calloutText, coFontSizeByHeight, coFontFamily, coFontWeight
+              );
+              var coAvailWidth = Math.max(1, bw - coPad * 2);
+              var coFontSize = coFontSizeByHeight;
+              // The cap exists to break a feedback loop: box height drives the
+              // font, the font drives the measured height, and the measured
+              // height gets written back to the box. A PINNED size is not in
+              // that loop — it comes from the user, not from the box — so it
+              // is honoured as given and the box grows to hold it instead.
+              if (!self._hasPinnedFontSize(shape) && coWidthAtHeightFont > coAvailWidth) {
+                coFontSize = Math.max(self._zoomPx(10), coFontSizeByHeight * coAvailWidth / coWidthAtHeightFont);
+              }
+
+              coText.setAttribute("x", bx + coPad);
+              coText.setAttribute("y", by + coPad);
+              coText.setAttribute("font-size", coFontSize);
+              coText.setAttribute("font-family", coFontFamily);
+              coText.setAttribute("font-weight", coFontWeight);
+              // Cross-browser baseline fix: override the factory-default
+              // `dominant-baseline: hanging` with `alphabetic` (the
+              // default for SVG text). Safari's `hanging` interpretation
+              // renders text ABOVE the hanging baseline, Firefox's
+              // renders text BELOW per spec — so a callout that fits in
+              // Safari shows its text below the rect in Firefox. Both
+              // browsers honor `alphabetic` identically, and the wrap
+              // helper's `dy="1em"` on the first tspan still positions
+              // the line one em below the text element's y (the
+              // alphabetic baseline lands at by + coPad + coFontSize).
+              coText.setAttribute("dominant-baseline", "alphabetic");
+              var coMeasured = self._fillTextWithWrappedTspans(
+                coText, calloutText, coAvailWidth, coFontSize
+              );
+
+              // Shrink-wrap the callout's text bbox the same way text
+              // shapes and titles do — keeps the underline + leader
+              // attached to the visible text edge. `_renderedBox` is
+              // the shrunk visual; geometry.text_box stays at the
+              // user-set size. Handle drag math (in _startHandleDrag
+              // / _applyHandleDrag) uses delta from startPt against
+              // the FULL geometry, so dragging a handle never bakes
+              // the visual shrink back into the storage box.
+              var coActualW = Math.max(coMeasured.width + coPad * 2, coFontSize);
+              var coActualH = Math.max(coMeasured.height + coPad * 2, coFontSize * 1.2);
+              if (coRect) {
+                coRect.setAttribute("width",  coActualW);
+                coRect.setAttribute("height", coActualH);
+              }
+              self._applyLabelBg(coRect, shape);
+              var cosx = bw > 0 ? bw / box.w : 1;
+              var cosy = bh > 0 ? bh / box.h : cosx;
+              shape._renderedBox = {
+                x: box.x,
+                y: box.y,
+                w: cosx > 0 ? coActualW / cosx : box.w,
+                h: cosy > 0 ? coActualH / cosy : box.h
+              };
+              bw = coActualW;
+              bh = coActualH;
+            } else {
+              shape._renderedBox = null;
+            }
+
           }
 
           // Underline spans the full bottom edge of the bbox.
@@ -13152,8 +13172,11 @@
           // The label as drawn, for the handles, the hit-test and handle
           // drags — which all have to agree with what is on screen.
           shape._labelRect = { x: bx, y: by, w: bw, h: bh };
-          self._setRotateTransform(coRect, coTurn);
-          self._setRotateTransform(coText, coTurn);
+          // (Point words carry their stretch in that same attribute.)
+          if (!coPoint) {
+            self._setRotateTransform(coRect, coTurn);
+            self._setRotateTransform(coText, coTurn);
+          }
           self._setRotateTransform(coUnderline, coTurn);
 
           // Thickness / line type / opacity, on the parts that are lines.
@@ -13213,6 +13236,7 @@
             coDot.setAttribute("cx", anchor.x);
             coDot.setAttribute("cy", anchor.y);
           }
+          if (coPoint) self._fitPointEditor(shape);
           break;
         }
         case "text": {
@@ -13988,8 +14012,12 @@
         (shape && shape.metadata && shape.metadata.title) ||
         null;
       var trimmed = title && String(title).trim();
+      // A point label being typed shows from its first keystroke on, empty
+      // or not — the words on screen are the label itself.
+      var pointLabel = this._isPointLabel(shape);
+      var typingLabel = pointLabel && shape._draftTitle != null;
 
-      if (!trimmed || !bboxTopImage) {
+      if ((!trimmed && !typingLabel) || !bboxTopImage) {
         if (shape.titleGroup && shape.titleGroup.parentNode) {
           shape.titleGroup.parentNode.removeChild(shape.titleGroup);
         }
@@ -14044,6 +14072,12 @@
       // colour was previously frozen at creation, so recolouring a shape
       // left its label behind in the old colour with no way to catch it up.
       shape.titleGroup.style.color = this._titleColorFor(shape);
+
+      if (pointLabel) {
+        this._renderPointLabel(shape, bboxTopImage);
+        return;
+      }
+      shape.titleGroup.classList.remove("is-point");
 
       var titleBox = this._shapeTitleBoxImage(shape, bboxTopImage);
       var tbox = this._orientedBox(titleBox);
@@ -14282,6 +14316,44 @@
       }
     },
 
+    // A shape's label as point text (`style.title_point`): sized by its
+    // font and stretch, placed where the label would be — its dragged
+    // corner, its alignment, its spot on the line — and turned with the
+    // board, as labels are. The leader and the shaft's break follow it.
+    _renderPointLabel: function(shape, bboxTopImage) {
+      var tg = shape.titleGroup;
+      tg.classList.add("is-point");
+      var rectEl = tg.querySelector(".etcher-text-rect");
+      var textEl = tg.querySelector(".etcher-text-content");
+      var lineEl = tg.querySelector(".etcher-title-leader");
+      var scale = this._markerScale() || 1;
+      var str = this._pointStretch(shape, "label");
+      var M = this._pointMeasure(shape);
+      var titleBox = this._shapeTitleBoxImage(shape, bboxTopImage,
+        { w: M.natW * str.x / scale, h: M.natH * str.y / scale });
+      var tbox = this._orientedBox(titleBox);
+      this._setRotateTransform(rectEl, tbox);
+      var turn = rectEl ? rectEl.getAttribute("transform") : null;
+      this._pointDraw(shape, M, tbox.x, tbox.y, str, rectEl, textEl, turn);
+      shape._renderedTitleImage = { x: titleBox.x, y: titleBox.y, w: titleBox.w, h: titleBox.h };
+      var tw = M.natW * str.x, th = M.natH * str.y;
+      if (lineEl) {
+        var center = { x: titleBox.x + titleBox.w / 2, y: titleBox.y + titleBox.h / 2 };
+        if (this._labelRidesShaft(shape.kind) || this._shapeContainsImagePoint(shape, center)) {
+          lineEl.setAttribute("visibility", "hidden");
+        } else {
+          lineEl.removeAttribute("visibility");
+          var anchors = this._titleLeaderAnchors(shape, tbox.x, tbox.y, tw, th);
+          lineEl.setAttribute("x1", anchors.title.x);
+          lineEl.setAttribute("y1", anchors.title.y);
+          lineEl.setAttribute("x2", anchors.parent.x);
+          lineEl.setAttribute("y2", anchors.parent.y);
+        }
+      }
+      if (this._labelRidesShaft(shape.kind)) this._syncShaftLabelGap(shape, rectEl);
+      this._fitPointEditor(shape);
+    },
+
     // Image-px point-in-shape test for rect / circle / polygon.
     // Freehand falls through to the polygon test since its geometry
     // is also a points-array. Used by _renderTitleSibling to decide
@@ -14365,7 +14437,7 @@
       return (shape && shape.style && shape.style.color) || "";
     },
 
-    _shapeTitleBoxImage: function(shape, bboxTopImage) {
+    _shapeTitleBoxImage: function(shape, bboxTopImage, sizeOverride) {
       var meta = (shape && shape.metadata) || {};
       var stored = meta.title_box;
       // A title the user has never sized gets a default that is comfortable
@@ -14392,6 +14464,14 @@
       var size = stored
         ? { w: stored.w, h: stored.h }
         : { w: basePx * 6, h: basePx * 1.4 };
+      // A point label knows its size from its words; the rest of this only
+      // has to say where a box that size goes.
+      if (sizeOverride) {
+        size = { w: sizeOverride.w, h: sizeOverride.h };
+        if (stored && !normalizeTitleAlign(meta.title_align)) {
+          stored = { x: stored.x, y: stored.y, w: size.w, h: size.h };
+        }
+      }
 
       // A shaft-riding label (dimension, arrow) rides its own line. The
       // stored box supplies the SIZE — that is what makes it resizable like
@@ -14591,6 +14671,10 @@
       this._exitEditMode();
       this._exitTitleEditMode();
 
+      // An older label becomes point text as it is picked up, looking the
+      // same (see `_ensurePointLabel`).
+      this._ensurePointLabel(shape);
+      if (!shape.titleGroup) return;
       this.editingTitleShape = shape;
       shape.titleGroup.classList.add("is-editing");
       this._hideTooltip();
@@ -14604,6 +14688,10 @@
         // any registered input-owner (modals, dialogs, ARIA dialogs)
         // also keep edit alive: the click belongs to that UI.
         if (e.target.closest(".etcher-shape")) return;
+        // The label's own handles, its editor and its outline grip: a drag
+        // on one ends with a click on it, and that is working on the label,
+        // not leaving it.
+        if (e.target.closest(".etcher-handle, .etcher-grab, .etcher-text-grip, .etcher-text-editor")) return;
         // Etcher's own chrome — the toolbar and the style panel. This is
         // what the comment above always claimed, and what the code never
         // did: only `isInputOwner` was checked, so picking a colour with a
@@ -14640,6 +14728,7 @@
       }
       this._removeTitleHandles();
       this.editingTitleShape = null;
+      if (!this.editingShape) this._unwireMidpointTracker();
       if (this._titleOutsideClickHandler) {
         document.removeEventListener("click", this._titleOutsideClickHandler, true);
         this._titleOutsideClickHandler = null;
@@ -14651,11 +14740,15 @@
 
     _renderTitleHandles: function(shape) {
       this._removeTitleHandles();
+      // A point label always has its handles, as point text does: black
+      // corner dots that scale it, side grabbers that come up as the
+      // cursor nears their side (Shift stretches with either).
+      var point = this._isPointLabel(shape);
       // The dots are opt-in (see _titleHandlesOn). Title-edit mode itself
       // is unchanged — the label still focuses, drags and takes the panel
       // controls — only the freehand resize corners stay away.
-      if (!this._titleHandlesOn()) return;
-      var box =
+      if (!point && !this._titleHandlesOn()) return;
+      var box = point ? this._pointHandleBox(shape, "label") :
         shape._renderedTitleImage ||
         this._shapeTitleBoxImage(shape, this._lastBboxTopImageFor(shape));
       if (!box) return;
@@ -14666,7 +14759,7 @@
         { x: box.x + box.w,   y: box.y + box.h   },  // 2: BR
         { x: box.x,           y: box.y + box.h   }   // 3: BL
       ];
-      var handleColor = self._handleColor(shape);
+      var handleColor = point ? POINT_HANDLE_COLOR : self._handleColor(shape);
       this.titleHandles = positions.map(function(pt, idx) {
         var h = svgEl("circle", { r: 5 });
         h.classList.add("etcher-handle", "etcher-title-handle");
@@ -14681,17 +14774,33 @@
         self._positionHandle(h, pt);
         return h;
       });
+      if (point) {
+        this._renderRectEdgeHandles(shape, "label");
+        this._wireMidpointTracker();
+      }
     },
 
     _removeTitleHandles: function() {
       var self = this;
       (this.titleHandles || []).forEach(function(h) { self._dropHandleEl(h); });
       this.titleHandles = [];
+      // A point label's side grabbers share the shape's midpoint set, which
+      // nothing else holds while a label is the thing being worked on.
+      if (this.editingTitleShape && !this.editingShape) this._removeMidpointHandles();
     },
 
     _positionAllTitleHandles: function(shape) {
       if (!this.titleHandles || !this.titleHandles.length) return;
-      var box =
+      var point = this._isPointLabel(shape);
+      if (point && this.midpointHandles && this.midpointHandles.length) {
+        var mids = this._rectEdgeMidpoints(this._pointHandleBox(shape, "label"));
+        var selfP = this;
+        this.midpointHandles.forEach(function(h, i) {
+          if (mids[i]) selfP._positionHandle(h, mids[i]);
+        });
+        this._syncPointEdgeRoom(shape);
+      }
+      var box = point ? this._pointHandleBox(shape, "label") :
         shape._renderedTitleImage ||
         this._shapeTitleBoxImage(shape, this._lastBboxTopImageFor(shape));
       if (!box) return;
@@ -14705,7 +14814,7 @@
       this.titleHandles.forEach(function(h, idx) {
         if (positions[idx]) self._positionHandle(h, positions[idx]);
       });
-      this._syncGrabRadii(this.titleHandles);
+      this._syncGrabRadii(this.titleHandles, point ? this.midpointHandles : null);
     },
 
     _startTitleHandleDrag: function(shape, idx, handleEl, e) {
@@ -14731,6 +14840,10 @@
         this._shapeTitleBoxImage(shape, this._lastBboxTopImageFor(shape))
       ));
       var dragged = false;
+      // A point label scales from its corners as point text does (Shift:
+      // each way on its own), the opposite corner holding.
+      var pointStart = this._isPointLabel(shape) ? this._pointTextDragStart(shape, "label") : null;
+      if (pointStart) startBox = pointStart.box;
 
       function onMove(ev) {
         var pt = self._toImage(ev);
@@ -14747,6 +14860,13 @@
           var bC = self._imageToContainer(pt);
           if ((bC.x - aC.x) * (bC.x - aC.x) + (bC.y - aC.y) * (bC.y - aC.y) < 9) return;
           dragged = true;
+        }
+        if (pointStart) {
+          self._resizePointText(shape, pointStart, idx, pt, !!ev.shiftKey);
+          self._renderShape(shape);
+          self._positionAllTitleHandles(shape);
+          self._syncPointSize();
+          return;
         }
         var right = startBox.x + startBox.w;
         var bottom = startBox.y + startBox.h;
@@ -15269,13 +15389,17 @@
       if (!this._connectorsOn()) this._removeConnectorDots();
       // Same for the label corner dots: a label focused right now gets or
       // loses its dots the moment the switch flips, not on the next focus.
-      if (this.editingTitleShape) {
+      // A point label's handles are not the switch's (they always show), so
+      // they are left alone — rebuilding them here dropped the one a drag
+      // had hold of whenever a panel sync landed mid-drag.
+      if (this.editingTitleShape && !this._isPointLabel(this.editingTitleShape)) {
         if (this._titleHandlesOn()) this._renderTitleHandles(this.editingTitleShape);
         else this._removeTitleHandles();
       }
       // And the text-sizing dots on a text or callout already in edit
-      // mode — same immediacy, same switch.
-      if (this.editingShape &&
+      // mode — same immediacy, same switch. Point frames' are not the
+      // switch's either.
+      if (this.editingShape && !this._isPointFrame(this.editingShape) &&
           (this.editingShape.kind === "text" ||
            this.editingShape.kind === "callout")) {
         this._renderHandles(this.editingShape);
@@ -20979,10 +21103,51 @@
         shape.style.point === true && !this._textboxFixed(shape));
     },
 
-    _pointStretch: function(shape) {
+    // A callout's words work the same way once `style.point` marks it:
+    // sized by their font and stretch, never wrapped, its box written back
+    // into `geometry.text_box`. The leader and anchor are untouched.
+    _isPointCallout: function(shape) {
+      return !!(shape && shape.kind === "callout" && shape.style &&
+        shape.style.point === true);
+    },
+
+    // A shape's label (rectangle, circle, arrow, dimension…) likewise, once
+    // `style.title_point` marks it. Its stretch is `style.title_scale_x` /
+    // `title_scale_y` — style, not metadata, because the host keeps a
+    // shape's style whole and only a named few metadata keys.
+    _isPointLabel: function(shape) {
+      return !!(shape && !this._isTextKind(shape.kind) && shape.style &&
+        shape.style.title_point === true);
+    },
+
+    // Point text and point callouts: the frames that live on the shape's
+    // own edit mode (a label's live on title-edit mode instead).
+    _isPointFrame: function(shape) {
+      return this._isPointText(shape) || this._isPointCallout(shape);
+    },
+
+    // The words a shape's editor types into work Affinity-style.
+    _typesAsPoint: function(shape) {
+      if (!shape) return false;
+      if (shape.kind === "text") return this._isPointText(shape);
+      if (shape.kind === "callout") return this._isPointCallout(shape);
+      return this._isPointLabel(shape);
+    },
+
+    // Which of a shape's texts a point frame is about: "label" for a
+    // shape's title, the shape's own kind otherwise.
+    _pointPart: function(shape) {
+      if (!shape) return null;
+      return this._isTextKind(shape.kind) ? shape.kind : "label";
+    },
+
+    _pointStretch: function(shape, part) {
       var st = (shape && shape.style) || {};
-      var sx = typeof st.scale_x === "number" && isFinite(st.scale_x) && st.scale_x > 0 ? st.scale_x : 1;
-      var sy = typeof st.scale_y === "number" && isFinite(st.scale_y) && st.scale_y > 0 ? st.scale_y : 1;
+      var label = (part || this._pointPart(shape)) === "label";
+      var rx = label ? st.title_scale_x : st.scale_x;
+      var ry = label ? st.title_scale_y : st.scale_y;
+      var sx = typeof rx === "number" && isFinite(rx) && rx > 0 ? rx : 1;
+      var sy = typeof ry === "number" && isFinite(ry) && ry > 0 ? ry : 1;
       return { x: sx, y: sy };
     },
 
@@ -20996,91 +21161,120 @@
       return String(t).split("\n");
     },
 
-    _renderPointText: function(shape, el, g, trect, ttext) {
-      var self = this;
-      // Marks the box for the Affinity-style outline (black, dashed).
-      if (el && el.classList) el.classList.add("is-point");
-      var scale = 1;
-      try { scale = self._markerScale() || 1; } catch (_) { scale = 1; }
-      var fontPx = self._fontSizeFor(shape, self._zoomPx(DEFAULT_LABEL_FONT_SIZE));
+    // Point text's natural size, unstretched, in container px — the
+    // measure every point frame (text, callout words, label) is laid out
+    // from. Lines step 1.1em, as everywhere; an empty text keeps one
+    // line's room so the caret has a home. The box runs from the top of
+    // the tallest letters to the bottom of the descenders (y, p, g), with
+    // the same pad all round, so the words sit centred in it and nothing
+    // pokes out of a background.
+    _pointMeasure: function(shape) {
+      var fontPx = this._fontSizeFor(shape, this._zoomPx(DEFAULT_LABEL_FONT_SIZE));
       var pad = fontPx * 0.2;
-      var str = self._pointStretch(shape);
       var family = "ui-sans-serif, system-ui, -apple-system, sans-serif";
-      var lines = self._pointTextLines(shape);
+      var lines = this._pointTextLines(shape);
       var widest = 0;
       for (var i = 0; i < lines.length; i++) {
-        var lw = lines[i] ? self._measureTextWidth(lines[i], fontPx, family, "500") : 0;
+        var lw = lines[i] ? this._measureTextWidth(lines[i], fontPx, family, "500") : 0;
         if (lw > widest) widest = lw;
       }
       var empty = lines.length === 1 && !lines[0];
-      // Unstretched size in container px. Lines step 1.1em, as everywhere;
-      // an empty text keeps one line's room so the caret has a home. The
-      // box runs from the top of the tallest letters to the bottom of the
-      // descenders (y, p, g), with the same pad all round, so the words
-      // sit centred in it and nothing pokes out of a background.
-      var met = self._pointTextMetrics(family);
-      var natW = Math.max(widest, empty ? fontPx * 0.5 : 0) + pad * 2;
-      var natH = (met.asc + met.desc) * fontPx +
-        Math.max(0, lines.length - 1) * fontPx * 1.1 + pad * 2;
-      // The geometry IS the box, always: written here so whatever reads it
-      // (hit-tests, handles, the turn below, the server) agrees with what
-      // is drawn.
-      g.w = natW * str.x / scale;
-      g.h = natH * str.y / scale;
-      var tbox = self._orientedBox(g);
-      self._setRotateTransform(el, tbox);
-      var tx = tbox.x, ty = tbox.y;
-      // Stretch about the top-left, where the geometry is anchored.
+      var met = this._pointTextMetrics(family);
+      return {
+        fontPx: fontPx, pad: pad, family: family, lines: lines, empty: empty, met: met,
+        natW: Math.max(widest, empty ? fontPx * 0.5 : 0) + pad * 2,
+        natH: (met.asc + met.desc) * fontPx + Math.max(0, lines.length - 1) * fontPx * 1.1 + pad * 2
+      };
+    },
+
+    // Draw a measured point text with its top-left at (tx, ty), stretched
+    // about that corner. `turn` is the rotation already on the rect and
+    // text (a label turns them one by one), kept ahead of the stretch;
+    // null when the turn sits on a parent or there is none. Returns the
+    // layout the editor fits itself over.
+    _pointDraw: function(shape, M, tx, ty, str, trect, ttext, turn) {
+      var self = this;
+      var fontPx = M.fontPx, pad = M.pad;
       var stretch = (str.x !== 1 || str.y !== 1)
         ? "matrix(" + str.x + " 0 0 " + str.y + " " + tx * (1 - str.x) + " " + ty * (1 - str.y) + ")"
         : null;
+      var xf = [turn, stretch].filter(Boolean).join(" ");
       if (trect) {
         trect.setAttribute("x", tx);
         trect.setAttribute("y", ty);
-        trect.setAttribute("width", natW);
-        trect.setAttribute("height", natH);
-        if (stretch) trect.setAttribute("transform", stretch);
+        trect.setAttribute("width", M.natW);
+        trect.setAttribute("height", M.natH);
+        if (xf) trect.setAttribute("transform", xf);
         else trect.removeAttribute("transform");
         self._applyLabelBg(trect, shape);
       }
       if (ttext) {
         ttext.setAttribute("x", tx + pad);
-        ttext.setAttribute("y", ty + pad + met.asc * fontPx);
+        ttext.setAttribute("y", ty + pad + M.met.asc * fontPx);
         ttext.setAttribute("font-size", fontPx);
-        ttext.setAttribute("font-family", family);
+        ttext.setAttribute("font-family", M.family);
         ttext.setAttribute("font-weight", "500");
         ttext.setAttribute("dominant-baseline", "alphabetic");
         // Spaces are the author's: kept, not collapsed.
         ttext.setAttribute("xml:space", "preserve");
         ttext.style.whiteSpace = "pre";
-        if (stretch) ttext.setAttribute("transform", stretch);
+        if (xf) ttext.setAttribute("transform", xf);
         else ttext.removeAttribute("transform");
         while (ttext.firstChild) ttext.removeChild(ttext.firstChild);
-        if (!empty) {
-          lines.forEach(function(line, idx) {
+        if (!M.empty) {
+          M.lines.forEach(function(line, idx) {
             var tspan = svgEl("tspan", { x: tx + pad, dy: idx === 0 ? "0" : "1.1em" });
             tspan.textContent = line || "\u00A0";
             ttext.appendChild(tspan);
           });
         }
       }
-      shape._renderedBox = { x: g.x, y: g.y, w: g.w, h: g.h };
       shape._pointLayout = {
-        tx: tx, ty: ty, pad: pad, fontPx: fontPx, met: met,
-        sx: str.x, sy: str.y, natW: natW, natH: natH,
-        turn: el.getAttribute("transform")
+        tx: tx, ty: ty, pad: pad, fontPx: fontPx, met: M.met,
+        sx: str.x, sy: str.y, natW: M.natW, natH: M.natH,
+        turn: turn || null
       };
-      // An open editor rides the text: typing, a handle drag, a pan or a
-      // panel edit all come through here.
-      var ed = self._textEditor;
+      return shape._pointLayout;
+    },
+
+    // An open editor rides its text: typing, a handle drag, a pan or a
+    // panel edit all re-render, and every point render ends here.
+    _fitPointEditor: function(shape) {
+      var ed = this._textEditor;
       if (ed && ed.shape === shape && ed.point && ed.fit) ed.fit();
+    },
+
+    _renderPointText: function(shape, el, g, trect, ttext) {
+      var self = this;
+      // Marks the box for the Affinity-style outline (black, dashed).
+      if (el && el.classList) el.classList.add("is-point");
+      var scale = 1;
+      try { scale = self._markerScale() || 1; } catch (_) { scale = 1; }
+      var str = self._pointStretch(shape, "text");
+      var M = self._pointMeasure(shape);
+      // The geometry IS the box, always: written here so whatever reads it
+      // (hit-tests, handles, the turn below, the server) agrees with what
+      // is drawn.
+      g.w = M.natW * str.x / scale;
+      g.h = M.natH * str.y / scale;
+      var tbox = self._orientedBox(g);
+      self._setRotateTransform(el, tbox);
+      self._pointDraw(shape, M, tbox.x, tbox.y, str, trect, ttext, null);
+      shape._pointLayout.turn = el.getAttribute("transform");
+      shape._renderedBox = { x: g.x, y: g.y, w: g.w, h: g.h };
+      self._fitPointEditor(shape);
     },
 
     // Whether a pointer event is on point text's outline: within a few
     // screen px of the drawn box's edge, a little more outside it than in,
     // so the band stays clear of the letters.
+    _pointRectEl: function(shape) {
+      var host = this._textEditHost(shape);
+      return (host && host.querySelector && host.querySelector(".etcher-text-rect")) || null;
+    },
+
     _onPointTextFrame: function(shape, e) {
-      var rect = shape && shape.el && shape.el.querySelector && shape.el.querySelector(".etcher-text-rect");
+      var rect = this._pointRectEl(shape);
       if (!rect || typeof e.clientX !== "number") return false;
       var r = rect.getBoundingClientRect();
       var x = e.clientX, y = e.clientY;
@@ -21095,7 +21289,7 @@
     // less the box shrunk by the inside one) in the overlay's own px.
     _fitPointGrip: function(shape) {
       var grip = this._textEditor && this._textEditor.shape === shape && this._textEditor.grip;
-      var rect = grip && shape.el && shape.el.querySelector(".etcher-text-rect");
+      var rect = grip && this._pointRectEl(shape);
       if (!rect || !this.svg) return;
       var r = rect.getBoundingClientRect();
       var o = this.svg.getBoundingClientRect();
@@ -21120,6 +21314,9 @@
       var caret = [input.selectionStart, input.selectionEnd];
       var startPt = self._toImage(e);
       var startGeom = JSON.parse(JSON.stringify(shape.geometry));
+      var part = self._pointPart(shape);
+      var startLabel = part === "label" ? Object.assign({},
+        shape._renderedTitleImage || self._shapeTitleBoxImage(shape, self._lastBboxTopImageFor(shape)) || {}) : null;
       var historyBefore = self._snapshotShape(shape);
       var moved = false;
       self._suspendMidpointHighlight();
@@ -21132,9 +21329,32 @@
           else dx = 0;
         }
         moved = moved || dx !== 0 || dy !== 0;
-        shape.geometry = self._translateGeometry(shape.kind, startGeom, dx, dy);
+        if (part === "label") {
+          // As the label's own drag moves it: along its line for a shaft
+          // rider, anywhere (and out of any alignment) for the rest.
+          if (self._labelRidesShaft(shape.kind)) {
+            var tProj = self._shaftOffsetFor(shape.geometry, pt);
+            if (tProj != null) {
+              shape.metadata = Object.assign({}, shape.metadata || {}, { title_offset: tProj });
+            }
+          } else {
+            shape.metadata = Object.assign({}, shape.metadata || {}, {
+              title_box: { x: startLabel.x + dx, y: startLabel.y + dy, w: startLabel.w, h: startLabel.h },
+              title_align: null
+            });
+          }
+        } else if (part === "callout") {
+          // The words move; the anchor stays where it points.
+          var cb = self._calloutTextBoxImage(startGeom);
+          shape.geometry = {
+            anchor: startGeom.anchor,
+            text_box: { x: cb.x + dx, y: cb.y + dy, w: cb.w, h: cb.h }
+          };
+        } else {
+          shape.geometry = self._translateGeometry(shape.kind, startGeom, dx, dy);
+        }
         self._renderShape(shape);
-        self._positionAllHandles(shape);
+        self._positionPointHandles(shape);
       }
       function onUp() {
         document.removeEventListener("pointermove", onMove, true);
@@ -21145,6 +21365,7 @@
         if (moved && shape.uuid) {
           self._emitChanged();
           self._pushUndo(shape.uuid, historyBefore, self._snapshotShape(shape));
+          if (part === "label") self._syncLabelSection();
         }
         setTimeout(function() {
           if (self._textEditor !== ed) return;
@@ -21190,7 +21411,12 @@
     // it up, looking exactly as it did: the lines it was showing become
     // the author's lines, and the size it was showing becomes its size.
     // Nothing is sent until the user actually changes something.
+    //
+    // Callouts and shapes' labels convert the same way (see
+    // `_ensurePointLabel` for the label's own wrinkles).
     _ensurePointText: function(shape) {
+      if (shape && shape.kind === "callout") return this._ensurePointCallout(shape);
+      if (shape && !this._isTextKind(shape.kind)) return this._ensurePointLabel(shape);
       if (!shape || shape.kind !== "text" || this._textboxFixed(shape)) return false;
       if (this._isPointText(shape)) return false;
       var textEl = shape.el && shape.el.querySelector && shape.el.querySelector(".etcher-text-content");
@@ -21213,6 +21439,74 @@
       }
       this._renderShape(shape);
       return true;
+    },
+
+    // The lines and font size an older text is showing, read off its
+    // render: wrapped lines become the author's lines, the size it was
+    // showing becomes its size (in canvas units).
+    _shownTextOf: function(textEl) {
+      var scale = 1;
+      try { scale = this._markerScale() || 1; } catch (_) { scale = 1; }
+      var fontPx = textEl && parseFloat(textEl.getAttribute("font-size"));
+      var lines = [];
+      if (textEl) {
+        var spans = textEl.querySelectorAll("tspan");
+        for (var i = 0; i < spans.length; i++) {
+          lines.push(String(spans[i].textContent || "").replace(/\u00A0/g, ""));
+        }
+      }
+      return { font: fontPx > 0 ? fontPx / scale : null, lines: lines };
+    },
+
+    _ensurePointCallout: function(shape) {
+      if (!shape || shape.kind !== "callout" || this._isPointCallout(shape)) return false;
+      var shown = this._shownTextOf(shape.el && shape.el.querySelector &&
+        shape.el.querySelector(".etcher-text-content"));
+      var style = Object.assign({}, shape.style || {}, { point: true });
+      if (shown.font) style.font_size = shown.font;
+      else if (!this._hasPinnedFontSize(shape)) style.font_size = this._defaultLabelFontSize() / this._inkScale();
+      shape.style = style;
+      // A box only ever stored as the legacy `text_at` point gets its box.
+      if (shape.geometry && !shape.geometry.text_box) {
+        shape.geometry = {
+          anchor: shape.geometry.anchor,
+          text_box: Object.assign({}, this._calloutTextBoxImage(shape.geometry))
+        };
+      }
+      if (shown.lines.length && (shape.metadata && shape.metadata.title)) {
+        shape.metadata = Object.assign({}, shape.metadata || {}, { title: shown.lines.join("\n") });
+      }
+      this._renderShape(shape);
+      return true;
+    },
+
+    // A shape's label as point text. Its lines never wrapped, so only the
+    // size needs pinning to what it shows; where it sits stays as it was —
+    // a dragged label keeps its corner, an aligned one its alignment, a
+    // shaft rider its place on the line.
+    _ensurePointLabel: function(shape) {
+      if (!shape || this._isTextKind(shape.kind) || this._isPointLabel(shape)) return false;
+      var shown = this._shownTextOf(shape.titleGroup &&
+        shape.titleGroup.querySelector(".etcher-text-content"));
+      var style = Object.assign({}, shape.style || {}, { title_point: true });
+      if (shown.font) style.font_size = shown.font;
+      else if (!this._hasPinnedFontSize(shape)) style.font_size = this._defaultLabelFontSize() / this._inkScale();
+      shape.style = style;
+      this._renderShape(shape);
+      return true;
+    },
+
+    // Scaling point text changes its size, so the panel's Label size box
+    // follows the pull as it happens.
+    _syncPointSize: function() {
+      try { if (this._syncFontRow) this._syncFontRow(); } catch (_) {}
+    },
+
+    // Handles on whichever point frame a shape shows: the label's when its
+    // label is the one being worked on, the shape's own otherwise.
+    _positionPointHandles: function(shape) {
+      if (this.editingTitleShape === shape) this._positionAllTitleHandles(shape);
+      else if (this.editingShape === shape) this._positionAllHandles(shape);
     },
 
     // A handle pulled on point text. Everything scales it evenly — its size
@@ -21285,8 +21579,24 @@
       }
       // Never so small it cannot be found again.
       if (font * scale < 2) font = 2 / scale;
+      var box = { x: nx, y: ny, w: nw, h: nh };
+      if (start.part === "label") {
+        shape.style = Object.assign({}, shape.style || {},
+          { font_size: font, title_scale_x: sx, title_scale_y: sy });
+        // A shaft rider stays on its line, centred where it was; any other
+        // label is placed where the pull left it, out of any alignment —
+        // as a drag of it would be.
+        if (!this._labelRidesShaft(shape.kind)) {
+          shape.metadata = Object.assign({}, shape.metadata || {}, { title_box: box, title_align: null });
+        }
+        return;
+      }
       shape.style = Object.assign({}, shape.style || {}, { font_size: font, scale_x: sx, scale_y: sy });
-      shape.geometry = { x: nx, y: ny, w: nw, h: nh };
+      if (start.part === "callout") {
+        shape.geometry = { anchor: shape.geometry.anchor, text_box: box };
+      } else {
+        shape.geometry = box;
+      }
     },
 
     // The frame point text's handles sit on: the text's own box, but never
@@ -21294,20 +21604,27 @@
     // started text is a letter wide and its eight handles otherwise pile up
     // over it in a knot that does not read as corners. It grows right and
     // down, the way the text itself grows.
-    _pointHandleBox: function(shape) {
-      var b = shape._renderedBox || shape.geometry;
+    _pointHandleBox: function(shape, part) {
+      part = part || (shape.kind === "text" || shape.kind === "callout" ? shape.kind : "label");
+      var b = part === "label"
+        ? (shape._renderedTitleImage || this._shapeTitleBoxImage(shape, this._lastBboxTopImageFor(shape)))
+        : part === "callout"
+          ? (shape._renderedBox || this._calloutTextBoxImage(shape.geometry))
+          : (shape._renderedBox || shape.geometry);
       var scale = 1;
       try { scale = this._markerScale() || 1; } catch (_) { scale = 1; }
       var min = POINT_HANDLE_MIN_PX / scale;
       return { x: b.x, y: b.y, w: Math.max(b.w, min), h: Math.max(b.h, min) };
     },
 
-    _pointTextDragStart: function(shape) {
-      var str = this._pointStretch(shape);
+    _pointTextDragStart: function(shape, part) {
+      part = part || this._pointPart(shape);
+      var str = this._pointStretch(shape, part);
       // From the frame the handles are drawn on, so the pull is measured
       // from where the user grabbed.
       return {
-        box: this._pointHandleBox(shape),
+        part: part,
+        box: this._pointHandleBox(shape, part),
         font: shape.style.font_size, sx: str.x, sy: str.y
       };
     },
@@ -22072,7 +22389,17 @@
       // Point text is typed into in place: older text is converted first,
       // so the editor below only ever meets the one model.
       this._ensurePointText(shape);
-      var point = this._isPointText(shape);
+      var point = this._typesAsPoint(shape);
+      // A label typed onto a shape that has none starts centred in it, as
+      // commit used to put it — stamped now, because a point label shows
+      // from the first keystroke and should grow from where it will stay.
+      if (point && shape.kind !== "callout" && !this._isTextKind(shape.kind) &&
+          !(shape.metadata && String(shape.metadata.title || "").trim()) &&
+          !this._labelRidesShaft(shape.kind) &&
+          !normalizeTitleAlign(shape.metadata && shape.metadata.title_align)) {
+        shape.metadata = Object.assign({}, shape.metadata || {},
+          { title_align: { h: "center", v: "middle" } });
+      }
       var g = this._textEditBoxImage(shape);
       if (!g) return;
       var tl = this._imageToContainer({ x: g.x, y: g.y });
@@ -22315,15 +22642,22 @@
           shape._draftTitle = input.value;
           // Renders the text and re-fits this editor over it.
           selfEd._renderShape(shape);
-          if (selfEd.editingShape === shape) selfEd._positionAllHandles(shape);
+          selfEd._positionPointHandles(shape);
           return;
         }
         edFit();
       });
       if (point) {
         shape._draftTitle = input.value;
-        if (shape.el) shape.el.classList.add("is-typing");
         this._renderShape(shape);
+        var typingHost = this._textEditHost(shape);
+        if (typingHost) typingHost.classList.add("is-typing");
+        // A label being typed is the label being worked on: its own frame
+        // and handles come up, usable while typing, as point text's are.
+        if (!this._isTextKind(shape.kind) && shape.titleGroup &&
+            this.editingTitleShape !== shape) {
+          this._enterTitleEditMode(shape);
+        }
       }
       edFit();
 
@@ -22430,7 +22764,7 @@
         // The dashed outline of point text being typed into is a grip: a
         // press on it moves the text, and the caret comes back after. Ahead
         // of the editor check, since the editor covers the box's inside.
-        if (point && self.editingShape === shape && self._onPointTextFrame(shape, e) &&
+        if (point && self._pointFrameUp(shape) && self._onPointTextFrame(shape, e) &&
             !(e.target.closest && e.target.closest(".etcher-handle, .etcher-grab"))) {
           e.preventDefault();
           e.stopPropagation();
@@ -22456,7 +22790,7 @@
         // One of this text's own handles: scaling or stretching it is part
         // of making it, Affinity-style — the editor stays open through the
         // drag and the caret comes back after it.
-        if (point && self.editingShape === shape && e.target.closest &&
+        if (point && self._pointFrameUp(shape) && e.target.closest &&
             e.target.closest(".etcher-handle, .etcher-grab")) {
           var edR = self._textEditor;
           edR.resizing = true;
@@ -22629,7 +22963,7 @@
         // it; only the caret's colour is the editor's own.
         ed.input.style.caretColor = this._titleColorFor(shape) || "#000";
         this._renderShape(shape);
-        if (this.editingShape === shape) this._positionAllHandles(shape);
+        this._positionPointHandles(shape);
         return;
       }
       size = this._editorFontPx(size);
@@ -22718,7 +23052,11 @@
       // label's corners — and the title-edit handles sit ON those corners.
       // Without this they stay at the old extent, framing where the label
       // used to end.
-      if (this.editingTitleShape === shape) this._positionAllTitleHandles(shape);
+      if (this.editingTitleShape === shape) {
+        // Committed empty: the label is gone, and its frame with it.
+        if (shape.titleGroup) this._positionAllTitleHandles(shape);
+        else this._exitTitleEditMode();
+      }
       // Whether the label controls apply turns on `metadata.title`, which
       // just changed without the selection changing — the selection-driven
       // syncs won't fire, so the section would stay as it was.
@@ -22761,6 +23099,7 @@
       // it stays selected, same as a commit (see _keepOrDropSelection).
       this._keepOrDropSelection(shape);
       this._renderShape(shape);
+      if (this.editingTitleShape === shape && !shape.titleGroup) this._exitTitleEditMode();
     },
 
     // The end of a label edit decides what is left selected. Cursor
@@ -22773,6 +23112,8 @@
     _keepOrDropSelection: function(shape) {
       if (!this._armedToolEdits(shape)) {
         this._exitEditMode();
+        // A label's own frame, too: typing it brought it up.
+        if (this.editingTitleShape === shape) this._exitTitleEditMode();
         return;
       }
       this._suppressEditDismissUntil = Date.now() + 400;
@@ -22800,6 +23141,7 @@
       if (ed.shape) {
         delete ed.shape._draftTitle;
         if (ed.shape.el) ed.shape.el.classList.remove("is-typing");
+        if (ed.shape.titleGroup) ed.shape.titleGroup.classList.remove("is-typing");
       }
       var hostEl = ed.shape && this._textEditHost(ed.shape);
       var existing = hostEl && hostEl.querySelector(".etcher-text-content");
@@ -22818,6 +23160,12 @@
     // path, the stale mapping meant the editor's hide-while-editing found
     // nothing to hide, and the OLD label stayed visible as a phantom
     // under the editor until the new text committed.
+    // Whether a point text's frame and handles are up: its shape selected,
+    // or — for a label — the label in title-edit mode.
+    _pointFrameUp: function(shape) {
+      return this.editingShape === shape || this.editingTitleShape === shape;
+    },
+
     _textEditHost: function(shape) {
       if (!shape) return null;
       if (shape.kind === "text" || shape.kind === "callout") {
@@ -23636,8 +23984,11 @@
       var self = this;
       if (self._midpointTracker) return;
       self._midpointTracker = function(e) {
-        if (!self.editingShape) return;
-        if (!self._hasMidpointHandles(self.editingShape.kind)) return;
+        // A point label's side grabbers, in title-edit mode, ride along.
+        if (!self._pointEdgeTarget()) {
+          if (!self.editingShape) return;
+          if (!self._hasMidpointHandles(self.editingShape.kind)) return;
+        }
         if (!self.midpointHandles || !self.midpointHandles.length) return;
         try { self._updateClosestMidpoint(self._toImage(e)); } catch (_) {}
       };
@@ -23698,7 +24049,7 @@
       if (opts.interactive) {
         if (shape.kind === "polygon" || shape.kind === "arrow") {
           self._renderMidpointHandles(shape);
-        } else if (shape.kind === "rectangle" || self._isPointText(shape)) {
+        } else if (shape.kind === "rectangle" || self._isPointFrame(shape)) {
           self._renderRectEdgeHandles(shape);
         }
       }
@@ -23749,11 +24100,12 @@
     // `midpointHandles` array so the closest-to-cursor highlight,
     // pan/zoom positioning, and `_updateClosestMidpoint` machinery
     // work without per-kind branching at the call sites.
-    _renderRectEdgeHandles: function(shape) {
+    _renderRectEdgeHandles: function(shape, part) {
       this._removeMidpointHandles();
-      var point = this._isPointText(shape);
+      // `part` "label": a shape's point label in title-edit mode.
+      var point = part === "label" || this._isPointFrame(shape);
       if (!shape || (shape.kind !== "rectangle" && !point)) return;
-      var g = point ? this._pointHandleBox(shape) : shape.geometry;
+      var g = point ? this._pointHandleBox(shape, part) : shape.geometry;
       var positions = this._rectEdgeMidpoints(g);
       var self = this;
       var handleColor = self._handleColor(shape);
@@ -23767,7 +24119,7 @@
           "etcher-handle-edge",
           horizontal ? "etcher-handle-edge--h" : "etcher-handle-edge--v"
         );
-        rect.style.color = handleColor;
+        rect.style.color = point ? POINT_HANDLE_COLOR : handleColor;
         rect.dataset.edgeIndex = idx;
         // Point text's grabbers wear its corner dots' black and white; they
         // light up when the cursor nears their side (`_updateClosestMidpoint`).
@@ -23776,7 +24128,7 @@
         self._positionHandle(rect, pt);
         (function(edgeIdx, handleEl) {
           handleEl.addEventListener("pointerdown", function(e) {
-            self._startRectEdgeDrag(shape, edgeIdx, handleEl, e);
+            self._startRectEdgeDrag(shape, edgeIdx, handleEl, e, part);
           });
         })(idx, rect);
         return rect;
@@ -23800,7 +24152,7 @@
     // corners on the grabbed edge slide along the perpendicular
     // axis. Normalizes negatives so a user dragging an edge past
     // its opposite still produces a sane rectangle.
-    _startRectEdgeDrag: function(shape, edgeIdx, handleEl, e) {
+    _startRectEdgeDrag: function(shape, edgeIdx, handleEl, e, part) {
       // Left button only. These handles sit above the canvas and swallow
       // the event, so without this a middle-press on one would start a
       // drag AND block the middle-drag pan from ever reaching Fresco.
@@ -23814,7 +24166,8 @@
       var self = this;
       var historyBefore = self._snapshotShape(shape);
       var g0 = JSON.parse(JSON.stringify(shape.geometry));
-      var pointStart = self._isPointText(shape) ? self._pointTextDragStart(shape) : null;
+      var pointStart = part === "label" ? self._pointTextDragStart(shape, "label")
+        : self._isPointFrame(shape) ? self._pointTextDragStart(shape) : null;
       var EDGE_NAMES = ["top", "right", "bottom", "left"];
       var startTitleBox =
         shape.metadata && shape.metadata.title_box
@@ -23826,7 +24179,8 @@
         if (pointStart) {
           self._resizePointText(shape, pointStart, EDGE_NAMES[edgeIdx], pt, !!ev.shiftKey);
           self._renderShape(shape);
-          self._positionAllHandles(shape);
+          self._positionPointHandles(shape);
+          self._syncPointSize();
           return;
         }
         var nx = g0.x, ny = g0.y, nw = g0.w, nh = g0.h;
@@ -23852,11 +24206,24 @@
           self._emitChanged();
           self._pushUndo(shape.uuid, historyBefore, self._snapshotShape(shape));
         }
+        if (part === "label") { self._syncLabelSection(); return; }
         self._showTooltipFor(shape);
       }
       handleEl.addEventListener("pointermove", onMove);
       handleEl.addEventListener("pointerup", onUp);
       handleEl.addEventListener("pointercancel", onUp);
+    },
+
+    // The point frame whose side grabbers are up, if any: a label in
+    // title-edit mode, or point text / a point callout in edit mode.
+    _pointEdgeTarget: function() {
+      if (this.editingTitleShape && this._isPointLabel(this.editingTitleShape)) {
+        return { shape: this.editingTitleShape, part: "label" };
+      }
+      if (this.editingShape && this._isPointFrame(this.editingShape)) {
+        return { shape: this.editingShape, part: this._pointPart(this.editingShape) };
+      }
+      return null;
     },
 
     // Mark the midpoint closest to the cursor as `.is-active` so its
@@ -23872,7 +24239,11 @@
       var threshold = this._midpointActivationRadiusImagePx();
       // Point text's grabbers wait until the cursor is at their side, not
       // anywhere within reach: all four lit at once is too much on a word.
-      if (shape && shape.kind === "text" && this._isPointText(shape)) threshold = threshold * POINT_EDGE_REACH_PX / 80;
+      var pointTarget = this._pointEdgeTarget();
+      if (pointTarget) {
+        shape = pointTarget.shape;
+        threshold = threshold * POINT_EDGE_REACH_PX / 80;
+      }
       var closestIdx = -1;
       var closestDist = Infinity;
 
@@ -23887,7 +24258,9 @@
       // points you were reaching for. Fixed at the middle, the two never
       // collide — existing bends stay grabbable, and the middle is where a
       // new one gets added.
-      var segments = this._midpointSegmentsForShape(shape);
+      var segments = pointTarget
+        ? this._pointEdgeSegments(pointTarget.shape, pointTarget.part)
+        : this._midpointSegmentsForShape(shape);
       if (segments.length) {
         segments.forEach(function(seg, i) {
           var near = self._nearestOnSegment(pt, seg.p, seg.q);
@@ -23917,14 +24290,7 @@
     // distance to an edge and the distance to its midpoint amount to the
     // same thing, and its own gate stays on the midpoint.
     _midpointSegmentsForShape: function(shape) {
-      // Point text measures to its box's sides, in handle order (top, right,
-      // bottom, left), so the grabber lights anywhere along its side.
-      if (shape && shape.kind === "text" && this._isPointText(shape)) {
-        var b = this._pointHandleBox(shape);
-        var tl = { x: b.x, y: b.y }, tr = { x: b.x + b.w, y: b.y };
-        var br = { x: b.x + b.w, y: b.y + b.h }, bl = { x: b.x, y: b.y + b.h };
-        return [{ p: tl, q: tr }, { p: tr, q: br }, { p: br, q: bl }, { p: bl, q: tl }];
-      }
+      if (shape && this._isPointFrame(shape)) return this._pointEdgeSegments(shape);
       if (!shape || shape.kind !== "arrow") return [];
       var path = this._arrowPath(shape.geometry);
       var segs = [];
@@ -23932,6 +24298,15 @@
         segs.push({ p: path[i], q: path[i + 1] });
       }
       return segs;
+    },
+
+    // A point frame's box sides, in handle order (top, right, bottom,
+    // left), so the grabber lights anywhere along its side.
+    _pointEdgeSegments: function(shape, part) {
+      var b = this._pointHandleBox(shape, part);
+      var tl = { x: b.x, y: b.y }, tr = { x: b.x + b.w, y: b.y };
+      var br = { x: b.x + b.w, y: b.y + b.h }, bl = { x: b.x, y: b.y + b.h };
+      return [{ p: tl, q: tr }, { p: tr, q: br }, { p: br, q: bl }, { p: bl, q: tl }];
     },
 
     // Image-px positions of every midpoint a shape currently
@@ -23953,7 +24328,7 @@
       if (shape.kind === "rectangle") {
         return this._rectEdgeMidpoints(shape.geometry);
       }
-      if (this._isPointText(shape)) {
+      if (this._isPointFrame(shape)) {
         return this._rectEdgeMidpoints(this._pointHandleBox(shape));
       }
       // Open path, so segments rather than a closed ring — no wrap from the
@@ -23992,7 +24367,8 @@
     _hasMidpointHandles: function(kind) {
       // "text": point text's side grabbers. A text box without them has no
       // midpointHandles, which `_updateClosestMidpoint` already bails on.
-      return kind === "polygon" || kind === "rectangle" || kind === "arrow" || kind === "text";
+      return kind === "polygon" || kind === "rectangle" || kind === "arrow" ||
+        kind === "text" || kind === "callout";
     },
 
     _clearClosestMidpoint: function() {
@@ -24029,8 +24405,10 @@
     // aside (the corners still do everything) and comes back as the text
     // grows.
     _syncPointEdgeRoom: function(shape) {
-      if (!this._isPointText(shape) || !this.midpointHandles) return;
-      var b = this._pointHandleBox(shape);
+      if (!this.midpointHandles) return;
+      var label = this.editingTitleShape === shape && this._isPointLabel(shape);
+      if (!label && !this._isPointFrame(shape)) return;
+      var b = this._pointHandleBox(shape, label ? "label" : null);
       var scale = 1;
       try { scale = this._markerScale() || 1; } catch (_) { scale = 1; }
       var wPx = b.w * scale, hPx = b.h * scale;
@@ -24152,7 +24530,7 @@
       // Point text wears black handles whatever its colour, as Affinity's
       // do: they are the tool's controls, not part of the drawing, and a
       // red text's red dots disappeared into it.
-      if (this._isPointText(shape)) return POINT_HANDLE_COLOR;
+      if (this._isPointFrame(shape)) return POINT_HANDLE_COLOR;
       if (shape && shape.style && shape.style.color) return shape.style.color;
       if (this.activeColor) return this.activeColor;
       return "#3b82f6";
@@ -24674,6 +25052,18 @@
           // storage envelope.
           var cbox = shape._renderedBox || this._calloutTextBoxImage(g);
           var lab = this._calloutLabelScreen(shape);
+          // Point words always have their corners, as point text does,
+          // on the frame its handles keep (never a knot on a fresh one).
+          if (this._isPointCallout(shape)) {
+            var pb = this._pointHandleBox(shape, "callout");
+            return [
+              { x: g.anchor[0], y: g.anchor[1] },
+              { x: pb.x,        y: pb.y        },
+              { x: pb.x + pb.w, y: pb.y        },
+              { x: pb.x + pb.w, y: pb.y + pb.h },
+              { x: pb.x,        y: pb.y + pb.h }
+            ];
+          }
           // The anchor dot is POSITIONAL — where the callout points — and
           // always stays. The four text corners are text-resize dots and
           // ride the same ⋯ opt-in as every other text-sizing dot; index
@@ -24762,7 +25152,11 @@
       // pointer DELTA against startGeom; visual continues to
       // shrink-fit independently. Text shapes still snap geometry to
       // the rendered box on release (existing 0.2.x behavior).
-      var pointStart = self._isPointText(shape) ? self._pointTextDragStart(shape) : null;
+      // A point callout's index 0 is its anchor, which still just moves;
+      // 1-4 are its words' corners.
+      var pointCorner = self._isPointCallout(shape) ? idx - 1 : idx;
+      var pointStart = self._isPointFrame(shape) && pointCorner >= 0
+        ? self._pointTextDragStart(shape) : null;
       var startGeom;
       if (shape.kind === "text" && shape._renderedBox) {
         startGeom = JSON.parse(JSON.stringify(shape._renderedBox));
@@ -24791,10 +25185,11 @@
         }
         // Read live rather than from the pointerdown: the user can press or
         // release Shift part-way through a drag and expect it to take.
-        if (pointStart) self._resizePointText(shape, pointStart, idx, pt, !!ev.shiftKey);
+        if (pointStart) self._resizePointText(shape, pointStart, pointCorner, pt, !!ev.shiftKey);
         else self._applyHandleDrag(shape, idx, pt, startGeom, startPt, !!ev.shiftKey);
         self._renderShape(shape);
         self._positionAllHandles(shape);
+        if (pointStart) self._syncPointSize();
       }
       function onUp(ev) {
         handleEl.classList.remove("is-dragging");

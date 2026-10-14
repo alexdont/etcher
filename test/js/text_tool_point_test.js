@@ -62,6 +62,18 @@ const resizePointText = make("_resizePointText");
 const ensurePointText = make("_ensurePointText");
 const pointHandleBox = make("_pointHandleBox");
 const syncPointEdgeRoom = make("_syncPointEdgeRoom");
+const pointMeasure = make("_pointMeasure");
+const pointDraw = make("_pointDraw");
+const fitPointEditor = make("_fitPointEditor");
+const isPointCallout = make("_isPointCallout");
+const isPointLabel = make("_isPointLabel");
+const isPointFrame = make("_isPointFrame");
+const typesAsPoint = make("_typesAsPoint");
+const pointPart = make("_pointPart");
+const shownTextOf = make("_shownTextOf");
+const ensurePointCallout = make("_ensurePointCallout");
+const ensurePointLabel = make("_ensurePointLabel");
+const pointEdgeSegments = make("_pointEdgeSegments");
 
 // A board at 2 container px per image px; text 10 px wide per character at
 // font 20 (0.5em a character), so the arithmetic below is readable.
@@ -79,6 +91,20 @@ function board(over) {
     _pointStretch: pointStretch,
     _pointTextLines: pointTextLines,
     _pointHandleBox: pointHandleBox,
+    _pointMeasure: pointMeasure,
+    _pointDraw: pointDraw,
+    _fitPointEditor: fitPointEditor,
+    _isPointCallout: isPointCallout,
+    _isPointLabel: isPointLabel,
+    _isPointFrame: isPointFrame,
+    _typesAsPoint: typesAsPoint,
+    _pointPart: pointPart,
+    _shownTextOf: shownTextOf,
+    _ensurePointCallout: ensurePointCallout,
+    _ensurePointLabel: ensurePointLabel,
+    _pointEdgeSegments: pointEdgeSegments,
+    _isTextKind: (k) => k === "text" || k === "callout",
+    _labelRidesShaft: (k) => k === "arrow" || k === "dimension",
     // Letters reach 0.75em up and 0.25em down: 1em in all, for easy sums.
     _pointTextMetrics: () => ({ asc: 0.75, desc: 0.25, fontAsc: 0.95, fontDesc: 0.25 }),
     _textEditor: null
@@ -291,12 +317,12 @@ function pull(handle, pt, freeform) {
   assert.deepStrictEqual(handlePositions.call(ctx, shape),
     [{ x: 10, y: 20 }, { x: 110, y: 20 }, { x: 110, y: 50 }, { x: 10, y: 50 }],
     "four corners on the text's own box, no opt-in needed");
-  assert.ok(/\} else if \(shape\.kind === "rectangle" \|\| self\._isPointText\(shape\)\) \{\s*self\._renderRectEdgeHandles\(shape\);/.test(src),
+  assert.ok(/\} else if \(shape\.kind === "rectangle" \|\| self\._isPointFrame\(shape\)\) \{\s*self\._renderRectEdgeHandles\(shape\);/.test(src),
     "and the four edge grabbers rectangles have");
   assert.ok(src.includes('if (point) rect.classList.add("is-point");'), "dressed black and white");
   assert.ok(!/\.etcher-handle-edge\.is-point \{[^}]*opacity: 1/.test(src) &&
     src.includes('".etcher-handle.etcher-handle-edge.is-point.is-active,",'), "hidden until the cursor nears their side");
-  assert.ok(src.includes('kind === "arrow" || kind === "text"'), "the hover tracker runs for text");
+  assert.ok(src.includes('kind === "text" || kind === "callout";'), "the hover tracker runs for text");
   const segs = make("_midpointSegmentsForShape");
   const sctx = board({ _pointHandleBox: () => ({ x: 10, y: 20, w: 100, h: 30 }) });
   assert.deepStrictEqual(segs.call(sctx, shape).map(s => [s.p.x, s.p.y, s.q.x, s.q.y]),
@@ -316,7 +342,7 @@ function pull(handle, pt, freeform) {
   assert.ok(/"\.etcher-text\.is-point\.is-selected \.etcher-text-rect,",\s*"\.etcher-text\.is-point\.is-editing \.etcher-text-rect,",\s*"\.etcher-text\.is-typing \.etcher-text-rect \{",\s*"  stroke: #111111; stroke-width: 1\.25px; stroke-dasharray: 4 3;/.test(src),
     "a black dashed box when selected and while it is being typed into");
   assert.ok(body("_renderPointText").includes('el.classList.add("is-point")'));
-  assert.ok(body("_startTextEdit").includes('shape.el.classList.add("is-typing")'));
+  assert.ok(body("_startTextEdit").includes('typingHost.classList.add("is-typing")'));
   assert.ok(/if \(point\) input\.setSelectionRange\(0, 0\);\s*else input\.select\(\);/.test(body("_startTextEdit")),
     "opened with a caret at the start, not the text selected");
   assert.ok(body("_endTextEdit").includes('ed.shape.el.classList.remove("is-typing")'));
@@ -362,7 +388,7 @@ function pull(handle, pt, freeform) {
     "every keystroke renders the real text");
   assert.ok(/if \(e\.shiftKey\) \{\s*if \(!point\) return;\s*e\.preventDefault\(\);[\s\S]*?input\.setRangeText\("\\n"/.test(ed),
     "Shift+Enter puts the line break in");
-  assert.ok(/if \(point && self\.editingShape === shape && e\.target\.closest &&\s*e\.target\.closest\("\.etcher-handle, \.etcher-grab"\)\) \{/.test(ed),
+  assert.ok(/if \(point && self\._pointFrameUp\(shape\) && e\.target\.closest &&\s*e\.target\.closest\("\.etcher-handle, \.etcher-grab"\)\) \{/.test(ed),
     "pressing one of its handles does not end the edit");
   assert.ok(ed.includes("if (self._textEditor.resizing) return;"), "nor does the blur that press may cause");
   assert.ok(ed.includes("this.svg.insertBefore(fo, firstHandle)"), "the editor lies under the handles");
@@ -380,7 +406,7 @@ console.log("text tool (point text): all checks passed");
   const onFrame = make("_onPointTextFrame");
   const rect = { getBoundingClientRect: () => ({ left: 100, top: 100, right: 200, bottom: 150 }) };
   const shape = { el: { querySelector: () => rect } };
-  const at = (x, y) => onFrame.call({}, shape, { clientX: x, clientY: y });
+  const at = (x, y) => onFrame.call({ _pointRectEl: () => rect }, shape, { clientX: x, clientY: y });
   assert.strictEqual(at(100, 125), true, "on the left edge");
   assert.strictEqual(at(100 - POINT_FRAME_OUT_PX, 125), true, "just outside it");
   assert.strictEqual(at(100 + POINT_FRAME_IN_PX - 1, 125), true, "just inside it");
@@ -411,10 +437,73 @@ console.log("text tool (point text): all checks passed");
   const grip = fakeEl("path");
   const rect = { getBoundingClientRect: () => ({ left: 110, top: 120, width: 100, height: 50 }) };
   const shape = { el: { querySelector: () => rect } };
-  fitGrip.call({ _textEditor: { shape, grip }, svg: { getBoundingClientRect: () => ({ left: 10, top: 20 }) } }, shape);
+  fitGrip.call({ _pointRectEl: () => rect, _textEditor: { shape, grip }, svg: { getBoundingClientRect: () => ({ left: 10, top: 20 }) } }, shape);
   const O = POINT_FRAME_OUT_PX, I = POINT_FRAME_IN_PX;
   assert.strictEqual(grip.getAttribute("d"),
     `M${100 - O} ${100 - O}h${100 + 2 * O}v${50 + 2 * O}h${-(100 + 2 * O)}Z` +
     `M${100 + I} ${100 + I}v${50 - 2 * I}h${100 - 2 * I}v${-(50 - 2 * I)}Z`,
     "a ring: the box grown by the outside reach, less the box shrunk by the inside one");
 }
+
+// ── labels and callouts work the same way ─────────────────────────────────
+
+{
+  const ctx = board();
+  assert.strictEqual(isPointCallout.call(ctx, { kind: "callout", style: { point: true } }), true);
+  assert.strictEqual(isPointCallout.call(ctx, { kind: "callout", style: {} }), false, "a callout from before");
+  assert.strictEqual(isPointLabel.call(ctx, { kind: "rectangle", style: { title_point: true } }), true);
+  assert.strictEqual(isPointLabel.call(ctx, { kind: "text", style: { title_point: true } }), false,
+    "text's words are the shape, not a label");
+  assert.strictEqual(typesAsPoint.call(ctx, { kind: "arrow", style: { title_point: true } }), true);
+  assert.strictEqual(typesAsPoint.call(ctx, { kind: "callout", style: { point: true } }), true);
+  assert.strictEqual(typesAsPoint.call(ctx, { kind: "rectangle", style: {} }), false);
+
+  // A label's stretch lives in style (the host keeps style whole).
+  assert.deepStrictEqual(pointStretch.call(ctx, { kind: "rectangle", style: { title_scale_x: 2, scale_x: 9 } }, "label"),
+    { x: 2, y: 1 }, "a label reads its own stretch, not the shape's");
+
+  // A corner pulled on a label scales its font and places its box, out of
+  // any alignment; the shape itself is untouched.
+  const rect = { kind: "rectangle", geometry: { x: 0, y: 0, w: 500, h: 300 },
+    style: { title_point: true, font_size: 20 }, metadata: { title: "hi", title_align: { h: "center", v: "middle" } } };
+  const start = { part: "label", box: { x: 10, y: 20, w: 100, h: 30 }, font: 20, sx: 1, sy: 1 };
+  resizePointText.call(ctx, rect, start, 2, { x: 210, y: 80 }, false);
+  assert.strictEqual(rect.style.font_size, 40, "twice the size");
+  assert.deepStrictEqual(rect.metadata.title_box, { x: 10, y: 20, w: 200, h: 60 }, "from the opposite corner");
+  assert.strictEqual(rect.metadata.title_align, null);
+  assert.deepStrictEqual(rect.geometry, { x: 0, y: 0, w: 500, h: 300 }, "the rectangle stays put");
+  resizePointText.call(ctx, rect, start, "right", { x: 160, y: 999 }, true);
+  assert.strictEqual(rect.style.title_scale_x, 1.5, "Shift on a side stretches the label");
+
+  // A shaft rider stays on its line: only its size changes.
+  const arrow = { kind: "arrow", geometry: { a: [0, 0], b: [100, 0] }, style: { title_point: true, font_size: 20 },
+    metadata: { title: "x", title_offset: 0.3 } };
+  resizePointText.call(ctx, arrow, start, 2, { x: 210, y: 80 }, false);
+  assert.strictEqual(arrow.style.font_size, 40);
+  assert.strictEqual(arrow.metadata.title_box, undefined, "no box: its place is the offset along the line");
+
+  // A callout's words scale; its anchor does not move.
+  const co = { kind: "callout", geometry: { anchor: [5, 5], text_box: { x: 10, y: 20, w: 100, h: 30 } },
+    style: { point: true, font_size: 20 }, metadata: { title: "hey" } };
+  resizePointText.call(ctx, co, Object.assign({}, start, { part: "callout" }), 2, { x: 210, y: 80 }, false);
+  assert.deepStrictEqual(co.geometry, { anchor: [5, 5], text_box: { x: 10, y: 20, w: 200, h: 60 } });
+  assert.strictEqual(co.style.font_size, 40);
+
+  // Rendered as point text: the callout's words draw from the shared layout.
+  const calloutCase = src.slice(src.indexOf('        case "callout": {\n          // shape.el is a <g>'));
+  assert.ok(/var coPoint = self\._isPointCallout\(shape\);[\s\S]{0,1200}self\._pointDraw\(shape, coM, bx, by, coStr, coRect, coText, null\);/.test(calloutCase));
+  assert.ok(body("_renderTitleSibling").includes("this._renderPointLabel(shape, bboxTopImage);"),
+    "a point label renders through the same layout");
+  assert.ok(body("_renderPointLabel").includes("this._pointDraw(shape, M, tbox.x, tbox.y, str, rectEl, textEl, turn);"));
+
+  // Its handles always show and are never torn down by the dots switch,
+  // nor by a click on them (the end of every drag).
+  assert.ok(body("_renderTitleHandles").includes("if (!point && !this._titleHandlesOn()) return;"));
+  assert.ok(body("_applyPrefs").includes("if (this.editingTitleShape && !this._isPointLabel(this.editingTitleShape)) {"));
+  assert.ok(body("_enterTitleEditMode").includes('if (e.target.closest(".etcher-handle, .etcher-grab, .etcher-text-grip, .etcher-text-editor")) return;'));
+  assert.ok(body("_enterTitleEditMode").includes("this._ensurePointLabel(shape);"), "picked up, an older label converts");
+  // Typing a label brings its frame up, so its handles work mid-typing.
+  assert.ok(body("_startTextEdit").includes("this._enterTitleEditMode(shape);"));
+}
+
+console.log("labels and callouts (point text): all checks passed");

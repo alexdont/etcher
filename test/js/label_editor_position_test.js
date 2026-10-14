@@ -72,6 +72,9 @@ function editorBoxFor(shape, floatingBox) {
     // pinned in text_tool_point_test.
     _ensurePointText: () => false,
     _isPointText: () => false,
+    _typesAsPoint: () => false,
+    _isPointLabel: () => false,
+    _isPointFrame: () => false,
     _hasPinnedFontSize: (s) => !!(s && s.style && s.style.font_size > 0),
     // The real one: the editor's font is floored on a touch screen so
     // mobile Safari has no reason to zoom the page. On anything else it

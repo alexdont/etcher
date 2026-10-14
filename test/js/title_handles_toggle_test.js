@@ -48,6 +48,8 @@ const renderHandles = extract("_renderTitleHandles");
   let removed = 0;
   const self = {
     _titleHandlesOn: () => false,
+    _isPointLabel: () => false,
+    _isPointCallout: () => false,
     _calloutLabelScreen: () => null,
     _removeTitleHandles() { removed++; },
     _shapeTitleBoxImage: () => { throw new Error("must not get this far"); },
@@ -85,6 +87,10 @@ const renderHandles = extract("_renderTitleHandles");
       // Text from before point text — point text always has its handles
       // (text_tool_point_test pins that).
       _isPointText: () => false,
+    _typesAsPoint: () => false,
+    _isPointLabel: () => false,
+    _isPointCallout: () => false,
+    _isPointFrame: () => false,
     };
   }
 

@@ -132,6 +132,21 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 - **The ⋯ "label dots" toggle is gone.** Labels, text and callouts always
   show their corner dots (older ones convert to point text when picked
   up), so the opt-in had nothing left to switch.
+- **Shapes rotate by a knob above them.** A selected shape shows a dot on a
+  short stem above the middle of its top edge; drag it to turn the shape
+  about its middle (Shift steps 15°). Rectangles, images, text and text
+  boxes keep an upright box and carry the angle as `style.rotation`
+  (degrees): they draw turned, are clicked where they are drawn, show
+  their dots on the turned corners, and resize in their own frame with
+  the opposite corner holding. Polygons, freehand, markers, lines, arrows
+  and dimensions turn their points. Text turns while it is typed into.
+  Circles (which look the same) and callouts (upright by design) have no
+  knob.
+- **A text box scales as one from a dot past its bottom-right corner.**
+  The filled dot just beyond the corner grows or shrinks the box, its
+  text and its corners together, the top-left corner holding.
+- **The compact strip has a Thickness button**, opening the thickness
+  slider beside it (the full panel keeps its inline line).
 - **Handles follow a colour change, side grabbers included.** Recolouring a
   shape (or a text box's text) repainted its corner dots but not its side
   grabbers, which kept the colour the shape was drawn in — a text box

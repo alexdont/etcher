@@ -104,6 +104,8 @@ function board(over) {
     _ensurePointLabel: ensurePointLabel,
     _pointEdgeSegments: pointEdgeSegments,
     _textboxPadPx: (s, pad) => pad,
+    _shapeRot: () => 0,
+    _rotPts: (s, p) => p,
     _drawTextboxFrame() {},
     _isTextKind: (k) => k === "text" || k === "callout",
     _labelRidesShaft: (k) => k === "arrow" || k === "dimension",

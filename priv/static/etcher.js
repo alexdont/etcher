@@ -1442,6 +1442,14 @@
       "  stroke: #3b82f6;",
       "  stroke-dasharray: none;",
       "}",
+      // The rotation knob: a dot on a short stem above the shape. The open
+      // hand over it, closed while turning.
+      ".etcher-rotate-stem { stroke: currentColor; stroke-width: 1; opacity: 0.55; pointer-events: none; vector-effect: non-scaling-stroke; }",
+      ".etcher-overlay svg .etcher-rotate-handle { cursor: grab; }",
+      ".etcher-overlay svg.is-rotating, .etcher-overlay svg.is-rotating * { cursor: grabbing !important; }",
+      // The text box's scale dot: filled, so it reads as a different thing
+      // from the corner dots it sits beyond.
+      ".etcher-overlay svg .etcher-scale-handle { fill: currentColor; cursor: nwse-resize; }",
       // A text box shows its frame (shaped corners) instead of its rect,
       // which stays the hit area: same states, same looks.
       ".etcher-text.is-textbox .etcher-text-rect { fill: transparent !important; stroke: transparent !important; }",
@@ -2472,6 +2480,10 @@
   // The reach a corner type gets when it is picked on a sharp box: at no
   // reach every type looks the same, so a pick alone would show nothing.
   var TEXTBOX_CORNER_PICK = 12;
+  // How far the rotation knob sits above a shape's top edge, and the text
+  // box's scale dot out past its bottom-right corner, in screen px.
+  var ROTATE_KNOB_PX = 26;
+  var SCALE_DOT_PX = 16;
 
   // The weight sliders travel 0-100 and curve onto WEIGHT_MIN..WEIGHT_MAX,
   // so the weights people actually draw with sit around the middle of the
@@ -5809,6 +5821,9 @@
       if (mode !== "compact" && mode !== "hidden") mode = "full";
       if (this._openChip) this._closeChipPop();
       if (this.stylePanel) this.stylePanel.setAttribute("data-size", mode);
+      // Which buttons belong depends on the size (thickness is one only in
+      // the strip).
+      if (this._chips) this._syncStyleChips();
       var btn = this.panelToggle;
       if (!btn) return;
       if (this.removePanelToggleBtn) {
@@ -8179,6 +8194,16 @@
         return sel ? sel.innerHTML : "";
       };
       var CHIPS = [
+        // Thickness is an inline line in the full panel; in the compact
+        // strip, where sliders do not fit, it is a button like the rest.
+        { key: "weight", title: "Thickness", caption: "Thickness", rows: [w.row], compactOnly: true,
+          face: function() {
+            return '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">' +
+              '<path d="M2 4H14" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>' +
+              '<path d="M2 8H14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>' +
+              '<path d="M2 12.5H14" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>' +
+              '<b>' + (self._paramsWeightVal.textContent || "") + '</b>';
+          } },
         { key: "stroke", title: "Line type", caption: "Line", rows: [lineHead, dashRow],
           face: function() { return selIcon(self._paramsDashBtns); } },
         { key: "opacity", title: "Opacity", caption: "Opacity", rows: [o.row],
@@ -8335,10 +8360,12 @@
       var chips = this._chips;
       if (!chips) return;
       var any = false;
+      var compact = this.stylePanel && this.stylePanel.getAttribute("data-size") === "compact";
       chips.forEach(function(chip) {
         var show = chip.rows.some(function(r) {
           return r.classList && !r.classList.contains("etcher-marker-row-head") && r.style.display !== "none";
         });
+        if (chip.compactOnly && !compact) show = false;
         chip.el.style.display = show ? "" : "none";
         any = any || show;
         // The current value on top, what the button is for underneath — so
@@ -13315,6 +13342,87 @@
     // element has to meet it — a callout's leader is drawn in unturned
     // container space but has to land on the corner of a label that is
     // turning, so it needs the corner's post-rotation position.
+    // ── Shape rotation ──────────────────────────────────────────────────
+    //
+    // Every shape you can move can be turned about its middle by the knob
+    // above it (`_startRotateDrag`). Shapes built from points (polygon,
+    // freehand, marker, line, arrow, dimension) simply have their points
+    // turned. Box shapes (rectangle, image, text and text boxes) keep their
+    // box upright in storage and carry the angle as `style.rotation`
+    // (degrees, clockwise): the render turns them about the box's centre,
+    // the hit test and the handles work in that turned frame, and a resize
+    // works in it too, the opposite corner holding still.
+    _isBoxRotatable: function(shape) {
+      return !!shape && (shape.kind === "rectangle" || shape.kind === "image" || shape.kind === "text");
+    },
+
+    _canRotate: function(shape) {
+      if (!shape || shape.readonly) return false;
+      if (this._isBoxRotatable(shape)) return true;
+      var k = shape.kind;
+      return k === "polygon" || k === "freehand" || k === "marker" ||
+        k === "line" || k === "arrow" || k === "dimension";
+    },
+
+    // A box shape's own turn, in degrees (0 for every other kind).
+    _shapeRot: function(shape) {
+      if (!this._isBoxRotatable(shape)) return 0;
+      var r = shape.style && shape.style.rotation;
+      return typeof r === "number" && isFinite(r) ? r : 0;
+    },
+
+    // The box a box shape turns with, unturned, in image px.
+    _rotBox: function(shape) {
+      var g = shape.geometry || {};
+      if (shape.kind === "text") return shape._renderedBox || g;
+      return g;
+    },
+
+    _rotCenter: function(shape) {
+      if (this._isBoxRotatable(shape)) {
+        var b = this._rotBox(shape);
+        return { x: b.x + b.w / 2, y: b.y + b.h / 2 };
+      }
+      var bb = this._shapeBBoxImagePx(shape);
+      return bb ? { x: bb.x + bb.w / 2, y: bb.y + bb.h / 2 } : null;
+    },
+
+    // Points in a box shape's unturned frame, carried into the turned one.
+    _rotPts: function(shape, pts) {
+      var rot = this._shapeRot(shape);
+      if (!rot) return pts;
+      var c = this._rotCenter(shape);
+      var self = this;
+      return pts.map(function(p) { return p && Object.assign({}, p, self._rotatePoint(p, c.x, c.y, rot)); });
+    },
+
+    // After a resize computed in a turned shape's own frame, slide the box
+    // so it turns about its new middle with the held corner where it was.
+    _recenterRotated: function(shape, c0, rot) {
+      var g = shape.geometry;
+      if (!g || !rot || !c0) return;
+      var cn = { x: g.x + g.w / 2, y: g.y + g.h / 2 };
+      var cw = this._rotatePoint(cn, c0.x, c0.y, rot);
+      shape.geometry = Object.assign({}, g, { x: g.x + cw.x - cn.x, y: g.y + cw.y - cn.y });
+    },
+
+    // A point shape's geometry turned by `deg` about `c`.
+    _rotateGeometry: function(kind, g, c, deg) {
+      var self = this;
+      var P = function(p) { var r = self._rotatePoint({ x: p[0], y: p[1] }, c.x, c.y, deg); return [r.x, r.y]; };
+      var V = function(v) { if (!v) return v; var r = self._rotatePoint({ x: v[0], y: v[1] }, 0, 0, deg); return [r.x, r.y]; };
+      var out = Object.assign({}, g);
+      if (g.points) out.points = g.points.map(P);
+      if (g.nodes) {
+        out.nodes = g.nodes.map(function(n) {
+          return Object.assign({}, n, { p: P(n.p), hIn: V(n.hIn), hOut: V(n.hOut) });
+        });
+      }
+      if (g.a) out.a = P(g.a);
+      if (g.b) out.b = P(g.b);
+      return out;
+    },
+
     _rotatePoint: function(pt, cx, cy, deg) {
       if (!deg) return { x: pt.x, y: pt.y };
       var r = deg * Math.PI / 180;
@@ -13385,11 +13493,19 @@
           el.setAttribute("y", Math.min(tl.y, br.y));
           el.setAttribute("width",  Math.abs(br.x - tl.x));
           el.setAttribute("height", Math.abs(br.y - tl.y));
+          // Its own turn, about its middle on screen.
+          var rRot = self._shapeRot(shape);
+          if (rRot) {
+            el.setAttribute("transform", "rotate(" + rRot + " " + (tl.x + br.x) / 2 + " " + (tl.y + br.y) / 2 + ")");
+          } else if (el.getAttribute("transform")) {
+            el.removeAttribute("transform");
+          }
           bboxTopImage = { x: g.x + g.w / 2, y: g.y };
           break;
         }
         case "image": {
           var ibox = self._orientedBox(g);
+          ibox.deg = (ibox.deg || 0) + self._shapeRot(shape);
           var iw = ibox.w;
           var ih = ibox.h;
           el.setAttribute("x", ibox.x);
@@ -13845,6 +13961,7 @@
           // together — a label stays readable relative to the board
           // instead of running across it at 90°.
           var tbox = self._orientedBox(g);
+          tbox.deg = (tbox.deg || 0) + self._shapeRot(shape);
           var tx = tbox.x, ty = tbox.y, tw = tbox.w, th = tbox.h;
           self._setRotateTransform(el, tbox);
 
@@ -18441,8 +18558,17 @@
         case "rectangle":
         case "text":
         case "audio":
-        case "video":
+        case "video": {
+          // A turned box takes the room its turned corners need.
+          var bRot = this._shapeRot ? this._shapeRot(shape) : 0;
+          if (bRot) {
+            var bc = { x: g.x + g.w / 2, y: g.y + g.h / 2 };
+            var selfB = this;
+            return fromPoints([[g.x, g.y], [g.x + g.w, g.y], [g.x + g.w, g.y + g.h], [g.x, g.y + g.h]]
+              .map(function(p) { return selfB._rotatePoint({ x: p[0], y: p[1] }, bc.x, bc.y, bRot); }));
+          }
           return { x: g.x, y: g.y, w: g.w, h: g.h };
+        }
         case "circle":
           return { x: g.cx - g.r, y: g.cy - g.r, w: 2 * g.r, h: 2 * g.r };
         case "polygon":
@@ -21971,6 +22097,7 @@
       g.w = M.natW * str.x / scale;
       g.h = M.natH * str.y / scale;
       var tbox = self._orientedBox(g);
+      tbox.deg = (tbox.deg || 0) + self._shapeRot(shape);
       self._setRotateTransform(el, tbox);
       self._pointDraw(shape, M, tbox.x, tbox.y, str, trect, ttext, null);
       self._drawTextboxFrame(shape, el, tbox.x, tbox.y, M.natW * str.x, M.natH * str.y);
@@ -22657,6 +22784,17 @@
     // the full visible footprint plus a title group when present,
     // so users don't have to nick the exact glyph or vertex.
     _shapeContainsPoint: function(shape, pt) {
+      // A turned box shape is tested in its own frame.
+      var hitRot = this._shapeRot ? this._shapeRot(shape) : 0;
+      if (hitRot) {
+        var hc = this._rotCenter(shape);
+        var lp = this._rotatePoint(pt, hc.x, hc.y, -hitRot);
+        var titleHit = shape.titleGroup && shape._renderedTitleImage;
+        var tb = titleHit && shape._renderedTitleImage;
+        if (tb && pt.x >= tb.x && pt.x <= tb.x + tb.w && pt.y >= tb.y && pt.y <= tb.y + tb.h) return true;
+        var bx = this._rotBox(shape);
+        return lp.x >= bx.x && lp.x <= bx.x + bx.w && lp.y >= bx.y && lp.y <= bx.y + bx.h;
+      }
       function inRect(box) {
         if (!box) return false;
         return pt.x >= box.x && pt.x <= box.x + box.w &&
@@ -23324,6 +23462,10 @@
           fo.setAttribute("y", Math.min(tlF.y, brF.y));
           fo.setAttribute("width", Math.max(20, Math.abs(brF.x - tlF.x)));
           fo.setAttribute("height", Math.max(16, Math.abs(brF.y - tlF.y)));
+          // A turned box types turned: the editor wears the box's turn.
+          var turnF = shape.el && shape.el.getAttribute("transform");
+          if (turnF) fo.setAttribute("transform", turnF);
+          else fo.removeAttribute("transform");
           return;
         }
         var linesEd = String(input.value || "").split("\n");
@@ -24808,7 +24950,203 @@
           // the text re-wraps inside.
           self._renderRectEdgeHandles(shape);
         }
+        self._renderExtraHandles(shape);
       }
+    },
+
+    // The knob above a shape that turns it, and — on a text box — the dot
+    // past its bottom-right corner that scales the box and its text as one.
+    _renderExtraHandles: function(shape) {
+      var self = this;
+      this._removeExtraHandles();
+      if (this._canRotate(shape)) {
+        var stem = svgEl("line", {});
+        stem.classList.add("etcher-rotate-stem");
+        stem.style.color = POINT_HANDLE_COLOR;
+        this.svg.appendChild(stem);
+        var knob = svgEl("circle", { r: 5 });
+        knob.classList.add("etcher-handle", "etcher-rotate-handle");
+        knob.style.color = this._isPointFrame(shape) ? POINT_HANDLE_COLOR : this._handleColor(shape);
+        knob.setAttribute("aria-label", "Rotate");
+        this.svg.appendChild(knob);
+        var onRot = function(e) { self._startRotateDrag(shape, knob, e); };
+        knob.addEventListener("pointerdown", onRot);
+        this._addGrabHalo(knob, HANDLE_GRAB_RADIUS, onRot);
+        this.rotateHandle = knob;
+        this.rotateStem = stem;
+      }
+      if (shape.kind === "text" && this._textboxFixed(shape)) {
+        var sd = svgEl("circle", { r: 4.5 });
+        sd.classList.add("etcher-handle", "etcher-scale-handle");
+        sd.style.color = this._handleColor(shape);
+        sd.setAttribute("aria-label", "Scale the box and its text");
+        this.svg.appendChild(sd);
+        var onScale = function(e) { self._startTextboxScaleDrag(shape, sd, e); };
+        sd.addEventListener("pointerdown", onScale);
+        this._addGrabHalo(sd, HANDLE_GRAB_RADIUS, onScale);
+        this.scaleHandle = sd;
+      }
+      this._positionExtraHandles(shape);
+    },
+
+    _removeExtraHandles: function() {
+      if (this.rotateHandle) this._dropHandleEl(this.rotateHandle);
+      if (this.rotateStem && this.rotateStem.parentNode) this.rotateStem.parentNode.removeChild(this.rotateStem);
+      if (this.scaleHandle) this._dropHandleEl(this.scaleHandle);
+      this.rotateHandle = this.rotateStem = this.scaleHandle = null;
+    },
+
+    // Where the knob and the scale dot go: the knob a fixed distance on
+    // screen above the middle of the shape's top edge (its turned top edge,
+    // for a turned box), the scale dot the same way out past the bottom-
+    // right corner along the diagonal.
+    _positionExtraHandles: function(shape) {
+      if (!this.rotateHandle && !this.scaleHandle) return;
+      var scale = 1;
+      try { scale = this._markerScale() || 1; } catch (_) { scale = 1; }
+      var box = this._isBoxRotatable(shape)
+        ? (this._isPointText(shape) ? this._pointHandleBox(shape) : this._rotBox(shape))
+        : this._shapeBBoxImagePx(shape);
+      if (!box) return;
+      var self = this;
+      var put = function(local) { return self._rotPts(shape, [local])[0]; };
+      if (this.rotateHandle) {
+        var top = put({ x: box.x + box.w / 2, y: box.y });
+        var knobAt = put({ x: box.x + box.w / 2, y: box.y - ROTATE_KNOB_PX / scale });
+        this._positionHandle(this.rotateHandle, knobAt);
+        var a = this._imageToContainer(top), b = this._imageToContainer(knobAt);
+        this.rotateStem.setAttribute("x1", a.x); this.rotateStem.setAttribute("y1", a.y);
+        this.rotateStem.setAttribute("x2", b.x); this.rotateStem.setAttribute("y2", b.y);
+      }
+      if (this.scaleHandle) {
+        var d = Math.hypot(box.w, box.h) || 1;
+        var off = SCALE_DOT_PX / scale;
+        var at = put({ x: box.x + box.w + off * box.w / d, y: box.y + box.h + off * box.h / d });
+        this._positionHandle(this.scaleHandle, at);
+      }
+    },
+
+    // Turn a shape about its middle by the knob. Shift steps it in 15°.
+    _startRotateDrag: function(shape, knob, e) {
+      if (e.button != null && e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      var self = this;
+      try { knob.setPointerCapture(e.pointerId); } catch (_) {}
+      knob.classList.add("is-dragging");
+      this._hideTooltip();
+      this._suspendMidpointHighlight();
+      var ed = this._textEditor;
+      if (ed && ed.shape === shape) ed.resizing = true;
+      var historyBefore = this._snapshotShape(shape);
+      var c = this._rotCenter(shape);
+      var box = this._isBoxRotatable(shape);
+      var startRot = this._shapeRot(shape);
+      var startGeom = JSON.parse(JSON.stringify(shape.geometry));
+      var p0 = this._toImage(e);
+      var a0 = Math.atan2(p0.y - c.y, p0.x - c.x);
+      var turned = false;
+      if (this.svg) this.svg.classList.add("is-rotating");
+      function onMove(ev) {
+        var p = self._toImage(ev);
+        var delta = (Math.atan2(p.y - c.y, p.x - c.x) - a0) * 180 / Math.PI;
+        var next = startRot + delta;
+        if (ev.shiftKey) next = Math.round(next / 15) * 15;
+        next = ((next % 360) + 540) % 360 - 180;
+        if (Math.abs(next) < 0.01) next = 0;
+        turned = true;
+        if (box) {
+          shape.style = Object.assign({}, shape.style || {}, { rotation: next });
+        } else {
+          shape.geometry = self._rotateGeometry(shape.kind, startGeom, c, next - startRot);
+        }
+        self._renderShape(shape);
+        self._positionAllHandles(shape);
+      }
+      function onUp(ev) {
+        knob.classList.remove("is-dragging");
+        knob.removeEventListener("pointermove", onMove);
+        knob.removeEventListener("pointerup", onUp);
+        knob.removeEventListener("pointercancel", onUp);
+        try { knob.releasePointerCapture(ev.pointerId); } catch (_) {}
+        if (self.svg) self.svg.classList.remove("is-rotating");
+        self._resumeMidpointHighlight();
+        if (ed && self._textEditor === ed) {
+          setTimeout(function() {
+            if (self._textEditor !== ed) return;
+            ed.resizing = false;
+            try { ed.input.focus({ preventScroll: true }); } catch (_) {}
+          }, 0);
+        }
+        if (turned && shape.uuid) {
+          self._emitChanged();
+          self._pushUndo(shape.uuid, historyBefore, self._snapshotShape(shape));
+        }
+        self._showTooltipFor(shape);
+      }
+      knob.addEventListener("pointermove", onMove);
+      knob.addEventListener("pointerup", onUp);
+      knob.addEventListener("pointercancel", onUp);
+    },
+
+    // A text box scaled as one: the box and its text (and its corners)
+    // grow or shrink together, the top-left corner holding still.
+    _startTextboxScaleDrag: function(shape, dot, e) {
+      if (e.button != null && e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      var self = this;
+      try { dot.setPointerCapture(e.pointerId); } catch (_) {}
+      dot.classList.add("is-dragging");
+      this._hideTooltip();
+      this._suspendMidpointHighlight();
+      var historyBefore = this._snapshotShape(shape);
+      var g0 = JSON.parse(JSON.stringify(shape.geometry));
+      var st0 = Object.assign({}, shape.style || {});
+      var rot = this._shapeRot(shape);
+      var c0 = this._rotCenter(shape);
+      var scaled = false;
+      function onMove(ev) {
+        var p = self._toImage(ev);
+        if (rot) p = self._rotatePoint(p, c0.x, c0.y, -rot);
+        var dx = p.x - g0.x, dy = p.y - g0.y;
+        var k = (dx * g0.w + dy * g0.h) / (g0.w * g0.w + g0.h * g0.h);
+        k = Math.max(0.1, k);
+        scaled = true;
+        shape.geometry = Object.assign({}, g0, { w: g0.w * k, h: g0.h * k });
+        var patch = {};
+        if (st0.font_size > 0) patch.font_size = st0.font_size * k;
+        if (st0.corner_size > 0) patch.corner_size = st0.corner_size * k;
+        shape.style = Object.assign({}, st0, patch);
+        if (rot) {
+          // Held at the top-left corner as it is on screen.
+          var tl0 = self._rotatePoint({ x: g0.x, y: g0.y }, c0.x, c0.y, rot);
+          var g = shape.geometry;
+          var cn = { x: g.x + g.w / 2, y: g.y + g.h / 2 };
+          var tl1 = self._rotatePoint({ x: g.x, y: g.y }, cn.x, cn.y, rot);
+          shape.geometry = Object.assign({}, g, { x: g.x + tl0.x - tl1.x, y: g.y + tl0.y - tl1.y });
+        }
+        self._renderShape(shape);
+        self._positionAllHandles(shape);
+        self._syncPointSize();
+      }
+      function onUp(ev) {
+        dot.classList.remove("is-dragging");
+        dot.removeEventListener("pointermove", onMove);
+        dot.removeEventListener("pointerup", onUp);
+        dot.removeEventListener("pointercancel", onUp);
+        try { dot.releasePointerCapture(ev.pointerId); } catch (_) {}
+        self._resumeMidpointHighlight();
+        if (scaled && shape.uuid) {
+          self._emitChanged();
+          self._pushUndo(shape.uuid, historyBefore, self._snapshotShape(shape));
+        }
+        self._syncStyleInspector();
+        self._showTooltipFor(shape);
+      }
+      dot.addEventListener("pointermove", onMove);
+      dot.addEventListener("pointerup", onUp);
+      dot.addEventListener("pointercancel", onUp);
     },
 
     // Render a ghost handle at the midpoint of each edge (polygon) or
@@ -24863,6 +25201,7 @@
       if (!shape || (shape.kind !== "rectangle" && !point && !this._textboxFixed(shape))) return;
       var g = point ? this._pointHandleBox(shape, part) : shape.geometry;
       var positions = this._rectEdgeMidpoints(g);
+      if (part !== "label") positions = this._rotPts(shape, positions);
       var self = this;
       var handleColor = self._handleColor(shape);
       this.midpointHandles = positions.map(function(pt, idx) {
@@ -24930,10 +25269,14 @@
           ? Object.assign({}, shape.metadata.title_box)
           : null;
 
+      var edgeRot = part === "label" ? 0 : self._shapeRot(shape);
+      var edgeC0 = edgeRot ? self._rotCenter(shape) : null;
       function onMove(ev) {
         var pt = self._toImage(ev);
+        if (edgeRot) pt = self._rotatePoint(pt, edgeC0.x, edgeC0.y, -edgeRot);
         if (pointStart) {
           self._resizePointText(shape, pointStart, EDGE_NAMES[edgeIdx], pt, !!ev.shiftKey);
+          if (edgeRot) self._recenterRotated(shape, edgeC0, edgeRot);
           self._renderShape(shape);
           self._positionPointHandles(shape);
           self._syncPointSize();
@@ -24948,7 +25291,8 @@
         }
         if (nw < 0) { nx += nw; nw = -nw; }
         if (nh < 0) { ny += nh; nh = -nh; }
-        shape.geometry = { x: nx, y: ny, w: nw, h: nh };
+        shape.geometry = Object.assign({}, g0, { x: nx, y: ny, w: nw, h: nh });
+        if (edgeRot) self._recenterRotated(shape, edgeC0, edgeRot);
         self._renderShape(shape);
         self._positionAllHandles(shape);
       }
@@ -25060,9 +25404,9 @@
     // left), so the grabber lights anywhere along its side.
     _pointEdgeSegments: function(shape, part) {
       var b = this._pointHandleBox(shape, part);
-      var tl = { x: b.x, y: b.y }, tr = { x: b.x + b.w, y: b.y };
-      var br = { x: b.x + b.w, y: b.y + b.h }, bl = { x: b.x, y: b.y + b.h };
-      return [{ p: tl, q: tr }, { p: tr, q: br }, { p: br, q: bl }, { p: bl, q: tl }];
+      var c = [{ x: b.x, y: b.y }, { x: b.x + b.w, y: b.y }, { x: b.x + b.w, y: b.y + b.h }, { x: b.x, y: b.y + b.h }];
+      if (part !== "label" && this._rotPts) c = this._rotPts(shape, c);
+      return [{ p: c[0], q: c[1] }, { p: c[1], q: c[2] }, { p: c[2], q: c[3] }, { p: c[3], q: c[0] }];
     },
 
     // Image-px positions of every midpoint a shape currently
@@ -25082,10 +25426,10 @@
         return out;
       }
       if (shape.kind === "rectangle" || this._textboxFixed(shape)) {
-        return this._rectEdgeMidpoints(shape.geometry);
+        return this._rotPts(shape, this._rectEdgeMidpoints(shape.geometry));
       }
       if (this._isPointFrame(shape)) {
-        return this._rectEdgeMidpoints(this._pointHandleBox(shape));
+        return this._rotPts(shape, this._rectEdgeMidpoints(this._pointHandleBox(shape)));
       }
       // Open path, so segments rather than a closed ring — no wrap from the
       // head back round to the tail.
@@ -25344,6 +25688,7 @@
       // editable vertices), so keep them in sync on pan/zoom via
       // a dedicated path.
       this._positionAllMidpointHandles(shape);
+      this._positionExtraHandles(shape);
       // Freehand pen-editor anchors/handles live outside the generic
       // `handles` array — reposition them on the same pan/zoom tick.
       if (this.freehandEditor) this._positionFreehandEditor();
@@ -25444,6 +25789,7 @@
       (this.handles || []).forEach(function(h) { self._dropHandleEl(h); });
       this.handles = [];
       this._removeMidpointHandles();
+      this._removeExtraHandles();
     },
 
     // -----------------------------------------------------------------------
@@ -25767,6 +26113,15 @@
     // Returns image-px positions for each handle, in an order each kind's
     // drag handler can reference by index.
     _handlePositions: function(shape) {
+      // A turned box: its handles sit on its turned corners.
+      if (!this._handlesUnturned && this._shapeRot && this._shapeRot(shape)) {
+        this._handlesUnturned = true;
+        var local;
+        try { local = this._handlePositions(shape); } finally { this._handlesUnturned = false; }
+        // A callout's or any kind's index 0 that is not a corner keeps its
+        // place — only box kinds turn, and all of theirs are corners.
+        return this._rotPts(shape, local);
+      }
       var g = shape.geometry;
       switch (shape.kind) {
         case "image":
@@ -25926,9 +26281,14 @@
       }
       var startPt = self._toImage(e);
       var dragged = false;
+      // A turned box resizes in its own frame (see `_recenterRotated`).
+      var dragRot = self._shapeRot(shape);
+      var dragC0 = dragRot ? self._rotCenter(shape) : null;
+      var startPtL = dragRot ? self._rotatePoint(startPt, dragC0.x, dragC0.y, -dragRot) : startPt;
 
       function onMove(ev) {
-        var pt = self._toImage(ev);
+        var ptW = self._toImage(ev);
+        var pt = dragRot ? self._rotatePoint(ptW, dragC0.x, dragC0.y, -dragRot) : ptW;
         if (!dragged) {
           // 3px screen-space dead zone — distinguishes "drag to
           // resize" from "I'm just clicking on a handle". Without
@@ -25940,14 +26300,15 @@
           // a handle. Same gating the body-drag and title-drag
           // handlers already use.
           var aC = self._imageToContainer(startPt);
-          var bC = self._imageToContainer(pt);
+          var bC = self._imageToContainer(ptW);
           if ((bC.x - aC.x) * (bC.x - aC.x) + (bC.y - aC.y) * (bC.y - aC.y) < 9) return;
           dragged = true;
         }
         // Read live rather than from the pointerdown: the user can press or
         // release Shift part-way through a drag and expect it to take.
         if (pointStart) self._resizePointText(shape, pointStart, pointCorner, pt, !!ev.shiftKey);
-        else self._applyHandleDrag(shape, idx, pt, startGeom, startPt, !!ev.shiftKey);
+        else self._applyHandleDrag(shape, idx, pt, startGeom, startPtL, !!ev.shiftKey);
+        if (dragRot) self._recenterRotated(shape, dragC0, dragRot);
         self._renderShape(shape);
         self._positionAllHandles(shape);
         if (pointStart) self._syncPointSize();

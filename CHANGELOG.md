@@ -14,10 +14,12 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   the size from the drag's height. Lines are the author's — Shift+Enter
   breaks one — and nothing ever wraps them; spaces are kept; the box is
   always exactly the text. The text stays selected while it is typed into,
-  with all eight handles up: a corner scales it evenly about the opposite
-  corner (Shift scales each way on its own), an edge stretches it along
-  one axis about the opposite edge, and pressing a handle mid-sentence
-  does not end the edit. While typing, what shows is the text itself,
+  with all eight handles up — black, whatever the text's colour — and its
+  box dashed while the caret is in it. Every handle scales it evenly: a
+  corner about the opposite corner, an edge about the middle of the
+  opposite edge. Shift frees it (a corner scales each way on its own, an
+  edge stretches one axis). Pressing a handle mid-sentence does not end
+  the edit. While typing, what shows is the text itself,
   re-rendered on every keystroke under an invisible caret layer, so Enter
   or a click away leaves it exactly as it was. The stretch is stored as
   `style.scale_x` / `style.scale_y` next to `style.font_size`, and

@@ -182,6 +182,7 @@
   // Point text's handle frame is never smaller than this on screen, and an
   // edge grabber needs a side at least this long to sit between its corners.
   var POINT_HANDLE_MIN_PX = 24;
+  var POINT_HANDLE_COLOR = "#111111";
   var POINT_EDGE_MIN_PX = 44;
 
   var NAV_SLOTS = { chevronMirrored: -1, pencil: 0, chevron: 1, eye: 2 };
@@ -1331,6 +1332,13 @@
       "  stroke: #3b82f6;",
       "  stroke-dasharray: none;",
       "}",
+      // Being typed into: the box goes dashed, as Affinity marks text in
+      // edit, so "selected" and "typing in it" read differently. Thin and
+      // the same width whatever the zoom or the text's stretch.
+      ".etcher-text.is-typing .etcher-text-rect {",
+      "  stroke: #3b82f6; stroke-width: 1.25px; stroke-dasharray: 4 3;",
+      "  vector-effect: non-scaling-stroke;",
+      "}",
       // No halo behind the glyphs. A 2px white stroke under every letter was
       // there to hold contrast over a photograph, but it reads as an outline
       // on the type itself and thickens small text into mush. Colour alone
@@ -1781,6 +1789,9 @@
       ".etcher-handle-edge--h { cursor: ns-resize; }",
       ".etcher-handle-edge--v { cursor: ew-resize; }",
       ".etcher-handle-edge.is-cramped { display: none; }",
+      // Point text's grabbers dress like its corner dots — white, with the
+      // black outline — rather than as a tint of the text under them.
+      ".etcher-handle.etcher-handle-edge.is-shown { fill: #fff; fill-opacity: 1; stroke-opacity: 1; stroke-width: 2; }",
       ".etcher-handle-edge.is-active, .etcher-handle-edge.is-shown {",
       "  fill-opacity: 0.35; stroke-opacity: 0.9;",
       "}",
@@ -20938,9 +20949,9 @@
     // ones the author typed (Shift+Enter) and nothing ever wraps them; the
     // box is always exactly the text. It has a size (`style.font_size`, in
     // canvas units like every pinned size) and a stretch along each axis
-    // (`style.scale_x` / `style.scale_y`, absent = 1). Corner handles scale
-    // it evenly, edge handles stretch it one way, the opposite side holding
-    // still — and all of that works while it is being typed into.
+    // (`style.scale_x` / `style.scale_y`, absent = 1). Its handles scale it
+    // evenly, the opposite side holding still; with Shift they stretch it —
+    // and all of that works while it is being typed into.
     //
     // `style.point` marks it. Text from before keeps rendering as it did
     // until someone picks it up (`_ensurePointText`).
@@ -21069,9 +21080,10 @@
       return true;
     },
 
-    // A handle pulled on point text. Corners scale it evenly about the
-    // opposite corner (its size changes); with Shift they scale each way on
-    // its own. Edges stretch it along one axis about the opposite edge.
+    // A handle pulled on point text. Everything scales it evenly — its size
+    // changes, its proportions never do: a corner about the opposite corner,
+    // an edge about the middle of the opposite edge. Shift frees it: a
+    // corner then scales each way on its own, an edge stretches one axis.
     // `start` is the text as the drag found it; `handle` is a corner index
     // 0-3 (TL, TR, BR, BL) or an edge "top" / "right" / "bottom" / "left".
     _resizePointText: function(shape, start, handle, pt, freeform) {
@@ -21082,7 +21094,24 @@
       try { scale = this._markerScale() || 1; } catch (_) { scale = 1; }
       var font = start.font, sx = start.sx, sy = start.sy;
       var nx = b.x, ny = b.y, nw = b.w, nh = b.h;
-      if (typeof handle === "string") {
+      if (typeof handle === "string" && !freeform) {
+        // An edge scales it evenly too: the opposite edge holds, and the
+        // text grows or shrinks about that edge's middle.
+        var horiz = handle === "left" || handle === "right";
+        var ke = Math.max(MIN_K, horiz
+          ? (handle === "right" ? pt.x - b.x : right - pt.x) / b.w
+          : (handle === "bottom" ? pt.y - b.y : bottom - pt.y) / b.h);
+        font = start.font * ke;
+        nw = b.w * ke; nh = b.h * ke;
+        if (horiz) {
+          nx = handle === "left" ? right - nw : b.x;
+          ny = b.y + (b.h - nh) / 2;
+        } else {
+          ny = handle === "top" ? bottom - nh : b.y;
+          nx = b.x + (b.w - nw) / 2;
+        }
+      } else if (typeof handle === "string") {
+        // Shift on an edge: stretch along that one axis instead.
         if (handle === "left" || handle === "right") {
           var kx = Math.max(MIN_K, (handle === "right" ? pt.x - b.x : right - pt.x) / b.w);
           sx = start.sx * kx;
@@ -22147,6 +22176,7 @@
       });
       if (point) {
         shape._draftTitle = input.value;
+        if (shape.el) shape.el.classList.add("is-typing");
         this._renderShape(shape);
       }
       edFit();
@@ -22587,7 +22617,10 @@
         this._textEditOutsideDown = null;
       }
       if (ed.fo && ed.fo.parentNode) ed.fo.parentNode.removeChild(ed.fo);
-      if (ed.shape) delete ed.shape._draftTitle;
+      if (ed.shape) {
+        delete ed.shape._draftTitle;
+        if (ed.shape.el) ed.shape.el.classList.remove("is-typing");
+      }
       var hostEl = ed.shape && this._textEditHost(ed.shape);
       var existing = hostEl && hostEl.querySelector(".etcher-text-content");
       if (existing) existing.removeAttribute("visibility");
@@ -23611,7 +23644,7 @@
       function onMove(ev) {
         var pt = self._toImage(ev);
         if (pointStart) {
-          self._resizePointText(shape, pointStart, EDGE_NAMES[edgeIdx], pt, false);
+          self._resizePointText(shape, pointStart, EDGE_NAMES[edgeIdx], pt, !!ev.shiftKey);
           self._renderShape(shape);
           self._positionAllHandles(shape);
           return;
@@ -23923,6 +23956,10 @@
     // shape that's never had a custom color picked still has matching
     // handles instead of an unrelated orange.
     _handleColor: function(shape) {
+      // Point text wears black handles whatever its colour, as Affinity's
+      // do: they are the tool's controls, not part of the drawing, and a
+      // red text's red dots disappeared into it.
+      if (this._isPointText(shape)) return POINT_HANDLE_COLOR;
       if (shape && shape.style && shape.style.color) return shape.style.color;
       if (this.activeColor) return this.activeColor;
       return "#3b82f6";

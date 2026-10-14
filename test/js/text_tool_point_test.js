@@ -4,9 +4,10 @@
 //     (text_drag_size_test). Either way it is selected and being typed into.
 //   - Lines are the author's (Shift+Enter) and never wrap; spaces are kept;
 //     the box is always exactly the text.
-//   - Corner handles scale it evenly about the opposite corner (Shift: each
-//     way on its own); edge handles stretch it one way about the opposite
-//     edge. All eight show, and they work WHILE typing.
+//   - Every handle scales it evenly — a corner about the opposite corner, an
+//     edge about the middle of the opposite edge; Shift frees it (a corner
+//     each way on its own, an edge a one-axis stretch). All eight show, in
+//     black, and they work WHILE typing, the box dashed meanwhile.
 //   - What is on screen while typing is the text itself, rendered live, so
 //     Enter or a click away changes nothing.
 //   - Text from before becomes point text when picked up, looking the same.
@@ -43,10 +44,11 @@ function fakeEl(tag) {
 const DEFAULT_LABEL_FONT_SIZE = Number(src.match(/var DEFAULT_LABEL_FONT_SIZE = (\d+)/)[1]);
 const POINT_HANDLE_MIN_PX = Number(src.match(/var POINT_HANDLE_MIN_PX = (\d+)/)[1]);
 const POINT_EDGE_MIN_PX = Number(src.match(/var POINT_EDGE_MIN_PX = (\d+)/)[1]);
+const POINT_HANDLE_COLOR = src.match(/var POINT_HANDLE_COLOR = "([^"]+)"/)[1];
 const make = (name) => new Function("svgEl", "DEFAULT_LABEL_FONT_SIZE", "POINT_HANDLE_MIN_PX", "POINT_EDGE_MIN_PX",
-  "return " + body(name))(
+  "POINT_HANDLE_COLOR", "return " + body(name))(
   (tag, a) => { const e = fakeEl(tag); Object.entries(a || {}).forEach(([k, v]) => e.setAttribute(k, v)); return e; },
-  DEFAULT_LABEL_FONT_SIZE, POINT_HANDLE_MIN_PX, POINT_EDGE_MIN_PX
+  DEFAULT_LABEL_FONT_SIZE, POINT_HANDLE_MIN_PX, POINT_EDGE_MIN_PX, POINT_HANDLE_COLOR
 );
 
 const isPointText = make("_isPointText");
@@ -181,27 +183,52 @@ function pull(handle, pt, freeform) {
 }
 
 {
+  // An edge scales evenly too, about the middle of the opposite edge.
   const r = pull("right", { x: 500, y: 0 });
-  assert.deepStrictEqual([r.style.font_size, r.style.scale_x, r.style.scale_y], [20, 2, 1],
-    "the right edge stretches it wider, nothing else");
-  assert.deepStrictEqual(r.geometry, { x: 100, y: 100, w: 400, h: 50 }, "the left edge holds");
+  assert.deepStrictEqual([r.style.font_size, r.style.scale_x, r.style.scale_y], [40, 1, 1],
+    "the right edge pulled out to twice the width: twice the size, no stretch");
+  assert.deepStrictEqual(r.geometry, { x: 100, y: 75, w: 400, h: 100 },
+    "the left edge holds, and the text grows evenly up and down about its middle");
+
+  const t = pull("top", { x: 0, y: 50 });
+  assert.strictEqual(t.style.font_size, 40, "the top edge pulled up: scaled, not stretched");
+  assert.deepStrictEqual(t.geometry, { x: 0, y: 50, w: 400, h: 100 },
+    "the bottom holds, centred left to right");
 
   const l = pull("left", { x: 200, y: 0 });
+  assert.strictEqual(l.style.font_size, 10);
+  assert.deepStrictEqual(l.geometry, { x: 200, y: 112.5, w: 100, h: 25 }, "the right edge holds");
+
+  const b = pull("bottom", { x: 0, y: 125 });
+  assert.strictEqual(b.style.font_size, 10);
+  assert.deepStrictEqual(b.geometry, { x: 150, y: 100, w: 100, h: 25 }, "the top holds");
+}
+
+{
+  // Shift on an edge: a stretch along that one axis.
+  const r = pull("right", { x: 500, y: 0 }, true);
+  assert.deepStrictEqual([r.style.font_size, r.style.scale_x, r.style.scale_y], [20, 2, 1],
+    "Shift+right edge stretches it wider, nothing else");
+  assert.deepStrictEqual(r.geometry, { x: 100, y: 100, w: 400, h: 50 }, "the left edge holds");
+
+  const l = pull("left", { x: 200, y: 0 }, true);
   assert.strictEqual(l.style.scale_x, 0.5);
   assert.deepStrictEqual(l.geometry, { x: 200, y: 100, w: 100, h: 50 }, "the right edge holds");
 
-  const t = pull("top", { x: 0, y: 50 });
+  const t = pull("top", { x: 0, y: 50 }, true);
   assert.deepStrictEqual([t.style.scale_x, t.style.scale_y], [1, 2]);
   assert.deepStrictEqual(t.geometry, { x: 100, y: 50, w: 200, h: 100 }, "the bottom holds");
 
-  const b = pull("bottom", { x: 0, y: 125 });
+  const b = pull("bottom", { x: 0, y: 125 }, true);
   assert.strictEqual(b.style.scale_y, 0.5);
   assert.deepStrictEqual(b.geometry, { x: 100, y: 100, w: 200, h: 25 }, "the top holds");
 }
 
 {
-  const flat = pull("right", { x: 0, y: 0 });
+  const flat = pull("right", { x: 0, y: 0 }, true);
   assert.ok(flat.style.scale_x > 0, "pulled past its other edge it stays a sliver, never inside out");
+  const gone = pull("top", { x: 0, y: 900 });
+  assert.ok(gone.style.font_size > 0, "nor does an even scale go below nothing");
   const tiny = pull(2, { x: 100, y: 100 });
   assert.ok(tiny.style.font_size * 2 >= 2, "never so small it cannot be found again");
 }
@@ -241,6 +268,21 @@ function pull(handle, pt, freeform) {
   assert.ok(/\} else if \(shape\.kind === "rectangle" \|\| self\._isPointText\(shape\)\) \{\s*self\._renderRectEdgeHandles\(shape\);/.test(src),
     "and the four edge grabbers rectangles have");
   assert.ok(src.includes('if (point) rect.classList.add("is-shown");'), "shown, not hidden until hovered");
+}
+
+// ── its handles are black, and typing dashes its box ─────────────────────
+
+{
+  const handleColor = make("_handleColor");
+  const ctx = board({ activeColor: "#f00" });
+  assert.strictEqual(handleColor.call(ctx, { kind: "text", style: { point: true, color: "#ef4444" } }),
+    src.match(/var POINT_HANDLE_COLOR = "([^"]+)"/)[1], "black, whatever colour the text is");
+  assert.strictEqual(handleColor.call(ctx, { kind: "rectangle", style: { color: "#ef4444" } }), "#ef4444",
+    "other shapes keep their own colour");
+  assert.ok(/\.etcher-text\.is-typing \.etcher-text-rect \{",\s*"  stroke: #3b82f6; stroke-width: 1\.25px; stroke-dasharray: 4 3;/.test(src),
+    "a dashed box while it is being typed into");
+  assert.ok(body("_startTextEdit").includes('shape.el.classList.add("is-typing")'));
+  assert.ok(body("_endTextEdit").includes('ed.shape.el.classList.remove("is-typing")'));
 }
 
 // ── a just-started text's handles never pile up ──────────────────────────

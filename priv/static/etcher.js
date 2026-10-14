@@ -22414,8 +22414,17 @@
       // the foreignObject is attached, and a browser that would not take the
       // first focus takes this one. Harmless where the first worked — the
       // caret is already here, and nothing can have been typed in between.
-      try { input.focus(); input.select(); } catch (_) {}
-      setTimeout(function() { try { input.focus(); input.select(); } catch (_) {} }, 0);
+      //
+      // Point text opens with a caret at the start of the text, not the text
+      // selected: it reads as "you are in the text now", and a keystroke
+      // adds to it instead of wiping it. Other labels keep select-all.
+      var placeCaret = function() {
+        input.focus();
+        if (point) input.setSelectionRange(0, 0);
+        else input.select();
+      };
+      try { placeCaret(); } catch (_) {}
+      setTimeout(function() { try { placeCaret(); } catch (_) {} }, 0);
 
       // The editor's shape just became the panel's target (see
       // _fontTargetShapes) — sync now, or the label rows only appear

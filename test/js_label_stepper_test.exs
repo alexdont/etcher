@@ -47,9 +47,11 @@ defmodule Etcher.JsLabelStepperTest do
       # `setTimeout` is the wrong place for this focus.
       [immediate, _] = String.split(body, "setTimeout(function()", parts: 2)
 
-      assert immediate =~ "input.focus();",
+      assert immediate =~ "try { placeCaret(); } catch (_) {}",
              "a focus deferred by even a tick is outside the gesture, and " <>
                "WebKit opens no keyboard for it"
+
+      assert immediate =~ ~r/var placeCaret = function\(\) \{\s*input\.focus\(\);/
     end
 
     test "and again on the next tick, as it always did" do
@@ -60,7 +62,7 @@ defmodule Etcher.JsLabelStepperTest do
         )
 
       assert body =~
-               "setTimeout(function() { try { input.focus(); input.select(); } catch (_) {} }, 0);",
+               "setTimeout(function() { try { placeCaret(); } catch (_) {} }, 0);",
              "the foreignObject is attached by then — a browser that ignored " <>
                "the first focus takes this one"
     end

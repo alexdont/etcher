@@ -314,6 +314,8 @@ function pull(handle, pt, freeform) {
     "a black dashed box when selected and while it is being typed into");
   assert.ok(body("_renderPointText").includes('el.classList.add("is-point")'));
   assert.ok(body("_startTextEdit").includes('shape.el.classList.add("is-typing")'));
+  assert.ok(/if \(point\) input\.setSelectionRange\(0, 0\);\s*else input\.select\(\);/.test(body("_startTextEdit")),
+    "opened with a caret at the start, not the text selected");
   assert.ok(body("_endTextEdit").includes('ed.shape.el.classList.remove("is-typing")'));
 }
 

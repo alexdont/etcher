@@ -77,4 +77,7 @@ assert.ok(src.includes("corner: cornerDef.corner,") && body("_textboxCornerDefau
   "new boxes are sharp unless the user chose otherwise");
 assert.ok(body("_syncParamsPopup").includes("this._syncCornerRows();"), "the panel shows the corner controls");
 
+assert.ok(/if \(!\(shape\.style && shape\.style\.corner_size > 0\)\) \{\s*patch\.corner_size = TEXTBOX_CORNER_PICK \/ self\._inkScale\(\);/.test(body("_setTextboxCorner")),
+  "picking a type on a sharp box gives it corners you can see");
+
 console.log("text box corners: all checks passed");

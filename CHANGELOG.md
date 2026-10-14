@@ -64,7 +64,8 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   well as after. With the text box tool armed and nothing selected the
   controls set what new boxes get, and tuning a freshly drawn box carries
   over to the next. The box is drawn by a frame path (the rect stays the
-  hit area). Text boxes made before this show sharp corners.
+  hit area). Text boxes made before this show sharp corners. Picking a
+  type on a sharp box gives it a small reach (12) so the pick shows.
 - **The text tool's icon is a typeset T** (a bar with dropped ends on a
   footed stem) instead of two round-capped strokes that read as ⊤.
 

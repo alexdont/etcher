@@ -2364,6 +2364,9 @@
   var TEXTBOX_CORNER_INSET = { round: 1 - Math.SQRT1_2, chamfer: 0.5, concave: Math.SQRT1_2, notch: 1 };
   // The corner slider's reach, in on-screen px at the ink scale.
   var TEXTBOX_CORNER_MAX = 80;
+  // The reach a corner type gets when it is picked on a sharp box: at no
+  // reach every type looks the same, so a pick alone would show nothing.
+  var TEXTBOX_CORNER_PICK = 12;
 
   // The weight sliders travel 0-100 and curve onto WEIGHT_MIN..WEIGHT_MAX,
   // so the weights people actually draw with sit around the middle of the
@@ -8238,7 +8241,10 @@
       var shapes = this._cornerTargetShapes();
       if (!shapes.length) {
         // Saved once, on release — not on every step of the slider.
-        if (prop === "corner") this._setPref("textbox_corner", value);
+        if (prop === "corner") {
+          this._setPref("textbox_corner", value);
+          if (!(this._textboxCornerDefaults().size > 0)) this._setPref("textbox_corner_size", TEXTBOX_CORNER_PICK);
+        }
         else if (commit) this._setPref("textbox_corner_size", value);
         if (prop === "corner" || commit) this._syncCornerRows();
         return;
@@ -8250,8 +8256,15 @@
       }
       shapes.forEach(function(shape) {
         var patch = {};
-        if (prop === "corner") patch.corner = value;
-        else patch.corner_size = value > 0 ? value / self._inkScale() : 0;
+        if (prop === "corner") {
+          patch.corner = value;
+          // Picking a type on a sharp box gives it corners to see.
+          if (!(shape.style && shape.style.corner_size > 0)) {
+            patch.corner_size = TEXTBOX_CORNER_PICK / self._inkScale();
+          }
+        } else {
+          patch.corner_size = value > 0 ? value / self._inkScale() : 0;
+        }
         shape.style = Object.assign({}, shape.style || {}, patch);
         if (self._textEditor && self._textEditor.shape === shape) self._refreshTextEditorStyle();
         else self._renderShape(shape);

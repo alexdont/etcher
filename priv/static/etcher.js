@@ -1977,7 +1977,12 @@
     ".etcher-customise-backdrop, .etcher-customise, " +
     ".etcher-link-menu, .etcher-link-popup, " +
     ".etcher-link-editor, " +
-    ".etcher-popup, .etcher-tooltip";
+    ".etcher-popup, .etcher-tooltip, " +
+    // The viewer's own controls float over the canvas too: Fresco's nav
+    // (its ⋯ popover is a `.fresco-nav` as well) and its zoom control.
+    // Left out, a zoom button pressed over a shape selected the shape,
+    // and a quick second press opened its label editor instead of zooming.
+    ".fresco-nav, .fresco-zoom";
 
 
   // The size every text measurement is taken at, whatever size the text will
@@ -16161,9 +16166,18 @@
       // Gate every handler on "cursor is over the viewer's container."
       // Cheap to compute, keeps us off the hot path of unrelated
       // document mousemoves.
+      // Inside the viewer's box, and pressed on something of the viewer's.
+      // A host lays its own buttons over the picture (a close button, a
+      // next-file tab) as siblings of the container, not children: the
+      // coordinates alone would put a press on one of those onto the shape
+      // underneath it as well.
       function overContainer(e) {
         if (!self.handle || !self.handle.container) return false;
-        var r = self.handle.container.getBoundingClientRect();
+        var c = self.handle.container;
+        var t = e.target;
+        if (t && t.nodeType === 1 && t !== document.documentElement &&
+            t !== document.body && !c.contains(t)) return false;
+        var r = c.getBoundingClientRect();
         return e.clientX >= r.left && e.clientX <= r.right &&
                e.clientY >= r.top && e.clientY <= r.bottom;
       }

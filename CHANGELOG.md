@@ -18,6 +18,15 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **The viewer's buttons work over a shape.** Etcher reads presses from
+  document listeners and finds the shape by coordinate, and only its own
+  bars were excluded. With a shape under Fresco's zoom-out button, a press
+  selected the shape, and a quick second press opened its label editor
+  instead of zooming. Fresco's nav and zoom control are now Etcher's
+  chrome, so a press there is only for the button, and it no longer ends a
+  label or shape edit in progress either. A host's own buttons laid over
+  the picture (a close button, a next-file tab) are left alone the same
+  way: a press must land inside the viewer to reach a shape.
 - **The pencil no longer steps along when it is pressed in a mirrored
   nav row.** With `panel_toggle: :nav` in a Fresco row laid out with
   `nav_reverse`, the panel switch that appears while annotating was put

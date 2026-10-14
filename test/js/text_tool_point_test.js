@@ -45,10 +45,13 @@ const DEFAULT_LABEL_FONT_SIZE = Number(src.match(/var DEFAULT_LABEL_FONT_SIZE = 
 const POINT_HANDLE_MIN_PX = Number(src.match(/var POINT_HANDLE_MIN_PX = (\d+)/)[1]);
 const POINT_EDGE_MIN_PX = Number(src.match(/var POINT_EDGE_MIN_PX = (\d+)/)[1]);
 const POINT_HANDLE_COLOR = src.match(/var POINT_HANDLE_COLOR = "([^"]+)"/)[1];
+const POINT_FRAME_OUT_PX = Number(src.match(/var POINT_FRAME_OUT_PX = (\d+)/)[1]);
+const POINT_FRAME_IN_PX = Number(src.match(/var POINT_FRAME_IN_PX = (\d+)/)[1]);
 const make = (name) => new Function("svgEl", "DEFAULT_LABEL_FONT_SIZE", "POINT_HANDLE_MIN_PX", "POINT_EDGE_MIN_PX",
-  "POINT_HANDLE_COLOR", "return " + body(name))(
+  "POINT_HANDLE_COLOR", "POINT_FRAME_OUT_PX", "POINT_FRAME_IN_PX", "return " + body(name))(
   (tag, a) => { const e = fakeEl(tag); Object.entries(a || {}).forEach(([k, v]) => e.setAttribute(k, v)); return e; },
-  DEFAULT_LABEL_FONT_SIZE, POINT_HANDLE_MIN_PX, POINT_EDGE_MIN_PX, POINT_HANDLE_COLOR
+  DEFAULT_LABEL_FONT_SIZE, POINT_HANDLE_MIN_PX, POINT_EDGE_MIN_PX, POINT_HANDLE_COLOR,
+  POINT_FRAME_OUT_PX, POINT_FRAME_IN_PX
 );
 
 const isPointText = make("_isPointText");
@@ -370,3 +373,24 @@ function pull(handle, pt, freeform) {
 }
 
 console.log("text tool (point text): all checks passed");
+
+// ── the dashed outline is a grip while typing ─────────────────────────────
+
+{
+  const onFrame = make("_onPointTextFrame");
+  const rect = { getBoundingClientRect: () => ({ left: 100, top: 100, right: 200, bottom: 150 }) };
+  const shape = { el: { querySelector: () => rect } };
+  const at = (x, y) => onFrame.call({}, shape, { clientX: x, clientY: y });
+  assert.strictEqual(at(100, 125), true, "on the left edge");
+  assert.strictEqual(at(100 - POINT_FRAME_OUT_PX, 125), true, "just outside it");
+  assert.strictEqual(at(100 + POINT_FRAME_IN_PX - 1, 125), true, "just inside it");
+  assert.strictEqual(at(150, 125), false, "the middle is the words (caret), not the grip");
+  assert.strictEqual(at(100 - POINT_FRAME_OUT_PX - 2, 125), false, "away from it is the board");
+  assert.strictEqual(at(150, 152), true, "the bottom edge too");
+  const press = body("_startTextEdit");
+  assert.ok(/self\._onPointTextFrame\(shape, e\)[\s\S]{0,120}\.etcher-handle, \.etcher-grab[\s\S]{0,80}e\.preventDefault\(\);\s*e\.stopPropagation\(\);\s*self\._movePointTextWhileTyping\(shape, e\);/.test(press),
+    "a press there moves the text instead of placing the caret (handles keep theirs)");
+  const mover = body("_movePointTextWhileTyping");
+  assert.ok(mover.includes("ed.resizing = true") && mover.includes("input.setSelectionRange(caret[0], caret[1])"),
+    "the edit stays open and the caret comes back where it was");
+}

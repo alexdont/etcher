@@ -186,6 +186,10 @@
   // How near (screen px) the cursor comes to a point text's side before
   // that side's grabber shows.
   var POINT_EDGE_REACH_PX = 24;
+  // The grip band along point text's outline while it is typed into, in
+  // screen px outside and inside the box's edge.
+  var POINT_FRAME_OUT_PX = 7;
+  var POINT_FRAME_IN_PX = 4;
   var POINT_EDGE_MIN_PX = 44;
 
   var NAV_SLOTS = { chevronMirrored: -1, pencil: 0, chevron: 1, eye: 2 };
@@ -1338,6 +1342,7 @@
       // Point text, selected or being typed into: a thin black dashed box,
       // as Affinity draws one, matching its black handles. The same width
       // whatever the zoom or the text's stretch.
+      ".etcher-overlay svg.is-over-text-frame, .etcher-overlay svg.is-over-text-frame * { cursor: move !important; }",
       ".etcher-text.is-point.is-selected .etcher-text-rect,",
       ".etcher-text.is-point.is-editing .etcher-text-rect,",
       ".etcher-text.is-typing .etcher-text-rect {",
@@ -21066,6 +21071,72 @@
       if (ed && ed.shape === shape && ed.point && ed.fit) ed.fit();
     },
 
+    // Whether a pointer event is on point text's outline: within a few
+    // screen px of the drawn box's edge, a little more outside it than in,
+    // so the band stays clear of the letters.
+    _onPointTextFrame: function(shape, e) {
+      var rect = shape && shape.el && shape.el.querySelector && shape.el.querySelector(".etcher-text-rect");
+      if (!rect || typeof e.clientX !== "number") return false;
+      var r = rect.getBoundingClientRect();
+      var x = e.clientX, y = e.clientY;
+      var OUT = POINT_FRAME_OUT_PX, IN = POINT_FRAME_IN_PX;
+      if (x < r.left - OUT || x > r.right + OUT || y < r.top - OUT || y > r.bottom + OUT) return false;
+      var inside = x > r.left + IN && x < r.right - IN && y > r.top + IN && y < r.bottom - IN;
+      return !inside;
+    },
+
+    // Point text dragged by its outline while being typed into. The editor
+    // stays open (the handles' `resizing` hold), the text and its handles
+    // follow the pointer, Shift keeps it on one axis, and release saves
+    // one undo step and hands the caret back where it was.
+    _movePointTextWhileTyping: function(shape, e) {
+      var self = this;
+      var ed = self._textEditor;
+      if (!ed) return;
+      ed.resizing = true;
+      var input = ed.input;
+      var caret = [input.selectionStart, input.selectionEnd];
+      var startPt = self._toImage(e);
+      var startGeom = JSON.parse(JSON.stringify(shape.geometry));
+      var historyBefore = self._snapshotShape(shape);
+      var moved = false;
+      self._suspendMidpointHighlight();
+      if (self.svg) self.svg.classList.add("is-over-text-frame");
+      function onMove(ev) {
+        var pt = self._toImage(ev);
+        var dx = pt.x - startPt.x, dy = pt.y - startPt.y;
+        if (ev.shiftKey) {
+          if (Math.abs(dx) > Math.abs(dy)) dy = 0;
+          else dx = 0;
+        }
+        moved = moved || dx !== 0 || dy !== 0;
+        shape.geometry = self._translateGeometry(shape.kind, startGeom, dx, dy);
+        self._renderShape(shape);
+        self._positionAllHandles(shape);
+      }
+      function onUp() {
+        document.removeEventListener("pointermove", onMove, true);
+        document.removeEventListener("pointerup", onUp, true);
+        document.removeEventListener("pointercancel", onUp, true);
+        self._resumeMidpointHighlight();
+        if (moved && shape.uuid) {
+          self._emitChanged();
+          self._pushUndo(shape.uuid, historyBefore, self._snapshotShape(shape));
+        }
+        setTimeout(function() {
+          if (self._textEditor !== ed) return;
+          ed.resizing = false;
+          try {
+            input.focus({ preventScroll: true });
+            input.setSelectionRange(caret[0], caret[1]);
+          } catch (_) {}
+        }, 0);
+      }
+      document.addEventListener("pointermove", onMove, true);
+      document.addEventListener("pointerup", onUp, true);
+      document.addEventListener("pointercancel", onUp, true);
+    },
+
     // A font's reach as fractions of its size, for point text's box: `asc`
     // and `desc` are how far the letters really go above and below the
     // baseline (brackets and descenders included), `fontAsc`/`fontDesc` the
@@ -22316,6 +22387,16 @@
       // do whatever it was for (deselect, draw, pick another shape).
       self._textEditOutsideDown = function(e) {
         if (!self._textEditor || self._textEditor.input !== input) return;
+        // The dashed outline of point text being typed into is a grip: a
+        // press on it moves the text, and the caret comes back after. Ahead
+        // of the editor check, since the editor covers the box's inside.
+        if (point && self.editingShape === shape && self._onPointTextFrame(shape, e) &&
+            !(e.target.closest && e.target.closest(".etcher-handle, .etcher-grab"))) {
+          e.preventDefault();
+          e.stopPropagation();
+          self._movePointTextWhileTyping(shape, e);
+          return;
+        }
         if (e.target === input || (fo.contains && fo.contains(e.target))) {
           // A press ON the editor is about the words, not the board. The
           // canvas hears it too (the editor sits inside the overlay), and
@@ -22399,6 +22480,16 @@
         self._commitTextEdit();
       };
       document.addEventListener("pointerdown", self._textEditOutsideDown, true);
+      // A move cursor over that outline, so the grip can be found.
+      if (point) {
+        self._textEditFrameHover = function(e) {
+          if (!self._textEditor || self._textEditor.input !== input) return;
+          var on = !e.buttons && self.editingShape === shape && self._onPointTextFrame(shape, e) &&
+            !(e.target.closest && e.target.closest(".etcher-handle, .etcher-grab"));
+          if (self.svg) self.svg.classList.toggle("is-over-text-frame", !!on);
+        };
+        document.addEventListener("pointermove", self._textEditFrameHover, true);
+      }
       // Focused twice, and both of them matter.
       //
       // Now, in the same task as the gesture that asked for it: WebKit opens
@@ -22669,6 +22760,11 @@
     _endTextEdit: function() {
       var ed = this._textEditor;
       if (!ed) return;
+      if (this._textEditFrameHover) {
+        document.removeEventListener("pointermove", this._textEditFrameHover, true);
+        this._textEditFrameHover = null;
+        if (this.svg) this.svg.classList.remove("is-over-text-frame");
+      }
       if (this._textEditOutsideDown) {
         document.removeEventListener("pointerdown", this._textEditOutsideDown, true);
         this._textEditOutsideDown = null;

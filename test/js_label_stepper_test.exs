@@ -40,7 +40,7 @@ defmodule Etcher.JsLabelStepperTest do
       body =
         fn_body(
           "document.addEventListener(\"pointerdown\", self._textEditOutsideDown, true);",
-          1800
+          2600
         )
 
       # On the CALL, not the word: the comment beside it explains why a
@@ -58,7 +58,7 @@ defmodule Etcher.JsLabelStepperTest do
       body =
         fn_body(
           "document.addEventListener(\"pointerdown\", self._textEditOutsideDown, true);",
-          1800
+          2600
         )
 
       assert body =~

@@ -143,8 +143,10 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   Circles (which look the same) and callouts (upright by design) have no
   knob.
 - **A text box scales as one from a dot past its bottom-right corner.**
-  The filled dot just beyond the corner grows or shrinks the box, its
-  text and its corners together, the top-left corner holding.
+  The filled dot, straight out at 45° from the corner, grows or shrinks
+  the box, its text and its corners together, the top-left corner holding.
+- **Side grabbers are slimmer (4.2 px instead of 6) and lie along a turned
+  shape's sides.**
 - **The compact strip has a Thickness button**, opening the thickness
   slider beside it (the full panel keeps its inline line).
 - **Handles follow a colour change, side grabbers included.** Recolouring a

@@ -25019,9 +25019,9 @@
         this.rotateStem.setAttribute("x2", b.x); this.rotateStem.setAttribute("y2", b.y);
       }
       if (this.scaleHandle) {
-        var d = Math.hypot(box.w, box.h) || 1;
-        var off = SCALE_DOT_PX / scale;
-        var at = put({ x: box.x + box.w + off * box.w / d, y: box.y + box.h + off * box.h / d });
+        // Straight out at 45° from the corner, whatever the box's shape.
+        var off = SCALE_DOT_PX * Math.SQRT1_2 / scale;
+        var at = put({ x: box.x + box.w + off, y: box.y + box.h + off });
         this._positionHandle(this.scaleHandle, at);
       }
     },
@@ -25206,8 +25206,9 @@
       var handleColor = self._handleColor(shape);
       this.midpointHandles = positions.map(function(pt, idx) {
         var horizontal = idx === 0 || idx === 2;
-        var w = horizontal ? 18 : 6;
-        var hgt = horizontal ? 6 : 18;
+        // 18 long, 4.2 thick — slim bars along the side, not chunky pills.
+        var w = horizontal ? 18 : 4.2;
+        var hgt = horizontal ? 4.2 : 18;
         var rect = svgEl("rect", { width: w, height: hgt, rx: 1.5, ry: 1.5 });
         rect.classList.add(
           "etcher-handle",
@@ -25229,6 +25230,17 @@
         return rect;
       });
       if (point) this._syncPointEdgeRoom(shape);
+      if (part !== "label") this._turnEdgeHandles(shape, this.midpointHandles);
+    },
+
+    // A turned shape's side grabbers lie along its turned sides. Inline, so
+    // it holds through the hover/drag scale the stylesheet gives them.
+    _turnEdgeHandles: function(shape, handles) {
+      var rot = this._shapeRot ? this._shapeRot(shape) : 0;
+      (handles || []).forEach(function(h) {
+        if (!h || !h.classList || !h.classList.contains("etcher-handle-edge")) return;
+        h.style.transform = rot ? "rotate(" + rot + "deg)" : "";
+      });
     },
 
     // Image-px midpoints of a rect's 4 sides. Order: top, right,
@@ -25496,6 +25508,7 @@
       this.midpointHandles.forEach(function(h, i) {
         if (positions[i]) self._positionHandle(h, positions[i]);
       });
+      this._turnEdgeHandles(shape, this.midpointHandles);
       this._syncPointEdgeRoom(shape);
       this._syncGrabRadii(this.handles, this.midpointHandles);
     },

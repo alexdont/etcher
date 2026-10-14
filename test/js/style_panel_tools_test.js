@@ -117,10 +117,34 @@ function fakeSelf(raw) {
 {
   // …and the nav keeps the pencil first, the chevron beside it and the eye
   // after, by Fresco slot — whichever attaches first.
-  assert.ok(src.includes("var NAV_SLOTS = { pencil: 0, chevron: 1, eye: 2 };"));
+  assert.ok(src.includes("var NAV_SLOTS = { chevronMirrored: -1, pencil: 0, chevron: 1, eye: 2 };"));
   assert.ok(src.includes("}, { slot: NAV_SLOTS.pencil });"), "the pencil asks for slot 0");
-  assert.ok(src.includes("}, { slot: NAV_SLOTS.chevron });"), "the chevron for the one beside it");
+  assert.ok(
+    src.includes("}, { slot: self._navMirrored() ? NAV_SLOTS.chevronMirrored : NAV_SLOTS.chevron });"),
+    "the chevron for the one beside it"
+  );
   assert.ok(src.includes("{ slot: NAV_SLOTS.eye }"), "the eye after them");
+}
+
+{
+  // The chevron comes and goes with annotation mode, so it must never sit
+  // between the pencil and the corner the nav is pinned to: the pencil
+  // would step along every time it is pressed. In a mirrored row the first
+  // button is the far end, so there the chevron goes ahead of the pencil.
+  const mirrored = lift("_navMirrored", "");
+  const host = (nav) => ({ handle: { container: { querySelector: (sel) => {
+    assert.strictEqual(sel, ":scope > .fresco-nav", "the viewer's own nav, not the ⋯ popover");
+    return nav;
+  } } } });
+  const nav = (layout, reverse) => ({
+    getAttribute: (n) => (n === "data-layout" ? layout : null),
+    hasAttribute: (n) => n === "data-reverse" && reverse
+  });
+  assert.strictEqual(mirrored.call(host(nav("row", true))), true, "a mirrored row");
+  assert.strictEqual(mirrored.call(host(nav("row", false))), false, "an ordinary row");
+  assert.strictEqual(mirrored.call(host(nav("column", true))), false, "a column ignores the flag");
+  assert.strictEqual(mirrored.call(host(null)), false, "no nav at all");
+  assert.strictEqual(mirrored.call({ handle: {} }), false, "a handle without a container");
 }
 
 {

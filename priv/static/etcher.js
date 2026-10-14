@@ -168,7 +168,13 @@
   // panel's chevron beside it, then the eye. A host adding its own pencil or
   // eye to the same nav (phoenix_kit does, on the finished picture) uses the
   // same numbers so the row reads the same in both modes.
-  var NAV_SLOTS = { pencil: 0, chevron: 1, eye: 2 };
+  // A nav grows away from the corner it is pinned to, so a button shown
+  // between that corner and the pencil pushes the pencil along. The chevron
+  // only shows while annotating, so it goes on the pencil's far side and
+  // the pencil stays put to be pressed again: after it in an ordinary nav,
+  // before it in a mirrored row (`nav_reverse`), whose first button sits
+  // furthest from the corner.
+  var NAV_SLOTS = { chevronMirrored: -1, pencil: 0, chevron: 1, eye: 2 };
 
   var ICONS = {
     pencil:   '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125"/></svg>',
@@ -5188,7 +5194,7 @@
         // Right after the pencil: it folds away the pencil's panel.
         var remove = self.handle.appendNavButton(ICONS.panelShown, "Narrow the style panel to one column", function() {
           self._cyclePanelSize();
-        }, { slot: NAV_SLOTS.chevron });
+        }, { slot: self._navMirrored() ? NAV_SLOTS.chevronMirrored : NAV_SLOTS.chevron });
         self.removePanelToggleBtn = remove;
         self.panelToggle = remove.el;
         self.panelToggle.hidden = true;
@@ -5567,6 +5573,14 @@
     _panelToggleInNav: function() {
       return !!(this.el && this.el.dataset && this.el.dataset.panelToggle === "nav" &&
         this.handle && typeof this.handle.appendNavButton === "function");
+    },
+
+    // Fresco's mirrored row: its nav says so on the element, and only a row
+    // is laid out in reverse (a column ignores the flag).
+    _navMirrored: function() {
+      var host = this.handle && this.handle.container;
+      var nav = host && host.querySelector && host.querySelector(":scope > .fresco-nav");
+      return !!(nav && nav.getAttribute("data-layout") === "row" && nav.hasAttribute("data-reverse"));
     },
 
     // Shown with the docked panel and gone without it. The corner chevron

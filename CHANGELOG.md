@@ -4,6 +4,18 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Fixed
+
+- **The pencil no longer steps along when it is pressed in a mirrored
+  nav row.** With `panel_toggle: :nav` in a Fresco row laid out with
+  `nav_reverse`, the panel switch that appears while annotating was put
+  between the pencil and the row's corner, so the pencil moved one slot
+  each time annotation mode turned on and back each time it turned off.
+  It now goes on the pencil's far side there, and the pencil stays where
+  it is, to be pressed again. Ordinary navs are unchanged.
+
 ## [0.21.0] — 2026-10-09
 
 The style panel's switch joins the viewer's controls, a callout is

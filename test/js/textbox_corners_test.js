@@ -80,4 +80,7 @@ assert.ok(body("_syncParamsPopup").includes("this._syncCornerRows();"), "the pan
 assert.ok(/if \(!\(shape\.style && shape\.style\.corner_size > 0\)\) \{\s*patch\.corner_size = TEXTBOX_CORNER_PICK \/ self\._inkScale\(\);/.test(body("_setTextboxCorner")),
   "picking a type on a sharp box gives it corners you can see");
 
+assert.ok(src.includes('["sharp"].concat(TEXTBOX_CORNERS).map(function(type) {'), "Sharp is a button of its own, first");
+assert.ok(body("_syncCornerRows").includes('var shown = px > 0 ? type : "sharp";'), "and lights whenever there are no corners");
+
 console.log("text box corners: all checks passed");

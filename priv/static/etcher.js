@@ -894,6 +894,9 @@
       "  display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px;",
       "}",
       ".etcher-stylepanel .etcher-marker-dash > * { width: 100%; min-width: 0; }",
+      // Five corner choices: sharp, then the four shaped kinds.
+      ".etcher-stylepanel .etcher-corner-row { grid-template-columns: repeat(5, 1fr); }",
+      ".etcher-corner-row svg { width: 22px; height: 16px; }",
       // Horizontal label alignment is three choices, not four.
       ".etcher-stylepanel .etcher-align-row {",
       "  grid-template-columns: repeat(3, 1fr);",
@@ -7768,19 +7771,26 @@
       // tool armed and nothing selected, where they set what new boxes get.
       var cornerTypeRow = document.createElement("div");
       cornerTypeRow.className = "etcher-marker-dash etcher-corner-row";
-      var CORNER_NAMES = { round: "Rounded", chamfer: "Straight", concave: "Concave", notch: "Notched" };
-      self._paramsCornerBtns = TEXTBOX_CORNERS.map(function(type) {
+      var CORNER_NAMES = { sharp: "Sharp", round: "Rounded", chamfer: "Straight", concave: "Concave", notch: "Notched" };
+      // Sharp first, as its own button: no corners at all is a choice you
+      // should see and pick, not something found by sliding to zero.
+      self._paramsCornerBtns = ["sharp"].concat(TEXTBOX_CORNERS).map(function(type) {
         var b = document.createElement("button");
         b.type = "button";
         b.dataset.corner = type;
         b.title = CORNER_NAMES[type] + " corners";
         b.setAttribute("aria-label", b.title);
         b.innerHTML = '<svg width="26" height="18" viewBox="0 0 26 18"><path d="' +
-          self._cornerPath(2, 2, 22, 14, type, 5.5) +
-          '" fill="none" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/></svg>';
+          self._cornerPath(2, 2, 22, 14, type, type === "sharp" ? 0 : 5.5) +
+          '" fill="none" stroke="#fff" stroke-width="1.6" stroke-linejoin="miter"/></svg>';
         b.addEventListener("click", function(e) {
           e.preventDefault();
-          self._setTextboxCorner("corner", type, true);
+          if (type === "sharp") {
+            self._setTextboxCorner("corner_size", 0, true);
+            self._syncCornerRows();
+          } else {
+            self._setTextboxCorner("corner", type, true);
+          }
         });
         cornerTypeRow.appendChild(b);
         return b;
@@ -8227,8 +8237,10 @@
       px = Math.min(TEXTBOX_CORNER_MAX, px);
       this._paramsCornerInput.value = String(px);
       this._paramsCornerVal.textContent = px ? String(px) : "Sharp";
+      // Sharp lights when there are no corners; a type only once they reach.
+      var shown = px > 0 ? type : "sharp";
       (this._paramsCornerBtns || []).forEach(function(b) {
-        b.classList.toggle("is-selected", b.dataset.corner === type);
+        b.classList.toggle("is-selected", b.dataset.corner === shown);
       });
     },
 

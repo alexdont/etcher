@@ -66,6 +66,8 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   over to the next. The box is drawn by a frame path (the rect stays the
   hit area). Text boxes made before this show sharp corners. Picking a
   type on a sharp box gives it a small reach (12) so the pick shows.
+  Sharp is a button of its own, first in the row, lit whenever a box
+  has no corners; picking it sets the reach to none.
 - **The text tool's icon is a typeset T** (a bar with dropped ends on a
   footed stem) instead of two round-capped strokes that read as ⊤.
 

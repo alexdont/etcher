@@ -188,6 +188,7 @@ const setLineParam = extract("_setLineParam");
     _refreshTextEditorStyle() {},
     _syncStyleInspector() {},
     _refreshLabelSwatch() {},
+    _repaintHandles() {},
   };
 
   // The call that used to never return.

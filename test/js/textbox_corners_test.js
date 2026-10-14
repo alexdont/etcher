@@ -90,4 +90,15 @@ assert.ok(body("_midpointPositionsForShape").includes('if (shape.kind === "recta
   "placed on its sides and lit as the cursor nears");
 assert.ok(body("_startTextEdit").includes("if (point || fixedEd) input.setSelectionRange(0, 0);"), "caret at the start");
 
+// Its handles wear the text's colour, and follow it when it changes.
+{
+  const handleColor = new Function("POINT_HANDLE_COLOR", "return " + body("_handleColor"))("#111111");
+  const hc = { _isPointFrame: () => false, _textboxFixed: (s) => s.style.box === "fixed",
+    _titleColorFor: (s) => (s.metadata && s.metadata.title_color) || s.style.color };
+  assert.strictEqual(handleColor.call(hc, { kind: "text", style: { box: "fixed", color: "#facc15" }, metadata: {} }), "#facc15");
+  assert.ok(body("_setLabelColor").includes("this._repaintHandles();"), "a new text colour repaints the handles");
+  assert.ok(/this\._repaintHandles\(\);/.test(body("_applyColorToTargets")), "and so does a new shape colour");
+  assert.ok(body("_repaintHandles").includes("(this.midpointHandles || []).forEach"), "side grabbers included");
+}
+
 console.log("text box corners: all checks passed");

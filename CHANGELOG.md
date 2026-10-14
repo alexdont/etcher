@@ -74,6 +74,12 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   (the text re-wraps). Double-clicking a text box opens it with the caret
   at its start instead of all its text selected, so arrows or a click
   move the caret and typing adds rather than replaces.
+- **Handles follow a colour change, side grabbers included.** Recolouring a
+  shape (or a text box's text) repainted its corner dots but not its side
+  grabbers, which kept the colour the shape was drawn in — a text box
+  turned green still showed red grabbers until it was reselected. All of
+  them repaint now, and a text box's handles wear its text's colour. Point
+  text and point labels keep their black handles through a recolour.
 - **The text tool's icon is a typeset T** (a bar with dropped ends on a
   footed stem) instead of two round-capped strokes that read as ⊤.
 

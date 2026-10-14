@@ -7166,6 +7166,27 @@
       }
       this._refreshTextEditorStyle();
       this._refreshLabelSwatch();
+      // A text box's handles wear its text's colour; a new ink is a new
+      // colour for them too, not the one it was drawn in.
+      this._repaintHandles();
+    },
+
+    // Bring the handles up on screen into the colour they should be now:
+    // corner dots and side grabbers of the shape in edit mode, and a
+    // focused label's dots. Point frames keep their black.
+    _repaintHandles: function() {
+      if (this.editingShape) {
+        var c = this._handleColor(this.editingShape);
+        (this.handles || []).forEach(function(h) { h.style.color = c; });
+        if (!this._isPointFrame(this.editingShape)) {
+          (this.midpointHandles || []).forEach(function(h) { h.style.color = c; });
+        }
+      }
+      if (this.editingTitleShape) {
+        var tc = this._isPointLabel(this.editingTitleShape)
+          ? POINT_HANDLE_COLOR : this._handleColor(this.editingTitleShape);
+        (this.titleHandles || []).forEach(function(h) { h.style.color = tc; });
+      }
     },
 
     // The colour the current label is WRITTEN in — the twin of
@@ -12589,8 +12610,7 @@
       // shape color immediately instead of waiting for the next handle
       // refresh.
       var handleColor = color || "#3b82f6";
-      (this.handles || []).forEach(function(h) { h.style.color = handleColor; });
-      (this.titleHandles || []).forEach(function(h) { h.style.color = handleColor; });
+      this._repaintHandles();
       // The freehand/marker pen editor's anchors, bezier handles, and their
       // tether lines live outside `handles`, so repaint them here too — else
       // a recolor wouldn't reach the points/handles until a reselect.
@@ -24811,6 +24831,11 @@
       // do: they are the tool's controls, not part of the drawing, and a
       // red text's red dots disappeared into it.
       if (this._isPointFrame(shape)) return POINT_HANDLE_COLOR;
+      // A text box's handles wear its text's colour.
+      if (shape && shape.kind === "text" && this._textboxFixed(shape)) {
+        var ink = this._titleColorFor(shape);
+        if (ink) return ink;
+      }
       if (shape && shape.style && shape.style.color) return shape.style.color;
       if (this.activeColor) return this.activeColor;
       return "#3b82f6";

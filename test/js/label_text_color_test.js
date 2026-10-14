@@ -52,6 +52,7 @@ function board(over) {
     _refreshTextEditorStyle() {},
     _freshTargets: () => false,
     _refreshLabelSwatch() {},
+    _repaintHandles() {},
     _syncStyleInspector() {},
     _snapshotShape: (s) => JSON.parse(JSON.stringify(s || {})),
     _pushUndo(uuid, before, after) { this.undos.push({ uuid, before, after }); },

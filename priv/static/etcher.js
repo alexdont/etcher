@@ -1332,11 +1332,13 @@
       "  stroke: #3b82f6;",
       "  stroke-dasharray: none;",
       "}",
-      // Being typed into: the box goes dashed, as Affinity marks text in
-      // edit, so "selected" and "typing in it" read differently. Thin and
-      // the same width whatever the zoom or the text's stretch.
+      // Point text, selected or being typed into: a thin black dashed box,
+      // as Affinity draws one, matching its black handles. The same width
+      // whatever the zoom or the text's stretch.
+      ".etcher-text.is-point.is-selected .etcher-text-rect,",
+      ".etcher-text.is-point.is-editing .etcher-text-rect,",
       ".etcher-text.is-typing .etcher-text-rect {",
-      "  stroke: #3b82f6; stroke-width: 1.25px; stroke-dasharray: 4 3;",
+      "  stroke: #111111; stroke-width: 1.25px; stroke-dasharray: 4 3;",
       "  vector-effect: non-scaling-stroke;",
       "}",
       // No halo behind the glyphs. A 2px white stroke under every letter was
@@ -20979,6 +20981,8 @@
 
     _renderPointText: function(shape, el, g, trect, ttext) {
       var self = this;
+      // Marks the box for the Affinity-style outline (black, dashed).
+      if (el && el.classList) el.classList.add("is-point");
       var scale = 1;
       try { scale = self._markerScale() || 1; } catch (_) { scale = 1; }
       var fontPx = self._fontSizeFor(shape, self._zoomPx(DEFAULT_LABEL_FONT_SIZE));

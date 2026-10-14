@@ -279,8 +279,9 @@ function pull(handle, pt, freeform) {
     src.match(/var POINT_HANDLE_COLOR = "([^"]+)"/)[1], "black, whatever colour the text is");
   assert.strictEqual(handleColor.call(ctx, { kind: "rectangle", style: { color: "#ef4444" } }), "#ef4444",
     "other shapes keep their own colour");
-  assert.ok(/\.etcher-text\.is-typing \.etcher-text-rect \{",\s*"  stroke: #3b82f6; stroke-width: 1\.25px; stroke-dasharray: 4 3;/.test(src),
-    "a dashed box while it is being typed into");
+  assert.ok(/"\.etcher-text\.is-point\.is-selected \.etcher-text-rect,",\s*"\.etcher-text\.is-point\.is-editing \.etcher-text-rect,",\s*"\.etcher-text\.is-typing \.etcher-text-rect \{",\s*"  stroke: #111111; stroke-width: 1\.25px; stroke-dasharray: 4 3;/.test(src),
+    "a black dashed box when selected and while it is being typed into");
+  assert.ok(body("_renderPointText").includes('el.classList.add("is-point")'));
   assert.ok(body("_startTextEdit").includes('shape.el.classList.add("is-typing")'));
   assert.ok(body("_endTextEdit").includes('ed.shape.el.classList.remove("is-typing")'));
 }

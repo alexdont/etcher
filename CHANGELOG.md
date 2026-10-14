@@ -6,6 +6,16 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+### Added
+
+- **Fresco's zoom control is lifted clear of the bars.** A Fresco viewer
+  with `actual_size` (Fresco 0.14) keeps a zoom control in its
+  bottom-right corner. Where Etcher's tool bar, action bar or style
+  trigger come down there too — on a phone, where the tool bar spans
+  nearly the width — Etcher raises it above them through
+  `--fresco-zoom-bottom` while annotating, and lets it back down after.
+  Nothing changes on a viewer without the control.
+
 ### Fixed
 
 - **The pencil no longer steps along when it is pressed in a mirrored

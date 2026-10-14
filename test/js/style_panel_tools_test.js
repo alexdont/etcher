@@ -33,6 +33,19 @@ function lift(name, signature) {
   );
 }
 
+function lift_(name) {
+  const needle = `    ${name}: function() {`;
+  const start = src.indexOf(needle);
+  assert.notStrictEqual(start, -1, `could not find ${name} in etcher.js`);
+  const end = src.indexOf("\n    },", start);
+  return new Function(
+    "ZOOM_CONTROL_OPEN_W", "ZOOM_CONTROL_REACH",
+    "return " + src.slice(start, end + "\n    }".length).replace(`${name}: function`, "function")
+  )(ZOOM_CONTROL_OPEN_W_, ZOOM_CONTROL_REACH_);
+}
+const ZOOM_CONTROL_OPEN_W_ = +src.match(/var ZOOM_CONTROL_OPEN_W = (\d+);/)[1];
+const ZOOM_CONTROL_REACH_ = +src.match(/var ZOOM_CONTROL_REACH = (\d+);/)[1];
+
 // ── panel offset → CSS custom properties ───────────────────────────────────
 
 const applyPanelOffset = lift("_applyPanelOffset", "");
@@ -145,6 +158,57 @@ function fakeSelf(raw) {
   assert.strictEqual(mirrored.call(host(nav("column", true))), false, "a column ignores the flag");
   assert.strictEqual(mirrored.call(host(null)), false, "no nav at all");
   assert.strictEqual(mirrored.call({ handle: {} }), false, "a handle without a container");
+}
+
+{
+  // Fresco's zoom control lives in the viewer's bottom-right corner. Where
+  // Etcher's bars come down there too (a phone), it is lifted above them
+  // through `--fresco-zoom-bottom`, and let back down when they go.
+  global.window = { getComputedStyle: () => ({ right: "12px" }) };
+  const lift = lift_("_liftViewerZoom");
+  const rect = (l, t, r, b) => ({ getBoundingClientRect: () => ({ left: l, top: t, right: r, bottom: b, width: r - l, height: b - t }) });
+  function viewer(w, h, bars) {
+    const props = {};
+    const host = Object.assign(rect(0, 0, w, h), {
+      style: { setProperty: (k, v) => (props[k] = v), removeProperty: (k) => delete props[k] },
+      querySelector: (sel) => (assert.strictEqual(sel, ":scope > .fresco-zoom"), {})
+    });
+    return { self: Object.assign({ handle: { container: host } }, bars), props };
+  }
+
+  // A phone: the tool bar and the style trigger reach the right edge.
+  const phone = viewer(390, 844, {
+    toolbar: rect(32, 780, 301, 828),
+    actionBar: rect(33, 742, 253, 780),
+    styleTrigger: rect(310, 780, 358, 828)
+  });
+  lift.call(phone.self);
+  assert.strictEqual(phone.props["--fresco-zoom-bottom"], "110px", "above the highest bar in the way, plus 8");
+
+  // The bars hidden (annotating ended): back to Fresco's own spacing.
+  phone.self.toolbar = rect(0, 0, 0, 0);
+  phone.self.actionBar = rect(0, 0, 0, 0);
+  phone.self.styleTrigger = rect(0, 0, 0, 0);
+  lift.call(phone.self);
+  assert.ok(!("--fresco-zoom-bottom" in phone.props), "the lift is taken off");
+
+  // A desktop: the bars sit in the middle, clear of the corner.
+  const desk = viewer(1300, 800, { toolbar: rect(390, 740, 920, 788), actionBar: rect(390, 702, 610, 740) });
+  lift.call(desk.self);
+  assert.deepStrictEqual(desk.props, {}, "nothing to clear");
+
+  // Overlap is horizontal, both ways: a bar out in the 12px gutter right of
+  // the control is not under it either.
+  const gutter = viewer(390, 844, { styleTrigger: rect(380, 780, 390, 828) });
+  lift.call(gutter.self);
+  assert.deepStrictEqual(gutter.props, {}, "right of the control");
+
+  // No zoom control (a viewer without `actual_size`): nothing touched.
+  const plain = viewer(390, 844, { toolbar: rect(32, 780, 380, 828) });
+  plain.self.handle.container.querySelector = () => null;
+  lift.call(plain.self);
+  assert.deepStrictEqual(plain.props, {});
+  delete global.window;
 }
 
 {

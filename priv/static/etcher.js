@@ -168,6 +168,11 @@
   // panel's chevron beside it, then the eye. A host adding its own pencil or
   // eye to the same nav (phoenix_kit does, on the finished picture) uses the
   // same numbers so the row reads the same in both modes.
+  // Fresco's zoom control, open: the width of the corner it may need, and
+  // how far up from the bottom a bar has to reach before it is in the way.
+  var ZOOM_CONTROL_OPEN_W = 250;
+  var ZOOM_CONTROL_REACH = 160;
+
   // A nav grows away from the corner it is pinned to, so a button shown
   // between that corner and the pencil pushes the pencil along. The chevron
   // only shows while annotating, so it goes on the pencil's far side and
@@ -4953,6 +4958,36 @@
       // and the style trigger are parked against its edges.
       this._positionActionBar();
       this._syncStylePanel();
+      this._liftViewerZoom();
+    },
+
+    // Fresco's zoom control (`actual_size`) sits in the viewer's bottom-right
+    // corner. Where the bars come down there too — a phone, whose tool bar
+    // spans nearly the width — lift it above them through
+    // `--fresco-zoom-bottom`, and let it back down when they go. The width
+    // checked is the control's when open, so opening it never runs it under.
+    _liftViewerZoom: function() {
+      var host = this.handle && this.handle.container;
+      if (!host || !host.style || !host.getBoundingClientRect) return;
+      var zoom = host.querySelector && host.querySelector(":scope > .fresco-zoom");
+      if (!zoom) return;
+      var box = host.getBoundingClientRect();
+      var cs = window.getComputedStyle ? window.getComputedStyle(zoom) : null;
+      var right = box.right - ((cs && parseFloat(cs.right)) || 12);
+      var left = right - ZOOM_CONTROL_OPEN_W;
+      var top = Infinity;
+      var bars = [this.toolbar, this.actionBar, this.styleTrigger];
+      for (var i = 0; i < bars.length; i++) {
+        var b = bars[i];
+        if (!b || !b.getBoundingClientRect) continue;
+        var r = b.getBoundingClientRect();
+        if (!(r.width > 0 && r.height > 0)) continue;
+        if (r.right <= left || r.left >= right) continue;
+        if (r.top < box.bottom - ZOOM_CONTROL_REACH) continue;
+        top = Math.min(top, r.top);
+      }
+      if (top === Infinity) host.style.removeProperty("--fresco-zoom-bottom");
+      else host.style.setProperty("--fresco-zoom-bottom", Math.ceil(box.bottom - top + 8) + "px");
     },
 
     // Secondary action bar: things you do TO the drawing, kept off the tool
@@ -11856,6 +11891,7 @@
       // the overflow layout immediately — `_layoutToolbar` bails when
       // the toolbar is hidden, so the `off` path is a no-op.
       if (on) self._layoutToolbar();
+      else self._liftViewerZoom();
 
       // Turning the mode on ARMS the cursor tool rather than merely
       // behaving like it. The board has always started in cursor mode

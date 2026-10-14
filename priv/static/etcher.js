@@ -1348,6 +1348,8 @@
       ".etcher-textbox-frame { fill: transparent; stroke: transparent; pointer-events: none; transition: stroke 120ms ease, fill 120ms ease; }",
       ".etcher-text.is-hovered .etcher-textbox-frame, .etcher-text.is-draft .etcher-textbox-frame { stroke: currentColor; stroke-dasharray: 5 4; }",
       ".etcher-text.is-selected .etcher-textbox-frame, .etcher-text.is-editing .etcher-textbox-frame { stroke: #3b82f6; stroke-dasharray: none; }",
+      // A callout's frame is point text's box: the thin black dash.
+      ".etcher-text.is-point.is-selected .etcher-textbox-frame, .etcher-text.is-point.is-editing .etcher-textbox-frame, .etcher-text.is-typing .etcher-textbox-frame { stroke: #111111; stroke-width: 1.25px; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; }",
       // Point text, selected or being typed into: a thin black dashed box,
       // as Affinity draws one, matching its black handles. The same width
       // whatever the zoom or the text's stretch.
@@ -8214,7 +8216,9 @@
     // selection's text boxes, or the one in edit mode.
     _cornerTargetShapes: function() {
       var self = this;
-      var box = function(s) { return !!s && s.kind === "text" && self._textboxFixed(s); };
+      var box = function(s) {
+        return !!s && ((s.kind === "text" && self._textboxFixed(s)) || self._isPointCallout(s));
+      };
       if (this._textEditor && this._textEditor.shape) {
         return box(this._textEditor.shape) ? [this._textEditor.shape] : [];
       }
@@ -8225,14 +8229,20 @@
     // With the text box tool armed and nothing focused, the controls set
     // the corners new boxes are drawn with.
     _cornerDefaultsShown: function() {
-      return this.activeTool === "textbox" && !this._textEditor &&
+      return (this.activeTool === "textbox" || this.activeTool === "callout") && !this._textEditor &&
         !(this.selectedShapes && this.selectedShapes.length) &&
         !this.editingShape && !this.editingTitleShape;
     },
 
-    _textboxCornerDefaults: function() {
-      var type = this._getPref("textbox_corner");
-      var px = this._getPref("textbox_corner_size");
+    // Text boxes and callouts each remember their own.
+    _cornerPrefKey: function(kind) {
+      return kind === "callout" ? "callout_corner" : "textbox_corner";
+    },
+
+    _textboxCornerDefaults: function(kind) {
+      var key = this._cornerPrefKey(kind || (this.activeTool === "callout" ? "callout" : "text"));
+      var type = this._getPref(key);
+      var px = this._getPref(key + "_size");
       return {
         corner: TEXTBOX_CORNERS.indexOf(type) >= 0 ? type : "round",
         size: typeof px === "number" && px > 0 ? px : 0
@@ -8272,13 +8282,15 @@
     _setTextboxCorner: function(prop, value, commit) {
       var self = this;
       var shapes = this._cornerTargetShapes();
+      var key = this._cornerPrefKey(shapes.length ? shapes[0].kind
+        : (this.activeTool === "callout" ? "callout" : "text"));
       if (!shapes.length) {
         // Saved once, on release — not on every step of the slider.
         if (prop === "corner") {
-          this._setPref("textbox_corner", value);
-          if (!(this._textboxCornerDefaults().size > 0)) this._setPref("textbox_corner_size", TEXTBOX_CORNER_PICK);
+          this._setPref(key, value);
+          if (!(this._textboxCornerDefaults().size > 0)) this._setPref(key + "_size", TEXTBOX_CORNER_PICK);
         }
-        else if (commit) this._setPref("textbox_corner_size", value);
+        else if (commit) this._setPref(key + "_size", value);
         if (prop === "corner" || commit) this._syncCornerRows();
         return;
       }
@@ -8304,8 +8316,8 @@
       });
       // What a fresh box is tuned to, the next one gets.
       if (commit && this._freshTargets && this._freshTargets(shapes)) {
-        if (prop === "corner") this._setPref("textbox_corner", value);
-        else this._setPref("textbox_corner_size", value);
+        if (prop === "corner") this._setPref(key, value);
+        else this._setPref(key + "_size", value);
       }
       if (prop === "corner") this._syncCornerRows();
       if (commit) {
@@ -13240,6 +13252,14 @@
             var coScale = self._markerScale() || 1;
             var coStr = self._pointStretch(shape, "callout");
             var coM = self._pointMeasure(shape);
+            // Corners, as a text box has them: the words are padded in as
+            // far as the corners bite, and the box grows by that much.
+            var coPad = self._textboxPadPx(shape, coM.pad, coM.natW * coStr.x, coM.natH * coStr.y);
+            if (coPad > coM.pad) {
+              coM.natW += 2 * (coPad - coM.pad);
+              coM.natH += 2 * (coPad - coM.pad);
+              coM.pad = coPad;
+            }
             if (!g.text_box) g.text_box = Object.assign({}, box);
             box = g.text_box;
             box.w = coM.natW * coStr.x / coScale;
@@ -13248,6 +13268,9 @@
             bx = cobox.x; by = cobox.y;
             bw = coM.natW * coStr.x; bh = coM.natH * coStr.y;
             self._pointDraw(shape, coM, bx, by, coStr, coRect, coText, null);
+            // The plate and outline are a frame with the callout's corners —
+            // sharp unless chosen, so the plate meets the underline square.
+            self._drawTextboxFrame(shape, el, bx, by, bw, bh);
             shape._renderedBox = { x: box.x, y: box.y, w: box.w, h: box.h };
           } else {
             if (coRect) {
@@ -21733,6 +21756,13 @@
       var style = Object.assign({}, shape.style || {}, { point: true });
       if (shown.font) style.font_size = shown.font;
       else if (!this._hasPinnedFontSize(shape)) style.font_size = this._defaultLabelFontSize() / this._inkScale();
+      // A callout being made takes the remembered corners (sharp unless
+      // chosen); one from before keeps none, i.e. sharp.
+      if (!(shape.metadata && shape.metadata.title) && style.corner == null) {
+        var cDef = this._textboxCornerDefaults("callout");
+        style.corner = cDef.corner;
+        style.corner_size = cDef.size > 0 ? cDef.size / this._inkScale() : 0;
+      }
       shape.style = style;
       // A box only ever stored as the legacy `text_at` point gets its box.
       if (shape.geometry && !shape.geometry.text_box) {
@@ -21981,7 +22011,7 @@
         if (fixedBox) {
           // Sharp corners unless the user has chosen otherwise (the corner
           // controls with the tool armed, or tuning the last fresh box).
-          var cornerDef = self._textboxCornerDefaults();
+          var cornerDef = self._textboxCornerDefaults("text");
           shape.style = Object.assign({}, shape.style || {}, {
             box: "fixed",
             font_size: self._defaultLabelFontSize() / self._inkScale(),

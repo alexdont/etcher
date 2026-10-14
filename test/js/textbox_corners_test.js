@@ -101,4 +101,15 @@ assert.ok(body("_startTextEdit").includes("if (point || fixedEd) input.setSelect
   assert.ok(body("_repaintHandles").includes("(this.midpointHandles || []).forEach"), "side grabbers included");
 }
 
+// Callouts take the same corners: a frame, padding that grows with them,
+// the panel's controls, and their own remembered default.
+{
+  const calloutCase = src.slice(src.indexOf('        case "callout": {\n          // shape.el is a <g>'));
+  assert.ok(calloutCase.includes("var coPad = self._textboxPadPx(shape, coM.pad, coM.natW * coStr.x, coM.natH * coStr.y);"));
+  assert.ok(calloutCase.includes("self._drawTextboxFrame(shape, el, bx, by, bw, bh);"));
+  assert.ok(body("_cornerTargetShapes").includes("self._isPointCallout(s)"));
+  assert.ok(body("_cornerPrefKey").includes('kind === "callout" ? "callout_corner" : "textbox_corner"'));
+  assert.ok(body("_ensurePointCallout").includes('this._textboxCornerDefaults("callout")'), "new callouts are sharp unless chosen");
+}
+
 console.log("text box corners: all checks passed");

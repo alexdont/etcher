@@ -74,6 +74,12 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   (the text re-wraps). Double-clicking a text box opens it with the caret
   at its start instead of all its text selected, so arrows or a click
   move the caret and typing adds rather than replaces.
+- **Callouts get the same corners.** A callout's background was a rounded
+  plate whose curve never met its underline. It is now a frame with the
+  text box's corner types and Corners slider — sharp by default, so the
+  plate sits square on the underline — padded in as the corners need,
+  with its own remembered default (the controls show with the callout
+  tool armed). Callouts made before this show sharp.
 - **Handles follow a colour change, side grabbers included.** Recolouring a
   shape (or a text box's text) repainted its corner dots but not its side
   grabbers, which kept the colour the shape was drawn in — a text box

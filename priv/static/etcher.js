@@ -21004,9 +21004,14 @@
       }
       var empty = lines.length === 1 && !lines[0];
       // Unstretched size in container px. Lines step 1.1em, as everywhere;
-      // an empty text keeps one line's room so the caret has a home.
+      // an empty text keeps one line's room so the caret has a home. The
+      // box runs from the top of the tallest letters to the bottom of the
+      // descenders (y, p, g), with the same pad all round, so the words
+      // sit centred in it and nothing pokes out of a background.
+      var met = self._pointTextMetrics(family);
       var natW = Math.max(widest, empty ? fontPx * 0.5 : 0) + pad * 2;
-      var natH = fontPx + Math.max(0, lines.length - 1) * fontPx * 1.1 + pad * 2;
+      var natH = (met.asc + met.desc) * fontPx +
+        Math.max(0, lines.length - 1) * fontPx * 1.1 + pad * 2;
       // The geometry IS the box, always: written here so whatever reads it
       // (hit-tests, handles, the turn below, the server) agrees with what
       // is drawn.
@@ -21030,7 +21035,7 @@
       }
       if (ttext) {
         ttext.setAttribute("x", tx + pad);
-        ttext.setAttribute("y", ty + pad);
+        ttext.setAttribute("y", ty + pad + met.asc * fontPx);
         ttext.setAttribute("font-size", fontPx);
         ttext.setAttribute("font-family", family);
         ttext.setAttribute("font-weight", "500");
@@ -21043,7 +21048,7 @@
         while (ttext.firstChild) ttext.removeChild(ttext.firstChild);
         if (!empty) {
           lines.forEach(function(line, idx) {
-            var tspan = svgEl("tspan", { x: tx + pad, dy: idx === 0 ? "1em" : "1.1em" });
+            var tspan = svgEl("tspan", { x: tx + pad, dy: idx === 0 ? "0" : "1.1em" });
             tspan.textContent = line || "\u00A0";
             ttext.appendChild(tspan);
           });
@@ -21051,7 +21056,7 @@
       }
       shape._renderedBox = { x: g.x, y: g.y, w: g.w, h: g.h };
       shape._pointLayout = {
-        tx: tx, ty: ty, pad: pad, fontPx: fontPx,
+        tx: tx, ty: ty, pad: pad, fontPx: fontPx, met: met,
         sx: str.x, sy: str.y, natW: natW, natH: natH,
         turn: el.getAttribute("transform")
       };
@@ -21059,6 +21064,31 @@
       // panel edit all come through here.
       var ed = self._textEditor;
       if (ed && ed.shape === shape && ed.point && ed.fit) ed.fit();
+    },
+
+    // A font's reach as fractions of its size, for point text's box: `asc`
+    // and `desc` are how far the letters really go above and below the
+    // baseline (brackets and descenders included), `fontAsc`/`fontDesc` the
+    // font's own line metrics, which place a textarea's baseline. Measured
+    // once per family; typical values stand in where canvas can't say.
+    _pointTextMetrics: function(family) {
+      var cache = this._pointMetricsCache || (this._pointMetricsCache = {});
+      if (cache[family]) return cache[family];
+      var m = { asc: 0.76, desc: 0.24, fontAsc: 0.93, fontDesc: 0.24 };
+      try {
+        if (!this._measureCanvas) this._measureCanvas = document.createElement("canvas");
+        var ctx = this._measureCanvas.getContext("2d");
+        ctx.font = "500 " + TEXT_MEASURE_FONT_PX + "px " + family;
+        var up = ctx.measureText("Hdlbk(|");
+        var down = ctx.measureText("gjpqy(|");
+        var n = TEXT_MEASURE_FONT_PX;
+        if (up.actualBoundingBoxAscent > 0) m.asc = up.actualBoundingBoxAscent / n;
+        if (down.actualBoundingBoxDescent > 0) m.desc = down.actualBoundingBoxDescent / n;
+        if (up.fontBoundingBoxAscent > 0) m.fontAsc = up.fontBoundingBoxAscent / n;
+        if (up.fontBoundingBoxDescent > 0) m.fontDesc = up.fontBoundingBoxDescent / n;
+      } catch (_) {}
+      cache[family] = m;
+      return m;
     },
 
     // Text from before point text — wrapped at its box, its size often
@@ -22102,6 +22132,13 @@
           else fo.removeAttribute("transform");
           input.style.font = "500 " + edPx + "px " + edFamily;
           input.style.padding = (L.pad / k) + "px";
+          // The textarea puts its first baseline half a leading plus the
+          // font's ascent down; the render puts it at the letters' own top.
+          // The top pad makes up the difference so the caret sits on them.
+          if (L.met) {
+            var edBase = 0.55 + (L.met.fontAsc - L.met.fontDesc) / 2;
+            input.style.paddingTop = Math.max(0, L.pad / k + edPx * (L.met.asc - edBase)) + "px";
+          }
           input.style.width = (roomW / k) + "px";
           input.style.height = (roomH / k) + "px";
           input.style.transformOrigin = "0 0";

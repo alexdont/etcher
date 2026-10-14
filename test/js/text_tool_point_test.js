@@ -76,6 +76,8 @@ function board(over) {
     _pointStretch: pointStretch,
     _pointTextLines: pointTextLines,
     _pointHandleBox: pointHandleBox,
+    // Letters reach 0.75em up and 0.25em down: 1em in all, for easy sums.
+    _pointTextMetrics: () => ({ asc: 0.75, desc: 0.25, fontAsc: 0.95, fontDesc: 0.25 }),
     _textEditor: null
   }, over || {});
 }
@@ -111,6 +113,27 @@ assert.strictEqual(isPointText.call(board(), { kind: "callout", style: { point: 
   assert.deepStrictEqual([shape.geometry.w, shape.geometry.h], [(widest + 8) / 2, 50 / 2],
     "and the geometry IS that box, in image units");
   assert.deepStrictEqual(shape._renderedBox, { x: 5, y: 7, w: shape.geometry.w, h: shape.geometry.h });
+  assert.strictEqual(Number(ttext.getAttribute("y")), 14 + 4 + 15,
+    "first baseline at the letters' top (pad + ascent) — the descenders end a pad above the bottom");
+  assert.deepStrictEqual(ttext.children.map((t) => t.getAttribute("dy")), ["0", "1.1em"]);
+}
+
+{
+  // The box is the letters' reach, whatever it is: 0.9em up, 0.3em down.
+  const shape = { kind: "text", style: { point: true, font_size: 10 }, metadata: { title: "gyp" },
+    geometry: { x: 0, y: 0 } };
+  const r = { trect: fakeEl("rect"), ttext: fakeEl("text") };
+  renderPointText.call(board({ _pointTextMetrics: () => ({ asc: 0.9, desc: 0.3, fontAsc: 1, fontDesc: 0.3 }) }),
+    shape, fakeEl("g"), shape.geometry, r.trect, r.ttext);
+  const top = 0, base = Number(r.ttext.getAttribute("y")), bottom = Number(r.trect.getAttribute("height"));
+  assert.strictEqual(base - 18 - top, 4, "pad above the tallest letters");
+  assert.strictEqual(Math.round((bottom - (base + 6)) * 1000) / 1000, 4, "the same pad below the descenders");
+  // Measured per family; canvas-less, typical values stand in.
+  const metrics = make("_pointTextMetrics");
+  const ctxM = {};
+  const m = metrics.call(ctxM, "x-family");
+  assert.ok(m.asc > 0.5 && m.desc > 0.1, "a sensible fallback");
+  assert.strictEqual(metrics.call(ctxM, "x-family"), m, "cached");
 }
 
 // ── while typing, the draft is what shows ─────────────────────────────────

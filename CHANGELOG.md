@@ -13,7 +13,9 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   centred on the click (never smaller than 12 px on screen); a drag sets
   the size from the drag's height. Lines are the author's — Shift+Enter
   breaks one — and nothing ever wraps them; spaces are kept; the box is
-  always exactly the text. The text stays selected while it is typed into,
+  always exactly the text, from the top of its tallest letters to the
+  bottom of its descenders with an even pad all round, so a background
+  holds every letter. The text stays selected while it is typed into,
   with its handles up — black, whatever the text's colour; the corner dots
   always, a side's grabber when the cursor comes near that side — and its
   box a thin black dash, selected or typed into, as Affinity draws it. Every handle scales it evenly: a

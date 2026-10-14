@@ -317,7 +317,7 @@ function pull(handle, pt, freeform) {
   assert.deepStrictEqual(handlePositions.call(ctx, shape),
     [{ x: 10, y: 20 }, { x: 110, y: 20 }, { x: 110, y: 50 }, { x: 10, y: 50 }],
     "four corners on the text's own box, no opt-in needed");
-  assert.ok(/\} else if \(shape\.kind === "rectangle" \|\| self\._isPointFrame\(shape\)\) \{\s*self\._renderRectEdgeHandles\(shape\);/.test(src),
+  assert.ok(/\} else if \(shape\.kind === "rectangle" \|\| self\._isPointFrame\(shape\) \|\|\s*self\._textboxFixed\(shape\)\) \{[\s\S]{0,160}self\._renderRectEdgeHandles\(shape\);/.test(src),
     "and the four edge grabbers rectangles have");
   assert.ok(src.includes('if (point) rect.classList.add("is-point");'), "dressed black and white");
   assert.ok(!/\.etcher-handle-edge\.is-point \{[^}]*opacity: 1/.test(src) &&
@@ -343,7 +343,7 @@ function pull(handle, pt, freeform) {
     "a black dashed box when selected and while it is being typed into");
   assert.ok(body("_renderPointText").includes('el.classList.add("is-point")'));
   assert.ok(body("_startTextEdit").includes('typingHost.classList.add("is-typing")'));
-  assert.ok(/if \(point\) input\.setSelectionRange\(0, 0\);\s*else input\.select\(\);/.test(body("_startTextEdit")),
+  assert.ok(/if \(point \|\| fixedEd\) input\.setSelectionRange\(0, 0\);\s*else input\.select\(\);/.test(body("_startTextEdit")),
     "opened with a caret at the start, not the text selected");
   assert.ok(body("_endTextEdit").includes('ed.shape.el.classList.remove("is-typing")'));
 }

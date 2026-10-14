@@ -83,4 +83,11 @@ assert.ok(/if \(!\(shape\.style && shape\.style\.corner_size > 0\)\) \{\s*patch\
 assert.ok(src.includes('["sharp"].concat(TEXTBOX_CORNERS).map(function(type) {'), "Sharp is a button of its own, first");
 assert.ok(body("_syncCornerRows").includes('var shown = px > 0 ? type : "sharp";'), "and lights whenever there are no corners");
 
+// Its sides pull like a rectangle's, and double-click opens it with the
+// caret at the start rather than everything selected.
+assert.ok(/self\._textboxFixed\(shape\)\) \{[\s\S]{0,160}self\._renderRectEdgeHandles\(shape\);/.test(src), "side grabbers");
+assert.ok(body("_midpointPositionsForShape").includes('if (shape.kind === "rectangle" || this._textboxFixed(shape)) {'),
+  "placed on its sides and lit as the cursor nears");
+assert.ok(body("_startTextEdit").includes("if (point || fixedEd) input.setSelectionRange(0, 0);"), "caret at the start");
+
 console.log("text box corners: all checks passed");

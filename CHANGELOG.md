@@ -68,6 +68,12 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   type on a sharp box gives it a small reach (12) so the pick shows.
   Sharp is a button of its own, first in the row, lit whenever a box
   has no corners; picking it sets the reach to none.
+- **Text boxes have side grabbers, and double-click puts the caret at the
+  start.** Each side of a selected text box has a grabber, like a
+  rectangle's, that comes up as the cursor nears and moves just that wall
+  (the text re-wraps). Double-clicking a text box opens it with the caret
+  at its start instead of all its text selected, so arrows or a click
+  move the caret and typing adds rather than replaces.
 - **The text tool's icon is a typeset T** (a bar with dropped ends on a
   footed stem) instead of two round-capped strokes that read as ⊤.
 

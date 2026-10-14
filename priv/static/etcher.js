@@ -23134,9 +23134,11 @@
       // Point text opens with a caret at the start of the text, not the text
       // selected: it reads as "you are in the text now", and a keystroke
       // adds to it instead of wiping it. Other labels keep select-all.
+      // A text box opens the same way: caret at the start, arrows or a
+      // click to move it, nothing selected to be typed over.
       var placeCaret = function() {
         input.focus();
-        if (point) input.setSelectionRange(0, 0);
+        if (point || fixedEd) input.setSelectionRange(0, 0);
         else input.select();
       };
       try { placeCaret(); } catch (_) {}
@@ -24324,7 +24326,10 @@
       if (opts.interactive) {
         if (shape.kind === "polygon" || shape.kind === "arrow") {
           self._renderMidpointHandles(shape);
-        } else if (shape.kind === "rectangle" || self._isPointFrame(shape)) {
+        } else if (shape.kind === "rectangle" || self._isPointFrame(shape) ||
+                   self._textboxFixed(shape)) {
+          // A text box's sides pull like a rectangle's: one wall moves,
+          // the text re-wraps inside.
           self._renderRectEdgeHandles(shape);
         }
       }
@@ -24379,7 +24384,7 @@
       this._removeMidpointHandles();
       // `part` "label": a shape's point label in title-edit mode.
       var point = part === "label" || this._isPointFrame(shape);
-      if (!shape || (shape.kind !== "rectangle" && !point)) return;
+      if (!shape || (shape.kind !== "rectangle" && !point && !this._textboxFixed(shape))) return;
       var g = point ? this._pointHandleBox(shape, part) : shape.geometry;
       var positions = this._rectEdgeMidpoints(g);
       var self = this;
@@ -24600,7 +24605,7 @@
         }
         return out;
       }
-      if (shape.kind === "rectangle") {
+      if (shape.kind === "rectangle" || this._textboxFixed(shape)) {
         return this._rectEdgeMidpoints(shape.geometry);
       }
       if (this._isPointFrame(shape)) {

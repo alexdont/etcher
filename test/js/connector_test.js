@@ -196,7 +196,7 @@ const midpointPositions = lift("_midpointPositionsForShape", "shape");
 
 // The layer method dispatches by kind and reaches back for `_arrowPath`, so
 // the stand-in has to carry it.
-const midLayer = { _arrowPath: arrowPath, _crSample: crSample, _arrowSegMidImage: arrowSegMid, _isPointText: () => false, _isPointFrame: () => false };
+const midLayer = { _arrowPath: arrowPath, _crSample: crSample, _arrowSegMidImage: arrowSegMid, _isPointText: () => false, _isPointFrame: () => false, _textboxFixed: () => false };
 
 // One ghost per segment — an arrow is an open path, so a straight one has a
 // single midpoint and there is no wrap from head back round to tail. (A
@@ -239,7 +239,7 @@ assert.strictEqual(
 // segment's middle either way, so it can't wander onto the bend handles at
 // either end and cover the points the user is reaching for.
 const segmentsFor = lift("_midpointSegmentsForShape", "shape");
-const segLayer2 = { _arrowPath: arrowPath, _crSample: crSample, _arrowSegMidImage: arrowSegMid, _isPointText: () => false, _isPointFrame: () => false };
+const segLayer2 = { _arrowPath: arrowPath, _crSample: crSample, _arrowSegMidImage: arrowSegMid, _isPointText: () => false, _isPointFrame: () => false, _textboxFixed: () => false };
 
 assert.strictEqual(
   segmentsFor.call(segLayer2, { kind: "arrow", geometry: routed }).length,

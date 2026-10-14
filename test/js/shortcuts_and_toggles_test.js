@@ -100,15 +100,10 @@ assert.strictEqual(snapOn.call(snapCtx(false, "true")), false,
 // connector toggles.
 assert.ok(src.includes('self._setPref("snap", !self._snapOn());'),
   "the snap toggle no longer writes the inverse of the resolved state");
-{
-  const conAt = src.indexOf("self.connectorsBtn = self._makePopupAction");
-  const snapAt = src.indexOf("self.snapBtn = self._makePopupAction");
-  // The view-toggle group has grown (label dots, ink-zoom anchoring sit
-  // between them now) — what matters is that snap stays in the same group
-  // after connectors, not a byte distance.
-  assert.ok(conAt !== -1 && snapAt !== -1 && snapAt > conAt && snapAt - conAt < 2000,
-    "the snap toggle must sit in the connector toggle's group in the customise menu");
-}
+// The connector-anchors toggle is gone (the arrow tool connects shapes);
+// the snap toggle stays in the customise menu.
+assert.ok(src.includes("self.snapBtn = self._makePopupAction"), "the snap toggle is in the customise menu");
+assert.ok(!src.includes("self.connectorsBtn = self._makePopupAction"), "and the connector toggle is not");
 
 // ── the drag respects the toggle ────────────────────────────────────────────
 

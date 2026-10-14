@@ -6669,13 +6669,8 @@
       // could never win there, and a switch that can't switch reads as
       // broken. `self.connectorsBtn` stays undefined; the sync block is
       // already null-safe.
-      if (!self._connectorsHardOff()) {
-        self.connectorsBtn = self._makePopupAction(
-          ICONS.connectors, self._connectorsTitle(),
-          function() { self._setPref("connectors", !self._connectorsOn()); }
-        );
-        popup.appendChild(self.connectorsBtn);
-      }
+      // (The connector-anchors toggle that sat here is gone: the arrow tool
+      // connects shapes itself.)
 
       self.titleHandlesBtn = self._makePopupAction(
         ICONS.titleHandles, self._titleHandlesTitle(),
@@ -15979,11 +15974,11 @@
     // connectors — everywhere else they are eight dots that appear under
     // the cursor on every shape you pass over. (They previously defaulted
     // on, which is exactly how that felt.)
+    // Connecting is the arrow tool's job now — it snaps to a shape's anchors
+    // as it draws — so there is no user toggle for it any more; only a host
+    // that has no use for anchors at all turns it off.
     _connectorsOn: function() {
-      if (this._connectorsHardOff()) return false;
-      var pref = this._getPref("connectors");
-      if (pref === true || pref === false) return pref;
-      return !!(this.el && this.el.dataset && this.el.dataset.connectors === "true");
+      return !this._connectorsHardOff();
     },
 
     // `connectors={:off}` → `data-connectors="off"`: the host declares the
@@ -16657,7 +16652,11 @@
       }
 
       if (draft === this.draftCallout) this._commitCallout(pt, true);
-      else this._commitShaftDraft(this._shaftGeometry(anchor, pt));
+      else {
+        // The placing click settles an arrow's head, snap included.
+        if (draft.kind === "arrow") this._updateDimension(pt);
+        this._commitShaftDraft(this._shaftGeometry(anchor, pt));
+      }
       return true;
     },
 
@@ -16677,6 +16676,8 @@
           this._polygonHover(this._toImage(e));
         } else if (this.activeTool === "callout" && this.draftCallout) {
           this._calloutHover(this._toImage(e));
+        } else if (this.activeTool === "arrow") {
+          this._arrowToolHover(e);
         } else if (this.activeTool === "eraser" && this._erasingActive) {
           this._eraserMove(this._toImage(e));
         } else if (this.activeTool === "eraser") {
@@ -18819,8 +18820,11 @@
     // the four side midpoints too. Two stacked hit-targets per position is
     // a coin toss between resizing and connecting. Connectors are the
     // hover affordance, handles are the selected one.
+    // The cursor's hover dots: retired. Shapes are connected with the arrow
+    // tool, which shows a shape's anchors as it nears it (`_arrowToolHover`,
+    // `_updateDimension`); the cursor only selects and moves.
     _connectorsAvailableFor: function(shape) {
-      return !!shape &&
+      return false && !!shape &&
         // Resolved through `_connectorsOn` — user pref, else host default,
         // else off.
         this._connectorsOn() &&
@@ -20765,16 +20769,32 @@
     },
 
     _updateDimension: function(pt) {
-      var a = this.draftState.anchor;
-      if (this.draftState.shift) pt = this._constrainShaftPoint(a, pt);
+      var ds = this.draftState;
+      var a = ds.anchor;
+      // An arrow's head snaps to the anchor of whatever shape it nears —
+      // the same search, dots and reach as dragging an arrow's end — and is
+      // tied there; Shift's angle lock applies only to a free head.
+      var headSnap = null;
+      if (ds.kind === "arrow" && this._connectorsOn()) {
+        var state = this._arrowSnapState(pt, null);
+        if (!ds.leftSource) {
+          if (state.candidate && state.candidate.uuid === ds.sourceUuid) state = { candidate: null, snap: null };
+          else ds.leftSource = true;
+        }
+        this._paintTargetDots(state);
+        headSnap = state.snap;
+      }
+      if (headSnap) pt = { x: headSnap.x, y: headSnap.y };
+      else if (ds.shift) pt = this._constrainShaftPoint(a, pt);
       // Merged rather than replaced: an arrow draft carries `points` /
       // `from` / `to` as well, and rebuilding the object from a and b alone
       // would drop them — leaving the render to read a routed path that no
       // longer exists.
-      this.draftState.geometry = Object.assign({}, this.draftState.geometry, {
-        a: [a.x, a.y],
-        b: [pt.x, pt.y]
-      });
+      var patch = { a: [a.x, a.y], b: [pt.x, pt.y] };
+      if (ds.kind === "arrow") {
+        patch.to = headSnap ? { uuid: headSnap.shape.uuid, anchor: headSnap.anchor } : null;
+      }
+      ds.geometry = Object.assign({}, ds.geometry, patch);
       // No drag bookkeeping — click vs drag is decided once, on
       // pointerup, by `_isClickGesture` in `_commitDimension`.
       this._renderShape(this.draftState);
@@ -20795,7 +20815,9 @@
         this.draftState.armed = true;
         return;
       }
-      if (this.draftState.shift) pt = this._constrainShaftPoint(a, pt);
+      // An arrow settles its head (snap included) at the release point.
+      if (this.draftState.kind === "arrow") this._updateDimension(pt);
+      else if (this.draftState.shift) pt = this._constrainShaftPoint(a, pt);
       this._commitShaftDraft(this._shaftGeometry(a, pt));
     },
 
@@ -20804,7 +20826,11 @@
     // none and comes out as the plain pair it always did.
     _shaftGeometry: function(a, b) {
       var base = (this.draftState && this.draftState.geometry) || {};
-      return Object.assign({}, base, { a: [a.x, a.y], b: [b.x, b.y] });
+      var out = Object.assign({}, base, { a: [a.x, a.y], b: [b.x, b.y] });
+      // A tied end sits on its anchor, not where the pointer let go.
+      if (base.from && base.a) out.a = base.a.slice();
+      if (base.to && base.b) out.b = base.b.slice();
+      return out;
     },
 
     // Finalize the dimension / line draft with the given endpoints.
@@ -20820,6 +20846,7 @@
       var el = this.draftState.el;
       var kind = this.draftState.kind;
       el.classList.remove("is-draft");
+      if (kind === "arrow") this._removeTargetDots();
       // The dimension drops straight into its label editor on release
       // (head dev's call, restoring the prompt his earlier call removed —
       // with the half that mattered kept): the editor opens focused for
@@ -20911,7 +20938,20 @@
     // one; an arrow is finished the moment it points at something, and a
     // label is available the way it is on every other shape — by
     // double-clicking it.
+    // The arrow tool, before a press: the shape the pointer is near shows its
+    // anchors, the nearest one lit when close enough to take the tail.
+    _arrowToolHover: function(e) {
+      if (!this._connectorsOn()) return;
+      var pt;
+      try { pt = this._toImage(e); } catch (_) { return; }
+      this._paintTargetDots(this._arrowSnapState(pt, null));
+    },
+
     _startArrow: function(pt, e) {
+      // Pressed on (or near) a shape's anchor: the tail is tied there, and
+      // follows the shape from now on. Anywhere else it starts in the air.
+      var tailSnap = this._connectorsOn() ? this._arrowSnapState(pt, null).snap : null;
+      if (tailSnap) pt = { x: tailSnap.x, y: tailSnap.y };
       var el = this._makeArrowEl();
       el.classList.add("etcher-shape", "is-draft");
       var style = this._styleForNewShape("arrow");
@@ -20925,8 +20965,15 @@
           // Empty rather than absent: the render, the bbox and the hit test
           // all read the routed path, and a free arrow is the no-bends case
           // of one rather than a different shape.
-          points: [], from: null, to: null
+          points: [],
+          from: tailSnap ? { uuid: tailSnap.shape.uuid, anchor: tailSnap.anchor } : null,
+          to: null
         },
+        // The source shape is under the pointer as the arrow is born; its
+        // anchors only become targets once the pointer has left it (see
+        // `_updateDimension`), or the release would tie the head right back.
+        sourceUuid: tailSnap ? tailSnap.shape.uuid : null,
+        leftSource: !tailSnap,
         el: el,
         style: style
       };

@@ -502,22 +502,15 @@ defmodule Etcher.Layer do
   attr(:connectors, :any,
     default: false,
     doc: """
-    Host policy for the connector anchors — the eight bindable dots
-    that appear on shape hover for drawing arrows between shapes.
+    Host policy for connector anchors — the eight points on a shape an
+    arrow's end can be tied to. The arrow tool shows a shape's anchors as
+    it nears it and snaps its ends to them (dragging an arrow's end does
+    too); a tied end follows the shape. There is no user toggle.
 
-      * `false` (default) — off, but the user's own toggle (persisted
-        through the prefs mechanism) wins in either direction. They are
-        an affordance for boards where people draw connectors, and
-        everywhere else they are eight dots that appear under the
-        cursor on every shape passed over.
-      * `true` — on by default; the user's toggle still wins.
-      * `:off` — hard off: the surface has no use for anchors at all,
-        so the saved preference is ignored and the toolbar toggle is
-        hidden. Use this where connectors can't be drawn anyway (e.g.
-        a viewer that doesn't offer the arrow tool) — the preference
-        is shared across every Etcher surface in the browser, so
-        without the hard form a toggle flipped on a board follows the
-        user onto surfaces where the dots point at nothing.
+      * `false` / `true` (default `false`) — anchors on. (`true` is kept
+        for compatibility; both mean the same now.)
+      * `:off` — hard off: the surface has no use for anchors at all, and
+        arrows are always drawn free.
     """
   )
 

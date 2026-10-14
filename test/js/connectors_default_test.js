@@ -1,11 +1,7 @@
-// Pins who decides whether connector anchors are on.
-//
-// Three layers, most specific wins: the user's saved preference (a toggle
-// they touched is their answer, in either direction), else the host's
-// declared default (`connectors={true}` → `data-connectors="true"`), else
-// OFF. They used to default ON — the anchors are an affordance for boards
-// where people draw connectors, and everywhere else they were eight dots
-// that appeared under the cursor on every shape passed over.
+// Pins how shapes get connected now: by the ARROW TOOL, which snaps its ends
+// to a shape's anchors as it draws. The cursor's hover dots and the ⋯
+// connector toggle are retired; only a host that has no use for anchors at
+// all (`connectors={:off}` → `data-connectors="off"`) turns snapping off.
 //
 //   node test/js/connectors_default_test.js
 
@@ -13,104 +9,40 @@ const fs = require("fs");
 const path = require("path");
 const assert = require("assert");
 
-const SOURCE = path.join(__dirname, "..", "..", "priv", "static", "etcher.js");
-const src = fs.readFileSync(SOURCE, "utf8");
-
-function extract(name) {
-  const needle = `    ${name}: function`;
-  const start = src.indexOf(needle);
-  assert.notStrictEqual(start, -1, `could not find ${name}`);
+const src = fs.readFileSync(path.join(__dirname, "..", "..", "priv", "static", "etcher.js"), "utf8");
+function body(name) {
+  const start = src.indexOf(`    ${name}: function(`);
+  assert.ok(start >= 0, `${name} not found`);
   const end = src.indexOf("\n    },", start);
-  assert.notStrictEqual(end, -1, `could not find the end of ${name}`);
-  return eval("(" + src.slice(start, end + "\n    }".length)
-    .replace(`${name}: function`, "function") + ")");
+  return "(function" + src.slice(src.indexOf("(", start), end + "\n    }".length) + ")";
 }
+const connectorsOn = eval(body("_connectorsOn"));
+const hardOff = eval(body("_connectorsHardOff"));
+const ctx = (attr) => ({ el: { dataset: attr === undefined ? {} : { connectors: attr } },
+  _connectorsHardOff: hardOff, _getPref: () => false });
 
-const connectorsOn = extract("_connectorsOn");
-const hardOff = extract("_connectorsHardOff");
-const availableFor = extract("_connectorsAvailableFor");
+assert.strictEqual(connectorsOn.call(ctx()), true, "on, with no setting to turn off");
+assert.strictEqual(connectorsOn.call(ctx("off")), false, "a host with no use for anchors turns them off");
+assert.ok(!src.includes('self._setPref("connectors"'), "no ⋯ toggle writes a connectors preference");
+assert.ok(body("_connectorsAvailableFor").includes("return false &&"), "the cursor's hover dots are retired");
 
-function ctx(pref, hostAttr) {
-  return {
-    _getPref: (name) => (name === "connectors" ? pref : undefined),
-    el: { dataset: hostAttr === undefined ? {} : { connectors: hostAttr } },
-    _connectorsOn: connectorsOn,
-    _connectorsHardOff: hardOff
-  };
-}
+// The arrow tool: dots on hover, the tail tied at a press near an anchor,
+// the head snapping while it is drawn, and tied ends kept at commit.
+assert.ok(src.includes('} else if (this.activeTool === "arrow") {\n          this._arrowToolHover(e);'));
+assert.ok(body("_arrowToolHover").includes("this._paintTargetDots(this._arrowSnapState(pt, null));"));
+assert.ok(body("_startArrow").includes("from: tailSnap ? { uuid: tailSnap.shape.uuid, anchor: tailSnap.anchor } : null,"));
+const upd = body("_updateDimension");
+assert.ok(upd.includes("patch.to = headSnap ? { uuid: headSnap.shape.uuid, anchor: headSnap.anchor } : null;"));
+assert.ok(upd.includes("if (state.candidate && state.candidate.uuid === ds.sourceUuid) state = { candidate: null, snap: null };"),
+  "the source shape is no target until the pointer has left it");
 
-// ── the three-layer resolution ──────────────────────────────────────────────
-
-assert.strictEqual(connectorsOn.call(ctx(undefined, undefined)), false,
-  "no preference and no host default must mean OFF — this is the flipped default");
-
-assert.strictEqual(connectorsOn.call(ctx(undefined, "true")), true,
-  "the host's connectors={true} default is ignored");
-
-assert.strictEqual(connectorsOn.call(ctx(true, undefined)), true,
-  "the user's saved 'on' (usermeta) is ignored");
-
-assert.strictEqual(connectorsOn.call(ctx(false, "true")), false,
-  "the user turned them OFF but the host default overrode it — the user's toggle must win in either direction");
-
-// A stray non-boolean in the prefs blob falls through to the host layer
-// rather than counting as an answer.
-assert.strictEqual(connectorsOn.call(ctx("yes", undefined)), false,
-  "a malformed pref value should fall through the layers, not enable anchors");
-
-// ── the hard form: connectors={:off} beats even the user's pref ─────────────
-
-// The pref is shared across every Etcher surface in the browser, so a toggle
-// flipped on a board used to follow the user into surfaces where the anchors
-// point at nothing (no arrow tool offered). "off" is the host saying the
-// surface has no use for anchors at all — the one layer above the user.
-assert.strictEqual(connectorsOn.call(ctx(true, "off")), false,
-  "data-connectors=\"off\" must beat a saved pref of true — that pref leaking across surfaces is the bug");
-
-assert.strictEqual(connectorsOn.call(ctx(undefined, "off")), false,
-  "data-connectors=\"off\" with no pref must be off");
-
-// And the toggle is hidden there — a switch that can't switch reads as
-// broken, not as policy.
-assert.ok(src.includes("if (!self._connectorsHardOff()) {"),
-  "the connectors toggle is still built on hard-off surfaces");
-
-// ── the hover gate consults the resolution ──────────────────────────────────
-
-// Everything else about this context is maximally permissive, so the only
-// thing standing between the cursor and eight dots is the resolver.
-function permissive(on) {
-  return Object.assign(ctx(on ? true : undefined, undefined), {
-    annotationMode: true,
-    activeTool: null,
-    editingShape: null,
-    selectedShapes: null,
-    _arrowDrag: null
-  });
-}
-const shape = { kind: "rectangle", readonly: false };
-
-assert.strictEqual(availableFor.call(permissive(false), shape), false,
-  "_connectorsAvailableFor shows anchors while they are resolved OFF");
-assert.strictEqual(availableFor.call(permissive(true), shape), true,
-  "_connectorsAvailableFor never shows anchors — the gate broke in the other direction");
-
-// ── the toggle flips the RESOLVED state ─────────────────────────────────────
-
-// Toggling from the raw pref (the old `=== false` dance) breaks the first
-// press when no pref is stored: resolved OFF, raw undefined, and the toggle
-// would write `false` — a no-op the user reads as a dead button.
-assert.ok(src.includes('self._setPref("connectors", !self._connectorsOn());'),
-  "the toggle no longer writes the inverse of the resolved state");
-
-// ── nothing bypasses the resolver ───────────────────────────────────────────
-
-// Every consumer must go through `_connectorsOn`; a site reading the pref
-// directly resurrects the old always-on default for whatever it gates.
 {
-  const raw = src.split('_getPref("connectors")').length - 1;
-  assert.strictEqual(raw, 1,
-    `expected exactly one raw read of the connectors pref (inside _connectorsOn), found ${raw}`);
+  const shaftGeometry = eval(body("_shaftGeometry"));
+  const self = { draftState: { geometry: { a: [1, 2], b: [9, 9], from: { uuid: "s", anchor: "e" }, to: { uuid: "t", anchor: "w" }, points: [] } } };
+  const g = shaftGeometry.call(self, { x: 5, y: 5 }, { x: 7, y: 7 });
+  assert.deepStrictEqual([g.a, g.b], [[1, 2], [9, 9]], "tied ends stay on their anchors");
+  const free = shaftGeometry.call({ draftState: { geometry: { a: [0, 0], b: [0, 0], from: null, to: null } } }, { x: 5, y: 5 }, { x: 7, y: 7 });
+  assert.deepStrictEqual([free.a, free.b], [[5, 5], [7, 7]], "free ends go where the pointer did");
 }
 
-console.log("connectors default: all checks passed");
+console.log("connectors (arrow tool): all checks passed");

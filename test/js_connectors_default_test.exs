@@ -1,23 +1,15 @@
 defmodule Etcher.JsConnectorsDefaultTest do
   @moduledoc """
-  Runs `test/js/connectors_default_test.js`, which pins who decides whether
-  connector anchors are on.
-
-  Three layers, most specific wins: the user's saved preference (either
-  direction), else the host's `connectors={true}` default, else OFF. They
-  used to default ON — an affordance for boards where people draw
-  connectors that, everywhere else, was eight dots appearing under the
-  cursor on every shape passed over.
-
-  Shelled out to node for the same reason as the other JS checks: it keeps
-  the coverage inside `mix test` without adding a JS toolchain. Skipped when
-  node isn't on PATH.
+  Runs `test/js/connectors_default_test.js`: shapes are connected by the
+  arrow tool, which snaps its ends to anchors as it draws; the cursor's
+  hover dots and the connector toggle are retired, and only a host's
+  `connectors={:off}` turns snapping off. Skipped when node is absent.
   """
   use ExUnit.Case, async: true
 
   @script Path.expand("js/connectors_default_test.js", __DIR__)
 
-  test "connector anchors resolve user pref > host default > off" do
+  test "the arrow tool connects shapes; only a host turns anchors off" do
     case System.find_executable("node") do
       nil ->
         IO.puts("\n[skip] node not found — skipping etcher.js connectors checks")

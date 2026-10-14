@@ -119,6 +119,16 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   rectangle's strip to ~880 px. Escape with a pop-up open now closes just
   the pop-up.
   In the strip a button's caption appears beside it on hover.
+- **The arrow tool connects shapes.** With the arrow tool, the shape the
+  pointer nears shows its eight anchor dots (the nearest lit). Pressing on
+  or near one ties the arrow's tail there; anywhere else it starts free.
+  While drawing, the head snaps to the anchor of whatever shape it nears
+  and is tied there on release, so the arrow follows both shapes as they
+  move — dragging and click-click drawing alike; Shift still locks a free
+  head's angle. The cursor's hover dots and the ⋯ "connector anchors"
+  toggle are gone: connecting is the arrow tool's job. Only a host's
+  `connectors={:off}` turns anchors off; `connectors={true}` and the
+  default now mean the same (on).
 - **Handles follow a colour change, side grabbers included.** Recolouring a
   shape (or a text box's text) repainted its corner dots but not its side
   grabbers, which kept the colour the shape was drawn in — a text box

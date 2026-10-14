@@ -96,6 +96,9 @@ function board() {
                                      width_units: "canvas" });
     },
     _makeArrowEl: () => ({ classList: { add() {} } }),
+    _connectorsOn: () => false,
+    _updateDimension: updateDimension,
+    _removeTargetDots() {},
     _applyShapeColor() {},
     _renderShape(s) { this.rendered.push(s); },
     _positionAllHandles() {},

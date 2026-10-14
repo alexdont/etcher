@@ -8147,6 +8147,39 @@
       popup.appendChild(labelSection);
       self._labelSection = labelSection;
 
+      // A text box's text: where it sits inside the box. The same six
+      // placements a label has, for the words within the walls.
+      var tbAlignSection = document.createElement("div");
+      tbAlignSection.className = "etcher-label-section etcher-tb-align";
+      var tbHead = document.createElement("div");
+      tbHead.className = "etcher-params-label";
+      tbHead.textContent = "Text in the box";
+      tbAlignSection.appendChild(tbHead);
+      var tbH = document.createElement("div");
+      tbH.className = "etcher-marker-dash etcher-align-row";
+      var tbV = document.createElement("div");
+      tbV.className = "etcher-marker-dash etcher-align-row";
+      var tbBtn = function(row, axis, value) {
+        var b = document.createElement("button");
+        b.type = "button";
+        b.dataset.tbAlign = axis + ":" + value;
+        b.title = "Text " + value;
+        b.setAttribute("aria-label", b.title);
+        b.innerHTML = alignIcon(axis, value);
+        b.addEventListener("click", function(e) {
+          e.preventDefault();
+          self._setTextboxAlign(axis, value);
+        });
+        row.appendChild(b);
+        return b;
+      };
+      self._tbAlignBtns = TITLE_H_ALIGNS.map(function(v) { return tbBtn(tbH, "h", v); })
+        .concat(TITLE_V_ALIGNS.map(function(v) { return tbBtn(tbV, "v", v); }));
+      tbAlignSection.appendChild(tbH);
+      tbAlignSection.appendChild(tbV);
+      popup.appendChild(tbAlignSection);
+      self._tbAlignSection = tbAlignSection;
+
       // The choice rows — line type, fill, corners, label position — fold
       // into one slim row of buttons, each showing its current choice and
       // opening a small pop-up with the options. The rows themselves stay
@@ -8164,7 +8197,7 @@
       // the controls themselves, moved into the pop-up while it is open and
       // back after, so their wiring and sync are untouched. The compact
       // strip keeps them inline.
-      [o.row, bgRow, dashRow, fillRow, cs.row, labelSection]
+      [o.row, bgRow, dashRow, fillRow, cs.row, labelSection, tbAlignSection]
         .forEach(function(r) { r.classList.add("etcher-in-chips"); });
       // Thickness and label size stay out, each one slim line — an icon,
       // the control, its value — since they are the two reached for most.
@@ -8216,6 +8249,11 @@
             var v = self._paramsCornerInput && self._paramsCornerInput.style.display !== "none" ? self._paramsCornerInput.value : "";
             return selIcon(self._paramsCornerBtns) + (v ? '<b>' + v + '</b>' : "");
           } },
+        { key: "talign", title: "Text alignment in the box", caption: "Align", rows: [tbAlignSection],
+          face: function() {
+            var sel = (self._tbAlignBtns || []).filter(function(b) { return b.classList.contains("is-selected") && /^h:/.test(b.dataset.tbAlign); })[0];
+            return sel ? sel.innerHTML : alignIcon("h", "left");
+          } },
         { key: "position", title: "Label position", caption: "Label", rows: [labelSection],
           face: function() {
             var list = (self._titleAlignBtns || []).concat(self._titleFreeBtn ? [self._titleFreeBtn] : []);
@@ -8246,7 +8284,7 @@
       // between groups — only between groups that are showing (see
       // `_syncPanelSeps`).
       self._panelSeps = [];
-      [w.row, fontRow, chipsRow, o.row, bgRow, dashRow, fillRow, cs.row, labelSection]
+      [w.row, fontRow, chipsRow, o.row, bgRow, dashRow, fillRow, cs.row, labelSection, tbAlignSection]
         .forEach(function(item) {
           if (item === "|") {
             var sep = document.createElement("div");
@@ -8582,6 +8620,7 @@
       this._syncFontRow();
       this._syncLabelBgRow();
       this._syncCornerRows();
+      this._syncTextboxAlign();
       this._syncLabelSection();
       this._refreshLabelSwatch();
       this._syncStyleChips();
@@ -8611,6 +8650,38 @@
         if (g > 0) groups[g - 1].sep.style.display = vis && anyAbove ? "" : "none";
         anyAbove = anyAbove || vis;
       }
+    },
+
+    // The text-in-the-box placement shows for text boxes only, lit for the
+    // first one's alignment.
+    _syncTextboxAlign: function() {
+      if (!this._tbAlignSection) return;
+      var self = this;
+      var boxes = this._cornerTargetShapes().filter(function(s) { return s.kind === "text" && self._textboxFixed(s); });
+      this._tbAlignSection.style.display = boxes.length ? "" : "none";
+      if (!boxes.length) return;
+      var al = this._textboxAlign(boxes[0]);
+      (this._tbAlignBtns || []).forEach(function(b) {
+        var parts = b.dataset.tbAlign.split(":");
+        b.classList.toggle("is-selected", al[parts[0]] === parts[1]);
+      });
+    },
+
+    _setTextboxAlign: function(axis, value) {
+      var self = this;
+      var boxes = this._cornerTargetShapes().filter(function(s) { return s.kind === "text" && self._textboxFixed(s); });
+      boxes.forEach(function(shape) {
+        var before = self._snapshotShape(shape);
+        var al = self._textboxAlign(shape);
+        al[axis] = value;
+        shape.style = Object.assign({}, shape.style || {}, { text_align: al });
+        if (self._textEditor && self._textEditor.shape === shape) self._refreshTextEditorStyle();
+        else self._renderShape(shape);
+        if (shape.uuid) self._pushUndo(shape.uuid, before, self._snapshotShape(shape));
+      });
+      if (boxes.length) this._emitChanged();
+      this._syncTextboxAlign();
+      this._syncStyleChips();
     },
 
     // Text boxes the corner controls act on: the one being typed into, the
@@ -13364,6 +13435,36 @@
         k === "line" || k === "arrow" || k === "dimension";
     },
 
+    // How far a shape's label is turned: a turned box's own angle; for a
+    // shape built from points (whose turns are baked into its points) the
+    // turns the knob has given it, kept as `style.title_rotation`. A label
+    // riding an arrow or a dimension stays upright along its line.
+    _labelRot: function(shape) {
+      if (!shape || this._labelRidesShaft(shape.kind) || this._isTextKind(shape.kind)) return 0;
+      if (this._isBoxRotatable(shape)) return this._shapeRot(shape);
+      var r = shape.style && shape.style.title_rotation;
+      return typeof r === "number" && isFinite(r) ? r : 0;
+    },
+
+    // Points about a turned label's middle (image px, unturned frame →
+    // turned).
+    _labelRotPts: function(shape, pts) {
+      var rot = this._labelRot(shape);
+      var b = shape && shape._renderedTitleImage;
+      if (!rot || !b) return pts;
+      var cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+      var self = this;
+      return pts.map(function(p) { return p && Object.assign({}, p, self._rotatePoint(p, cx, cy, rot)); });
+    },
+
+    // `rotate(deg cx cy)` → {deg, cx, cy}, or null.
+    _parseTurn: function(t) {
+      var m = t && /rotate\(\s*([-\d.e]+)[ ,]+([-\d.e]+)[ ,]+([-\d.e]+)\s*\)/.exec(t);
+      if (!m) return null;
+      var deg = parseFloat(m[1]);
+      return deg ? { deg: deg, cx: parseFloat(m[2]), cy: parseFloat(m[3]) } : null;
+    },
+
     // A box shape's own turn, in degrees (0 for every other kind).
     _shapeRot: function(shape) {
       if (!this._isBoxRotatable(shape)) return 0;
@@ -13404,6 +13505,17 @@
       var cn = { x: g.x + g.w / 2, y: g.y + g.h / 2 };
       var cw = this._rotatePoint(cn, c0.x, c0.y, rot);
       shape.geometry = Object.assign({}, g, { x: g.x + cw.x - cn.x, y: g.y + cw.y - cn.y });
+    },
+
+    // The same for a turned label's stored box (`metadata.title_box`).
+    _recenterLabel: function(shape, c0, rot) {
+      var tb = shape.metadata && shape.metadata.title_box;
+      if (!tb || !rot || !c0) return;
+      var cn = { x: tb.x + tb.w / 2, y: tb.y + tb.h / 2 };
+      var cw = this._rotatePoint(cn, c0.x, c0.y, rot);
+      shape.metadata = Object.assign({}, shape.metadata, {
+        title_box: { x: tb.x + cw.x - cn.x, y: tb.y + cw.y - cn.y, w: tb.w, h: tb.h }
+      });
     },
 
     // A point shape's geometry turned by `deg` about `c`.
@@ -14014,6 +14126,15 @@
               // handles, the editor and every hit-test work the storage
               // geometry, which IS the visible box here.
               self._drawTextboxFrame(shape, el, tx, ty, tw, th);
+              // The text placed in the box as asked: across by the anchor
+              // its lines hang from, down by the room left under them.
+              var tAl = self._textboxAlign(shape);
+              var tAx = tAl.h === "center" ? tx + tw / 2 : tAl.h === "right" ? tx + tw - pad : tx + pad;
+              ttext.setAttribute("text-anchor", tAl.h === "center" ? "middle" : tAl.h === "right" ? "end" : "start");
+              ttext.setAttribute("x", tAx);
+              self._shiftTspans(ttext, tAx);
+              var tRoom = Math.max(0, th - pad * 2 - measured.height);
+              ttext.setAttribute("y", ty + pad + (tAl.v === "middle" ? tRoom / 2 : tAl.v === "bottom" ? tRoom : 0));
               shape._renderedBox = null;
             } else {
               var actualW = Math.max(measured.width + pad * 2, fontSize);
@@ -15039,7 +15160,19 @@
       var M = this._pointMeasure(shape);
       var titleBox = this._shapeTitleBoxImage(shape, bboxTopImage,
         { w: M.natW * str.x / scale, h: M.natH * str.y / scale });
+      // The label turns with its shape. One aligned inside a turned box
+      // also travels round with it, keeping its place in the shape; a
+      // label placed freely turns where it stands.
+      var lRot = this._labelRot(shape);
+      if (lRot && this._isBoxRotatable(shape) &&
+          normalizeTitleAlign(shape.metadata && shape.metadata.title_align)) {
+        var sc = this._rotCenter(shape);
+        var lc = { x: titleBox.x + titleBox.w / 2, y: titleBox.y + titleBox.h / 2 };
+        var nc = this._rotatePoint(lc, sc.x, sc.y, lRot);
+        titleBox = { x: titleBox.x + nc.x - lc.x, y: titleBox.y + nc.y - lc.y, w: titleBox.w, h: titleBox.h };
+      }
       var tbox = this._orientedBox(titleBox);
+      tbox.deg = (tbox.deg || 0) + lRot;
       this._setRotateTransform(rectEl, tbox);
       var turn = rectEl ? rectEl.getAttribute("transform") : null;
       this._pointDraw(shape, M, tbox.x, tbox.y, str, rectEl, textEl, turn);
@@ -15461,12 +15594,12 @@
         this._shapeTitleBoxImage(shape, this._lastBboxTopImageFor(shape));
       if (!box) return;
       var self = this;
-      var positions = [
+      var positions = this._labelRotPts(shape, [
         { x: box.x,           y: box.y           },  // 0: TL
         { x: box.x + box.w,   y: box.y           },  // 1: TR
         { x: box.x + box.w,   y: box.y + box.h   },  // 2: BR
         { x: box.x,           y: box.y + box.h   }   // 3: BL
-      ];
+      ]);
       var handleColor = point ? POINT_HANDLE_COLOR : self._handleColor(shape);
       this.titleHandles = positions.map(function(pt, idx) {
         var h = svgEl("circle", { r: 5 });
@@ -15501,23 +15634,24 @@
       if (!this.titleHandles || !this.titleHandles.length) return;
       var point = this._isPointLabel(shape);
       if (point && this.midpointHandles && this.midpointHandles.length) {
-        var mids = this._rectEdgeMidpoints(this._pointHandleBox(shape, "label"));
+        var mids = this._labelRotPts(shape, this._rectEdgeMidpoints(this._pointHandleBox(shape, "label")));
         var selfP = this;
         this.midpointHandles.forEach(function(h, i) {
           if (mids[i]) selfP._positionHandle(h, mids[i]);
         });
         this._syncPointEdgeRoom(shape);
+        this._turnEdgeHandles(shape, this.midpointHandles, this._labelRot(shape));
       }
       var box = point ? this._pointHandleBox(shape, "label") :
         shape._renderedTitleImage ||
         this._shapeTitleBoxImage(shape, this._lastBboxTopImageFor(shape));
       if (!box) return;
-      var positions = [
+      var positions = this._labelRotPts(shape, [
         { x: box.x,           y: box.y           },
         { x: box.x + box.w,   y: box.y           },
         { x: box.x + box.w,   y: box.y + box.h   },
         { x: box.x,           y: box.y + box.h   }
-      ];
+      ]);
       var self = this;
       this.titleHandles.forEach(function(h, idx) {
         if (positions[idx]) self._positionHandle(h, positions[idx]);
@@ -15552,6 +15686,9 @@
       // each way on its own), the opposite corner holding.
       var pointStart = this._isPointLabel(shape) ? this._pointTextDragStart(shape, "label") : null;
       if (pointStart) startBox = pointStart.box;
+      // A turned label resizes in its own frame, the held corner fixed.
+      var lblRot = pointStart ? this._labelRot(shape) : 0;
+      var lblC0 = lblRot ? { x: startBox.x + startBox.w / 2, y: startBox.y + startBox.h / 2 } : null;
 
       function onMove(ev) {
         var pt = self._toImage(ev);
@@ -15570,7 +15707,9 @@
           dragged = true;
         }
         if (pointStart) {
+          if (lblRot) pt = self._rotatePoint(pt, lblC0.x, lblC0.y, -lblRot);
           self._resizePointText(shape, pointStart, idx, pt, !!ev.shiftKey);
+          if (lblRot) self._recenterLabel(shape, lblC0, lblRot);
           self._renderShape(shape);
           self._positionAllTitleHandles(shape);
           self._syncPointSize();
@@ -21852,6 +21991,16 @@
         ((shape.style && shape.style.box === "fixed") || shape.fixedBox));
     },
 
+    // Where a text box's text sits inside it: `style.text_align` {h, v},
+    // left/centre/right and top/middle/bottom. Top-left when unset.
+    _textboxAlign: function(shape) {
+      var a = (shape && shape.style && shape.style.text_align) || {};
+      return {
+        h: a.h === "center" || a.h === "right" ? a.h : "left",
+        v: a.v === "middle" || a.v === "bottom" ? a.v : "top"
+      };
+    },
+
     // A text box's corner type and reach in container px (0 = sharp),
     // never more than half the box's shorter side.
     _textboxCorner: function(shape, w, h) {
@@ -22117,6 +22266,17 @@
     _onPointTextFrame: function(shape, e) {
       var rect = this._pointRectEl(shape);
       if (!rect || typeof e.clientX !== "number") return false;
+      // Turned: test in the text's own frame, from its layout.
+      var L = shape._pointLayout;
+      var turn = L && this._parseTurn ? this._parseTurn(L.turn) : null;
+      if (turn && this.svg) {
+        var o = this.svg.getBoundingClientRect();
+        var q = this._rotatePoint({ x: e.clientX - o.left, y: e.clientY - o.top }, turn.cx, turn.cy, -turn.deg);
+        var bx = L.tx, by = L.ty, bw = L.natW * L.sx, bh = L.natH * L.sy;
+        var O2 = POINT_FRAME_OUT_PX, I2 = POINT_FRAME_IN_PX;
+        if (q.x < bx - O2 || q.x > bx + bw + O2 || q.y < by - O2 || q.y > by + bh + O2) return false;
+        return !(q.x > bx + I2 && q.x < bx + bw - I2 && q.y > by + I2 && q.y < by + bh - I2);
+      }
       var r = rect.getBoundingClientRect();
       var x = e.clientX, y = e.clientY;
       var OUT = POINT_FRAME_OUT_PX, IN = POINT_FRAME_IN_PX;
@@ -22132,9 +22292,20 @@
       var grip = this._textEditor && this._textEditor.shape === shape && this._textEditor.grip;
       var rect = grip && this._pointRectEl(shape);
       if (!rect || !this.svg) return;
-      var r = rect.getBoundingClientRect();
-      var o = this.svg.getBoundingClientRect();
-      var x = r.left - o.left, y = r.top - o.top, w = r.width, h = r.height;
+      var x, y, w, h;
+      // Turned: the ring is laid out in the text's own frame and wears its
+      // turn; upright, it is read off the drawn box.
+      var L = shape._pointLayout;
+      var turn = L && this._parseTurn ? this._parseTurn(L.turn) : null;
+      if (turn) {
+        x = L.tx; y = L.ty; w = L.natW * L.sx; h = L.natH * L.sy;
+        grip.setAttribute("transform", L.turn);
+      } else {
+        var r = rect.getBoundingClientRect();
+        var o = this.svg.getBoundingClientRect();
+        x = r.left - o.left; y = r.top - o.top; w = r.width; h = r.height;
+        grip.removeAttribute("transform");
+      }
       var O = POINT_FRAME_OUT_PX, I = POINT_FRAME_IN_PX;
       var iw = Math.max(0, w - 2 * I), ih = Math.max(0, h - 2 * I);
       grip.setAttribute("d",
@@ -22789,20 +22960,27 @@
       if (hitRot) {
         var hc = this._rotCenter(shape);
         var lp = this._rotatePoint(pt, hc.x, hc.y, -hitRot);
-        var titleHit = shape.titleGroup && shape._renderedTitleImage;
-        var tb = titleHit && shape._renderedTitleImage;
-        if (tb && pt.x >= tb.x && pt.x <= tb.x + tb.w && pt.y >= tb.y && pt.y <= tb.y + tb.h) return true;
+        var tb = shape.titleGroup && shape._renderedTitleImage;
+        if (tb) {
+          var tq = this._rotatePoint(pt, tb.x + tb.w / 2, tb.y + tb.h / 2, -this._labelRot(shape));
+          if (tq.x >= tb.x && tq.x <= tb.x + tb.w && tq.y >= tb.y && tq.y <= tb.y + tb.h) return true;
+        }
         var bx = this._rotBox(shape);
         return lp.x >= bx.x && lp.x <= bx.x + bx.w && lp.y >= bx.y && lp.y <= bx.y + bx.h;
       }
-      function inRect(box) {
+      var selfHit = this;
+      function inRect(box, label) {
         if (!box) return false;
-        return pt.x >= box.x && pt.x <= box.x + box.w &&
-               pt.y >= box.y && pt.y <= box.y + box.h;
+        var q = pt;
+        var lr = label && selfHit._labelRot ? selfHit._labelRot(shape) : 0;
+        if (lr) q = selfHit._rotatePoint(pt, box.x + box.w / 2, box.y + box.h / 2, -lr);
+        return q.x >= box.x && q.x <= box.x + box.w &&
+               q.y >= box.y && q.y <= box.y + box.h;
       }
-      // Title group (when present) is its own hit zone.
+      // Title group (when present) is its own hit zone — tested turned when
+      // the label is.
       if (shape.titleGroup && shape._renderedTitleImage &&
-          inRect(shape._renderedTitleImage)) {
+          inRect(shape._renderedTitleImage, true)) {
         return true;
       }
       var g = shape.geometry;
@@ -23376,6 +23554,9 @@
       input.style.padding = Math.round(edPad) + "px";
       var edFamily = "ui-sans-serif, system-ui, -apple-system, sans-serif";
       input.style.font = "500 " + edFontSize + "px " + edFamily;
+      // The `font` shorthand just reset the line height to "normal"; a text
+      // box's lines step 1.1em in the render, so its editor's do too.
+      if (fixedEd) input.style.lineHeight = "1.1";
       input.style.outline = "none";
       // Typing grows from where the committed text will sit: centred for a
       // shaft-rider, a fresh label (commit centres those in the shape) or
@@ -23462,6 +23643,24 @@
           fo.setAttribute("y", Math.min(tlF.y, brF.y));
           fo.setAttribute("width", Math.max(20, Math.abs(brF.x - tlF.x)));
           fo.setAttribute("height", Math.max(16, Math.abs(brF.y - tlF.y)));
+          // Typed where the text will sit: across by the alignment, down by
+          // padding the room left under the lines.
+          var alF = selfEd._textboxAlign(shape);
+          input.style.textAlign = alF.h;
+          input.style.paddingTop = edPad + "px";
+          if (alF.v !== "top") {
+            var boxHF = Math.max(16, Math.abs(brF.y - tlF.y));
+            // The lines' own height: read with the field collapsed, since a
+            // field taller than its text reports its own height instead.
+            input.style.height = "0px";
+            var contentF = input.scrollHeight - edPad * 2;
+            input.style.height = "100%";
+            // Laid out as the render lays them (its first line is 1em, the
+            // field's 1.1em), so the words do not jump at Enter.
+            var edFs = parseFloat(input.style.fontSize) || edFontSize;
+            var roomF = Math.max(0, boxHF - edPad * 2 - (contentF - edFs * 0.1));
+            input.style.paddingTop = (edPad + (alF.v === "middle" ? roomF / 2 : roomF)) + "px";
+          }
           // A turned box types turned: the editor wears the box's turn.
           var turnF = shape.el && shape.el.getAttribute("transform");
           if (turnF) fo.setAttribute("transform", turnF);
@@ -23545,6 +23744,9 @@
       var firstHandle = point && this.svg.querySelector(":scope > .etcher-grab, :scope > .etcher-handle");
       if (firstHandle) this.svg.insertBefore(fo, firstHandle);
       else this.svg.appendChild(fo);
+      // A text box's fit measures its lines, which needs the field on the
+      // page — the first fit above ran before it was.
+      if (fixedEd) edFit();
       // The dashed outline's grip: an invisible band over it, on top of the
       // editor and under the handles, wearing the move cursor. A real
       // element rather than a cursor swapped on hover, because a browser
@@ -25042,6 +25244,7 @@
       var c = this._rotCenter(shape);
       var box = this._isBoxRotatable(shape);
       var startRot = this._shapeRot(shape);
+      var startTitleRot = (shape.style && typeof shape.style.title_rotation === "number") ? shape.style.title_rotation : 0;
       var startGeom = JSON.parse(JSON.stringify(shape.geometry));
       var p0 = this._toImage(e);
       var a0 = Math.atan2(p0.y - c.y, p0.x - c.x);
@@ -25059,6 +25262,11 @@
           shape.style = Object.assign({}, shape.style || {}, { rotation: next });
         } else {
           shape.geometry = self._rotateGeometry(shape.kind, startGeom, c, next - startRot);
+          // Its label turns along (see `_labelRot`).
+          if (!self._labelRidesShaft(shape.kind)) {
+            var tr = ((startTitleRot + next) % 360 + 540) % 360 - 180;
+            shape.style = Object.assign({}, shape.style || {}, { title_rotation: Math.abs(tr) < 0.01 ? 0 : tr });
+          }
         }
         self._renderShape(shape);
         self._positionAllHandles(shape);
@@ -25201,7 +25409,7 @@
       if (!shape || (shape.kind !== "rectangle" && !point && !this._textboxFixed(shape))) return;
       var g = point ? this._pointHandleBox(shape, part) : shape.geometry;
       var positions = this._rectEdgeMidpoints(g);
-      if (part !== "label") positions = this._rotPts(shape, positions);
+      positions = part === "label" ? this._labelRotPts(shape, positions) : this._rotPts(shape, positions);
       var self = this;
       var handleColor = self._handleColor(shape);
       this.midpointHandles = positions.map(function(pt, idx) {
@@ -25230,13 +25438,13 @@
         return rect;
       });
       if (point) this._syncPointEdgeRoom(shape);
-      if (part !== "label") this._turnEdgeHandles(shape, this.midpointHandles);
+      this._turnEdgeHandles(shape, this.midpointHandles, part === "label" ? this._labelRot(shape) : undefined);
     },
 
     // A turned shape's side grabbers lie along its turned sides. Inline, so
     // it holds through the hover/drag scale the stylesheet gives them.
-    _turnEdgeHandles: function(shape, handles) {
-      var rot = this._shapeRot ? this._shapeRot(shape) : 0;
+    _turnEdgeHandles: function(shape, handles, rotOverride) {
+      var rot = rotOverride != null ? rotOverride : (this._shapeRot ? this._shapeRot(shape) : 0);
       (handles || []).forEach(function(h) {
         if (!h || !h.classList || !h.classList.contains("etcher-handle-edge")) return;
         h.style.transform = rot ? "rotate(" + rot + "deg)" : "";
@@ -25281,14 +25489,21 @@
           ? Object.assign({}, shape.metadata.title_box)
           : null;
 
-      var edgeRot = part === "label" ? 0 : self._shapeRot(shape);
-      var edgeC0 = edgeRot ? self._rotCenter(shape) : null;
+      var edgeRot = part === "label" ? self._labelRot(shape) : self._shapeRot(shape);
+      var edgeC0 = null;
+      if (edgeRot && part === "label") {
+        var eb = pointStart.box;
+        edgeC0 = { x: eb.x + eb.w / 2, y: eb.y + eb.h / 2 };
+      } else if (edgeRot) {
+        edgeC0 = self._rotCenter(shape);
+      }
       function onMove(ev) {
         var pt = self._toImage(ev);
         if (edgeRot) pt = self._rotatePoint(pt, edgeC0.x, edgeC0.y, -edgeRot);
         if (pointStart) {
           self._resizePointText(shape, pointStart, EDGE_NAMES[edgeIdx], pt, !!ev.shiftKey);
-          if (edgeRot) self._recenterRotated(shape, edgeC0, edgeRot);
+          if (edgeRot && part === "label") self._recenterLabel(shape, edgeC0, edgeRot);
+          else if (edgeRot) self._recenterRotated(shape, edgeC0, edgeRot);
           self._renderShape(shape);
           self._positionPointHandles(shape);
           self._syncPointSize();
@@ -25417,7 +25632,8 @@
     _pointEdgeSegments: function(shape, part) {
       var b = this._pointHandleBox(shape, part);
       var c = [{ x: b.x, y: b.y }, { x: b.x + b.w, y: b.y }, { x: b.x + b.w, y: b.y + b.h }, { x: b.x, y: b.y + b.h }];
-      if (part !== "label" && this._rotPts) c = this._rotPts(shape, c);
+      if (part === "label") { if (this._labelRotPts) c = this._labelRotPts(shape, c); }
+      else if (this._rotPts) c = this._rotPts(shape, c);
       return [{ p: c[0], q: c[1] }, { p: c[1], q: c[2] }, { p: c[2], q: c[3] }, { p: c[3], q: c[0] }];
     },
 

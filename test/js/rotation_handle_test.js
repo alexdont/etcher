@@ -70,4 +70,17 @@ assert.ok(scale.includes("shape.geometry = Object.assign({}, g0, { w: g0.w * k, 
   scale.includes("patch.font_size = st0.font_size * k;") && scale.includes("patch.corner_size = st0.corner_size * k;"));
 assert.ok(body("_renderExtraHandles").includes('if (shape.kind === "text" && this._textboxFixed(shape)) {'), "only on text boxes");
 
+// The label turns with its shape.
+{
+  const labelRot = eval(body("_labelRot"));
+  const lctx = Object.assign({}, ctx, { _labelRidesShaft: (k) => k === "arrow" || k === "dimension",
+    _isTextKind: (k) => k === "text" || k === "callout" });
+  assert.strictEqual(labelRot.call(lctx, { kind: "rectangle", style: { rotation: 30 } }), 30, "a turned box's label turns as far");
+  assert.strictEqual(labelRot.call(lctx, { kind: "polygon", style: { title_rotation: 50 } }), 50, "a point shape's label keeps the knob's turns");
+  assert.strictEqual(labelRot.call(lctx, { kind: "arrow", style: { title_rotation: 50 } }), 0, "a label riding its line stays upright");
+  assert.ok(body("_renderPointLabel").includes("tbox.deg = (tbox.deg || 0) + lRot;"));
+  assert.ok(body("_renderPointLabel").includes("var nc = this._rotatePoint(lc, sc.x, sc.y, lRot);"), "an aligned label travels round with its box");
+  assert.ok(body("_startRotateDrag").includes("title_rotation:"), "the knob turns a point shape's label along");
+}
+
 console.log("rotation + scale dot: all checks passed");

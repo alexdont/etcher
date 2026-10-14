@@ -109,7 +109,7 @@ const handlePositions = lift("_handlePositions", "shape");
                        src.indexOf("    _repositionTextEditor: function"));
   assert.ok(/var fixedEd = this\._textboxFixed\(shape\);\s*if \(fixedEd\) \{\s*input\.wrap = "soft";\s*input\.style\.whiteSpace = "pre-wrap";/.test(ed),
     "the box's editor wraps while typing — soft wrap, pre-wrap — like the committed render");
-  assert.ok(/if \(fixedEd\) \{\s*var gF = selfEd\._textEditBoxImage\(shape\);[\s\S]{0,900}?return;\s*\}\s*var linesEd/.test(ed),
+  assert.ok(/if \(fixedEd\) \{\s*var gF = selfEd\._textEditBoxImage\(shape\);[\s\S]{0,1800}?return;\s*\}\s*var linesEd/.test(ed),
     "and its fit pins the editor to the shape's own box (recomputed per fit, " +
     "so pan/zoom mid-edit tracks) instead of growing it around the text");
 }

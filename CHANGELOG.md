@@ -147,6 +147,17 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   the box, its text and its corners together, the top-left corner holding.
 - **Side grabbers are slimmer (4.2 px instead of 6) and lie along a turned
   shape's sides.**
+- **Labels turn with their shape.** A turned rectangle's or image's label
+  turns as far, and one aligned inside it travels round with it; a turned
+  polygon's, freehand's or marker's label keeps the knob's turns
+  (`style.title_rotation`). Labels riding an arrow or dimension stay
+  upright. A turned label's dots, side grabbers, clicks, resizing and
+  outline grip all work in its turned frame.
+- **Text boxes place their text: left, centre or right; top, middle or
+  bottom** — an Align button in the panel (`style.text_align`), the same
+  six placements a label has, for the words inside the box. The editor
+  types them where they will sit. Its lines now step 1.1em like the
+  render (the `font` shorthand had reset them to "normal").
 - **The compact strip has a Thickness button**, opening the thickness
   slider beside it (the full panel keeps its inline line).
 - **Handles follow a colour change, side grabbers included.** Recolouring a

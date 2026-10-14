@@ -50,6 +50,7 @@ function panel(over) {
     _syncFontRow() {},
     _syncLabelBgRow() {},
     _syncCornerRows() {},
+    _syncTextboxAlign() {},
     _syncPanelSeps() {},
     _syncStyleChips() {},
     _syncLabelSection() {},

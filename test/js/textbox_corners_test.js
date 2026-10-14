@@ -113,4 +113,17 @@ assert.ok(body("_startTextEdit").includes("if (point || fixedEd) input.setSelect
   assert.ok(body("_ensurePointCallout").includes('this._textboxCornerDefaults("callout")'), "new callouts are sharp unless chosen");
 }
 
+// The text placed inside the box: left/centre/right, top/middle/bottom.
+{
+  const align = eval(body("_textboxAlign"));
+  assert.deepStrictEqual(align({ style: {} }), { h: "left", v: "top" }, "top-left unless set");
+  assert.deepStrictEqual(align({ style: { text_align: { h: "center", v: "bottom" } } }), { h: "center", v: "bottom" });
+  const render = src.slice(src.indexOf('        case "text": {'), src.indexOf('        case "dimension": {'));
+  assert.ok(render.includes('ttext.setAttribute("text-anchor", tAl.h === "center" ? "middle" : tAl.h === "right" ? "end" : "start");'));
+  assert.ok(render.includes("var tRoom = Math.max(0, th - pad * 2 - measured.height);"));
+  assert.ok(body("_startTextEdit").includes("input.style.textAlign = alF.h;"), "the editor types where the text will sit");
+  assert.ok(body("_startTextEdit").includes("if (fixedEd) edFit();"), "measured once it is on the page");
+  assert.ok(body("_setTextboxAlign").includes("shape.style = Object.assign({}, shape.style || {}, { text_align: al });"));
+}
+
 console.log("text box corners: all checks passed");

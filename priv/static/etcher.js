@@ -22212,31 +22212,34 @@
           if (!L) return;
           var edPx = selfEd._editorFontPx(L.fontPx);
           var k = L.fontPx / edPx;
-          // A character's room past the widest line for the caret, and no
-          // more: anything wider would sit over the canvas (and the handles)
-          // catching presses meant for them.
-          var roomW = L.natW + L.fontPx, roomH = L.natH + L.fontPx * 0.2;
-          fo.setAttribute("x", L.tx);
-          fo.setAttribute("y", L.ty);
+          // The editor stays inside the dashed outline's grip band, so
+          // nothing it does can sit over the grip: Safari draws a scaled
+          // element in a foreignObject above the SVG after it, z-order or
+          // not. The inset comes out of the padding, leaving the words
+          // where the render has them; a pixel of padding is kept so a
+          // caret at the end of the widest line never scrolls the field.
+          var ix = Math.max(0, Math.min(POINT_FRAME_IN_PX, L.pad * L.sx - 1)) / L.sx;
+          var iy = Math.max(0, Math.min(POINT_FRAME_IN_PX, L.pad * L.sy - 1)) / L.sy;
+          var roomW = L.natW - 2 * ix, roomH = L.natH - 2 * iy;
+          fo.setAttribute("x", L.tx + ix * L.sx);
+          fo.setAttribute("y", L.ty + iy * L.sy);
           fo.setAttribute("width", roomW * L.sx);
           fo.setAttribute("height", roomH * L.sy);
           if (L.turn) fo.setAttribute("transform", L.turn);
           else fo.removeAttribute("transform");
           input.style.font = "500 " + edPx + "px " + edFamily;
-          input.style.padding = (L.pad / k) + "px";
+          input.style.padding = ((L.pad - iy) / k) + "px " + ((L.pad - ix) / k) + "px";
           // The textarea puts its first baseline half a leading plus the
           // font's ascent down; the render puts it at the letters' own top.
           // The top pad makes up the difference so the caret sits on them.
           if (L.met) {
             var edBase = 0.55 + (L.met.fontAsc - L.met.fontDesc) / 2;
-            input.style.paddingTop = Math.max(0, L.pad / k + edPx * (L.met.asc - edBase)) + "px";
+            input.style.paddingTop = Math.max(0, (L.pad - iy) / k + edPx * (L.met.asc - edBase)) + "px";
           }
           input.style.width = (roomW / k) + "px";
           input.style.height = (roomH / k) + "px";
           input.style.transformOrigin = "0 0";
           input.style.transform = "scale(" + (L.sx * k) + ", " + (L.sy * k) + ")";
-          // A wider room than the text, so the caret at the end of the
-          // longest line never scrolls the textarea out from under it.
           input.scrollLeft = 0;
           input.scrollTop = 0;
           selfEd._fitPointGrip(shape);

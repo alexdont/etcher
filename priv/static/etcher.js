@@ -909,7 +909,8 @@
       // and shrinking (never wrapping) when four are up.
       ".etcher-chips { display: flex; flex-wrap: nowrap; gap: 6px; }",
       ".etcher-chip {",
-      "  flex: 1 1 0; min-width: 0; height: 30px; padding: 0 4px; overflow: hidden;",
+      "  flex: 1 1 0; min-width: 0; height: 42px; padding: 4px 2px 3px; overflow: hidden;",
+      "  flex-direction: column; gap: 3px;",
       "  display: inline-flex; align-items: center; justify-content: center; gap: 4px;",
       "  border: 0; border-radius: 8px; cursor: pointer; color: #fff;",
       "  background: rgba(255, 255, 255, 0.08); transition: background 120ms ease;",
@@ -919,6 +920,8 @@
       ".etcher-chip-face { display: inline-flex; align-items: center; gap: 5px; pointer-events: none; }",
       ".etcher-chip-face svg { max-width: 20px; max-height: 16px; }",
       ".etcher-chip-face b { font: 600 12px/1 ui-sans-serif, system-ui, sans-serif; font-variant-numeric: tabular-nums; }",
+      ".etcher-chip-caption { font: 500 9.5px/1 ui-sans-serif, system-ui, sans-serif; letter-spacing: 0.01em; opacity: 0.7; white-space: nowrap; pointer-events: none; }",
+      ".etcher-chip:hover .etcher-chip-caption, .etcher-chip.is-open .etcher-chip-caption { opacity: 0.95; }",
       ".etcher-chip-aa { font: 600 12px/1 ui-sans-serif, system-ui, sans-serif; opacity: 0.75; }",
       ".etcher-chip-pop {",
       "  position: absolute; left: 8px; right: 8px; z-index: 13; display: none;",
@@ -8163,19 +8166,19 @@
         return sel ? sel.innerHTML : "";
       };
       var CHIPS = [
-        { key: "stroke", title: "Line type", rows: [lineHead, dashRow],
+        { key: "stroke", title: "Line type", caption: "Line", rows: [lineHead, dashRow],
           face: function() { return selIcon(self._paramsDashBtns); } },
-        { key: "opacity", title: "Opacity", rows: [o.row],
+        { key: "opacity", title: "Opacity", caption: "Opacity", rows: [o.row],
           // Just the number: "70%" says what it is, and an icon beside it
           // would not fit when four buttons share the row.
           face: function() { return '<b>' + (self._paramsOpacityVal.textContent || "") + '</b>'; } },
-        { key: "fill", title: "Fill", rows: [fillHead, fillRow], face: function() { return selIcon(self._paramsFillBtns); } },
-        { key: "corners", title: "Corners", rows: [cs.row],
+        { key: "fill", title: "Fill", caption: "Fill", rows: [fillHead, fillRow], face: function() { return selIcon(self._paramsFillBtns); } },
+        { key: "corners", title: "Corners", caption: "Corners", rows: [cs.row],
           face: function() {
             var v = self._paramsCornerInput && self._paramsCornerInput.style.display !== "none" ? self._paramsCornerInput.value : "";
             return selIcon(self._paramsCornerBtns) + (v ? '<b>' + v + '</b>' : "");
           } },
-        { key: "position", title: "Label position", rows: [labelSection],
+        { key: "position", title: "Label position", caption: "Label", rows: [labelSection],
           face: function() {
             var list = (self._titleAlignBtns || []).concat(self._titleFreeBtn ? [self._titleFreeBtn] : []);
             var sel = list.filter(function(b) { return b.classList.contains("is-selected"); });
@@ -8313,7 +8316,12 @@
         });
         chip.el.style.display = show ? "" : "none";
         any = any || show;
-        try { chip.el.innerHTML = '<span class="etcher-chip-face">' + chip.face() + '</span>'; } catch (_) {}
+        // The current value on top, what the button is for underneath — so
+        // a first look reads "Line", "Fill", "Corners" without hovering.
+        try {
+          chip.el.innerHTML = '<span class="etcher-chip-face">' + chip.face() + '</span>' +
+            (chip.caption ? '<span class="etcher-chip-caption">' + chip.caption + '</span>' : "");
+        } catch (_) {}
       });
       if (this._chipsRow) this._chipsRow.style.display = any ? "" : "none";
       if (this._openChip && this._openChip.el.style.display === "none") this._closeChipPop();

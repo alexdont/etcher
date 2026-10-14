@@ -84,7 +84,10 @@ assert.ok(body("_syncBgChoices").includes("self._setLabelBg(null, true);"), "the
 assert.ok(body("_syncBgChoices").includes('row.style.display = this._labelBgPickTarget ? "" : "none";'), "only when aimed at the plate");
 
 assert.ok(src.includes('".etcher-chips { display: flex; flex-wrap: nowrap; gap: 6px; }",') &&
-  src.includes('"  flex: 1 1 0; min-width: 0; height: 30px; padding: 0 4px; overflow: hidden;",'),
+  src.includes('"  flex: 1 1 0; min-width: 0; height: 42px; padding: 4px 2px 3px; overflow: hidden;",'),
   "the buttons share one row evenly and never wrap");
+
+assert.ok(src.includes('<span class="etcher-chip-caption">') && src.includes('caption: "Corners"'),
+  "each button says what it is for under its value");
 
 console.log("panel relevance: all checks passed");

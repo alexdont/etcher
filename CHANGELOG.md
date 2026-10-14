@@ -109,6 +109,8 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   tall). The compact strip keeps its inline controls.
   Thickness and label size stay out as one slim line each (an icon, the
   slider or the − / + box, the value); the rest are the buttons.
+  Each button carries a small caption under its value (Line, Opacity,
+  Fill, Corners, Label) so it reads at a glance without hovering.
 - **Handles follow a colour change, side grabbers included.** Recolouring a
   shape (or a text box's text) repainted its corner dots but not its side
   grabbers, which kept the colour the shape was drawn in — a text box

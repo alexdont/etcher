@@ -59,8 +59,12 @@ assert.ok(src.includes('[w.row, fontRow, chipsRow, o.row, bgRow, dashRow, fillRo
   "thickness and label size stay out as slim lines, the buttons below");
 assert.ok(src.includes('row.classList.add("etcher-inline-row");') && src.includes('"Thickness");') && src.includes('"Label size");'),
   "each with its icon");
-assert.ok(src.includes('".etcher-stylepanel:not([data-size=\\"compact\\"]) .etcher-in-chips { display: none !important; }",'),
-  "hidden as rows in the full panel, kept inline in the compact strip");
+assert.ok(src.includes('".etcher-stylepanel .etcher-in-chips { display: none !important; }",'),
+  "folded rows are hidden in both panel sizes");
+assert.ok(src.includes('".etcher-stylepanel[data-size=\\"compact\\"] .etcher-chips { flex-direction: column; gap: 6px; }",'),
+  "the compact strip stacks the same buttons");
+assert.ok(body("_openChipPop").includes("pop.style.top = ((compact ? rr.top : rr.bottom + 6) - hr.top)"),
+  "its pop-ups open beside the button");
 {
   const syncChips = make("_syncStyleChips");
   const row = (shown, head) => ({ style: { display: shown ? "" : "none" }, classList: { contains: (c) => !!head && c === "etcher-marker-row-head" } });

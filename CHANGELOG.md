@@ -111,6 +111,13 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   slider or the − / + box, the value); the rest are the buttons.
   Each button carries a small caption under its value (Line, Opacity,
   Fill, Corners, Label) so it reads at a glance without hovering.
+  The compact one-column strip follows the same pattern: the setting
+  buttons stack as small icon squares under the colours and the size
+  stepper, their pop-ups opening beside the strip (its parts setting still
+  decides whether line type and fill are there). Before, it laid out every
+  line type and the whole label-position grid inline, running a labelled
+  rectangle's strip to ~880 px. Escape with a pop-up open now closes just
+  the pop-up.
 - **Handles follow a colour change, side grabbers included.** Recolouring a
   shape (or a text box's text) repainted its corner dots but not its side
   grabbers, which kept the colour the shape was drawn in — a text box

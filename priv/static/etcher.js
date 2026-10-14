@@ -903,8 +903,27 @@
       ".etcher-stylepanel .etcher-corner-row button { height: 30px; }",
       // The choice buttons: one slim row, each a small square showing its
       // current pick with a caret, opening a pop-up of the options.
-      ".etcher-stylepanel:not([data-size=\"compact\"]) .etcher-in-chips { display: none !important; }",
-      ".etcher-stylepanel[data-size=\"compact\"] .etcher-chips, .etcher-stylepanel[data-size=\"compact\"] .etcher-chip-pop { display: none !important; }",
+      ".etcher-stylepanel .etcher-in-chips { display: none !important; }",
+      // The compact strip: the same buttons, stacked as small squares with
+      // just their icon, their pop-ups opening beside the strip. Its parts
+      // setting still decides whether line type and fill are there; opacity,
+      // a slider, stays out of the strip as it always has.
+      ".etcher-stylepanel[data-size=\"compact\"] .etcher-chips { flex-direction: column; gap: 6px; }",
+      ".etcher-stylepanel[data-size=\"compact\"] .etcher-chip { flex: 0 0 auto; width: 30px; height: 30px; padding: 0; }",
+      ".etcher-stylepanel[data-size=\"compact\"] .etcher-chip-caption,",
+      ".etcher-stylepanel[data-size=\"compact\"] .etcher-chip-face b,",
+      ".etcher-stylepanel[data-size=\"compact\"] .etcher-chip[data-chip=\"opacity\"],",
+      ".etcher-stylepanel[data-size=\"compact\"]:not([data-compact-parts~=\"dash\"]) .etcher-chip[data-chip=\"stroke\"],",
+      ".etcher-stylepanel[data-size=\"compact\"]:not([data-compact-parts~=\"fills\"]) .etcher-chip[data-chip=\"fill\"] { display: none !important; }",
+      ".etcher-stylepanel[data-size=\"compact\"] .etcher-chip-pop { left: auto; right: calc(100% + 8px); width: 190px; box-sizing: border-box; }",
+      ".etcher-stylepanel[data-size=\"compact\"][data-side=\"left\"] .etcher-chip-pop { right: auto; left: calc(100% + 8px); }",
+      // Inside a pop-up the strip's own hiding rules stand down: the
+      // controls lay out as they do in the full panel.
+      ".etcher-stylepanel[data-size=\"compact\"] .etcher-chip-pop .etcher-marker-row { display: flex !important; }",
+      ".etcher-stylepanel[data-size=\"compact\"] .etcher-chip-pop .etcher-marker-dash { display: grid !important; grid-template-columns: repeat(4, 1fr) !important; }",
+      ".etcher-stylepanel[data-size=\"compact\"] .etcher-chip-pop .etcher-corner-row { grid-template-columns: repeat(5, 1fr) !important; }",
+      ".etcher-stylepanel[data-size=\"compact\"] .etcher-chip-pop .etcher-align-row { grid-template-columns: repeat(3, 1fr) !important; }",
+      ".etcher-stylepanel[data-size=\"compact\"] .etcher-chip-pop .etcher-label-section { display: flex !important; }",
       // One row, always: the buttons share its width, growing to fill it
       // and shrinking (never wrapping) when four are up.
       ".etcher-chips { display: flex; flex-wrap: nowrap; gap: 6px; }",
@@ -8251,11 +8270,15 @@
         pop.appendChild(row);
       });
       pop.classList.add("is-open");
+      // Under the button row in the full panel; beside the button, level
+      // with it, in the compact strip.
       var row = this._chipsRow;
       var host = pop.offsetParent || pop.parentNode;
+      var compact = this.stylePanel && this.stylePanel.getAttribute("data-size") === "compact";
       if (row && host && host.getBoundingClientRect) {
-        var rr = row.getBoundingClientRect(), hr = host.getBoundingClientRect();
-        pop.style.top = (rr.bottom - hr.top + 6) + "px";
+        var hr = host.getBoundingClientRect();
+        var rr = compact ? chip.el.getBoundingClientRect() : row.getBoundingClientRect();
+        pop.style.top = ((compact ? rr.top : rr.bottom + 6) - hr.top) + "px";
       }
       // The button's face follows the controls as they move.
       this._chipPopLive = function() { setTimeout(function() { self._syncStyleChips(); }, 0); };
@@ -8268,7 +8291,15 @@
         if (e.target.closest && e.target.closest(".etcher-popup[data-kind=\"colors\"]")) return;
         self._closeChipPop();
       };
-      this._chipPopKey = function(e) { if (e.key === "Escape" && self._openChip) self._closeChipPop(); };
+      // Escape with a pop-up open closes the pop-up, and only that — not the
+      // selection or annotation mode behind it.
+      this._chipPopKey = function(e) {
+        if (e.key !== "Escape" || !self._openChip) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+        self._closeChipPop();
+      };
       document.addEventListener("pointerdown", this._chipPopOutside, true);
       document.addEventListener("keydown", this._chipPopKey, true);
     },
@@ -8542,12 +8573,9 @@
     _syncPanelSeps: function() {
       var seps = this._panelSeps;
       if (!seps || !seps.length || !this.paramsPopup) return;
-      // Rows folded into the choice buttons count as hidden, except in the
-      // compact strip, which still lays them out inline.
-      var compact = this.stylePanel && this.stylePanel.getAttribute("data-size") === "compact";
+      // Rows folded into the setting buttons count as hidden.
       var shown = function(el) {
-        if (!compact && el.classList && el.classList.contains("etcher-in-chips")) return false;
-        if (compact && el.classList && el.classList.contains("etcher-chips")) return false;
+        if (el.classList && el.classList.contains("etcher-in-chips")) return false;
         return el.style.display !== "none";
       };
       var anyAbove = false, group = [], groups = [];

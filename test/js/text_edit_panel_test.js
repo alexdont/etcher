@@ -75,6 +75,7 @@ const refresh = extract("_refreshTextEditorStyle");
       fit() { refit++; },
       setFontSize(s) { sizeSet = s; },
     },
+    _textboxFixed: () => false,
     _textEditHost: () => ({ querySelector: () => ({ getAttribute: () => "28" }) }),
     _fontSizeFor: (s, base) => base,
     // The real one: the editor's font is floored on a touch screen so

@@ -52,6 +52,19 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   `scale_y` like text. Older labels and callouts convert when picked up,
   looking the same. A point label's and callout's dots always show — the
   label-dots switch now only governs older ones.
+- **Text box corners: four types and a size, and the words stay inside.**
+  New text boxes have sharp corners. The panel offers Affinity's corner
+  types — rounded, straight (cut across), concave (scooped in), notched
+  (a square bitten out) — and a Corners slider for how far they reach.
+  The reach is stored in canvas units (`style.corner`,
+  `style.corner_size`), so enlarging the box no longer enlarges its
+  corners; before, the plate's corners were 18% of the box's height and
+  ballooned as it grew. The words are padded in as far as the corners
+  need (exactly enough for each type, plus a little air), while typing as
+  well as after. With the text box tool armed and nothing selected the
+  controls set what new boxes get, and tuning a freshly drawn box carries
+  over to the next. The box is drawn by a frame path (the rect stays the
+  hit area). Text boxes made before this show sharp corners.
 - **The text tool's icon is a typeset T** (a bar with dropped ends on a
   footed stem) instead of two round-capped strokes that read as ⊤.
 

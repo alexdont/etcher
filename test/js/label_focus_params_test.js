@@ -49,6 +49,7 @@ function panel(over) {
     _inkScale: () => 1,
     _syncFontRow() {},
     _syncLabelBgRow() {},
+    _syncCornerRows() {},
     _syncLabelSection() {},
     _paramsWeightRow: row(),
     _paramsOpacityRow: row(),

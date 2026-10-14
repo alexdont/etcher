@@ -218,6 +218,7 @@ assert.ok(
     // hands the size straight back, which is every case here.
     _editorFontPx: editorFontPx,
     _fontSizeFor: (_s, fallback) => 16 * scale,
+    _textboxFixed: () => false,
   };
 
   reposition.call(ctx);

@@ -1339,6 +1339,12 @@
       "  stroke: #3b82f6;",
       "  stroke-dasharray: none;",
       "}",
+      // A text box shows its frame (shaped corners) instead of its rect,
+      // which stays the hit area: same states, same looks.
+      ".etcher-text.is-textbox .etcher-text-rect { fill: transparent !important; stroke: transparent !important; }",
+      ".etcher-textbox-frame { fill: transparent; stroke: transparent; pointer-events: none; transition: stroke 120ms ease, fill 120ms ease; }",
+      ".etcher-text.is-hovered .etcher-textbox-frame, .etcher-text.is-draft .etcher-textbox-frame { stroke: currentColor; stroke-dasharray: 5 4; }",
+      ".etcher-text.is-selected .etcher-textbox-frame, .etcher-text.is-editing .etcher-textbox-frame { stroke: #3b82f6; stroke-dasharray: none; }",
       // Point text, selected or being typed into: a thin black dashed box,
       // as Affinity draws one, matching its black handles. The same width
       // whatever the zoom or the text's stretch.
@@ -2343,6 +2349,21 @@
   // height. Well under 0.5, so it reads as a rounded card rather than a
   // pill however tall the label is set.
   var LABEL_BG_RADIUS_RATIO = 0.18;
+  // A text box's corners, as Affinity offers them: rounded, cut straight
+  // across, scooped inward, or notched out square. `style.corner` is the
+  // type and `style.corner_size` how far it reaches, in canvas units like
+  // a pinned font size — so it holds its size when the box is resized and
+  // scales with the drawing on zoom. No size (the default) is a sharp
+  // corner whatever the type.
+  var TEXTBOX_CORNERS = ["round", "chamfer", "concave", "notch"];
+  // How far in, as a fraction of the corner's reach, a text box's words
+  // must start so their own corner stays inside the cut: the inner box's
+  // corner (d, d) has to clear a quarter circle about the inside point
+  // (round: d >= r(1 - 1/sqrt2)), the 45° cut (d >= r/2), a quarter circle
+  // about the corner itself (d >= r/sqrt2), and a square bite (d >= r).
+  var TEXTBOX_CORNER_INSET = { round: 1 - Math.SQRT1_2, chamfer: 0.5, concave: Math.SQRT1_2, notch: 1 };
+  // The corner slider's reach, in on-screen px at the ink scale.
+  var TEXTBOX_CORNER_MAX = 80;
 
   // The weight sliders travel 0-100 and curve onto WEIGHT_MIN..WEIGHT_MAX,
   // so the weights people actually draw with sit around the middle of the
@@ -7739,6 +7760,45 @@
         self._toggleLabelBg();
       });
 
+      // A text box's corners: which shape (rounded, cut, scooped, notched)
+      // and how far they reach. Shown for text boxes, and with the text box
+      // tool armed and nothing selected, where they set what new boxes get.
+      var cornerTypeRow = document.createElement("div");
+      cornerTypeRow.className = "etcher-marker-dash etcher-corner-row";
+      var CORNER_NAMES = { round: "Rounded", chamfer: "Straight", concave: "Concave", notch: "Notched" };
+      self._paramsCornerBtns = TEXTBOX_CORNERS.map(function(type) {
+        var b = document.createElement("button");
+        b.type = "button";
+        b.dataset.corner = type;
+        b.title = CORNER_NAMES[type] + " corners";
+        b.setAttribute("aria-label", b.title);
+        b.innerHTML = '<svg width="26" height="18" viewBox="0 0 26 18"><path d="' +
+          self._cornerPath(2, 2, 22, 14, type, 5.5) +
+          '" fill="none" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/></svg>';
+        b.addEventListener("click", function(e) {
+          e.preventDefault();
+          self._setTextboxCorner("corner", type, true);
+        });
+        cornerTypeRow.appendChild(b);
+        return b;
+      });
+      popup.appendChild(cornerTypeRow);
+      self._paramsCornerTypeRow = cornerTypeRow;
+
+      var cs = sliderRow("Corners");
+      cs.input.min = "0"; cs.input.max = String(TEXTBOX_CORNER_MAX); cs.input.step = "1";
+      self._paramsCornerRow = cs.row;
+      self._paramsCornerInput = cs.input;
+      self._paramsCornerVal = cs.val;
+      cs.input.addEventListener("input", function() {
+        var v = parseInt(cs.input.value, 10) || 0;
+        cs.val.textContent = v ? String(v) : "Sharp";
+        self._setTextboxCorner("corner_size", v, false);
+      });
+      cs.input.addEventListener("change", function() {
+        self._setTextboxCorner("corner_size", parseInt(cs.input.value, 10) || 0, true);
+      });
+
 
 
       var dashRow = document.createElement("div");
@@ -8111,8 +8171,106 @@
       }
       this._syncFontRow();
       this._syncLabelBgRow();
+      this._syncCornerRows();
       this._syncLabelSection();
       this._refreshLabelSwatch();
+    },
+
+    // Text boxes the corner controls act on: the one being typed into, the
+    // selection's text boxes, or the one in edit mode.
+    _cornerTargetShapes: function() {
+      var self = this;
+      var box = function(s) { return !!s && s.kind === "text" && self._textboxFixed(s); };
+      if (this._textEditor && this._textEditor.shape) {
+        return box(this._textEditor.shape) ? [this._textEditor.shape] : [];
+      }
+      if (this.selectedShapes && this.selectedShapes.length) return this.selectedShapes.filter(box);
+      return box(this.editingShape) ? [this.editingShape] : [];
+    },
+
+    // With the text box tool armed and nothing focused, the controls set
+    // the corners new boxes are drawn with.
+    _cornerDefaultsShown: function() {
+      return this.activeTool === "textbox" && !this._textEditor &&
+        !(this.selectedShapes && this.selectedShapes.length) &&
+        !this.editingShape && !this.editingTitleShape;
+    },
+
+    _textboxCornerDefaults: function() {
+      var type = this._getPref("textbox_corner");
+      var px = this._getPref("textbox_corner_size");
+      return {
+        corner: TEXTBOX_CORNERS.indexOf(type) >= 0 ? type : "round",
+        size: typeof px === "number" && px > 0 ? px : 0
+      };
+    },
+
+    _syncCornerRows: function() {
+      if (!this._paramsCornerRow) return;
+      var targets = this._cornerTargetShapes();
+      var show = targets.length > 0 || this._cornerDefaultsShown();
+      this._paramsCornerRow.style.display = show ? "" : "none";
+      if (this._paramsCornerTypeRow) this._paramsCornerTypeRow.style.display = show ? "" : "none";
+      if (!show) return;
+      var type, px;
+      if (targets.length) {
+        var st = targets[0].style || {};
+        type = TEXTBOX_CORNERS.indexOf(st.corner) >= 0 ? st.corner : "round";
+        px = st.corner_size > 0 ? Math.round(st.corner_size * this._inkScale()) : 0;
+      } else {
+        var d = this._textboxCornerDefaults();
+        type = d.corner; px = Math.round(d.size);
+      }
+      px = Math.min(TEXTBOX_CORNER_MAX, px);
+      this._paramsCornerInput.value = String(px);
+      this._paramsCornerVal.textContent = px ? String(px) : "Sharp";
+      (this._paramsCornerBtns || []).forEach(function(b) {
+        b.classList.toggle("is-selected", b.dataset.corner === type);
+      });
+    },
+
+    // Set a text box's corner type ("corner") or reach ("corner_size", in
+    // on-screen px, stored in canvas units) — live while a slider moves,
+    // one undo step per shape on release. With no text box in focus it
+    // sets the default for new ones instead.
+    _setTextboxCorner: function(prop, value, commit) {
+      var self = this;
+      var shapes = this._cornerTargetShapes();
+      if (!shapes.length) {
+        // Saved once, on release — not on every step of the slider.
+        if (prop === "corner") this._setPref("textbox_corner", value);
+        else if (commit) this._setPref("textbox_corner_size", value);
+        if (prop === "corner" || commit) this._syncCornerRows();
+        return;
+      }
+      if (!this._cornerBefore) {
+        this._cornerBefore = shapes.map(function(s) {
+          return { uuid: s.uuid, before: self._snapshotShape(s) };
+        });
+      }
+      shapes.forEach(function(shape) {
+        var patch = {};
+        if (prop === "corner") patch.corner = value;
+        else patch.corner_size = value > 0 ? value / self._inkScale() : 0;
+        shape.style = Object.assign({}, shape.style || {}, patch);
+        if (self._textEditor && self._textEditor.shape === shape) self._refreshTextEditorStyle();
+        else self._renderShape(shape);
+      });
+      // What a fresh box is tuned to, the next one gets.
+      if (commit && this._freshTargets && this._freshTargets(shapes)) {
+        if (prop === "corner") this._setPref("textbox_corner", value);
+        else this._setPref("textbox_corner_size", value);
+      }
+      if (prop === "corner") this._syncCornerRows();
+      if (commit) {
+        this._emitChanged();
+        (this._cornerBefore || []).forEach(function(rec) {
+          if (!rec.uuid) return;
+          var shape = self.shapes.find(function(s) { return s.uuid === rec.uuid; });
+          if (shape) self._pushUndo(rec.uuid, rec.before, self._snapshotShape(shape));
+        });
+        this._cornerBefore = null;
+      }
     },
 
     // The font row shows when there is text for it to act on — the shapes
@@ -13282,6 +13440,9 @@
             // is the same proportion: pad was 0.13 of the height, the font
             // 0.65 of it, and 0.13 / 0.65 = 0.2.
             if (self._hasPinnedFontSize(shape)) pad = fontSize * 0.2;
+            // A text box's corners can bite into where the words would go;
+            // the pad grows until they clear them.
+            if (self._textboxFixed(shape)) pad = self._textboxPadPx(shape, pad, tw, th);
             ttext.setAttribute("x", tx + pad);
             ttext.setAttribute("y", ty + pad);
             ttext.setAttribute("font-size", fontSize);
@@ -13305,7 +13466,7 @@
               // size moves the walls. `_renderedBox` stays null so the
               // handles, the editor and every hit-test work the storage
               // geometry, which IS the visible box here.
-              self._applyLabelBg(trect, shape);
+              self._drawTextboxFrame(shape, el, tx, ty, tw, th);
               shape._renderedBox = null;
             } else {
               var actualW = Math.max(measured.width + pad * 2, fontSize);
@@ -21083,6 +21244,68 @@
         ((shape.style && shape.style.box === "fixed") || shape.fixedBox));
     },
 
+    // A text box's corner type and reach in container px (0 = sharp),
+    // never more than half the box's shorter side.
+    _textboxCorner: function(shape, w, h) {
+      var st = (shape && shape.style) || {};
+      var type = TEXTBOX_CORNERS.indexOf(st.corner) >= 0 ? st.corner : "round";
+      var size = typeof st.corner_size === "number" && isFinite(st.corner_size) && st.corner_size > 0
+        ? st.corner_size : 0;
+      var scale = 1;
+      try { scale = this._markerScale() || 1; } catch (_) { scale = 1; }
+      var r = Math.max(0, Math.min(size * scale, Math.min(w, h) / 2));
+      return { type: type, r: r };
+    },
+
+    // The padding a text box's words need: its usual pad, or more once the
+    // corners bite deep enough that text at that pad would run out through
+    // them — the inset each corner type needs (TEXTBOX_CORNER_INSET), with
+    // half the usual pad kept as breathing room past the cut.
+    _textboxPadPx: function(shape, basePad, w, h) {
+      var c = this._textboxCorner(shape, w, h);
+      if (!(c.r > 0)) return basePad;
+      return Math.max(basePad, c.r * TEXTBOX_CORNER_INSET[c.type] + basePad * 0.5);
+    },
+
+    // A text box is drawn by a frame path rather than its rect, so its
+    // corners can take any shape: the frame wears the plate and the
+    // hover/selection outline, the rect stays as the invisible hit area.
+    _drawTextboxFrame: function(shape, el, x, y, w, h) {
+      if (!el || !el.querySelector) return;
+      el.classList.add("is-textbox");
+      var frame = el.querySelector(".etcher-textbox-frame");
+      if (!frame) {
+        frame = svgEl("path", { "stroke-width": "1.5" });
+        frame.classList.add("etcher-textbox-frame");
+        el.insertBefore(frame, el.firstChild);
+      }
+      var c = this._textboxCorner(shape, w, h);
+      frame.setAttribute("d", this._cornerPath(x, y, w, h, c.type, c.r));
+      var bg = this._labelBgFor(shape);
+      frame.style.fill = bg || "";
+    },
+
+    // The outline of a box with shaped corners, as path data.
+    _cornerPath: function(x, y, w, h, type, r) {
+      var R = x + w, B = y + h;
+      if (!(r > 0)) return "M" + x + " " + y + "H" + R + "V" + B + "H" + x + "Z";
+      var a = function(ex, ey, sweep) { return "A" + r + " " + r + " 0 0 " + sweep + " " + ex + " " + ey; };
+      var p = "M" + (x + r) + " " + y + "H" + (R - r);
+      if (type === "chamfer") {
+        return p + "L" + R + " " + (y + r) + "V" + (B - r) + "L" + (R - r) + " " + B +
+          "H" + (x + r) + "L" + x + " " + (B - r) + "V" + (y + r) + "Z";
+      }
+      if (type === "notch") {
+        return p + "V" + (y + r) + "H" + R + "V" + (B - r) + "H" + (R - r) + "V" + B +
+          "H" + (x + r) + "V" + (B - r) + "H" + x + "V" + (y + r) + "H" + (x + r) + "Z";
+      }
+      // Round bulges out (clockwise arcs); concave scoops in about the
+      // corner point itself (the same arcs swept the other way).
+      var sw = type === "concave" ? 0 : 1;
+      return p + a(R, y + r, sw) + "V" + (B - r) + a(R - r, B, sw) +
+        "H" + (x + r) + a(x, B - r, sw) + "V" + (y + r) + a(x + r, y, sw) + "Z";
+    },
+
     // `fixedBox` is the textbox tool's variant: same draft, same element,
     // but the committed shape keeps the drawn box fixed (see TOOL_DEFS).
     // ── Point text ──────────────────────────────────────────────────────
@@ -21711,9 +21934,14 @@
         // again — resizing the box leaves the text, resizing the text
         // leaves the box.
         if (fixedBox) {
+          // Sharp corners unless the user has chosen otherwise (the corner
+          // controls with the tool armed, or tuning the last fresh box).
+          var cornerDef = self._textboxCornerDefaults();
           shape.style = Object.assign({}, shape.style || {}, {
             box: "fixed",
-            font_size: self._defaultLabelFontSize() / self._inkScale()
+            font_size: self._defaultLabelFontSize() / self._inkScale(),
+            corner: cornerDef.corner,
+            corner_size: cornerDef.size > 0 ? cornerDef.size / self._inkScale() : 0
           });
           self._renderShape(shape);
           self._startTextEdit(shape);
@@ -22491,11 +22719,19 @@
       input.style.color = point ? "transparent" : edColor;
       input.style.caretColor = edColor;
       if (point) input.style.background = "transparent";
+      // A text box's plate is its frame, shaped corners and all, and it
+      // stays drawn while typing — a rounded textarea over it would hide it.
+      if (fixedEd) {
+        input.style.background = "transparent";
+        input.style.borderRadius = "";
+      }
       // The render's own padding rule: a fraction of the box, or of the
       // font once a size is pinned (0.13 / 0.65 = 0.2 — same proportion).
       var edPad = this._hasPinnedFontSize(shape)
         ? edFontSize * 0.2
         : h * 0.13;
+      // …and a text box's corners push it in as the render does.
+      if (fixedEd) edPad = this._textboxPadPx(shape, edPad, w, h);
       // Padding on all sides now — the textarea top-aligns its text, so
       // the vertical pad is what centres a single line in the box.
       input.style.padding = Math.round(edPad) + "px";
@@ -22933,6 +23169,9 @@
         ed.setFontSize(size);
         ed.input.style.fontSize = size + "px";
         var pad = this._hasPinnedFontSize(ed.shape) ? size * 0.2 : boxH * 0.13;
+        if (this._textboxFixed(ed.shape)) {
+          pad = this._textboxPadPx(ed.shape, pad, Math.abs(br.x - tl.x), boxH);
+        }
         if (ed.setPad) ed.setPad(pad);
         ed.input.style.padding = Math.round(pad) + "px";
       }
@@ -22973,7 +23212,18 @@
       ed.input.style.color = color;
       ed.input.style.caretColor = color;
       var bg = this._labelBgFor ? this._labelBgFor(shape) : null;
-      ed.input.style.background = bg || "transparent";
+      ed.input.style.background = (bg && !this._textboxFixed(shape)) ? bg : "transparent";
+      if (this._textboxFixed(shape)) {
+        // The frame re-renders in its new dress (plate, corners) under the
+        // editor, and the padding follows the corners.
+        this._renderShape(shape);
+        var tbH = parseFloat(ed.fo.getAttribute("height")) || 0;
+        var tbW = parseFloat(ed.fo.getAttribute("width")) || 0;
+        var tbPad = this._hasPinnedFontSize(shape) ? size * 0.2 : tbH * 0.13;
+        tbPad = this._textboxPadPx(shape, tbPad, tbW, tbH);
+        if (ed.setPad) ed.setPad(tbPad);
+        ed.input.style.padding = Math.round(tbPad) + "px";
+      }
       if (ed.fit) ed.fit();
     },
 

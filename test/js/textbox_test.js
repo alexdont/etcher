@@ -67,8 +67,8 @@ const textboxFixed = lift("_textboxFixed", "shape");
     "a fixed box exposes its storage geometry — handles, editor and hit-tests all work the drawn box");
   assert.ok(!fixed.includes("actualW"),
     "…and never shrink-wraps to the measured text");
-  assert.ok(fixed.includes("self._applyLabelBg(trect, shape);"),
-    "the plate (background on/off + colour) still applies — transparency is the label's own control");
+  assert.ok(fixed.includes("self._drawTextboxFrame(shape, el, tx, ty, tw, th);"),
+    "the plate (background on/off + colour) still applies, on the frame that carries its corners");
 }
 
 // ── the corners always show, and resize the box without touching the font ─

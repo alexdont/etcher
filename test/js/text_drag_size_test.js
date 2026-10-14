@@ -52,7 +52,7 @@ function commit(anchor, pt, over) {
     _defaultLabelFontSize: () => 16,
     _inkScale: () => 1,
     _renderShape() {},
-    _enterEditMode(shape) { shape._selected = true; },
+    _enterEditMode(shape) { shape._selected = true; shape._guarded = this._suppressEditDismissUntil > Date.now(); },
     _startTextEdit(shape) { shape._typing = true; },
     _finalizeShape(kind, geom, el, cb) {
       const shape = { kind, geometry: geom, style: {} };
@@ -101,6 +101,9 @@ function commit(anchor, pt, over) {
   const drawn = commit({ x: 0, y: 0 }, { x: 300, y: 100 });
   assert.strictEqual(drawn.style.point, true);
   assert.ok(drawn._selected, "its eight handles are up while typing");
+  // The click a drag ends with lands at its far corner, off the new text;
+  // without the guard it read as "clicked away" and dropped the selection.
+  assert.ok(drawn._guarded, "selected under the dismiss guard, so the drag's own click does not unselect it");
   assert.ok(drawn._typing, "and the caret is in it");
   assert.deepStrictEqual([drawn.geometry.x, drawn.geometry.y], [0, 0],
     "a drawn text starts at the drag's top-left");

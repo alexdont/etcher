@@ -179,6 +179,11 @@
   // the pencil stays put to be pressed again: after it in an ordinary nav,
   // before it in a mirrored row (`nav_reverse`), whose first button sits
   // furthest from the corner.
+  // Point text's handle frame is never smaller than this on screen, and an
+  // edge grabber needs a side at least this long to sit between its corners.
+  var POINT_HANDLE_MIN_PX = 24;
+  var POINT_EDGE_MIN_PX = 44;
+
   var NAV_SLOTS = { chevronMirrored: -1, pencil: 0, chevron: 1, eye: 2 };
 
   var ICONS = {
@@ -1775,6 +1780,7 @@
       "}",
       ".etcher-handle-edge--h { cursor: ns-resize; }",
       ".etcher-handle-edge--v { cursor: ew-resize; }",
+      ".etcher-handle-edge.is-cramped { display: none; }",
       ".etcher-handle-edge.is-active, .etcher-handle-edge.is-shown {",
       "  fill-opacity: 0.35; stroke-opacity: 0.9;",
       "}",
@@ -21119,10 +21125,25 @@
       shape.geometry = { x: nx, y: ny, w: nw, h: nh };
     },
 
+    // The frame point text's handles sit on: the text's own box, but never
+    // narrower or shorter than POINT_HANDLE_MIN_PX on screen. Freshly
+    // started text is a letter wide and its eight handles otherwise pile up
+    // over it in a knot that does not read as corners. It grows right and
+    // down, the way the text itself grows.
+    _pointHandleBox: function(shape) {
+      var b = shape._renderedBox || shape.geometry;
+      var scale = 1;
+      try { scale = this._markerScale() || 1; } catch (_) { scale = 1; }
+      var min = POINT_HANDLE_MIN_PX / scale;
+      return { x: b.x, y: b.y, w: Math.max(b.w, min), h: Math.max(b.h, min) };
+    },
+
     _pointTextDragStart: function(shape) {
       var str = this._pointStretch(shape);
+      // From the frame the handles are drawn on, so the pull is measured
+      // from where the user grabbed.
       return {
-        box: Object.assign({}, shape._renderedBox || shape.geometry),
+        box: this._pointHandleBox(shape),
         font: shape.style.font_size, sx: str.x, sy: str.y
       };
     },
@@ -21253,6 +21274,13 @@
         self._renderShape(shape);
         // Selected AND typing: the box and its eight handles are up while
         // the words go in, so it can be scaled or stretched mid-sentence.
+        //
+        // A drag ends with a click at its far corner — off the new text,
+        // which sits at the drag's start and is one empty line tall — and
+        // the outside-click dismisser read that click as "clicked away" and
+        // dropped the selection, so a dragged text had no box and no dots
+        // until Enter. Same guard `_finalizeShape` sets for its own shapes.
+        self._suppressEditDismissUntil = Date.now() + 400;
         self._enterEditMode(shape);
         self._startTextEdit(shape);
       });
@@ -23512,7 +23540,7 @@
       this._removeMidpointHandles();
       var point = this._isPointText(shape);
       if (!shape || (shape.kind !== "rectangle" && !point)) return;
-      var g = point ? (shape._renderedBox || shape.geometry) : shape.geometry;
+      var g = point ? this._pointHandleBox(shape) : shape.geometry;
       var positions = this._rectEdgeMidpoints(g);
       var self = this;
       var handleColor = self._handleColor(shape);
@@ -23540,6 +23568,7 @@
         })(idx, rect);
         return rect;
       });
+      if (point) this._syncPointEdgeRoom(shape);
     },
 
     // Image-px midpoints of a rect's 4 sides. Order: top, right,
@@ -23701,7 +23730,7 @@
         return this._rectEdgeMidpoints(shape.geometry);
       }
       if (this._isPointText(shape)) {
-        return this._rectEdgeMidpoints(shape._renderedBox || shape.geometry);
+        return this._rectEdgeMidpoints(this._pointHandleBox(shape));
       }
       // Open path, so segments rather than a closed ring — no wrap from the
       // head back round to the tail.
@@ -23765,7 +23794,24 @@
       this.midpointHandles.forEach(function(h, i) {
         if (positions[i]) self._positionHandle(h, positions[i]);
       });
+      this._syncPointEdgeRoom(shape);
       this._syncGrabRadii(this.handles, this.midpointHandles);
+    },
+
+    // An edge grabber on point text needs a side long enough to sit between
+    // its two corner dots without covering them; on a shorter side it steps
+    // aside (the corners still do everything) and comes back as the text
+    // grows.
+    _syncPointEdgeRoom: function(shape) {
+      if (!this._isPointText(shape) || !this.midpointHandles) return;
+      var b = this._pointHandleBox(shape);
+      var scale = 1;
+      try { scale = this._markerScale() || 1; } catch (_) { scale = 1; }
+      var wPx = b.w * scale, hPx = b.h * scale;
+      this.midpointHandles.forEach(function(h, i) {
+        var side = (i === 0 || i === 2) ? wPx : hPx;
+        h.classList.toggle("is-cramped", side < POINT_EDGE_MIN_PX);
+      });
     },
 
     // Insert a new point at the midpoint under the ghost handle — a vertex
@@ -24379,7 +24425,8 @@
               !this._titleHandlesOn()) return [];
           // Handles ride the shrunk-to-text bbox so users grab where
           // they see the box, not the (often wider) storage envelope.
-          var tBox = shape._renderedBox || g;
+          var tBox = this._isPointText(shape) ? this._pointHandleBox(shape)
+            : (shape._renderedBox || g);
           return [
             { x: tBox.x,           y: tBox.y           },
             { x: tBox.x + tBox.w,  y: tBox.y           },

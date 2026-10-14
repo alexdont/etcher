@@ -41,9 +41,12 @@ function fakeEl(tag) {
   };
 }
 const DEFAULT_LABEL_FONT_SIZE = Number(src.match(/var DEFAULT_LABEL_FONT_SIZE = (\d+)/)[1]);
-const make = (name) => new Function("svgEl", "DEFAULT_LABEL_FONT_SIZE", "return " + body(name))(
+const POINT_HANDLE_MIN_PX = Number(src.match(/var POINT_HANDLE_MIN_PX = (\d+)/)[1]);
+const POINT_EDGE_MIN_PX = Number(src.match(/var POINT_EDGE_MIN_PX = (\d+)/)[1]);
+const make = (name) => new Function("svgEl", "DEFAULT_LABEL_FONT_SIZE", "POINT_HANDLE_MIN_PX", "POINT_EDGE_MIN_PX",
+  "return " + body(name))(
   (tag, a) => { const e = fakeEl(tag); Object.entries(a || {}).forEach(([k, v]) => e.setAttribute(k, v)); return e; },
-  DEFAULT_LABEL_FONT_SIZE
+  DEFAULT_LABEL_FONT_SIZE, POINT_HANDLE_MIN_PX, POINT_EDGE_MIN_PX
 );
 
 const isPointText = make("_isPointText");
@@ -52,6 +55,8 @@ const pointTextLines = make("_pointTextLines");
 const renderPointText = make("_renderPointText");
 const resizePointText = make("_resizePointText");
 const ensurePointText = make("_ensurePointText");
+const pointHandleBox = make("_pointHandleBox");
+const syncPointEdgeRoom = make("_syncPointEdgeRoom");
 
 // A board at 2 container px per image px; text 10 px wide per character at
 // font 20 (0.5em a character), so the arithmetic below is readable.
@@ -68,6 +73,7 @@ function board(over) {
     _isPointText: isPointText,
     _pointStretch: pointStretch,
     _pointTextLines: pointTextLines,
+    _pointHandleBox: pointHandleBox,
     _textEditor: null
   }, over || {});
 }
@@ -235,6 +241,35 @@ function pull(handle, pt, freeform) {
   assert.ok(/\} else if \(shape\.kind === "rectangle" \|\| self\._isPointText\(shape\)\) \{\s*self\._renderRectEdgeHandles\(shape\);/.test(src),
     "and the four edge grabbers rectangles have");
   assert.ok(src.includes('if (point) rect.classList.add("is-shown");'), "shown, not hidden until hovered");
+}
+
+// ── a just-started text's handles never pile up ──────────────────────────
+
+{
+  // At 2 px per image px the frame is at least 24 screen px = 12 image px
+  // each way, growing right and down from the text's corner.
+  const fresh = { kind: "text", style: { point: true }, _renderedBox: { x: 10, y: 20, w: 3, h: 8 } };
+  assert.deepStrictEqual(pointHandleBox.call(board(), fresh), { x: 10, y: 20, w: 12, h: 12 });
+  const grown = { kind: "text", style: { point: true }, _renderedBox: { x: 10, y: 20, w: 80, h: 30 } };
+  assert.deepStrictEqual(pointHandleBox.call(board(), grown), grown._renderedBox,
+    "and is just the text's box once that is bigger");
+
+  // Edge grabbers step aside on a side too short to sit between corners.
+  const edges = [0, 1, 2, 3].map(() => {
+    const cls = new Set();
+    return { cls, classList: { toggle: (c, on) => (on ? cls.add(c) : cls.delete(c)) } };
+  });
+  const ctx = board({ midpointHandles: edges });
+  // 30 x 12 image px = 60 x 24 screen px: wide enough along the top and
+  // bottom (44), too short up the sides.
+  syncPointEdgeRoom.call(ctx, { kind: "text", style: { point: true }, _renderedBox: { x: 0, y: 0, w: 30, h: 12 } });
+  assert.deepStrictEqual(edges.map((e) => e.cls.has("is-cramped")), [false, true, false, true]);
+  syncPointEdgeRoom.call(ctx, { kind: "text", style: { point: true }, _renderedBox: { x: 0, y: 0, w: 30, h: 40 } });
+  assert.deepStrictEqual(edges.map((e) => e.cls.has("is-cramped")), [false, false, false, false],
+    "and come back as the text grows");
+  assert.ok(src.includes('".etcher-handle-edge.is-cramped { display: none; }"'));
+  assert.ok(/this\._syncPointEdgeRoom\(shape\);\s*this\._syncGrabRadii/.test(src),
+    "checked again every time the handles move — as the text is typed, say");
 }
 
 // ── the editor: the text itself, with a caret ─────────────────────────────

@@ -183,6 +183,9 @@
   // edge grabber needs a side at least this long to sit between its corners.
   var POINT_HANDLE_MIN_PX = 24;
   var POINT_HANDLE_COLOR = "#111111";
+  // How near (screen px) the cursor comes to a point text's side before
+  // that side's grabber shows.
+  var POINT_EDGE_REACH_PX = 24;
   var POINT_EDGE_MIN_PX = 44;
 
   var NAV_SLOTS = { chevronMirrored: -1, pencil: 0, chevron: 1, eye: 2 };
@@ -1792,9 +1795,13 @@
       ".etcher-handle-edge--v { cursor: ew-resize; }",
       ".etcher-handle-edge.is-cramped { display: none; }",
       // Point text's grabbers dress like its corner dots — white, with the
-      // black outline — rather than as a tint of the text under them.
-      ".etcher-handle.etcher-handle-edge.is-shown { fill: #fff; fill-opacity: 1; stroke-opacity: 1; stroke-width: 2; }",
-      ".etcher-handle-edge.is-active, .etcher-handle-edge.is-shown {",
+      // black outline — rather than as a tint of the text under them, and
+      // like a rectangle's they show only when the cursor comes near.
+      ".etcher-handle.etcher-handle-edge.is-point { fill: #fff; stroke-width: 2; }",
+      ".etcher-handle.etcher-handle-edge.is-point.is-active,",
+      ".etcher-handle.etcher-handle-edge.is-point:hover,",
+      ".etcher-handle.etcher-handle-edge.is-point.is-dragging { fill-opacity: 1; stroke-opacity: 1; }",
+      ".etcher-handle-edge.is-active {",
       "  fill-opacity: 0.35; stroke-opacity: 0.9;",
       "}",
       ".etcher-handle-edge:hover {",
@@ -23593,9 +23600,9 @@
         );
         rect.style.color = handleColor;
         rect.dataset.edgeIndex = idx;
-        // On point text all eight show, as in Affinity — the edges are half
-        // of what the text can do, not a hidden extra.
-        if (point) rect.classList.add("is-shown");
+        // Point text's grabbers wear its corner dots' black and white; they
+        // light up when the cursor nears their side (`_updateClosestMidpoint`).
+        if (point) rect.classList.add("is-point");
         self.svg.appendChild(rect);
         self._positionHandle(rect, pt);
         (function(edgeIdx, handleEl) {
@@ -23694,6 +23701,9 @@
       var shape = this.editingShape;
       var self = this;
       var threshold = this._midpointActivationRadiusImagePx();
+      // Point text's grabbers wait until the cursor is at their side, not
+      // anywhere within reach: all four lit at once is too much on a word.
+      if (shape && shape.kind === "text" && this._isPointText(shape)) threshold = threshold * POINT_EDGE_REACH_PX / 80;
       var closestIdx = -1;
       var closestDist = Infinity;
 
@@ -23738,6 +23748,14 @@
     // distance to an edge and the distance to its midpoint amount to the
     // same thing, and its own gate stays on the midpoint.
     _midpointSegmentsForShape: function(shape) {
+      // Point text measures to its box's sides, in handle order (top, right,
+      // bottom, left), so the grabber lights anywhere along its side.
+      if (shape && shape.kind === "text" && this._isPointText(shape)) {
+        var b = this._pointHandleBox(shape);
+        var tl = { x: b.x, y: b.y }, tr = { x: b.x + b.w, y: b.y };
+        var br = { x: b.x + b.w, y: b.y + b.h }, bl = { x: b.x, y: b.y + b.h };
+        return [{ p: tl, q: tr }, { p: tr, q: br }, { p: br, q: bl }, { p: bl, q: tl }];
+      }
       if (!shape || shape.kind !== "arrow") return [];
       var path = this._arrowPath(shape.geometry);
       var segs = [];
@@ -23803,7 +23821,9 @@
     // about which shapes have them — a mismatch shows dots nothing updates,
     // or updates dots that were never drawn.
     _hasMidpointHandles: function(kind) {
-      return kind === "polygon" || kind === "rectangle" || kind === "arrow";
+      // "text": point text's side grabbers. A text box without them has no
+      // midpointHandles, which `_updateClosestMidpoint` already bails on.
+      return kind === "polygon" || kind === "rectangle" || kind === "arrow" || kind === "text";
     },
 
     _clearClosestMidpoint: function() {

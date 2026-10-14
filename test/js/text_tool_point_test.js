@@ -267,7 +267,15 @@ function pull(handle, pt, freeform) {
     "four corners on the text's own box, no opt-in needed");
   assert.ok(/\} else if \(shape\.kind === "rectangle" \|\| self\._isPointText\(shape\)\) \{\s*self\._renderRectEdgeHandles\(shape\);/.test(src),
     "and the four edge grabbers rectangles have");
-  assert.ok(src.includes('if (point) rect.classList.add("is-shown");'), "shown, not hidden until hovered");
+  assert.ok(src.includes('if (point) rect.classList.add("is-point");'), "dressed black and white");
+  assert.ok(!/\.etcher-handle-edge\.is-point \{[^}]*opacity: 1/.test(src) &&
+    src.includes('".etcher-handle.etcher-handle-edge.is-point.is-active,",'), "hidden until the cursor nears their side");
+  assert.ok(src.includes('kind === "arrow" || kind === "text"'), "the hover tracker runs for text");
+  const segs = make("_midpointSegmentsForShape");
+  const sctx = board({ _pointHandleBox: () => ({ x: 10, y: 20, w: 100, h: 30 }) });
+  assert.deepStrictEqual(segs.call(sctx, shape).map(s => [s.p.x, s.p.y, s.q.x, s.q.y]),
+    [[10, 20, 110, 20], [110, 20, 110, 50], [110, 50, 10, 50], [10, 50, 10, 20]],
+    "measured to each side, in handle order");
 }
 
 // ── its handles are black, and typing dashes its box ─────────────────────

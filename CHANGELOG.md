@@ -14,7 +14,8 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   the size from the drag's height. Lines are the author's — Shift+Enter
   breaks one — and nothing ever wraps them; spaces are kept; the box is
   always exactly the text. The text stays selected while it is typed into,
-  with all eight handles up — black, whatever the text's colour — and its
+  with its handles up — black, whatever the text's colour; the corner dots
+  always, a side's grabber when the cursor comes near that side — and its
   box a thin black dash, selected or typed into, as Affinity draws it. Every handle scales it evenly: a
   corner about the opposite corner, an edge about the middle of the
   opposite edge. Shift frees it (a corner scales each way on its own, an

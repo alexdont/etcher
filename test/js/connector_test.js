@@ -239,7 +239,7 @@ assert.strictEqual(
 // segment's middle either way, so it can't wander onto the bend handles at
 // either end and cover the points the user is reaching for.
 const segmentsFor = lift("_midpointSegmentsForShape", "shape");
-const segLayer2 = { _arrowPath: arrowPath, _crSample: crSample, _arrowSegMidImage: arrowSegMid };
+const segLayer2 = { _arrowPath: arrowPath, _crSample: crSample, _arrowSegMidImage: arrowSegMid, _isPointText: () => false };
 
 assert.strictEqual(
   segmentsFor.call(segLayer2, { kind: "arrow", geometry: routed }).length,

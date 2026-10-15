@@ -18993,23 +18993,79 @@
     // to know connectors exist.
     // -------------------------------------------------------------------------
 
+    // The box a shape's anchors sit on, in the shape's OWN frame: the box
+    // itself, how far it is turned, and the point it turns about. A turned
+    // shape's anchors turn with it — its "w" dot is on whatever side the
+    // shape's left has gone to, and an arrow tied there follows it round.
+    // (They used to sit on the upright bounding box, so after a half turn
+    // an arrow tied to the left still came in from the left.)
+    _anchorFrame: function(shape) {
+      if (!shape || !shape.geometry) return null;
+      if (this._isBoxRotatable(shape)) {
+        var rb = this._rotBox(shape);
+        if (!rb) return null;
+        return { box: { x: rb.x, y: rb.y, w: rb.w, h: rb.h }, rot: this._shapeRot(shape),
+                 c: { x: rb.x + rb.w / 2, y: rb.y + rb.h / 2 } };
+      }
+      var bb = this._shapeBBoxImagePx(shape);
+      if (!bb) return null;
+      var turn = this._shapeTurn(shape);
+      var pts = turn ? this._turnablePoints(shape) : null;
+      if (!pts || !pts.length) return { box: bb, rot: 0, c: null };
+      // Turned back upright about the middle, measured, and turned again.
+      var c = { x: bb.x + bb.w / 2, y: bb.y + bb.h / 2 };
+      var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (var i = 0; i < pts.length; i++) {
+        var q = this._rotatePoint({ x: pts[i][0], y: pts[i][1] }, c.x, c.y, -turn);
+        if (q.x < minX) minX = q.x; if (q.x > maxX) maxX = q.x;
+        if (q.y < minY) minY = q.y; if (q.y > maxY) maxY = q.y;
+      }
+      return { box: { x: minX, y: minY, w: maxX - minX, h: maxY - minY }, rot: turn, c: c };
+    },
+
+    // How far a point-built shape has been turned with the rotation knob
+    // (`style.turn`, kept by `_startRotateDrag`). Box shapes carry theirs
+    // in `style.rotation` instead — see `_shapeRot`.
+    _shapeTurn: function(shape) {
+      var t = shape && shape.style && shape.style.turn;
+      return typeof t === "number" && isFinite(t) ? t : 0;
+    },
+
+    // The points a point-built shape is drawn through, as [x, y].
+    _turnablePoints: function(shape) {
+      var g = shape.geometry || {};
+      switch (shape.kind) {
+        case "polygon": return g.points || [];
+        case "marker":
+        case "freehand": return this._freehandFlatten(g);
+        case "line":
+        case "dimension": return g.a && g.b ? [g.a, g.b] : [];
+      }
+      return null;
+    },
+
+    _anchorAt: function(frame, a) {
+      var p = { x: frame.box.x + frame.box.w * a.fx, y: frame.box.y + frame.box.h * a.fy };
+      return frame.rot ? this._rotatePoint(p, frame.c.x, frame.c.y, frame.rot) : p;
+    },
+
     // The eight bindable points on a shape, in image px.
     _anchorPointsFor: function(shape) {
-      var box = shape && this._shapeBBoxImagePx(shape);
-      if (!box) return [];
+      var frame = this._anchorFrame(shape);
+      if (!frame) return [];
+      var self = this;
       return ARROW_ANCHORS.map(function(a) {
-        return { id: a.id, x: box.x + box.w * a.fx, y: box.y + box.h * a.fy };
+        var p = self._anchorAt(frame, a);
+        return { id: a.id, x: p.x, y: p.y };
       });
     },
 
     _anchorPointImage: function(shape, anchorId) {
-      var box = shape && this._shapeBBoxImagePx(shape);
-      if (!box) return null;
+      var frame = this._anchorFrame(shape);
+      if (!frame) return null;
       for (var i = 0; i < ARROW_ANCHORS.length; i++) {
         var a = ARROW_ANCHORS[i];
-        if (a.id === anchorId) {
-          return { x: box.x + box.w * a.fx, y: box.y + box.h * a.fy };
-        }
+        if (a.id === anchorId) return this._anchorAt(frame, a);
       }
       return null;
     },
@@ -25503,6 +25559,7 @@
       var box = this._isBoxRotatable(shape);
       var startRot = this._shapeRot(shape);
       var startTitleRot = (shape.style && typeof shape.style.title_rotation === "number") ? shape.style.title_rotation : 0;
+      var startTurn = this._shapeTurn(shape);
       var startGeom = JSON.parse(JSON.stringify(shape.geometry));
       var p0 = this._toImage(e);
       var a0 = Math.atan2(p0.y - c.y, p0.x - c.x);
@@ -25520,6 +25577,10 @@
           shape.style = Object.assign({}, shape.style || {}, { rotation: next });
         } else {
           shape.geometry = self._rotateGeometry(shape.kind, startGeom, c, next - startRot);
+          // How far it has turned in all, so its anchors turn with it (see
+          // `_anchorFrame`).
+          var tn = ((startTurn + next) % 360 + 540) % 360 - 180;
+          shape.style = Object.assign({}, shape.style || {}, { turn: Math.abs(tn) < 0.01 ? 0 : tn });
           // Its label turns along (see `_labelRot`).
           if (!self._labelRidesShaft(shape.kind)) {
             var tr = ((startTitleRot + next) % 360 + 540) % 360 - 180;

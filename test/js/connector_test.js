@@ -103,13 +103,20 @@ for (const a of ARROW_ANCHORS) {
 // ── resolving anchors against a box ─────────────────────────────────────────
 
 // A stand-in layer: `_anchorPointsFor` only reaches back for the bbox.
+const anchorFrame = lift("_anchorFrame", "shape");
+const anchorAt = lift("_anchorAt", "frame, a");
+const shapeTurn = lift("_shapeTurn", "shape");
+const rotatePoint = lift("_rotatePoint", "pt, cx, cy, deg");
+const turnablePoints = lift("_turnablePoints", "shape");
 function layerWithBox(box) {
-  return { _shapeBBoxImagePx: () => box };
+  return { _shapeBBoxImagePx: () => box, _anchorFrame: anchorFrame, _anchorAt: anchorAt,
+           _isBoxRotatable: () => false, _shapeTurn: shapeTurn, _rotatePoint: rotatePoint,
+           _turnablePoints: turnablePoints };
 }
 
 const BOX = { x: 100, y: 200, w: 400, h: 300 };
 const layer = layerWithBox(BOX);
-const shape = { kind: "rectangle" };
+const shape = { kind: "circle", geometry: {} };
 
 const byId = {};
 for (const p of anchorPointsFor.call(layer, shape)) byId[p.id] = p;
@@ -570,5 +577,32 @@ assert.strictEqual(short[1][0] - short[0][0], long[1][0] - long[0][0],
     "the endpoint drag's snap search is gated on _connectorsOn() — off " +
     "means no dots, no snap, no re-bind, for this gesture like every other");
 }
+
+// ── a turned shape's anchors turn with it ──────────────────────────────────
+{
+  const near = (p, x, y) => Math.abs(p.x - x) < 1e-6 && Math.abs(p.y - y) < 1e-6;
+  // A rectangle turned a half turn: its "w" dot is on the right now.
+  const boxLayer = {
+    _anchorFrame: anchorFrame, _anchorAt: anchorAt, _rotatePoint: rotatePoint,
+    _isBoxRotatable: () => true, _rotBox: (sh) => sh.geometry,
+    _shapeRot: (sh) => sh.style.rotation
+  };
+  const rect = { kind: "rectangle", geometry: { x: 0, y: 0, w: 100, h: 50 }, style: { rotation: 180 } };
+  assert.ok(near(anchorPointImage.call(boxLayer, rect, "w"), 100, 25), "a half-turned box's w anchor is on its right");
+  rect.style.rotation = 90;
+  assert.ok(near(anchorPointImage.call(boxLayer, rect, "n"), 75, 25), "a quarter turn carries n to the right side");
+
+  // A polygon turned with the knob: its points are rewritten, and
+  // style.turn says how far, so "w" follows the shape's own left.
+  const tri = { kind: "polygon", style: { turn: 180 },
+                geometry: { points: [[100, 0], [100, 50], [0, 25]] } }; // the half-turned [0,0],[0,50],[100,25]
+  const polyLayer = Object.assign(layerWithBox({ x: 0, y: 0, w: 100, h: 50 }), {});
+  assert.ok(near(anchorPointImage.call(polyLayer, tri, "w"), 100, 25), "a half-turned polygon's w is on its right");
+  tri.style.turn = 0;
+  assert.ok(near(anchorPointImage.call(polyLayer, tri, "w"), 0, 25), "unturned, w is the left");
+}
+assert.ok(/var tn = \(\(startTurn \+ next\) % 360 \+ 540\) % 360 - 180;/.test(src) &&
+  src.includes("{ turn: Math.abs(tn) < 0.01 ? 0 : tn }"),
+  "the rotation knob records how far a point-built shape has turned");
 
 console.log("connectors: all checks passed");

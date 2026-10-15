@@ -153,6 +153,13 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   (`style.title_rotation`). Labels riding an arrow or dimension stay
   upright. A turned label's dots, side grabbers, clicks, resizing and
   outline grip all work in its turned frame.
+- **Connector dots turn with their shape.** A turned shape's anchor dots
+  sit on its own turned outline, and an arrow tied to one follows it round —
+  tie an arrow to a rectangle's left and turn it half way, and the arrow
+  now meets what was the left, on the right. Rectangles, images and text
+  use their turn; polygons, marker strokes, lines and dimensions keep how
+  far the rotation knob has turned them in `style.turn` (shapes turned
+  before this keep upright dots until turned again).
 - **A double-click edits the shape you clicked, never one underneath.**
   Double-clicking the empty part of a text box over a callout opened the
   callout: the second click counted as "tap the same spot again" and walked

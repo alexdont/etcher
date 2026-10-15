@@ -6599,14 +6599,17 @@
       // Undo / redo appear in the popup ONLY when their inline buttons
       // were collapsed off the toolbar (the pair folds into the menu when
       // the bar runs short) — otherwise they ride out on the toolbar
-      // itself. The divider shows only when overflowed tools ALSO sit
-      // above them.
+      // itself. The divider under them shows only when overflowed tools
+      // ALSO sit below; the one under the settings only when anything does.
       var histHidden = !!(self.undoBtn &&
         self.undoBtn.classList.contains("etcher-overflow-hidden"));
       if (self.popupUndoBtn) self.popupUndoBtn.style.display = histHidden ? "" : "none";
       if (self.popupRedoBtn) self.popupRedoBtn.style.display = histHidden ? "" : "none";
       if (self._popupHistoryDivider) {
         self._popupHistoryDivider.style.display = (histHidden && anyToolHidden) ? "" : "none";
+      }
+      if (self._popupSettingsDivider) {
+        self._popupSettingsDivider.style.display = (histHidden || anyToolHidden) ? "" : "none";
       }
 
       // `[⋯]` shows only when the popup has content — overflowed tools
@@ -6797,12 +6800,13 @@
       });
       popup.appendChild(self.popupRedoBtn);
 
-      // Customise lives at the bottom of this menu because this menu is
-      // where you end up when the tool you want is not on the bar — which is
-      // the moment you want to put it there.
+      // Customise lives in this menu because this menu is where you end up
+      // when the tool you want is not on the bar — which is the moment you
+      // want to put it there.
       var customiseDivider = document.createElement("div");
       customiseDivider.className = "etcher-popup-divider";
       popup.appendChild(customiseDivider);
+      self._popupSettingsDivider = customiseDivider;
 
       // The two view switches live here rather than in the nav column: they
       // are board chrome like the tools around them, and the nav column is
@@ -6835,6 +6839,15 @@
         function() { self._closePopup(); self._openCustomise(); }
       );
       popup.appendChild(customiseBtn);
+
+      // Top to bottom: the settings, then undo / redo, then the tools. The
+      // menu opens upward out of the bar, so the tools — what it is opened
+      // for nearly every time — sit nearest the button, and the switches
+      // that are set once and left sit at the far end instead of in the way.
+      [self.gridBtn, self.zoomAnchorBtn, self.snapBtn, customiseBtn, customiseDivider,
+       self.popupUndoBtn, self.popupRedoBtn, historyDivider]
+        .concat(self.toolsPopupBtns)
+        .forEach(function(node) { popup.appendChild(node); });
 
       self.handle.container.appendChild(popup);
       self.toolsPopup = popup;

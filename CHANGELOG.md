@@ -153,6 +153,11 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   (`style.title_rotation`). Labels riding an arrow or dimension stay
   upright. A turned label's dots, side grabbers, clicks, resizing and
   outline grip all work in its turned frame.
+- **The tool bar's ⋯ menu puts the tools nearest the bar.** It opens
+  upward, and the tools came first with the settings switches under them,
+  so reaching a tool meant crossing the settings. Now the settings sit at
+  the top, then undo/redo when they have folded in, then the tools, right
+  above the button.
 - **Box-selected text shows that it is selected.** Texts, text boxes and
   callouts opt out of the blue outline filter (it would bold the glyphs),
   so picked with a box-select or shift-click they looked unselected. Their

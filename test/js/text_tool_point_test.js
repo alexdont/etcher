@@ -388,7 +388,7 @@ function pull(handle, pt, freeform) {
   assert.ok(ed.includes('input.style.color = point ? "transparent" : edColor;'),
     "the textarea's own glyphs are invisible — the live render is what shows");
   assert.ok(ed.includes("var existing = !point &&"), "so the text is not hidden while typing");
-  assert.ok(/shape\._draftTitle = input\.value;\s*\/\/ Renders the text and re-fits this editor over it\.\s*selfEd\._renderShape\(shape\);/.test(ed),
+  assert.ok(/shape\._draftTitle = input\.value;\s*\/\/ Renders the text and re-fits this editor over it\.\s*selfEd\._typePointText\(shape\);/.test(ed),
     "every keystroke renders the real text");
   assert.ok(/if \(e\.shiftKey\) \{\s*if \(!point\) return;\s*e\.preventDefault\(\);[\s\S]*?input\.setRangeText\("\\n"/.test(ed),
     "Shift+Enter puts the line break in");
@@ -508,6 +508,25 @@ console.log("text tool (point text): all checks passed");
   assert.ok(body("_enterTitleEditMode").includes("this._ensurePointLabel(shape);"), "picked up, an older label converts");
   // Typing a label brings its frame up, so its handles work mid-typing.
   assert.ok(body("_startTextEdit").includes("this._enterTitleEditMode(shape);"));
+}
+
+// A turned text typed into stays anchored at its own top-left corner.
+{
+  const typeIt = eval("(function" + body("_typePointText").slice(body("_typePointText").indexOf("(")) + ")");
+  const rotatePoint = eval("(function" + body("_rotatePoint").slice(body("_rotatePoint").indexOf("(")) + ")");
+  const recenter = eval("(function" + body("_recenterRotated").slice(body("_recenterRotated").indexOf("(")) + ")");
+  const shape = { geometry: { x: 0, y: 0, w: 100, h: 20 } };
+  const layer = {
+    _shapeRot: () => 90, _rotatePoint: rotatePoint, _recenterRotated: recenter,
+    // typing three more letters: the box grows to the right in its own frame
+    _renderShape: (sh) => { sh.geometry.w = 160; }
+  };
+  const tl = (g) => rotatePoint({ x: g.x, y: g.y }, g.x + g.w / 2, g.y + g.h / 2, 90);
+  const before = tl(shape.geometry);
+  typeIt.call(layer, shape);
+  const after = tl(shape.geometry);
+  assert.ok(Math.abs(before.x - after.x) < 1e-9 && Math.abs(before.y - after.y) < 1e-9,
+    `the turned text's starting corner stays put while it grows (${JSON.stringify(before)} → ${JSON.stringify(after)})`);
 }
 
 console.log("labels and callouts (point text): all checks passed");

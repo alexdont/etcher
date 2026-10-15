@@ -153,6 +153,10 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   (`style.title_rotation`). Labels riding an arrow or dimension stay
   upright. A turned label's dots, side grabbers, clicks, resizing and
   outline grip all work in its turned frame.
+- **A turned text stays put while you type into it.** Its box grows with
+  the words, and since it turns about the box's middle, typing carried the
+  whole text off up, down and around. It now stays anchored at the corner
+  where its words start and grows from there along its own angle.
 - **Finishing a text leaves it selected.** Enter, a click away or Escape
   ends the typing and keeps the text (or the shape whose label it is)
   selected with its handles up, ready to scale, turn or move — under the

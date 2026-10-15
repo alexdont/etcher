@@ -22527,6 +22527,24 @@
 
     // An open editor rides its text: typing, a handle drag, a pan or a
     // panel edit all re-render, and every point render ends here.
+    // Re-render point text as it is typed into. The box grows with the
+    // words; a turned text turns about its box's middle, so a growing box
+    // used to carry the whole text off as you typed — up, down, around. The
+    // box is set back so its own top-left corner — where the words start,
+    // and the corner the text grows away from — stays where it was.
+    _typePointText: function(shape) {
+      var rot = this._shapeRot(shape);
+      var g0 = shape.geometry;
+      var c0 = rot && g0 ? { x: g0.x + g0.w / 2, y: g0.y + g0.h / 2 } : null;
+      var w0 = g0 && g0.w, h0 = g0 && g0.h;
+      this._renderShape(shape);
+      var g = shape.geometry;
+      if (c0 && g && (Math.abs(g.w - w0) > 1e-9 || Math.abs(g.h - h0) > 1e-9)) {
+        this._recenterRotated(shape, c0, rot);
+        this._renderShape(shape);
+      }
+    },
+
     _fitPointEditor: function(shape) {
       var ed = this._textEditor;
       if (ed && ed.shape === shape && ed.point && ed.fit) ed.fit();
@@ -24036,7 +24054,7 @@
         if (point) {
           shape._draftTitle = input.value;
           // Renders the text and re-fits this editor over it.
-          selfEd._renderShape(shape);
+          selfEd._typePointText(shape);
           selfEd._positionPointHandles(shape);
           return;
         }

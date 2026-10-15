@@ -135,12 +135,12 @@ defmodule Etcher.JsLabelStepperTest do
     end
 
     test "and the tap path uses it" do
-      assert fn_body("_commitText: function", 1400) =~ "var boxPx = this._newTextBoxPx();"
+      assert fn_body("_commitText: function", 2400) =~ "var boxPx = this._newTextBoxPx();"
     end
 
     test "a drawn box is left alone" do
       # They said how big by drawing it; only the minted default is floored.
-      body = fn_body("_commitText: function", 1400)
+      body = fn_body("_commitText: function", 2400)
 
       assert body =~ "var drewBox = geom.h >= minImagePx;"
 

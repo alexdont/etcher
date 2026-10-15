@@ -7,10 +7,12 @@
 // luck. Every comparable canvas tool turns that click into a default-sized
 // shape centered on the point.
 //
-// Now: rectangle and circle click-place a default-sized shape centered on
-// the cursor (and `_finalizeShape` selects it — click, drop, adjust);
-// freehand and marker taps cancel instead of committing a speck; the
-// thresholds are SCREEN px so a click is the same gesture at every zoom.
+// Now: a bare click with the rectangle, circle or text box tool places
+// nothing — it sets the first corner (the circle's centre) and the next click
+// elsewhere finishes the shape; a click back on the same spot cancels, so
+// spam-clicking one place makes nothing. Freehand and marker taps cancel
+// instead of committing a speck; the thresholds are SCREEN px so a click is
+// the same gesture at every zoom.
 //
 //   node test/js/click_place_test.js
 
@@ -80,32 +82,32 @@ function harness(scale, draft) {
     "40 image px at 0.05× is 2 screen px of jitter — that is a click");
 }
 
-// ── a click places a centered default square ────────────────────────────────
+// ── a click places nothing: it arms the draft ───────────────────────────────
+// A default shape dropped on every click was a placeholder people then had to
+// deal with. Now the click sets the first corner (or the circle's centre) and
+// the next click elsewhere finishes it; a click back on the same spot cancels
+// (`_placeArmedDraft` / `_isTooCloseToPlace`), so spam-clicking makes nothing.
 
 {
   const { ctx, out } = harness(2, { anchor: { x: 100, y: 50 } });
   commitRectangle.call(ctx, { x: 101, y: 50 }); // 2 screen px of jitter
-  assert.ok(out.finalized, "a click should place a rectangle, not cancel");
-  const g = out.finalized.geom;
-  const side = SIZE / 2; // screen size / scale 2 = image px
-  assert.strictEqual(g.w, side, "click-placed square is the default size");
-  assert.strictEqual(g.h, side, "click-placed square is square");
-  assert.ok(
-    Math.abs(g.x + g.w / 2 - 100) < 0.001 && Math.abs(g.y + g.h / 2 - 50) < 0.001,
-    `the square must center on the click point, got ${JSON.stringify(g)}`
-  );
+  assert.ok(!out.finalized && !out.canceled, "a click neither places nor cancels a rectangle");
+  assert.strictEqual(ctx.draftState.armed, true, "it arms the draft for the second click");
 }
-
-// ── a click places a centered default circle ────────────────────────────────
-
 {
   const { ctx, out } = harness(2, { center: { x: 30, y: 40 } });
   commitCircle.call(ctx, { x: 30, y: 41 });
-  assert.ok(out.finalized, "a click should place a circle, not cancel");
-  const g = out.finalized.geom;
-  assert.strictEqual(g.cx, 30, "circle centers on the click point (x)");
-  assert.strictEqual(g.cy, 40, "circle centers on the click point (y)");
-  assert.strictEqual(g.r, SIZE / 2 / 2, "circle radius is half the default size");
+  assert.ok(!out.finalized && !out.canceled, "nor a circle");
+  assert.strictEqual(ctx.draftState.armed, true);
+}
+{
+  const place = src.slice(src.indexOf("    _placeArmedDraft: function"), src.indexOf("\n    },", src.indexOf("    _placeArmedDraft: function")));
+  assert.ok(place.includes('else if (draft.kind === "rectangle") this._commitRectangle(pt);') &&
+    place.includes('else if (draft.kind === "circle") this._commitCircle(pt);') &&
+    place.includes('else if (draft.kind === "text") this._commitText(pt);'),
+    "the second click finishes rectangles, circles and text boxes");
+  assert.ok(place.includes("if (this._isTooCloseToPlace(anchor, pt)) {\n        this._cancelDraft();"),
+    "and a second click on the same spot cancels");
 }
 
 // ── real drags still work exactly as drawn ──────────────────────────────────

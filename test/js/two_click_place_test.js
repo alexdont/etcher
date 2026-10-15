@@ -250,8 +250,8 @@ for (const [where, what] of [[JITTER, "on the first click"], [NEAR, "near it"]])
   // the second click starts a fresh draft on top of the one waiting.
   const down = src.slice(src.indexOf("    _onPointerDown: function(e) {"),
                          src.indexOf("    _onPointerMove: function(e) {"));
-  assert.ok(down.includes("if (this._placeArmedDraft(pt)) return;"),
-    "the press is offered to an armed draft first");
+  assert.ok(/if \(this\._placeArmedDraft\(pt\)\) \{[\s\S]{0,300}?e\.preventDefault\(\);\s*return;/.test(down),
+    "the press is offered to an armed draft first (and keeps focus where the editor it opens put it)");
   assert.ok(down.indexOf("_placeArmedDraft") < down.indexOf("switch (this.activeTool)"),
     "…before the tool dispatch");
 }

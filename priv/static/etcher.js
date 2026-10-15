@@ -16745,7 +16745,13 @@
       // A draft left waiting for its second click owns this press: the
       // gesture already in flight finishes rather than a new one starting
       // on top of it.
-      if (this._placeArmedDraft(pt)) return;
+      if (this._placeArmedDraft(pt)) {
+        // The finishing click may have just opened a label or text editor;
+        // its default action would move focus to where it landed and blur
+        // that editor shut (an empty new text box is then thrown away).
+        e.preventDefault();
+        return;
+      }
 
       // The press that just closed a label editor is a full stop, not a
       // new sentence. Since a tool stays armed after it draws, typing a
@@ -16856,7 +16862,7 @@
 
       var anchor = draft.kind === "callout"
         ? { x: draft.geometry.anchor[0], y: draft.geometry.anchor[1] }
-        : draft.anchor;
+        : (draft.kind === "circle" ? draft.center : draft.anchor);
 
       // The second click landed on the first, or near enough that there is
       // no shape between them. Almost always a double-click — people
@@ -16870,6 +16876,9 @@
       }
 
       if (draft === this.draftCallout) this._commitCallout(pt, true);
+      else if (draft.kind === "rectangle") this._commitRectangle(pt);
+      else if (draft.kind === "circle") this._commitCircle(pt);
+      else if (draft.kind === "text") this._commitText(pt);
       else {
         // The placing click settles an arrow's head, snap included.
         if (draft.kind === "arrow") this._updateDimension(pt);
@@ -20581,15 +20590,14 @@
         h: Math.abs(pt.y - a.y)
       };
       if (this._isClickGesture(a, pt)) {
-        // A bare click places a default-sized square centered on the point
-        // (and `_finalizeShape` selects it), so click-drop-adjust works the
-        // way every comparable tool has trained people to expect. This used
-        // to cancel outright — a tool that does nothing on click reads as
-        // broken — and a click with a few px of jitter produced a shape
-        // whose corners all sat within those px: visible as a speck,
-        // grabbable by nothing.
-        var side = this._clickPlaceSizeImagePx();
-        geom = { x: a.x - side / 2, y: a.y - side / 2, w: side, h: side };
+        // A bare click places nothing: it sets the first corner and ARMS the
+        // draft, which follows the cursor until a click somewhere else sets
+        // the opposite corner (`_placeArmedDraft`). A default-sized square
+        // dropped on every click was a placeholder people then had to deal
+        // with — and a click back on the same spot cancels, so clicking one
+        // place over and over makes nothing at all.
+        this.draftState.armed = true;
+        return;
       } else {
         // A real drag that still spans nothing on one axis (a fast
         // horizontal swipe has width but no height) can't make a usable
@@ -20640,10 +20648,10 @@
       var dx = pt.x - c.x, dy = pt.y - c.y;
       var r = Math.sqrt(dx * dx + dy * dy);
       if (this._isClickGesture(c, pt)) {
-        // A bare click places a default-sized circle centered on the point —
-        // same reasoning as `_commitRectangle`, and the circle is centered
-        // by construction since the draft anchors at the pointerdown.
-        r = this._clickPlaceSizeImagePx() / 2;
+        // A bare click sets the centre and arms the draft; the next click
+        // elsewhere sets the radius (see `_commitRectangle`).
+        this.draftState.armed = true;
+        return;
       }
       // No sliver guard here: the radius IS the gesture distance, so
       // anything past the click threshold is already ≥ 5 screen px of
@@ -22698,6 +22706,14 @@
       // on the draft KIND, which is "text" for both tools).
       var fixedBox = !!this.draftState.fixedBox;
       var a = this.draftState.anchor;
+      // A text box from a bare click is a placeholder too: the click sets
+      // one corner and the next click elsewhere the other (see
+      // `_commitRectangle`). The text tool's click still places text — a
+      // caret where you click is what that tool is for.
+      if (fixedBox && this._isClickGesture(a, pt)) {
+        this.draftState.armed = true;
+        return;
+      }
       var geom = {
         x: Math.min(a.x, pt.x),
         y: Math.min(a.y, pt.y),

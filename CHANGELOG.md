@@ -153,6 +153,14 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   (`style.title_rotation`). Labels riding an arrow or dimension stay
   upright. A turned label's dots, side grabbers, clicks, resizing and
   outline grip all work in its turned frame.
+- **A bare click no longer drops a placeholder shape.** With the
+  rectangle, circle or text box tool, a click sets the first corner (the
+  circle's centre) and a preview follows the cursor; a click somewhere else
+  finishes the shape, and a click back on the same spot cancels — so
+  clicking one place over and over makes nothing. Dragging works as
+  before; the text tool's click still places text. The finishing click no
+  longer steals focus from the editor it opens, which had been discarding
+  a two-click text box.
 - **Text boxes place their text: left, centre or right; top, middle or
   bottom** — an Align button in the panel (`style.text_align`), the same
   six placements a label has, for the words inside the box. The editor

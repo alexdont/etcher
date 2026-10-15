@@ -120,7 +120,18 @@ assert.ok(body("_startTextEdit").includes("if (point || fixedEd) input.setSelect
   assert.deepStrictEqual(align({ style: { text_align: { h: "center", v: "bottom" } } }), { h: "center", v: "bottom" });
   const render = src.slice(src.indexOf('        case "text": {'), src.indexOf('        case "dimension": {'));
   assert.ok(render.includes('ttext.setAttribute("text-anchor", tAl.h === "center" ? "middle" : tAl.h === "right" ? "end" : "start");'));
-  assert.ok(render.includes("var tRoom = Math.max(0, th - pad * 2 - measured.height);"));
+  assert.ok(render.includes("var tRoom = Math.max(0, th - pad * 2 - tLines * 1.1 * fontSize);"),
+    "the room is what the 1.1em line boxes leave — the editor's own layout");
+  assert.ok(render.includes('ttext.setAttribute("y", tTop + (tFirst - 1) * fontSize);'));
+  // Centred means the glyphs' ascent-to-descent band sits mid-box: equal
+  // space above the ascent and below the descent.
+  const met = eval(body("_fontLineMetrics")).call({});
+  const fs = 20, th = 200, pad = 10, n = 1, ty = 0;
+  const first = (1.1 - (met.asc + met.desc)) / 2 + met.asc;
+  const room = th - pad * 2 - n * 1.1 * fs;
+  const baseline = ty + pad + room / 2 + first * fs;
+  const above = (baseline - met.asc * fs) - ty, below = th - (baseline + met.desc * fs);
+  assert.ok(Math.abs(above - below) < 1e-9, `centred text is centred (above ${above}, below ${below})`);
   assert.ok(body("_startTextEdit").includes("input.style.textAlign = alF.h;"), "the editor types where the text will sit");
   assert.ok(body("_startTextEdit").includes("if (fixedEd) edFit();"), "measured once it is on the page");
   assert.ok(body("_setTextboxAlign").includes("shape.style = Object.assign({}, shape.style || {}, { text_align: al });"));

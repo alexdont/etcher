@@ -153,6 +153,19 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   (`style.title_rotation`). Labels riding an arrow or dimension stay
   upright. A turned label's dots, side grabbers, clicks, resizing and
   outline grip all work in its turned frame.
+- **A double-click edits the shape you clicked, never one underneath.**
+  Double-clicking the empty part of a text box over a callout opened the
+  callout: the second click counted as "tap the same spot again" and walked
+  down to the shape below. A quick second tap now stays put (slower repeat
+  taps still reach underneath), and a double-click that lands on the
+  selected shape always edits that one.
+- **No dots while a shape waits for its second click.** Two-click placement
+  shows only the preview; the dots arrive with the finished shape. A
+  press-drag still shows them while pulling.
+- **Text in a text box is truly centred.** Lines are laid out in 1.1em line
+  boxes using the font's real ascent and descent (as the editor does), so
+  middle is the middle — it used to sit low — and top and bottom keep the
+  same distance from the walls.
 - **The shape you're working on holds the focus while a tool is armed.**
   Text being typed, a shape just drawn, or a selection: other shapes don't
   light up, can't be grabbed and aren't selected by a click until a click

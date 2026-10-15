@@ -71,7 +71,7 @@ function board(over) {
     _canvasRotation: () => 0,
     committed: [],
     calloutCommits: [],
-    _isClickGesture: isClickGesture,
+    _isClickGesture: isClickGesture, _syncDraftHandles() {},
     _isTooCloseToPlace: isTooClose,
     cancelled: 0,
     _cancelDraft() { this.cancelled++; this.draftState = null; this.draftCallout = null; },

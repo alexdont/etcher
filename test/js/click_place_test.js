@@ -59,7 +59,7 @@ function harness(scale, draft) {
         { el: { classList: { remove: () => {} } } }, draft
       ),
       _markerScale: () => scale,
-      _isClickGesture: isClickGesture,
+      _isClickGesture: isClickGesture, _syncDraftHandles() {},
       _clickPlaceSizeImagePx: clickPlaceSize,
       _strokeIsClick: strokeIsClick,
       _finalizeShape: (kind, geom) => { out.finalized = { kind, geom }; },

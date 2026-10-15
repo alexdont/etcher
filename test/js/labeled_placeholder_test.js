@@ -60,7 +60,7 @@ function ctx(draft) {
     _markerScale: () => 1,
     _textDefaultBoxImagePx: () => 16,
     _textDefaultBoxInkPx: () => 16,
-    _isClickGesture: isClickGesture,
+    _isClickGesture: isClickGesture, _syncDraftHandles() {},
     _clickPlaceSizeImagePx: clickPlaceSize,
     _calloutDefaultBox: calloutDefaultBox,
     _calloutBoxAt: extract("_calloutBoxAt"),

@@ -14133,8 +14133,19 @@
               ttext.setAttribute("text-anchor", tAl.h === "center" ? "middle" : tAl.h === "right" ? "end" : "start");
               ttext.setAttribute("x", tAx);
               self._shiftTspans(ttext, tAx);
-              var tRoom = Math.max(0, th - pad * 2 - measured.height);
-              ttext.setAttribute("y", ty + pad + (tAl.v === "middle" ? tRoom / 2 : tAl.v === "bottom" ? tRoom : 0));
+              // Down: the lines laid out as CSS lays them in the editor — a
+              // 1.1em box per line, the glyphs centred in each by the font's
+              // own ascent and descent. Measuring from the top of the em box
+              // to the last baseline (as before) left room above the letters
+              // and none below them, so "centred" text sat visibly low, and
+              // top and bottom were never the same distance from the walls.
+              var tLines = Math.max(1, ttext.childNodes.length);
+              var tMet = self._fontLineMetrics(ttext.getAttribute("font-family"), "500");
+              var tFirst = (1.1 - (tMet.asc + tMet.desc)) / 2 + tMet.asc;
+              var tRoom = Math.max(0, th - pad * 2 - tLines * 1.1 * fontSize);
+              var tTop = ty + pad + (tAl.v === "middle" ? tRoom / 2 : tAl.v === "bottom" ? tRoom : 0);
+              // The first tspan drops 1em from `y`; the baseline belongs at tFirst.
+              ttext.setAttribute("y", tTop + (tFirst - 1) * fontSize);
               shape._renderedBox = null;
             } else {
               var actualW = Math.max(measured.width + pad * 2, fontSize);
@@ -15940,6 +15951,28 @@
       return w * (fontSize / TEXT_MEASURE_FONT_PX);
     },
 
+    // The font's ascent and descent, as fractions of the font size — where a
+    // line box puts the baseline. From the canvas's font metrics where the
+    // browser has them; otherwise the usual proportions of a system UI face.
+    _fontLineMetrics: function(fontFamily, fontWeight) {
+      var key = (fontWeight || "500") + "|" + (fontFamily || "");
+      this._lineMetricsCache = this._lineMetricsCache || {};
+      if (this._lineMetricsCache[key]) return this._lineMetricsCache[key];
+      var m = { asc: 0.92, desc: 0.24 };
+      try {
+        if (!this._measureCanvas) this._measureCanvas = document.createElement("canvas");
+        var ctx = this._measureCanvas.getContext("2d");
+        ctx.font = (fontWeight || "500") + " 100px " +
+          (fontFamily || "ui-sans-serif, system-ui, -apple-system, sans-serif");
+        var tm = ctx.measureText("Hg");
+        if (tm && tm.fontBoundingBoxAscent > 0 && tm.fontBoundingBoxDescent >= 0) {
+          m = { asc: tm.fontBoundingBoxAscent / 100, desc: tm.fontBoundingBoxDescent / 100 };
+        }
+      } catch (_) {}
+      this._lineMetricsCache[key] = m;
+      return m;
+    },
+
     _fillTextWithWrappedTspans: function(textEl, content, maxWidth, fontSize) {
       while (textEl.firstChild) textEl.removeChild(textEl.firstChild);
       if (!content) return { width: 0, height: 0 };
@@ -17154,22 +17187,25 @@
       // memory and lets users tweak the callout's label without
       // re-opening the composer.
       el.addEventListener("dblclick", function(e) {
-        if (shape.kind !== "text" && shape.kind !== "callout" && shape.kind !== "dimension") {
+        // The shape the first click selected, not whatever this element is
+        // — see `_dblClickTarget`.
+        var target = self._dblClickTarget(shape, e);
+        if (target.kind !== "text" && target.kind !== "callout" && target.kind !== "dimension") {
           return;
         }
         // Cursor mode, or the shape's own tool armed — a double-click on
         // a text shape with the text tool out means "edit this one", not
         // "draw two more here".
         if (self.annotationMode && self.activeTool != null &&
-            !self._armedToolEdits(shape)) {
+            !self._armedToolEdits(target)) {
           return;
         }
         if (!self.annotationMode) return;
-        if (shape.readonly) return; // locked → no inline text edit
+        if (target.readonly) return; // locked → no inline text edit
         e.stopPropagation();
         e.preventDefault();
-        self._enterEditMode(shape);
-        self._startTextEdit(shape);
+        self._enterEditMode(target);
+        self._startTextEdit(target);
       });
 
       // In annotation cursor mode, the shape body is a grab-handle —
@@ -17657,6 +17693,7 @@
         try { pt = self._toImage(e); } catch (_) { return; }
         var hit = self._shapeAt(pt);
         if (!hit) return;
+        hit = self._dblClickTarget(hit, e);
         // With a tool armed, a double-click only reaches the shapes that
         // tool itself edits (same-tool editing — a dimension's label
         // opens under the dimension tool). On everything else, both
@@ -20364,6 +20401,23 @@
     _TAP_CYCLE_SLOP: 14,
     // After this long, a tap reads as fresh intent, not a continuation.
     _TAP_CYCLE_MS: 1500,
+    // Quicker than this, the second tap is the other half of a double-click
+    // — "edit this one" — and must not walk down to the shape underneath.
+    _TAP_CYCLE_DBL_MS: 500,
+
+    // A double-click edits the shape its first click selected — never one
+    // underneath it. Reported from the field: double-clicking the empty
+    // part of a text box opened the callout beneath it instead. The DOM
+    // target can't be trusted for this (a selected shape takes pointer
+    // events; the one on top may not), so: if the point lies on the shape
+    // being edited, that is the one; otherwise the one the caller found.
+    _dblClickTarget: function(shape, e) {
+      var cur = this.editingShape;
+      if (!cur || cur === shape || cur.readonly) return shape;
+      var pt;
+      try { pt = this._toImage(e); } catch (_) { return shape; }
+      return this._shapeContainsPoint(cur, pt) ? cur : shape;
+    },
 
     // All shapes under an image-space point, topmost first.
     //
@@ -20421,7 +20475,10 @@
       }
 
       var index;
-      if (samePlace) {
+      if (samePlace && now - prev.t < self._TAP_CYCLE_DBL_MS) {
+        // The second half of a double-click: stay on the same shape.
+        index = Math.min(prev.index, stack.length - 1);
+      } else if (samePlace) {
         index = (prev.index + 1) % stack.length;
       } else {
         // Start from whatever a plain hit-test picked rather than assuming
@@ -20722,6 +20779,7 @@
         // with — and a click back on the same spot cancels, so clicking one
         // place over and over makes nothing at all.
         this.draftState.armed = true;
+        this._syncDraftHandles();
         return;
       } else {
         // A real drag that still spans nothing on one axis (a fast
@@ -20776,6 +20834,7 @@
         // A bare click sets the centre and arms the draft; the next click
         // elsewhere sets the radius (see `_commitRectangle`).
         this.draftState.armed = true;
+        this._syncDraftHandles();
         return;
       }
       // No sliver guard here: the radius IS the gesture distance, so
@@ -21001,6 +21060,7 @@
       // gets here — see `_placeArmedDraft`.
       if (!second && this._isClickGesture({ x: anchor[0], y: anchor[1] }, pt)) {
         draft.armed = true;
+        this._syncDraftHandles();
         return;
       }
       var geom = {
@@ -21173,6 +21233,7 @@
       var a = this.draftState.anchor;
       if (this._isClickGesture(a, pt)) {
         this.draftState.armed = true;
+        this._syncDraftHandles();
         return;
       }
       // An arrow settles its head (snap included) at the release point.
@@ -22837,6 +22898,7 @@
       // caret where you click is what that tool is for.
       if (fixedBox && this._isClickGesture(a, pt)) {
         this.draftState.armed = true;
+        this._syncDraftHandles();
         return;
       }
       var geom = {
@@ -23796,10 +23858,10 @@
             input.style.height = "0px";
             var contentF = input.scrollHeight - edPad * 2;
             input.style.height = "100%";
-            // Laid out as the render lays them (its first line is 1em, the
-            // field's 1.1em), so the words do not jump at Enter.
-            var edFs = parseFloat(input.style.fontSize) || edFontSize;
-            var roomF = Math.max(0, boxHF - edPad * 2 - (contentF - edFs * 0.1));
+            // The render lays its lines out the way the field does (1.1em
+            // line boxes), so the room is the same and the words do not
+            // jump at Enter.
+            var roomF = Math.max(0, boxHF - edPad * 2 - contentF);
             input.style.paddingTop = (edPad + (alF.v === "middle" ? roomF / 2 : roomF)) + "px";
           }
           // A turned box types turned: the editor wears the box's turn.
@@ -26038,6 +26100,14 @@
     _syncDraftHandles: function() {
       var d = this._draftActive();
       if (!d) {
+        if (!this.editingShape) this._removeHandles();
+        return;
+      }
+      // A draft waiting for its second click shows only its preview. Its
+      // dots sat on the first click as a dot of their own, which read as
+      // a stray mark; they come with the finished shape instead. (A
+      // press-drag keeps them — there the box is being pulled by them.)
+      if (d.armed) {
         if (!this.editingShape) this._removeHandles();
         return;
       }

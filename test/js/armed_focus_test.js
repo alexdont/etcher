@@ -26,7 +26,7 @@ const other = { kind: "text", uuid: "t2" };
 function layer(over) {
   return Object.assign({
     annotationMode: true, activeTool: "text", editingShape: null, selectedShapes: [],
-    _pressFocus: null, _focusLetGo: null,
+    _pressFocus: null,
     _liveFocus: liveFocus, _armedFocusBars: bars, _armedToolEdits: edits
   }, over);
 }
@@ -62,10 +62,7 @@ function layer(over) {
   l._pressFocus = { focus: [typed], shift: true };
   assert.ok(l._armedToolEdits(other), "shift gets past the focus");
 }
-{
-  const l = layer({ editingShape: typed, _focusLetGo: typed });
-  assert.ok(l._armedToolEdits(other), "committed by a click away: the focus is let go");
-}
+
 
 // wiring — cursor mode
 assert.ok(/if \(hit && self\._armedFocusBars\(hit\) && self\.activeTool == null\) \{/.test(src),
@@ -82,8 +79,8 @@ assert.ok(/if \(self\._armedFocusBars\(hit\)\) return;/.test(src),
   "the doc tap tracker never selects a shape the focus bars");
 assert.ok(/var add = this\._sameToolGrabTarget\(pt\);/.test(src) && src.includes("this._armedShiftAdd(add, e);"),
   "shift-press on a shape gathers it into the selection");
-assert.ok(/if \(this\._pressFocus\) this\._focusLetGo = shape;/.test(src),
-  "a click-away commit lets go of the focus; Enter keeps it");
+assert.ok(src.includes("if (self._pressCommittedText && self.activeTool == null) {"),
+  "the press that finishes typing under the cursor leaves the text selected");
 
 console.log("armed focus: all checks passed");
 assert.ok(/if \(!onShape\) this\._pendingDraw/.test(src) &&

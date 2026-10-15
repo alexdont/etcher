@@ -16701,7 +16701,7 @@
     // presses — hover — the live selection answers.
     _liveFocus: function() {
       var list = [];
-      if (this.editingShape && this.editingShape !== this._focusLetGo) list.push(this.editingShape);
+      if (this.editingShape) list.push(this.editingShape);
       // A label picked on its own (its frame up) holds the focus for its shape.
       if (this.editingTitleShape && list.indexOf(this.editingTitleShape) === -1) list.push(this.editingTitleShape);
       (this.selectedShapes || []).forEach(function(s) {
@@ -17267,8 +17267,11 @@
           return;
         }
         e.stopPropagation();
-        // Another shape holds the focus: this press only lets go of it.
+        // Another shape holds the focus: this press only lets go of it —
+        // unless it is the press that just finished typing (that one only
+        // finishes; see `_pressCommittedText`).
         if (self._armedFocusBars(shape)) {
+          if (self._pressCommittedText) { self._pressCommittedText = false; return; }
           self._clearSelection();
           self._exitEditMode();
           if (self.editingTitleShape) self._exitTitleEditMode();
@@ -17500,6 +17503,13 @@
         // A handle/title/toolbar/modal element under the cursor
         // handles its own event; don't shadow it with a shape tap.
         if (isInputOwner(e.target, self.overlayWrapper)) return;
+
+        // The press that just closed a text editor: done typing, and the
+        // shape stays selected — it is not also a press on the board.
+        if (self._pressCommittedText && self.activeTool == null) {
+          self._pressCommittedText = false;
+          return;
+        }
 
         // Fingers are counted here as well as on the drawing overlay, because
         // in cursor mode that overlay takes no events at all — these document
@@ -24235,10 +24245,17 @@
         // This press is closing the editor; whatever tool is armed must
         // not also treat it as "draw one here" (see `_onPointerDown`).
         self._drawSuppressedUntilDrag = true;
+        // And under the cursor it is not also a click away from the shape:
+        // finishing the words leaves the shape selected (see
+        // `_keepOrDropSelection`); the NEXT press deselects.
+        self._pressCommittedText = true;
         // Belt and braces: if this press never reaches `_onPointerDown`
         // at all (it landed somewhere that does not draw), the flag still
         // dies with the gesture rather than eating the next press.
-        setTimeout(function() { self._drawSuppressedUntilDrag = false; }, 0);
+        setTimeout(function() {
+          self._drawSuppressedUntilDrag = false;
+          self._pressCommittedText = false;
+        }, 0);
         self._commitTextEdit();
       };
       document.addEventListener("pointerdown", self._textEditOutsideDown, true);
@@ -24432,24 +24449,10 @@
       }
       shape.metadata = Object.assign({}, shape.metadata || {}, patch);
       this._endTextEdit();
-      // Setting a label is a full stop: that shape is done, so it stops
-      // being the selected one — no handles, no actions in the panel, and
-      // the next click is about whatever it lands on.
-      //
+      // The shape stays selected, handles up — see _keepOrDropSelection.
       // Here rather than at either commit site, because there are three of
       // them (Enter, a click outside, the blur that a click on Etcher's own
-      // chrome comes through) and they were not ending the same way. The
-      // one you reach for should not decide what you are left holding.
-      //
-      // It also ends the shape's FRESHNESS, which is deliberate: the
-      // draw-tune-keep-drawing window belongs to the shape you just drew,
-      // and naming it is the point at which you are finished with it.
-      //
-      // EXCEPT under the shape's OWN tool (same-tool editing). There the
-      // label is one step of placing the thing — a dimension gets typed
-      // and then MOVED — so the full stop stranded the user: the end
-      // dots they were about to grab vanished with the editor. The shape
-      // stays selected instead, handles up, ready to pull.
+      // chrome comes through) and they must all end the same way.
       this._keepOrDropSelection(shape);
       this._renderShape(shape);
       // The box is sized by the text now, so committing new text moves the
@@ -24506,20 +24509,16 @@
       if (this.editingTitleShape === shape && !shape.titleGroup) this._exitTitleEditMode();
     },
 
-    // The end of a label edit decides what is left selected. Cursor
-    // mode keeps its full stop — the shape is done, the next click is
-    // about whatever it lands on. Under the shape's OWN tool (same-tool
-    // editing) the selection survives: handles back up (the editor may
-    // have replaced them), positioned against the just-committed text,
-    // and the dismiss guard swallows the click that a commit-by-
-    // clicking-away still has in flight — it already did its job.
+    // The end of a label edit leaves the shape selected — Enter, a click
+    // away or Escape alike, under the cursor or any tool. Finishing the
+    // words is when you reach for the corners: to scale it, turn it, move
+    // it. (Cursor mode used to make it a full stop that dropped the
+    // selection, so the handles vanished just as they were wanted.) The
+    // handles come back up (the editor may have replaced them), positioned
+    // against the just-committed text, and the dismiss guard swallows the
+    // click that a commit-by-clicking-away still has in flight — it already
+    // did its job. The NEXT click away deselects.
     _keepOrDropSelection: function(shape) {
-      if (!this._armedToolEdits(shape)) {
-        this._exitEditMode();
-        // A label's own frame, too: typing it brought it up.
-        if (this.editingTitleShape === shape) this._exitTitleEditMode();
-        return;
-      }
       this._suppressEditDismissUntil = Date.now() + 400;
       if (this.editingShape === shape) {
         // Already in edit mode (the created-flow: selected, then the
@@ -24530,11 +24529,6 @@
       } else {
         this._enterEditMode(shape);
       }
-      // Committed by clicking away: that click was the "done with it". The
-      // text keeps its handles, but stops holding the focus — the next
-      // press can reach any shape (see `_armedFocusBars`). Committed with
-      // Enter, it keeps the focus until a click away.
-      if (this._pressFocus) this._focusLetGo = shape;
     },
 
     _endTextEdit: function() {
@@ -25159,7 +25153,6 @@
     // -------------------------------------------------------------------------
 
     _enterEditMode: function(shape) {
-      this._focusLetGo = null;
       // Only persisted shapes are editable — temp shapes haven't been
       // ack'd by the server yet so an `etcher:updated` event for them
       // would point at a non-existent uuid.
@@ -25256,7 +25249,6 @@
     },
 
     _exitEditMode: function() {
-      this._focusLetGo = null;
       // Leaving the shape ends its freshness for good — a later
       // re-select is a one-time edit (see _freshTargets).
       this._freshShape = null;

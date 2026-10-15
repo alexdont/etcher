@@ -217,14 +217,16 @@ function layerWith(tool, shape) {
     "already selected → the dots rebuild against the committed text");
   assert.strictEqual(editing.exited, 0);
 
+  // Finishing the words keeps the shape selected everywhere now — the
+  // corners are what you reach for next.
   const cursor = world(null, dim);
   cursor._keepOrDropSelection(dim);
-  assert.strictEqual(cursor.exited, 1, "cursor mode keeps its full stop");
-  assert.strictEqual(cursor.entered + cursor.rendered, 0);
+  assert.strictEqual(cursor.exited, 0, "cursor mode keeps the shape selected");
+  assert.strictEqual(cursor.rendered, 1, "handles back up");
 
   const otherTool = world("rectangle", dim);
   otherTool._keepOrDropSelection(dim);
-  assert.strictEqual(otherTool.exited, 1, "someone else's tool is a full stop too");
+  assert.strictEqual(otherTool.exited, 0, "and so does any other tool");
 
   // Both ends of a label edit route through it.
   const uses = src.match(/this\._keepOrDropSelection\(shape\);/g) || [];

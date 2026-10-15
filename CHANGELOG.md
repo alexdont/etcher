@@ -153,6 +153,11 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   (`style.title_rotation`). Labels riding an arrow or dimension stay
   upright. A turned label's dots, side grabbers, clicks, resizing and
   outline grip all work in its turned frame.
+- **Finishing a text leaves it selected.** Enter, a click away or Escape
+  ends the typing and keeps the text (or the shape whose label it is)
+  selected with its handles up, ready to scale, turn or move — under the
+  cursor as well as the text tools, where it used to drop the selection.
+  The next click away deselects.
 - **Connector dots turn with their shape.** A turned shape's anchor dots
   sit on its own turned outline, and an arrow tied to one follows it round —
   tie an arrow to a rectangle's left and turn it half way, and the arrow

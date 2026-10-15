@@ -63,8 +63,17 @@ assert.ok(src.includes('".etcher-stylepanel .etcher-in-chips { display: none !im
   "folded rows are hidden in both panel sizes");
 assert.ok(src.includes('".etcher-stylepanel[data-size=\\"compact\\"] .etcher-chips { flex-direction: column; gap: 6px; }",'),
   "the compact strip stacks the same buttons");
-assert.ok(body("_openChipPop").includes("pop.style.top = ((compact ? rr.top : rr.bottom + 6) - hr.top)"),
+assert.ok(body("_openChipPop").includes(": ((compact ? rr.top : rr.bottom + 6) - hr.top)"),
   "its pop-ups open beside the button");
+// The ⋯ menu borrows the same controls: laid out as the full panel, its
+// pop-ups opening upward, Arrange as captioned buttons, never disabled whole.
+assert.ok(src.includes('host.className = "etcher-stylepanel etcher-menu-host";'),
+  "the ⋯ menu hosts the controls in a panel-styled holder, so they fold into buttons there too");
+assert.ok(body("_openChipPop").includes("(rr.top - hr.top - pop.offsetHeight - 6)"),
+  "in the ⋯ menu a pop-up opens above the button row");
+assert.ok(src.includes('b.className = "etcher-chip";') && src.includes('caption: "Lower"'),
+  "Arrange is a row of captioned buttons");
+assert.ok(!/actionMoreBtn\.disabled = /.test(src), "the ⋯ stays usable without a selection");
 {
   const syncChips = make("_syncStyleChips");
   const row = (shown, head) => ({ style: { display: shown ? "" : "none" }, classList: { contains: (c) => !!head && c === "etcher-marker-row-head" } });

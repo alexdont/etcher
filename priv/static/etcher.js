@@ -535,20 +535,6 @@
       // The arrange menu. Popup buttons are styled per `data-kind`, and this
       // kind had no rules — its buttons laid out at 0x0, so the menu opened
       // as an empty pill.
-      ".etcher-popup[data-kind=\"actions\"] { gap: 4px; }",
-      ".etcher-popup[data-kind=\"actions\"] button {",
-      "  width: 34px; height: 34px; display: inline-flex;",
-      "  align-items: center; justify-content: center;",
-      "  border: 0; background: none; color: #fff; cursor: pointer;",
-      "  border-radius: 8px; padding: 0;",
-      "}",
-      ".etcher-popup[data-kind=\"actions\"] button svg { width: 18px; height: 18px; }",
-      ".etcher-popup[data-kind=\"actions\"] button:hover:not(:disabled) {",
-      "  background: rgba(255, 255, 255, 0.14);",
-      "}",
-      ".etcher-popup[data-kind=\"actions\"] button:disabled {",
-      "  opacity: 0.35; cursor: default;",
-      "}",
       ".etcher-actionbar .etcher-divider {",
       "  width: 1px; height: 18px; margin: 0 3px;",
       "  background: rgba(255, 255, 255, 0.2);",
@@ -1190,34 +1176,34 @@
       // Full-width hairline divider used inside flex-wrap popups to
       // force the items after it onto a new row + visually section
       // them off (e.g., \"history\" buttons below the tools grid).
-      // The style controls borrowed by the arrange menu. That menu is a row
-      // of buttons; these need the full width and a column, the same shape
-      // they have in the style panel.
+      // The ⋯ menu over the action bar: the style controls (borrowed from the
+      // panel, which can be minimized or hidden) laid out exactly as the full
+      // panel lays them — the slim thickness line, the row of choice buttons
+      // with their pop-ups — and under them Arrange, a row of the same
+      // captioned buttons. One column, the panel's width, nothing spilling.
       ".etcher-popup[data-kind=\"actions\"] {",
-      "  flex-wrap: wrap; max-width: 172px; gap: 2px; padding: 6px;",
+      "  flex-direction: column; flex-wrap: nowrap; align-items: stretch;",
+      "  width: 206px; box-sizing: border-box; padding: 10px; gap: 10px; border-radius: 12px;",
       "}",
-      ".etcher-popup[data-kind=\"actions\"] .etcher-popup[data-kind=\"params\"] {",
+      ".etcher-popup[data-kind=\"actions\"].is-open { flex-wrap: nowrap; }",
+      // The holder that makes the borrowed controls lay out as the full
+      // panel (every panel rule keys on `.etcher-stylepanel`), without any of
+      // the floating panel's own box.
+      ".etcher-stylepanel.etcher-menu-host {",
+      "  position: static; display: flex; width: auto; max-width: none;",
+      "  padding: 0; background: none; box-shadow: none; border-radius: 0; z-index: auto;",
+      "}",
+      ".etcher-menu-host .etcher-popup[data-kind=\"params\"] {",
       "  position: static; display: flex; flex-direction: column;",
-      "  width: 100%; min-width: 0; padding: 0; gap: 5px;",
+      "  width: 100%; min-width: 0; padding: 0; gap: 10px;",
       "  background: none; box-shadow: none; z-index: auto;",
       "}",
-      // Tighter than in the style panel: this is a menu that opens over the
-      // board, so every row it saves is board the user can still see.
-      ".etcher-popup[data-kind=\"actions\"] .etcher-marker-row { gap: 1px; }",
-      ".etcher-popup[data-kind=\"actions\"] .etcher-marker-row-head {",
-      "  font-size: 11px;",
-      "}",
-      ".etcher-popup[data-kind=\"actions\"] .etcher-marker-dash { gap: 4px; }",
-      // Square, and the same square the arrange buttons are. In the style
-      // panel these stretch to fill the width, which is right there — the
-      // panel is a column of full-width controls. Here they sit in a menu
-      // whose other row is four equal icon buttons, and a row of wider ones
-      // directly above reads as a different kind of control rather than as
-      // the same menu.
-      ".etcher-popup[data-kind=\"actions\"] .etcher-marker-dash button {",
-      "  flex: 0 0 34px; width: 34px; height: 34px;",
-      "}",
-      ".etcher-popup[data-kind=\"actions\"] .etcher-popup-divider { margin: 2px 0; }",
+      ".etcher-menu-host:empty { display: none; }",
+      ".etcher-popup[data-kind=\"actions\"] .etcher-popup-divider { flex: 0 0 auto; margin: 0; }",
+      ".etcher-arrange-row { display: flex; gap: 6px; }",
+      ".etcher-arrange-row .etcher-chip:disabled { opacity: 0.35; cursor: default; }",
+      ".etcher-arrange-row .etcher-chip:disabled:hover { background: rgba(255, 255, 255, 0.08); }",
+      ".etcher-arrange-row .etcher-chip-face svg { width: 17px; height: 17px; max-width: none; max-height: none; }",
       ".etcher-popup-divider {",
       "  flex: 0 0 100%; height: 1px; margin: 4px 0;",
       "  background: rgba(255, 255, 255, 0.15);",
@@ -5245,7 +5231,8 @@
       self._positionActionBar();
     },
 
-    // The `⋮` menu: the four arrange actions, as a row.
+    // The `⋯` menu: the style controls (see `_hostParamsIn`), then Arrange —
+    // four captioned buttons in the style panel's own button style.
     _buildActionMenu: function() {
       var self = this;
       var menu = document.createElement("div");
@@ -5253,27 +5240,37 @@
       menu.dataset.kind = "actions";
       menu.setAttribute("data-fresco-no-capture", "");
 
+      var host = document.createElement("div");
+      host.className = "etcher-stylepanel etcher-menu-host";
+      menu.appendChild(host);
+      self._actionParamsHost = host;
+
+      var row = document.createElement("div");
+      row.className = "etcher-arrange-row";
       self.actionArrangeBtns = [
-        { where: "front", icon: ICONS.toFront, title: "Bring to front (\u2318])" },
-        { where: "forward", icon: ICONS.forward, title: "Bring forward (])" },
-        { where: "backward", icon: ICONS.backward, title: "Send backward ([)" },
-        { where: "back", icon: ICONS.toBack, title: "Send to back (\u2318[)" }
+        { where: "front", icon: ICONS.toFront, caption: "Front", title: "Bring to front (\u2318])" },
+        { where: "forward", icon: ICONS.forward, caption: "Raise", title: "Bring forward (])" },
+        { where: "backward", icon: ICONS.backward, caption: "Lower", title: "Send backward ([)" },
+        { where: "back", icon: ICONS.toBack, caption: "Back", title: "Send to back (\u2318[)" }
       ].map(function(entry) {
         var b = document.createElement("button");
         b.type = "button";
+        b.className = "etcher-chip";
         b.dataset.arrange = entry.where;
         b.title = entry.title;
         b.setAttribute("aria-label", entry.title.replace(/\s*\(.*\)$/, ""));
-        b.innerHTML = entry.icon;
+        b.innerHTML = '<span class="etcher-chip-face">' + entry.icon + '</span>' +
+          '<span class="etcher-chip-caption">' + entry.caption + '</span>';
         b.addEventListener("click", function(e) {
           e.preventDefault();
           self._arrange(entry.where);
           // Left open — nudging something forward a few steps is the common
           // case, same reasoning as the undo button.
         });
-        menu.appendChild(b);
+        row.appendChild(b);
         return b;
       });
+      menu.appendChild(row);
 
       self.handle.container.appendChild(menu);
       self.actionMenu = menu;
@@ -5283,7 +5280,6 @@
     // they read as a section rather than as more arrange buttons.
     _hostParamsIn: function(host) {
       if (!host || !this.paramsPopup) return;
-      if (this.paramsPopup.parentNode === host) return;
       if (!this._paramsDivider) {
         var d = document.createElement("div");
         d.className = "etcher-popup-divider";
@@ -5293,8 +5289,12 @@
       // canvas is the occasional action; thickness and line type are what
       // you reach for between strokes, so they sit nearest the pointer —
       // this menu opens upwards out of a bar at the bottom of the screen.
-      host.insertBefore(this.paramsPopup, host.firstChild);
-      host.insertBefore(this._paramsDivider, this.paramsPopup.nextSibling);
+      // Into the menu's panel-styled holder, so they lay out as the full
+      // panel does (see `_buildActionMenu`).
+      var inner = host === this.actionMenu && this._actionParamsHost ? this._actionParamsHost : host;
+      if (this.paramsPopup.parentNode === inner) return;
+      inner.appendChild(this.paramsPopup);
+      host.insertBefore(this._paramsDivider, inner.nextSibling);
     },
 
     // Hand them back to the style panel. Called when the menu closes, so the
@@ -6272,10 +6272,9 @@
       (this.actionArrangeBtns || []).forEach(function(b) {
         b.disabled = !canArrange;
       });
-      // Arrange is all the `⋮` holds, so disable the trigger too rather than
-      // opening onto four dead buttons.
-      if (this.actionMoreBtn) this.actionMoreBtn.disabled = !canArrange;
-      if (!canArrange) this._closeActionMenu();
+      // The `⋯` stays usable without a selection: it holds the style
+      // controls too, for the next shape drawn, and those must be reachable
+      // when the panel is minimized or hidden. Only Arrange greys out.
 
       if (this.actionBar) {
         this.actionBar.classList.toggle("is-active", !!this.annotationMode);
@@ -8333,10 +8332,17 @@
       var row = this._chipsRow;
       var host = pop.offsetParent || pop.parentNode;
       var compact = this.stylePanel && this.stylePanel.getAttribute("data-size") === "compact";
+      // Borrowed by the ⋯ menu, which opens upwards out of the bar at the
+      // bottom: the pop-up opens above the button row, never down over
+      // Arrange and the bar.
+      var inMenu = !!(this.actionMenu && this.actionMenu.contains(pop));
+      if (inMenu) compact = false;
       if (row && host && host.getBoundingClientRect) {
         var hr = host.getBoundingClientRect();
         var rr = compact ? chip.el.getBoundingClientRect() : row.getBoundingClientRect();
-        pop.style.top = ((compact ? rr.top : rr.bottom + 6) - hr.top) + "px";
+        pop.style.top = inMenu
+          ? (rr.top - hr.top - pop.offsetHeight - 6) + "px"
+          : ((compact ? rr.top : rr.bottom + 6) - hr.top) + "px";
       }
       // The button's face follows the controls as they move.
       this._chipPopLive = function() { setTimeout(function() { self._syncStyleChips(); }, 0); };

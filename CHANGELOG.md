@@ -153,6 +153,14 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   (`style.title_rotation`). Labels riding an arrow or dimension stay
   upright. A turned label's dots, side grabbers, clicks, resizing and
   outline grip all work in its turned frame.
+- **The ⋯ menu over the action bar is tidy again.** It borrows the style
+  panel's controls (so they are reachable with the panel minimized or
+  hidden), and since the panel moved to captioned buttons with pop-ups the
+  menu showed both the buttons and every row they fold away — two opacity
+  controls, oversized line-type tiles, uncaptioned arrange icons. It now
+  lays the controls out exactly as the full panel does, its pop-ups opening
+  upward, with Arrange below as four captioned buttons (Front, Raise,
+  Lower, Back). The ⋯ opens without a selection too; only Arrange greys out.
 - **A turned text stays put while you type into it.** Its box grows with
   the words, and since it turns about the box's middle, typing carried the
   whole text off up, down and around. It now stays anchored at the corner

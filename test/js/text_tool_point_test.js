@@ -388,7 +388,7 @@ function pull(handle, pt, freeform) {
   assert.ok(ed.includes('input.style.color = point ? "transparent" : edColor;'),
     "the textarea's own glyphs are invisible — the live render is what shows");
   assert.ok(ed.includes("var existing = !point &&"), "so the text is not hidden while typing");
-  assert.ok(/shape\._draftTitle = input\.value;\s*\/\/ Renders the text and re-fits this editor over it\.\s*selfEd\._typePointText\(shape\);/.test(ed),
+  assert.ok(/shape\._draftTitle = input\.value;\s*\/\/ Renders the text and re-fits this editor over it\.\s*selfEd\._renderKeepingCorner\(shape\);/.test(ed),
     "every keystroke renders the real text");
   assert.ok(/if \(e\.shiftKey\) \{\s*if \(!point\) return;\s*e\.preventDefault\(\);[\s\S]*?input\.setRangeText\("\\n"/.test(ed),
     "Shift+Enter puts the line break in");
@@ -512,7 +512,7 @@ console.log("text tool (point text): all checks passed");
 
 // A turned text typed into stays anchored at its own top-left corner.
 {
-  const typeIt = eval("(function" + body("_typePointText").slice(body("_typePointText").indexOf("(")) + ")");
+  const typeIt = eval("(function" + body("_renderKeepingCorner").slice(body("_renderKeepingCorner").indexOf("(")) + ")");
   const rotatePoint = eval("(function" + body("_rotatePoint").slice(body("_rotatePoint").indexOf("(")) + ")");
   const recenter = eval("(function" + body("_recenterRotated").slice(body("_recenterRotated").indexOf("(")) + ")");
   const shape = { geometry: { x: 0, y: 0, w: 100, h: 20 } };
@@ -527,6 +527,8 @@ console.log("text tool (point text): all checks passed");
   const after = tl(shape.geometry);
   assert.ok(Math.abs(before.x - after.x) < 1e-9 && Math.abs(before.y - after.y) < 1e-9,
     `the turned text's starting corner stays put while it grows (${JSON.stringify(before)} → ${JSON.stringify(after)})`);
+  assert.ok(/else shape\.style\.font_size = value \/ scale;[\s\S]{0,120}self\._renderKeepingCorner\(shape\);/.test(src),
+    "a new font size anchors the same way");
 }
 
 console.log("labels and callouts (point text): all checks passed");

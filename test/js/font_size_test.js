@@ -118,7 +118,7 @@ function board(targets) {
     _markerScale: () => 2,
     _inkScale: () => 2,
     _snapshotShape: (s) => ({ was: s.style && s.style.font_size }),
-    _renderShape: (s) => rendered.push(s),
+    _renderShape: (s) => rendered.push(s), _renderKeepingCorner(s) { this._renderShape(s); },
     placedTitle: [],
     placedShape: [],
     _positionAllTitleHandles(s) { this.placedTitle.push(s); },

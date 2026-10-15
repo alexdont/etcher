@@ -7420,7 +7420,8 @@
           shape.style = Object.assign({}, shape.style || {});
           if (value == null) delete shape.style.font_size;
           else shape.style.font_size = value / scale;
-          self._renderShape(shape);
+          // A turned text keeps its starting corner as it grows or shrinks.
+          self._renderKeepingCorner(shape);
           // The resize handles sit on the label's corners, and the label
           // just changed size under them — so they have to be re-placed,
           // the same as after an align or a drag. Without this they hang in
@@ -22527,12 +22528,13 @@
 
     // An open editor rides its text: typing, a handle drag, a pan or a
     // panel edit all re-render, and every point render ends here.
-    // Re-render point text as it is typed into. The box grows with the
+    // Re-render a shape whose box may change size under it — point text
+    // being typed into, or given a new font size. The box grows with the
     // words; a turned text turns about its box's middle, so a growing box
-    // used to carry the whole text off as you typed — up, down, around. The
-    // box is set back so its own top-left corner — where the words start,
-    // and the corner the text grows away from — stays where it was.
-    _typePointText: function(shape) {
+    // used to carry the whole text off — up, down, around. The box is set
+    // back so its own top-left corner — where the words start, and the
+    // corner the text grows away from — stays where it was.
+    _renderKeepingCorner: function(shape) {
       var rot = this._shapeRot(shape);
       var g0 = shape.geometry;
       var c0 = rot && g0 ? { x: g0.x + g0.w / 2, y: g0.y + g0.h / 2 } : null;
@@ -24054,7 +24056,7 @@
         if (point) {
           shape._draftTitle = input.value;
           // Renders the text and re-fits this editor over it.
-          selfEd._typePointText(shape);
+          selfEd._renderKeepingCorner(shape);
           selfEd._positionPointHandles(shape);
           return;
         }

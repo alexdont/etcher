@@ -73,7 +73,13 @@ assert.ok(body("_openChipPop").includes("(rr.top - hr.top - pop.offsetHeight - 6
   "in the ⋯ menu a pop-up opens above the button row");
 assert.ok(src.includes('b.className = "etcher-chip";') && src.includes('caption: "Lower"'),
   "Arrange is a row of captioned buttons");
-assert.ok(src.includes("this.actionMoreBtn.disabled = !canArrange && this._menuParamsShow() === \"none\";"), "the ⋯ greys out only when it would hold nothing usable");
+assert.ok(src.includes('this.actionMoreBtn.disabled = this._menuParamsShow() === "none";'), "the ⋯ greys out when it would hold nothing");
+// Arrange is its own button beside Paste, opening a small pop-up; the ⋯ is
+// kept but hidden for now.
+assert.ok(src.includes('self.actionLayersBtn = mk(ICONS.layers, "Arrange layers"'), "a layers button opens the arrange moves");
+assert.ok(src.includes('menu.dataset.kind = "layers";') && /_buildLayersMenu[\s\S]{0,800}etcher-arrange-row/.test(src),
+  "the arrange row lives in the layers pop-up");
+assert.ok(src.includes('self.actionMoreBtn.style.display = "none";'), "the ⋯ is hidden, not removed");
 assert.ok(src.includes('if (size === "compact") return "missing";') && src.includes('if (size === "hidden") return "all";'), "the menu carries only what the panel is not showing");
 {
   const syncChips = make("_syncStyleChips");

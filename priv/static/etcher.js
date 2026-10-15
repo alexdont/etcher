@@ -290,6 +290,8 @@
     // compact mobile toolbar. Heroicons solid `EllipsisHorizontal`.
     paste: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.6" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1.5"/></svg>',
     duplicate: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.6" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M15 5.5A1.5 1.5 0 0 0 13.5 4h-8A1.5 1.5 0 0 0 4 5.5v8A1.5 1.5 0 0 0 5.5 15"/></svg>',
+    // Stacked sheets: the arrange (layer order) button.
+    layers:   '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.6" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.43 9.75 2.25 12l4.18 2.25m0-4.5 5.57 3 5.57-3m-11.14 0L2.25 7.5 12 2.25l9.75 5.25-4.18 2.25m0 0L21.75 12l-4.18 2.25m0 0 4.18 2.25L12 21.75 2.25 16.5l4.18-2.25m11.14 0-5.57 3-5.57-3"/></svg>',
     more:     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 12a2 2 0 1 1-4 0 2 2 0 0 1 4 0Zm8 0a2 2 0 1 1-4 0 2 2 0 0 1 4 0Zm6 2a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"/></svg>',
     // Artist's palette — the colors `[⋯]` trigger (opens the picker).
     palette: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21a9 9 0 1 1 0-18 9 8 0 0 1 9 8 4.5 4 0 0 1-4.5 4H14a2 2 0 0 0-1 3.75A1.3 1.3 0 0 1 12 21Z"/><circle cx="7.5" cy="10.5" r="1.1" fill="currentColor" stroke="none"/><circle cx="12" cy="7.5" r="1.1" fill="currentColor" stroke="none"/><circle cx="16.5" cy="10.5" r="1.1" fill="currentColor" stroke="none"/></svg>'
@@ -1209,6 +1211,9 @@
       ".etcher-menu-host[data-show=\"missing\"][data-compact-parts~=\"dash\"] .etcher-chip[data-chip=\"stroke\"],",
       ".etcher-menu-host[data-show=\"missing\"][data-compact-parts~=\"fills\"] .etcher-chip[data-chip=\"fill\"] { display: none !important; }",
       ".etcher-popup[data-kind=\"actions\"] .etcher-popup-divider { flex: 0 0 auto; margin: 0; }",
+      ".etcher-popup[data-kind=\"layers\"] { width: 216px; box-sizing: border-box; padding: 8px; border-radius: 12px; }",
+      ".etcher-popup[data-kind=\"layers\"].is-open { flex-wrap: nowrap; }",
+      ".etcher-popup[data-kind=\"layers\"] .etcher-arrange-row { flex: 1 1 auto; }",
       ".etcher-arrange-row { display: flex; gap: 6px; }",
       ".etcher-arrange-row .etcher-chip:disabled { opacity: 0.35; cursor: default; }",
       ".etcher-arrange-row .etcher-chip:disabled:hover { background: rgba(255, 255, 255, 0.08); }",
@@ -3714,6 +3719,11 @@
         this.actionMenu.parentNode.removeChild(this.actionMenu);
       }
       this.actionMenu = null;
+      this._closeLayersMenu();
+      if (this.layersMenu && this.layersMenu.parentNode) {
+        this.layersMenu.parentNode.removeChild(this.layersMenu);
+      }
+      this.layersMenu = null;
       if (this.stylePanel && this.stylePanel.parentNode) {
         this.stylePanel.parentNode.removeChild(this.stylePanel);
       }
@@ -5219,29 +5229,37 @@
       self.actionPasteBtn = mk(ICONS.paste, "Paste (\u2318V)", function() {
         self._pasteFromClipboard();
       });
-
-      var div2 = document.createElement("div");
-      div2.className = "etcher-divider";
-      bar.appendChild(div2);
-
-      // Arrange sits behind the `⋮` rather than inline: four more icons made
+      // Layer order, beside the other selection actions: one button opening
+      // a small pop-up of the four arrange moves. Four more icons inline made
       // the bar noticeably wider than the tool bar under it, and these are
       // occasional actions with keyboard shortcuts for anyone who reaches
       // for them often.
-      self.actionMoreBtn = mk(ICONS.more, "Arrange", function() {
+      self.actionLayersBtn = mk(ICONS.layers, "Arrange layers", function() {
+        self._toggleLayersMenu();
+      });
+
+      // The `⋯` is kept, hidden: with Arrange on its own button it would hold
+      // nothing of its own yet, and it will again (see `_toggleActionMenu`).
+      var div2 = document.createElement("div");
+      div2.className = "etcher-divider";
+      div2.style.display = "none";
+      bar.appendChild(div2);
+      self.actionMoreBtn = mk(ICONS.more, "More", function() {
         self._toggleActionMenu();
       });
+      self.actionMoreBtn.style.display = "none";
 
       container.appendChild(bar);
       self.actionBar = bar;
 
       self._buildActionMenu();
+      self._buildLayersMenu();
       self._syncActionBar();
       self._positionActionBar();
     },
 
-    // The `⋯` menu: the style controls (see `_hostParamsIn`), then Arrange —
-    // four captioned buttons in the style panel's own button style.
+    // The `⋯` menu: the style controls the panel isn't showing (see
+    // `_hostParamsIn`). Its button is hidden for now — see `_buildActionBar`.
     _buildActionMenu: function() {
       var self = this;
       var menu = document.createElement("div");
@@ -5253,6 +5271,20 @@
       host.className = "etcher-stylepanel etcher-menu-host";
       menu.appendChild(host);
       self._actionParamsHost = host;
+
+
+      self.handle.container.appendChild(menu);
+      self.actionMenu = menu;
+    },
+
+    // The layers pop-up over the action bar: the four arrange moves as
+    // captioned buttons in the style panel's own button style.
+    _buildLayersMenu: function() {
+      var self = this;
+      var menu = document.createElement("div");
+      menu.className = "etcher-popup";
+      menu.dataset.kind = "layers";
+      menu.setAttribute("data-fresco-no-capture", "");
 
       var row = document.createElement("div");
       row.className = "etcher-arrange-row";
@@ -5282,7 +5314,43 @@
       menu.appendChild(row);
 
       self.handle.container.appendChild(menu);
-      self.actionMenu = menu;
+      self.layersMenu = menu;
+    },
+
+    _toggleLayersMenu: function() {
+      var self = this;
+      var menu = self.layersMenu;
+      if (!menu) return;
+      var open = menu.classList.contains("is-open");
+      self._closeLayersMenu();
+      if (open) return;
+      self._closeActionMenu();
+      menu.classList.add("is-open");
+      var btnRect = self.actionLayersBtn.getBoundingClientRect();
+      var barRect = self.actionBar.getBoundingClientRect();
+      var contRect = self.handle.container.getBoundingClientRect();
+      var mRect = menu.getBoundingClientRect();
+      // Over its button, inside the container.
+      var left = btnRect.left + btnRect.width / 2 - mRect.width / 2 - contRect.left;
+      left = Math.max(4, Math.min(left, contRect.width - mRect.width - 4));
+      menu.style.left = left + "px";
+      menu.style.top = barRect.top - contRect.top - mRect.height - 6 + "px";
+      self.actionLayersBtn.classList.add("is-active");
+      self._onLayersMenuOutside = function(e) {
+        if (menu.contains(e.target) || self.actionLayersBtn.contains(e.target)) return;
+        self._closeLayersMenu();
+      };
+      document.addEventListener("pointerdown", self._onLayersMenuOutside, true);
+    },
+
+    _closeLayersMenu: function() {
+      if (!this.layersMenu) return;
+      this.layersMenu.classList.remove("is-open");
+      if (this.actionLayersBtn) this.actionLayersBtn.classList.remove("is-active");
+      if (this._onLayersMenuOutside) {
+        document.removeEventListener("pointerdown", this._onLayersMenuOutside, true);
+        this._onLayersMenuOutside = null;
+      }
     },
 
     // Move the live params controls into `host`, with a divider above them so
@@ -6328,13 +6396,15 @@
       (this.actionArrangeBtns || []).forEach(function(b) {
         b.disabled = !canArrange;
       });
-      // The `⋯` holds Arrange and whatever style controls the panel isn't
-      // showing (see `_menuParamsShow`). With nothing to arrange it stays
-      // usable while it carries controls — for the next shape drawn, with the
-      // panel narrowed or hidden — and greys out when it would open onto
-      // nothing but four dead buttons.
+      if (this.actionLayersBtn) {
+        this.actionLayersBtn.disabled = !canArrange;
+        if (!canArrange) this._closeLayersMenu();
+      }
+      // The `⋯` (hidden for now) holds whatever style controls the panel
+      // isn't showing (see `_menuParamsShow`), and greys out when that is
+      // nothing.
       if (this.actionMoreBtn) {
-        this.actionMoreBtn.disabled = !canArrange && this._menuParamsShow() === "none";
+        this.actionMoreBtn.disabled = this._menuParamsShow() === "none";
         if (this.actionMoreBtn.disabled) this._closeActionMenu();
       }
 

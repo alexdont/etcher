@@ -153,6 +153,10 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   (`style.title_rotation`). Labels riding an arrow or dimension stay
   upright. A turned label's dots, side grabbers, clicks, resizing and
   outline grip all work in its turned frame.
+- **Arrange has its own button.** A layers button beside Paste opens a
+  small pop-up with Front, Raise, Lower and Back (greyed out when nothing
+  can be arranged); it stays open for a few nudges and closes on a click
+  away. The ⋯ button is hidden for now — kept for what it will hold later.
 - **The ⋯ menu over the action bar is tidy again.** It borrows the style
   panel's controls (so they are reachable with the panel minimized or
   hidden), and since the panel moved to captioned buttons with pop-ups the

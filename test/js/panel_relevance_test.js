@@ -73,7 +73,8 @@ assert.ok(body("_openChipPop").includes("(rr.top - hr.top - pop.offsetHeight - 6
   "in the ⋯ menu a pop-up opens above the button row");
 assert.ok(src.includes('b.className = "etcher-chip";') && src.includes('caption: "Lower"'),
   "Arrange is a row of captioned buttons");
-assert.ok(!/actionMoreBtn\.disabled = /.test(src), "the ⋯ stays usable without a selection");
+assert.ok(src.includes("this.actionMoreBtn.disabled = !canArrange && this._menuParamsShow() === \"none\";"), "the ⋯ greys out only when it would hold nothing usable");
+assert.ok(src.includes('if (size === "compact") return "missing";') && src.includes('if (size === "hidden") return "all";'), "the menu carries only what the panel is not showing");
 {
   const syncChips = make("_syncStyleChips");
   const row = (shown, head) => ({ style: { display: shown ? "" : "none" }, classList: { contains: (c) => !!head && c === "etcher-marker-row-head" } });

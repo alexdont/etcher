@@ -160,7 +160,11 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   controls, oversized line-type tiles, uncaptioned arrange icons. It now
   lays the controls out exactly as the full panel does, its pop-ups opening
   upward, with Arrange below as four captioned buttons (Front, Raise,
-  Lower, Back). The ⋯ opens without a selection too; only Arrange greys out.
+  Lower, Back). And it only carries what the panel isn't showing: just
+  Arrange beside the full panel, the controls the compact strip leaves out
+  (opacity; line type and fill when the strip drops them) beside the strip,
+  and all of them when the panel is hidden. The ⋯ greys out only when it
+  would open onto nothing usable.
 - **A turned text stays put while you type into it.** Its box grows with
   the words, and since it turns about the box's middle, typing carried the
   whole text off up, down and around. It now stays anchored at the corner

@@ -1199,6 +1199,15 @@
       "  background: none; box-shadow: none; z-index: auto;",
       "}",
       ".etcher-menu-host:empty { display: none; }",
+      // With the compact strip up, only what the strip leaves out: never the
+      // thickness / label-size lines or the corner, alignment and label
+      // buttons (all in the strip); opacity always (never in it); line type
+      // and fill when the strip's parts setting leaves them out.
+      ".etcher-menu-host[data-show=\"missing\"] .etcher-inline-row,",
+      ".etcher-menu-host[data-show=\"missing\"] .etcher-font-row,",
+      ".etcher-menu-host[data-show=\"missing\"] .etcher-chip:not([data-chip=\"opacity\"]):not([data-chip=\"stroke\"]):not([data-chip=\"fill\"]),",
+      ".etcher-menu-host[data-show=\"missing\"][data-compact-parts~=\"dash\"] .etcher-chip[data-chip=\"stroke\"],",
+      ".etcher-menu-host[data-show=\"missing\"][data-compact-parts~=\"fills\"] .etcher-chip[data-chip=\"fill\"] { display: none !important; }",
       ".etcher-popup[data-kind=\"actions\"] .etcher-popup-divider { flex: 0 0 auto; margin: 0; }",
       ".etcher-arrange-row { display: flex; gap: 6px; }",
       ".etcher-arrange-row .etcher-chip:disabled { opacity: 0.35; cursor: default; }",
@@ -5303,6 +5312,7 @@
       if (this._paramsDivider && this._paramsDivider.parentNode) {
         this._paramsDivider.parentNode.removeChild(this._paramsDivider);
       }
+      if (this._actionParamsHost) this._actionParamsHost.removeAttribute("data-show");
       this._syncStylePanel();
     },
 
@@ -5322,11 +5332,30 @@
       // Only one of the two places can be on screen at a time, and two sets
       // of sliders for one value is a bug waiting to happen — they disagree
       // the moment anything changes either one from elsewhere.
-      self._hostParamsIn(self.actionMenu);
+      // Only what the panel isn't showing: nothing while the full panel is
+      // up (or reachable from its own button on a narrow screen), the
+      // controls the compact strip leaves out while it is the strip, and all
+      // of them while the panel is hidden. The menu never repeats the panel.
+      var show = self._menuParamsShow();
+      var paramsHost = self._actionParamsHost;
+      if (show !== "none") {
+        self._hostParamsIn(self.actionMenu);
+        if (paramsHost) {
+          paramsHost.setAttribute("data-show", show);
+          paramsHost.setAttribute("data-compact-parts",
+            (self.stylePanel && self.stylePanel.getAttribute("data-compact-parts")) || "");
+        }
+      }
 
       var barRect = self.actionBar.getBoundingClientRect();
       var contRect = self.handle.container.getBoundingClientRect();
       self.actionMenu.classList.add("is-open");
+      // Borrowed, but nothing of it applies here (the strip already has the
+      // rest, or the selection takes none of these): hand it back rather
+      // than open on an empty section.
+      if (show !== "none" && paramsHost && !self._menuParamsVisible(paramsHost)) {
+        self._releaseParams();
+      }
       var mRect = self.actionMenu.getBoundingClientRect();
       self.actionMenu.style.left =
         Math.max(4, barRect.right - contRect.left - mRect.width) + "px";
@@ -5340,6 +5369,30 @@
         self._closeActionMenu();
       };
       document.addEventListener("pointerdown", self._onActionMenuOutside, true);
+    },
+
+    // What of the style controls the ⋯ menu carries: "none" (the panel shows
+    // them all), "missing" (the compact strip is up: only what it leaves
+    // out) or "all" (the panel is hidden).
+    _menuParamsShow: function() {
+      var panel = this.stylePanel;
+      if (!panel) return "all";
+      // A narrow screen: the panel is a pop-up from its own button, every
+      // control a press away there.
+      if (panel.hasAttribute("data-compact")) return "none";
+      var size = panel.getAttribute("data-size");
+      if (size === "hidden") return "all";
+      if (size === "compact") return "missing";
+      return "none";
+    },
+
+    // Whether the borrowed controls show anything in the menu.
+    _menuParamsVisible: function(host) {
+      var els = host.querySelectorAll(".etcher-chip, .etcher-inline-row, .etcher-marker-row");
+      for (var i = 0; i < els.length; i++) {
+        if (els[i].offsetParent !== null && !els[i].closest(".etcher-chip-pop")) return true;
+      }
+      return false;
     },
 
     _closeActionMenu: function() {
@@ -5821,6 +5874,8 @@
       if (mode !== "compact" && mode !== "hidden") mode = "full";
       if (this._openChip) this._closeChipPop();
       if (this.stylePanel) this.stylePanel.setAttribute("data-size", mode);
+      // What the ⋯ menu carries follows the panel's size.
+      if (this.actionBar) this._syncActionBar();
       // Which buttons belong depends on the size (thickness is one only in
       // the strip).
       if (this._chips) this._syncStyleChips();
@@ -6074,7 +6129,8 @@
       // arrange menu is currently borrowing it. This runs on a great many
       // events, and without the guard it would pull the controls out from
       // under the pointer the moment anything else on the board changed.
-      var borrowed = this.actionMenu && this.actionMenu.classList.contains("is-open");
+      var borrowed = !!(this.actionMenu && this.actionMenu.classList.contains("is-open") &&
+        this.paramsPopup && this.actionMenu.contains(this.paramsPopup));
       if (!borrowed && this.paramsPopup && this.paramsPopup.parentNode !== this.stylePanel) {
         this.stylePanel.appendChild(this.paramsPopup);
       }
@@ -6272,9 +6328,15 @@
       (this.actionArrangeBtns || []).forEach(function(b) {
         b.disabled = !canArrange;
       });
-      // The `⋯` stays usable without a selection: it holds the style
-      // controls too, for the next shape drawn, and those must be reachable
-      // when the panel is minimized or hidden. Only Arrange greys out.
+      // The `⋯` holds Arrange and whatever style controls the panel isn't
+      // showing (see `_menuParamsShow`). With nothing to arrange it stays
+      // usable while it carries controls — for the next shape drawn, with the
+      // panel narrowed or hidden — and greys out when it would open onto
+      // nothing but four dead buttons.
+      if (this.actionMoreBtn) {
+        this.actionMoreBtn.disabled = !canArrange && this._menuParamsShow() === "none";
+        if (this.actionMoreBtn.disabled) this._closeActionMenu();
+      }
 
       if (this.actionBar) {
         this.actionBar.classList.toggle("is-active", !!this.annotationMode);

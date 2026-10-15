@@ -153,6 +153,14 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   (`style.title_rotation`). Labels riding an arrow or dimension stay
   upright. A turned label's dots, side grabbers, clicks, resizing and
   outline grip all work in its turned frame.
+- **Escape only cancels what it cancels.** Escape steps down one rung —
+  an open menu or pop-up, the text being typed, a shape half-placed with
+  two clicks, the armed tool, the selection — and when it does, the key
+  stops there. A host's own Escape used to fire as well: in phoenix_kit,
+  cancelling a two-click shape also ended the drawing session (and burned
+  the drawing), and Escape with the tool bar's ⋯ menu open did the same. It
+  is claimed on the window in the capture phase, ahead of the page; an idle
+  Escape still reaches the page.
 - **The tool bar's ⋯ menu puts the tools nearest the bar.** It opens
   upward, and the tools came first with the settings switches under them,
   so reaching a tool meant crossing the settings. Now the settings sit at

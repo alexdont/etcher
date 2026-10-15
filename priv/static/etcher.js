@@ -3749,6 +3749,10 @@
         document.removeEventListener("keydown", this._undoKeyHandler);
         this._undoKeyHandler = null;
       }
+      if (this._escapeCaptureHandler) {
+        window.removeEventListener("keydown", this._escapeCaptureHandler, true);
+        this._escapeCaptureHandler = null;
+      }
       if (this._spaceUpHandler) {
         document.removeEventListener("keyup", this._spaceUpHandler);
         this._spaceUpHandler = null;
@@ -4607,6 +4611,53 @@
         }
       };
       document.addEventListener("keydown", self._undoKeyHandler);
+
+      // Escape, claimed ahead of the page. A host lays its own Escape on the
+      // viewer — phoenix_kit's closes the viewer or ends the annotating —
+      // and that listener ran before this layer's, so cancelling a shape
+      // half-placed with two clicks also threw the user out of drawing.
+      // Here, in the capture phase on the WINDOW — ahead of every listener
+      // on the document, capture-phase ones included (phoenix_kit's burn
+      // hook reads any Escape as "closing the viewer" and burned the
+      // drawing on the spot): when Escape has something of ours to cancel
+      // (a menu, the inline text editor, a draft, the armed tool, the
+      // selection) it does that and the key stops here. An idle Escape is
+      // left alone for the page.
+      self._escapeCaptureHandler = function(e) {
+        if (e.key !== "Escape" || !self.annotationMode) return;
+        // A style pop-up open: Escape closes it, and only it.
+        if (self._openChip) {
+          self._closeChipPop();
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
+        var t = e.target;
+        var editing = !!(self._textEditor && self._textEditor.input);
+        if (!editing && t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" ||
+                  t.isContentEditable === true)) return;
+        var did = false;
+        if (editing) {
+          self._cancelTextEdit();
+          did = true;
+        } else if (self._openPopupKind ||
+                   (self.layersMenu && self.layersMenu.classList.contains("is-open")) ||
+                   (self.actionMenu && self.actionMenu.classList.contains("is-open"))) {
+          // One of this layer's menus is open (the tool bar's ⋯, colours,
+          // layers): Escape closes the menu and nothing else.
+          self._closePopup();
+          self._closeLayersMenu();
+          self._closeActionMenu();
+          did = true;
+        } else {
+          did = self._escapeLadder();
+        }
+        if (did) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      };
+      window.addEventListener("keydown", self._escapeCaptureHandler, true);
 
       self._spaceUpHandler = function(e) {
         if (e.key === " " || e.code === "Space") self._endSpacePan();

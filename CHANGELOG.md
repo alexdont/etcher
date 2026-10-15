@@ -160,12 +160,19 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   taps still reach underneath), and a double-click that lands on the
   selected shape always edits that one.
 - **No dots while a shape waits for its second click.** Two-click placement
-  shows only the preview; the dots arrive with the finished shape. A
-  press-drag still shows them while pulling.
+  shows only the preview, and a press shows none until it moves far enough
+  to be a drag (they used to flash for a moment on every click); the dots
+  arrive with the finished shape, or as soon as a press-drag starts pulling.
 - **Text in a text box is truly centred.** Lines are laid out in 1.1em line
   boxes using the font's real ascent and descent (as the editor does), so
   middle is the middle — it used to sit low — and top and bottom keep the
   same distance from the walls.
+- **The selected shape holds the focus under the cursor too.** With any
+  shape selected, other shapes don't light up and a click on one only lets
+  go of the selection; the next click picks it. Shift-click still gathers a
+  group (the shape you were on joins it). Tapping the selected shape again
+  still reaches the one underneath, but only on a tap — a drag always moves
+  the selected shape.
 - **The shape you're working on holds the focus while a tool is armed.**
   Text being typed, a shape just drawn, or a selection: other shapes don't
   light up, can't be grabbed and aren't selected by a click until a click

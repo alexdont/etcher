@@ -42,7 +42,14 @@ function layer(over) {
 }
 {
   const l = layer({ editingShape: typed, activeTool: null });
-  assert.ok(!l._armedFocusBars(other), "the cursor tool is not affected");
+  assert.ok(l._armedFocusBars(other), "the cursor holds the focus the same way");
+  assert.ok(!l._armedFocusBars(typed));
+  l.annotationMode = false;
+  assert.ok(!l._armedFocusBars(other), "browsing (annotation mode off) is not affected");
+}
+{
+  const l = layer({ activeTool: null, editingTitleShape: typed });
+  assert.ok(l._armedFocusBars(other), "a picked label holds the focus for its shape");
 }
 {
   const l = layer({ selectedShapes: [typed, other] });
@@ -59,6 +66,14 @@ function layer(over) {
   const l = layer({ editingShape: typed, _focusLetGo: typed });
   assert.ok(l._armedToolEdits(other), "committed by a click away: the focus is let go");
 }
+
+// wiring — cursor mode
+assert.ok(/if \(hit && self\._armedFocusBars\(hit\) && self\.activeTool == null\) \{/.test(src),
+  "a cursor press on another shape only lets go");
+assert.ok(/if \(next && \(!this\._hoverAllowed\(\) \|\| this\._armedFocusBars\(next\)\)\)/.test(src),
+  "no hover on other shapes while one holds the focus");
+assert.ok(src.includes("if (!dragged && tapCycle) self._onShapeTap(tapCycle);"),
+  "tapping a focused shape again still reaches underneath — but only on a tap, never a drag");
 
 // wiring
 assert.ok(src.includes('window.addEventListener("pointerdown", self._focusPressDown, true);'),

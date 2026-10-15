@@ -15466,6 +15466,7 @@
             !self._armedToolEdits(shape)) {
           return;
         }
+        if (self._armedFocusBars(shape)) return;
         tg.classList.add("is-hovered");
       });
       tg.addEventListener("mouseleave", function() {
@@ -15491,6 +15492,7 @@
           return;
         }
         if (!self.annotationMode) return;
+        if (self._armedFocusBars(shape)) return;
         e.stopPropagation();
         e.preventDefault();
         self._enterTitleEditMode(shape);
@@ -15502,6 +15504,9 @@
           return;
         }
         if (!self.annotationMode) return;
+        // Another shape holds the focus: the press lets go of it (the
+        // canvas handlers do that), and the label stays where it is.
+        if (self._armedFocusBars(shape)) return;
         // With the shape's own tool armed the drawing wrapper is live
         // and would read this press as "draw here" — the label owns it.
         if (self.activeTool != null) e.stopPropagation();
@@ -16697,6 +16702,8 @@
     _liveFocus: function() {
       var list = [];
       if (this.editingShape && this.editingShape !== this._focusLetGo) list.push(this.editingShape);
+      // A label picked on its own (its frame up) holds the focus for its shape.
+      if (this.editingTitleShape && list.indexOf(this.editingTitleShape) === -1) list.push(this.editingTitleShape);
       (this.selectedShapes || []).forEach(function(s) {
         if (s && list.indexOf(s) === -1) list.push(s);
       });
@@ -16704,7 +16711,7 @@
     },
 
     _armedFocusBars: function(shape) {
-      if (!shape || !this.annotationMode || this.activeTool == null) return false;
+      if (!shape || !this.annotationMode) return false;
       var press = this._pressFocus;
       if (press && press.shift) return false;
       var focus = press ? press.focus : this._liveFocus();
@@ -17030,7 +17037,14 @@
         if (this.activeTool === "polygon" && this.draftPolygon) {
           this._polygonHover(this._toImage(e));
         } else if (this.activeTool === "callout" && this.draftCallout) {
-          this._calloutHover(this._toImage(e));
+          var cPt = this._toImage(e);
+          this._calloutHover(cPt);
+          var dc = this.draftCallout;
+          if (dc && !dc.armed && !dc.pulled && (e.buttons & 1) && dc.geometry && dc.geometry.anchor &&
+              !this._isClickGesture({ x: dc.geometry.anchor[0], y: dc.geometry.anchor[1] }, cPt)) {
+            dc.pulled = true;
+            this._syncDraftHandles();
+          }
         } else if (this.activeTool === "arrow") {
           this._arrowToolHover(e);
         } else if (this.activeTool === "eraser" && this._erasingActive) {
@@ -17050,6 +17064,16 @@
         return;
       }
       var pt = this._toImage(e);
+      // The press has become a drag: the draft's dots come up now.
+      var dPull = this.draftState;
+      var pulledNow = false;
+      if (!dPull.armed && !dPull.pulled && (e.buttons & 1)) {
+        var pullFrom = dPull.anchor || dPull.center;
+        if (pullFrom && !this._isClickGesture(pullFrom, pt)) {
+          dPull.pulled = true;
+          pulledNow = true;
+        }
+      }
       // Shift is read at use, not at pointerdown: constraints engage and
       // release mid-drag as the key goes down and up, which is how every
       // comparable tool behaves.
@@ -17081,6 +17105,7 @@
         case "line":      this._updateDimension(pt); break;
         case "arrow":     this._updateDimension(pt); break;
       }
+      if (pulledNow) this._syncDraftHandles();
     },
 
     _onPointerUp: function(e) {
@@ -17136,6 +17161,7 @@
 
       el.addEventListener("mouseenter", function() {
         if (self.annotationMode && self.activeTool != null) return;
+        if (self._armedFocusBars(shape)) return;
         // Visual hover state (dashed outline, .is-hovered class) is
         // always applied so users can see which shape the cursor is
         // over — even when a different shape's tooltip is pinned.
@@ -17172,6 +17198,11 @@
         // shape pointer events back on.
         if (self.annotationMode && self.activeTool != null &&
             !self._armedToolEdits(shape)) {
+          return;
+        }
+        // The press of this click let go of another shape; it selects nothing.
+        if (self._armedFocusBars(shape)) {
+          e.stopPropagation();
           return;
         }
         // Stop propagation so OSD's canvas (which lives next to us
@@ -17236,13 +17267,20 @@
           return;
         }
         e.stopPropagation();
+        // Another shape holds the focus: this press only lets go of it.
+        if (self._armedFocusBars(shape)) {
+          self._clearSelection();
+          self._exitEditMode();
+          if (self.editingTitleShape) self._exitTitleEditMode();
+          return;
+        }
         // Shift extends the multi-selection; that lives on the doc-level
         // handler, and swallowing it here would make shift-clicking a
         // selected shape start a move instead.
         if (e.shiftKey) {
           if (shape.readonly) { e.preventDefault(); return; }
-          self._exitEditMode();
-          self._toggleInSelection(shape);
+          // The shape being worked on joins the group too.
+          self._armedShiftAdd(shape, e);
           e.preventDefault();
           return;
         }
@@ -17351,7 +17389,7 @@
       // selection under this same press. Dropped a tick after release, once
       // the press's click (and a double-click's) has been handled.
       self._focusPressDown = function(e) {
-        self._pressFocus = (self.annotationMode && self.activeTool != null)
+        self._pressFocus = self.annotationMode
           ? { focus: self._liveFocus(), shift: !!e.shiftKey }
           : null;
       };
@@ -17516,6 +17554,17 @@
             hit = self._shapeAt(ptDirect);
           }
         }
+        // A shape holds the focus and this press is on another one: the
+        // press lets go of it and does nothing else — see `_armedFocusBars`.
+        // (A drawing tool's press reaches `_onPointerDown` for that.)
+        if (hit && self._armedFocusBars(hit) && self.activeTool == null) {
+          if (self.annotationMode) {
+            self._clearSelection();
+            self._exitEditMode();
+            if (self.editingTitleShape) self._exitTitleEditMode();
+          }
+          return;
+        }
         // Repeat taps in one spot reach past the topmost shape. This is the
         // path that picks a *new* selection; tapping the already-editing
         // shape is swallowed by its own listener and cycles in
@@ -17559,8 +17608,7 @@
         if (self.annotationMode && self.activeTool == null && e.shiftKey) {
           // Locked shapes can't join a multi-selection (no group move/edit).
           if (hit.readonly) { e.preventDefault(); return; }
-          self._exitEditMode();
-          self._toggleInSelection(hit);
+          self._armedShiftAdd(hit, e);
           e.preventDefault();
           return;
         }
@@ -17774,7 +17822,7 @@
       // Nothing is hoverable while a tool is armed — see `_hoverAllowed`.
       // Coerced here rather than refused so a hover already on screen when
       // the tool is armed still gets cleaned up by the transition below.
-      if (next && !this._hoverAllowed()) {
+      if (next && (!this._hoverAllowed() || this._armedFocusBars(next))) {
         next = null;
         onTitle = false;
       }
@@ -26107,7 +26155,11 @@
       // dots sat on the first click as a dot of their own, which read as
       // a stray mark; they come with the finished shape instead. (A
       // press-drag keeps them — there the box is being pulled by them.)
-      if (d.armed) {
+      // Nor does a press that hasn't moved yet — it may be the first of two
+      // clicks, and dots raised on the press and dropped on the release
+      // flashed for a moment on every click. They come once the press has
+      // travelled far enough to be a drag (see `_onPointerMove`).
+      if (d.armed || (d.kind !== "polygon" && !d.pulled)) {
         if (!this.editingShape) this._removeHandles();
         return;
       }
@@ -26977,7 +27029,15 @@
       // Tapping the same spot again reaches for whatever is underneath —
       // without this, a shape covered by a larger one can never be selected,
       // and so can never be arranged out from under it.
-      shape = this._cycleTapTarget(shape, e);
+      //
+      // While a shape holds the focus, the walk happens only on a TAP: a
+      // press that goes on to drag still moves the shape it landed on, so
+      // grabbing the selected shape a second time never catches the one
+      // underneath it instead.
+      var cycled = this._cycleTapTarget(shape, e);
+      var tapCycle = null;
+      if (cycled !== shape && this._armedFocusBars(cycled)) tapCycle = cycled;
+      else shape = cycled;
       // Locked shape: no drag-to-move. Fall through to the tap path so a
       // click still pins the tooltip (browse-mode behavior).
       if (shape.readonly) { this._onShapeTap(shape); return; }
@@ -27166,6 +27226,7 @@
           // so the user expects the tooltip to come back.
           self._showTooltipFor(shape);
         }
+        if (!dragged && tapCycle) self._onShapeTap(tapCycle);
         // No-drag case is otherwise a no-op here — `_onShapeTap` already
         // fired at the top of _startShapeMove, so the shape is already
         // selected / pinned by the time we hit pointerup.

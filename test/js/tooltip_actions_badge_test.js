@@ -160,7 +160,7 @@ console.log("tooltip actions + badge: all checks passed");
       shown: [],
       dots: [],
       classed: [],
-      _hoverAllowed: hoverAllowed,
+      _hoverAllowed: hoverAllowed, _armedFocusBars: () => false,
       _showTooltipFor(s) { this.shown.push(s); },
       // Hover goes through the intent delay now; the harness records the
       // ask, since what it is testing is WHICH shape hover picked.

@@ -45,7 +45,19 @@ sync.call({
   editingShape: null, _draftActive: () => ({ kind: "rectangle" }),
   _removeHandles: () => removed++, _renderHandles: () => rendered++
 });
-assert.strictEqual(rendered, 1, "a press-drag keeps its dots");
+assert.strictEqual(rendered, 0, "a press that hasn't moved shows no dots — it may be a click");
+sync.call({
+  editingShape: null, _draftActive: () => ({ kind: "rectangle", pulled: true }),
+  _removeHandles: () => removed++, _renderHandles: () => rendered++
+});
+assert.strictEqual(rendered, 1, "a press-drag shows its dots");
+sync.call({
+  editingShape: null, _draftActive: () => ({ kind: "polygon" }),
+  _removeHandles: () => removed++, _renderHandles: () => rendered++
+});
+assert.strictEqual(rendered, 2, "a polygon's vertex dots are its placement, always shown");
+assert.ok(/dPull\.pulled = true;/.test(src) && src.includes("if (pulledNow) this._syncDraftHandles();"),
+  "the dots come up once the press travels past a click");
 assert.strictEqual((src.match(/armed = true;\n        this\._syncDraftHandles\(\);/g) || []).length, 5,
   "every place that arms a draft drops its dots");
 

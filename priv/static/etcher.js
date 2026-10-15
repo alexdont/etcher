@@ -1458,6 +1458,11 @@
       ".etcher-text.is-selected .etcher-textbox-frame, .etcher-text.is-editing .etcher-textbox-frame { stroke: #3b82f6; stroke-dasharray: none; }",
       // A callout's frame is point text's box: the thin black dash.
       ".etcher-text.is-point.is-selected .etcher-textbox-frame, .etcher-text.is-point.is-editing .etcher-textbox-frame, .etcher-text.is-typing .etcher-textbox-frame { stroke: #111111; stroke-width: 1.25px; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; }",
+      // Picked with a box-select (or shift-click): the same blue as every
+      // other selected shape, solid, around the text's box. Text opts out of
+      // the outline filter (it would bold the glyphs), so without this a
+      // selected text looked exactly like an unselected one.
+      ".etcher-text.is-multi-selected .etcher-textbox-frame { stroke: #3b82f6; stroke-width: 1.5px; stroke-dasharray: none; vector-effect: non-scaling-stroke; }",
       // Point text, selected or being typed into: a thin black dashed box,
       // as Affinity draws one, matching its black handles. The same width
       // whatever the zoom or the text's stretch.

@@ -137,4 +137,9 @@ assert.ok(body("_startTextEdit").includes("if (point || fixedEd) input.setSelect
   assert.ok(body("_setTextboxAlign").includes("shape.style = Object.assign({}, shape.style || {}, { text_align: al });"));
 }
 
+// A box-selected text shows it: text opts out of the outline filter, so its
+// frame turns blue instead.
+assert.ok(src.includes('".etcher-text.is-multi-selected .etcher-textbox-frame { stroke: #3b82f6;'),
+  "a text picked with a box-select is outlined in blue");
+
 console.log("text box corners: all checks passed");

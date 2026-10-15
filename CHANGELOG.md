@@ -153,6 +153,10 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   (`style.title_rotation`). Labels riding an arrow or dimension stay
   upright. A turned label's dots, side grabbers, clicks, resizing and
   outline grip all work in its turned frame.
+- **Box-selected text shows that it is selected.** Texts, text boxes and
+  callouts opt out of the blue outline filter (it would bold the glyphs),
+  so picked with a box-select or shift-click they looked unselected. Their
+  frame now turns solid blue, like every other selected shape's outline.
 - **Arrange has its own button.** A layers button beside Paste opens a
   small pop-up with Front, Raise, Lower and Back (greyed out when nothing
   can be arranged); it stays open for a few nudges and closes on a click

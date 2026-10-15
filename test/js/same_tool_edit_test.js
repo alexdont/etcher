@@ -46,7 +46,7 @@ function lift(name, signature) {
 const armedToolEdits = lift("_armedToolEdits", "shape");
 
 function ctx(tool) {
-  return { activeTool: tool, _armedToolEdits: armedToolEdits };
+  return { activeTool: tool, _armedToolEdits: armedToolEdits, _armedFocusBars: () => false };
 }
 
 {
@@ -81,7 +81,8 @@ const grabTarget = lift("_sameToolGrabTarget", "pt");
 function layerWith(tool, shape) {
   return {
     activeTool: tool,
-    _armedToolEdits: armedToolEdits,
+    _armedToolEdits: armedToolEdits, _armedFocusBars: () => false,
+    _liveFocus: function() { return null; },
     _shapeAt: function() { return shape; },
     _screenPerImagePx: function() { return 1; }, // tol = 8 image px
     _sameToolGrabTarget: grabTarget
@@ -144,7 +145,7 @@ function layerWith(tool, shape) {
   // uses, and leaves the doc-level tap tracker a note (touch presses
   // reach both handlers; two trackers would tap twice).
   assert.ok(
-    /var grab = this\._sameToolGrabTarget\(pt\);\s*if \(grab\) \{[\s\S]{0,400}?_startShapeMove\(grab, e\)/.test(src),
+    /var grab = this\._sameToolGrabTarget\(pt\);\s*if \(grab\) \{[\s\S]{0,700}?_startShapeMove\(grab, e\)/.test(src),
     "the tool-armed press routes a same-kind grab into _startShapeMove");
   assert.ok(src.includes("this._sameToolGrab = { pointerId: e.pointerId, at: Date.now() };"),
     "and notes the gesture for the doc-level tracker");
@@ -193,7 +194,7 @@ function layerWith(tool, shape) {
     const w = {
       activeTool: tool,
       editingShape: editing || null,
-      _armedToolEdits: armedToolEdits,
+      _armedToolEdits: armedToolEdits, _armedFocusBars: () => false,
       _keepOrDropSelection: keepOrDrop,
       exited: 0, entered: 0, rendered: 0,
       _exitEditMode() { this.exited++; },

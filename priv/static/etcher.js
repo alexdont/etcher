@@ -16641,11 +16641,65 @@
       if (t === "freehand" || t === "marker" || t === "highlighter" || t === "image") {
         return false;
       }
+      if (this._armedFocusBars(shape)) return false;
       // The textbox tool draws `text` shapes (style.box: "fixed"), so the
       // text family is one kind for editing purposes — either tool grabs
       // either shape.
       if (t === "textbox") return shape.kind === "text";
       return shape.kind === t;
+    },
+
+    // While a tool is armed, the shape being worked on — the text being
+    // typed, the box just drawn, a selection — holds the focus. Every other
+    // shape is inert until a click away lets go of it: no hover, no grab,
+    // no tap that selects it. Reported from the field: grabbing a text's
+    // dashed outline right after typing it sometimes caught the shape
+    // underneath instead. Shift is the way past it (it adds to the
+    // selection), so a group can still be gathered with the tool in hand.
+    //
+    // A press is judged by the focus it STARTED with (`_pressFocus`, taken
+    // on the window in the capture phase, ahead of the editor's commit and
+    // anything else that might clear the selection mid-press). Between
+    // presses — hover — the live selection answers.
+    _liveFocus: function() {
+      var list = [];
+      if (this.editingShape && this.editingShape !== this._focusLetGo) list.push(this.editingShape);
+      (this.selectedShapes || []).forEach(function(s) {
+        if (s && list.indexOf(s) === -1) list.push(s);
+      });
+      return list.length ? list : null;
+    },
+
+    _armedFocusBars: function(shape) {
+      if (!shape || !this.annotationMode || this.activeTool == null) return false;
+      var press = this._pressFocus;
+      if (press && press.shift) return false;
+      var focus = press ? press.focus : this._liveFocus();
+      if (!focus) return false;
+      for (var i = 0; i < focus.length; i++) {
+        if (focus[i] === shape || (focus[i].uuid && focus[i].uuid === shape.uuid)) return false;
+      }
+      return true;
+    },
+
+    // Shift-press with a tool armed: the shape joins the selection (or
+    // leaves it), the way it does under the cursor. What was being worked
+    // on comes along, so the group starts from it rather than replacing it.
+    _armedShiftAdd: function(shape, e) {
+      if (!shape || shape.readonly || !shape.uuid) return;
+      var press = this._pressFocus;
+      var had = (press && press.focus) || this._liveFocus() || [];
+      this._exitEditMode();
+      for (var i = 0; i < had.length; i++) {
+        if (had[i] !== shape && !had[i].readonly && had[i].uuid &&
+            this.shapes.indexOf(had[i]) !== -1 && !this._isInSelection(had[i])) {
+          this._addToSelection(had[i]);
+        }
+      }
+      this._toggleInSelection(shape);
+      // The doc-level tap tracker sees this press too; it must not turn
+      // the same click into a plain select of this one shape on release.
+      if (e) this._sameToolGrab = { pointerId: e.pointerId, at: Date.now() };
     },
 
     // Container px per image px around `pt` — the live zoom, measured by
@@ -16677,7 +16731,18 @@
     // whatever the kind: it is how a label is reached, and nothing is
     // ever deliberately drawn inside a label.
     _sameToolGrabTarget: function(pt) {
-      var hit = this._shapeAt(pt);
+      // With a shape holding the focus, only it can be grabbed — tested on
+      // its own, so its outline wins even where another shape lies on top.
+      var press = this._pressFocus;
+      var focus = press ? (press.shift ? null : press.focus) : this._liveFocus();
+      var hit = null;
+      if (focus) {
+        for (var f = focus.length - 1; f >= 0; f--) {
+          if (focus[f].uuid && this._shapeContainsPoint(focus[f], pt)) { hit = focus[f]; break; }
+        }
+      } else {
+        hit = this._shapeAt(pt);
+      }
       if (!this._armedToolEdits(hit)) return null;
 
       var tol = 8 / this._screenPerImagePx(pt);
@@ -16753,6 +16818,24 @@
         return;
       }
 
+      // Shift on a shape gathers it into the selection — see _armedShiftAdd.
+      // A shift-press on empty canvas still draws (shift constrains the
+      // shape). The text tools gather any shape; a drawing tool only its
+      // own kind, so shift-drawing a square over a picture still draws.
+      if (e.shiftKey && !this.draftPolygon && !this.draftCallout &&
+          this.activeTool !== "eraser") {
+        var add = this._sameToolGrabTarget(pt);
+        if (!add && (this.activeTool === "text" || this.activeTool === "textbox")) {
+          add = this._shapeAt(pt);
+        }
+        if (add && !add.readonly) {
+          this._pendingDraw = null;
+          this._armedShiftAdd(add, e);
+          e.preventDefault();
+          return;
+        }
+      }
+
       // The press that just closed a label editor is a full stop, not a
       // new sentence. Since a tool stays armed after it draws, typing a
       // dimension's label and clicking away to set it ALSO started the
@@ -16765,7 +16848,7 @@
       // just putting the label down. Held rather than dropped, so the
       // drag that does come still starts from where the finger landed.
       if (afterLabelCommit) {
-        this._pendingDraw = { pt: pt, shift: !!e.shiftKey };
+        if (!this._pressLetsGoOnShape(pt)) this._pendingDraw = { pt: pt, shift: !!e.shiftKey };
         return;
       }
 
@@ -16780,7 +16863,11 @@
           // stop propagation at the wrapper) — leave it a note so it does
           // not ALSO track a tap on the same gesture.
           this._sameToolGrab = { pointerId: e.pointerId, at: Date.now() };
-          this._startShapeMove(grab, e);
+          if (this._isInSelection(grab) && this.selectedShapes.length > 1) {
+            this._startMultiShapeMove(grab, e);
+          } else {
+            this._startShapeMove(grab, e);
+          }
           return;
         }
       }
@@ -16796,13 +16883,21 @@
       // or mid-callout (those presses are vertices of the draft).
       if (this._hasSelection() && this.activeTool !== "eraser" &&
           !this.draftPolygon && !this.draftCallout) {
+        var onShape = this._pressLetsGoOnShape(pt);
         this._exitEditMode();
         if (typeof this._clearSelection === "function") this._clearSelection();
-        this._pendingDraw = { pt: pt, shift: !!e.shiftKey };
+        if (!onShape) this._pendingDraw = { pt: pt, shift: !!e.shiftKey };
         return;
       }
 
       this._dispatchToolDown(pt, e);
+    },
+
+    // A press that lets go of the focused shape by landing on ANOTHER shape
+    // only lets go: a drag from there must not draw a fresh shape on top of
+    // the one the user was reaching for (see `_armedFocusBars`).
+    _pressLetsGoOnShape: function(pt) {
+      return this._armedFocusBars(this._shapeAt(pt));
     },
 
     // A shape being edited, or any shapes selected.
@@ -17094,7 +17189,14 @@
           // same press as "draw here".
           if (!self._armedToolEdits(shape)) return;
           e.stopPropagation();
-          self._startShapeMove(shape, e);
+          if (e.shiftKey) {
+            e.preventDefault();
+            self._armedShiftAdd(shape, e);
+          } else if (self._isInSelection(shape) && self.selectedShapes.length > 1) {
+            self._startMultiShapeMove(shape, e);
+          } else {
+            self._startShapeMove(shape, e);
+          }
           return;
         }
         e.stopPropagation();
@@ -17207,6 +17309,22 @@
         return e.clientX >= r.left && e.clientX <= r.right &&
                e.clientY >= r.top && e.clientY <= r.bottom;
       }
+
+      // The focus a press starts with — see `_armedFocusBars`. Window,
+      // capture phase: ahead of every handler that could change the
+      // selection under this same press. Dropped a tick after release, once
+      // the press's click (and a double-click's) has been handled.
+      self._focusPressDown = function(e) {
+        self._pressFocus = (self.annotationMode && self.activeTool != null)
+          ? { focus: self._liveFocus(), shift: !!e.shiftKey }
+          : null;
+      };
+      self._focusPressUp = function() {
+        setTimeout(function() { self._pressFocus = null; }, 0);
+      };
+      window.addEventListener("pointerdown", self._focusPressDown, true);
+      window.addEventListener("pointerup", self._focusPressUp, true);
+      window.addEventListener("pointercancel", self._focusPressUp, true);
 
       self._docMouseMove = function(e) {
         // Sitting on a connector's grab zone doesn't count as leaving the
@@ -17447,6 +17565,8 @@
             Date.now() - grabbed.at < 1000) {
           return;
         }
+        // The press is letting go of the focused shape, not picking this one.
+        if (self._armedFocusBars(hit)) return;
 
         // Browse mode (or a draw tool is active): track for click-to-pin
         // only. _pendingTap survives until _docPointerUp; if the pointer
@@ -17573,6 +17693,11 @@
         document.removeEventListener("pointermove", this._docMouseMove);
       if (this._docPointerDown)
         document.removeEventListener("pointerdown", this._docPointerDown);
+      if (this._focusPressDown) {
+        window.removeEventListener("pointerdown", this._focusPressDown, true);
+        window.removeEventListener("pointerup", this._focusPressUp, true);
+        window.removeEventListener("pointercancel", this._focusPressUp, true);
+      }
       if (this._docPointerMove)
         document.removeEventListener("pointermove", this._docPointerMove);
       if (this._docPointerUp)
@@ -24239,6 +24364,11 @@
       } else {
         this._enterEditMode(shape);
       }
+      // Committed by clicking away: that click was the "done with it". The
+      // text keeps its handles, but stops holding the focus — the next
+      // press can reach any shape (see `_armedFocusBars`). Committed with
+      // Enter, it keeps the focus until a click away.
+      if (this._pressFocus) this._focusLetGo = shape;
     },
 
     _endTextEdit: function() {
@@ -24863,6 +24993,7 @@
     // -------------------------------------------------------------------------
 
     _enterEditMode: function(shape) {
+      this._focusLetGo = null;
       // Only persisted shapes are editable — temp shapes haven't been
       // ack'd by the server yet so an `etcher:updated` event for them
       // would point at a non-existent uuid.
@@ -24959,6 +25090,7 @@
     },
 
     _exitEditMode: function() {
+      this._focusLetGo = null;
       // Leaving the shape ends its freshness for good — a later
       // re-select is a one-time edit (see _freshTargets).
       this._freshShape = null;

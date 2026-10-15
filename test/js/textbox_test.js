@@ -119,11 +119,11 @@ const handlePositions = lift("_handlePositions", "shape");
 {
   const armedToolEdits = lift("_armedToolEdits", "shape");
   const box = { kind: "text", uuid: "b1", style: { box: "fixed" } };
-  assert.ok(armedToolEdits.call({ activeTool: "textbox", _armedToolEdits: armedToolEdits }, box),
+  assert.ok(armedToolEdits.call({ activeTool: "textbox", _armedToolEdits: armedToolEdits, _armedFocusBars: () => false }, box),
     "the textbox tool grabs text shapes");
-  assert.ok(armedToolEdits.call({ activeTool: "text", _armedToolEdits: armedToolEdits }, box),
+  assert.ok(armedToolEdits.call({ activeTool: "text", _armedToolEdits: armedToolEdits, _armedFocusBars: () => false }, box),
     "and so does the text tool — one family");
-  assert.ok(!armedToolEdits.call({ activeTool: "rectangle", _armedToolEdits: armedToolEdits }, box));
+  assert.ok(!armedToolEdits.call({ activeTool: "rectangle", _armedToolEdits: armedToolEdits, _armedFocusBars: () => false }, box));
 }
 
 console.log("textbox: all checks passed");

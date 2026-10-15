@@ -773,7 +773,7 @@ assert.ok(
       _toImage: () => ({ x: 10, y: 10 }),
       _placeArmedDraft: () => false,
       _sameToolGrabTarget: () => null,
-      _hasSelection: hasSel,
+      _hasSelection: hasSel, _pressLetsGoOnShape: () => false,
       _exitEditMode() { calls.push("deselect"); this.editingShape = null; },
       _clearSelection() { calls.push("clear"); },
       _dispatchToolDown() { calls.push("draw"); },

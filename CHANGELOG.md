@@ -153,6 +153,15 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   (`style.title_rotation`). Labels riding an arrow or dimension stay
   upright. A turned label's dots, side grabbers, clicks, resizing and
   outline grip all work in its turned frame.
+- **The shape you're working on holds the focus while a tool is armed.**
+  Text being typed, a shape just drawn, or a selection: other shapes don't
+  light up, can't be grabbed and aren't selected by a click until a click
+  away lets go — so grabbing a text's dashed outline never catches the shape
+  underneath, and the focused shape's outline wins even where another lies
+  on top. Clicking away to commit a text counts as letting go; Enter keeps
+  the focus. Shift-click still gathers shapes into a selection with the tool
+  in hand (the text tools any shape, drawing tools their own kind), and a
+  press on one of them moves the whole group.
 - **A bare click no longer drops a placeholder shape.** With the
   rectangle, circle or text box tool, a click sets the first corner (the
   circle's centre) and a preview follows the cursor; a click somewhere else

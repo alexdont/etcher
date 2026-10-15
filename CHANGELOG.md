@@ -153,6 +153,13 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   (`style.title_rotation`). Labels riding an arrow or dimension stay
   upright. A turned label's dots, side grabbers, clicks, resizing and
   outline grip all work in its turned frame.
+- **Type a thickness.** Click the number beside the thickness slider (or
+  focus it and press Enter), type the size, Enter — no aiming the handle at
+  37. A click away applies it too (to the shape selected at that moment),
+  Escape leaves it as it was, and the slider follows. Sizes are held to the
+  slider's range: past the top is the top (40), zero or below is 1, and
+  anything that isn't a number keeps the previous size. The marker's Weight
+  readout works the same way.
 - **Escape only cancels what it cancels.** Escape steps down one rung —
   an open menu or pop-up, the text being typed, a shape half-placed with
   two clicks, the armed tool, the selection — and when it does, the key

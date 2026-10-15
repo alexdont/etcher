@@ -956,6 +956,15 @@
       ".etcher-chip-pop-grid button.is-selected { background: rgba(255, 255, 255, 0.22); border-color: rgba(255, 255, 255, 0.6); }",
       ".etcher-chip-pop-grid svg { max-width: 22px; max-height: 18px; }",
       ".etcher-chip-pop input[type=\"range\"] { width: 100%; }",
+      // The thickness readout, typeable: a faint box on hover says so, and
+      // the field that stands in while typing is the same size and type.
+      ".etcher-num-typeable { cursor: text; border-radius: 4px; padding: 1px 4px; margin: -1px -4px; min-width: 2ch; text-align: right; outline: none; }",
+      ".etcher-num-typeable:hover, .etcher-num-typeable:focus-visible { background: rgba(255, 255, 255, 0.14); }",
+      ".etcher-num-field {",
+      "  width: 4ch; box-sizing: content-box; padding: 1px 4px; margin: -1px -4px; border: 0; border-radius: 4px;",
+      "  background: rgba(255, 255, 255, 0.92); color: #111; text-align: right; outline: none;",
+      "  order: 3; font: 600 12px/1 ui-sans-serif, system-ui, sans-serif; font-variant-numeric: tabular-nums;",
+      "}",
       // Thickness and label size, one slim line each: icon, control, value.
       ".etcher-inline-icon { display: none; }",
       ".etcher-stylepanel:not([data-size=\"compact\"]) .etcher-inline-row {",
@@ -7110,6 +7119,9 @@
       w.input.addEventListener("change", function() {
         self._setMarkerStyleProp("width", self._weightFromSlider(w.input.value), true);
       });
+      self._makeWeightTypeable(w.val, w.input, function(n) {
+        self._setMarkerStyleProp("width", n, true);
+      });
 
       // Opacity (0–100% → 0.0–1.0).
       var o = sliderRow("Opacity");
@@ -8003,6 +8015,9 @@
       });
       w.input.addEventListener("change", function() {
         self._setLineParam("width", self._weightFromSlider(w.input.value), true);
+      });
+      self._makeWeightTypeable(w.val, w.input, function(n) {
+        self._setLineParam("width", n, true);
       });
 
       var o = sliderRow("Opacity");
@@ -10280,6 +10295,88 @@
     // Slider position (0-100) -> weight. Rounded to whole units: the
     // number is what the panel shows and what gets stored, and a weight of
     // 7.4 is not a thing anyone asked for.
+    // The number beside a thickness slider, typeable: click it (or focus it
+    // and press Enter), type the size, Enter — no aiming the handle at 37.
+    // The readout stays the plain span every sync writes into; while it is
+    // being edited a small field stands in its place. Enter or a click away
+    // applies, Escape leaves it as it was, and the slider follows. What is
+    // typed is read by `_typedWeight`: held to the slider's own range, and
+    // anything that isn't a number keeps the size it had.
+    _makeWeightTypeable: function(val, range, apply) {
+      var self = this;
+      val.classList.add("etcher-num-typeable");
+      val.tabIndex = 0;
+      val.setAttribute("role", "button");
+      val.title = "Type a thickness";
+      var editing = false;
+      function start(e) {
+        if (editing) return;
+        if (e) { e.preventDefault(); e.stopPropagation(); }
+        editing = true;
+        var field = document.createElement("input");
+        field.type = "text";
+        field.inputMode = "numeric";
+        field.className = "etcher-num-field";
+        field.setAttribute("aria-label", "Thickness");
+        field.value = val.textContent || "";
+        val.style.display = "none";
+        val.parentNode.insertBefore(field, val.nextSibling);
+        var done = false;
+        function finish(applyIt) {
+          if (done) return;
+          done = true;
+          editing = false;
+          if (applyIt) {
+            var n = self._typedWeight(field.value);
+            if (n != null && String(n) !== val.textContent) {
+              range.value = String(self._sliderFromWeight(n));
+              val.textContent = String(n);
+              apply(n);
+            }
+          }
+          window.removeEventListener("pointerdown", onOutside, true);
+          if (field.parentNode) field.parentNode.removeChild(field);
+          val.style.display = "";
+        }
+        // A click away applies the size to what is selected NOW — on the
+        // press, ahead of everything else (window, capture phase). Left to
+        // the field's blur, the board's own press handling deselected the
+        // shape first and the size went to the next shape instead.
+        function onOutside(ev) {
+          if (ev.target === field) return;
+          finish(true);
+        }
+        window.addEventListener("pointerdown", onOutside, true);
+        field.addEventListener("keydown", function(ev) {
+          // The board's shortcuts and the host's keys stay out of a field
+          // being typed into.
+          ev.stopPropagation();
+          if (ev.key === "Enter") { ev.preventDefault(); finish(true); val.focus(); }
+          else if (ev.key === "Escape") { ev.preventDefault(); finish(false); val.focus(); }
+        });
+        field.addEventListener("blur", function() { finish(true); });
+        field.focus();
+        field.select();
+      }
+      val.addEventListener("click", start);
+      val.addEventListener("keydown", function(e) {
+        if (e.key === "Enter" || e.key === " ") start(e);
+      });
+    },
+
+    // A typed thickness, or null to keep the one there was. A number is held
+    // to the slider's range — past the top it is the top, at or under the
+    // bottom it is the bottom (1) — and rounded to a whole size. Anything
+    // that isn't a number ("abc", "4px", blank) is not a size: null, no
+    // error, the previous value stands.
+    _typedWeight: function(text) {
+      var t = String(text == null ? "" : text).trim().replace(",", ".");
+      if (!/^-?\d+(\.\d+)?$/.test(t)) return null;
+      var n = Math.round(Number(t));
+      if (!isFinite(n)) return null;
+      return Math.max(WEIGHT_MIN, Math.min(WEIGHT_MAX, n));
+    },
+
     _weightFromSlider: function(pos) {
       var p = Number(pos);
       if (!isFinite(p)) return WEIGHT_MIN;

@@ -1008,6 +1008,27 @@
       ".etcher-stylepanel-divider {",
       "  height: 1px; background: rgba(255, 255, 255, 0.18);",
       "}",
+      // The live sample beside a thickness or size control while it is
+      // being changed: the stroke or the letters at the size the canvas
+      // will draw them, so the change is seen, not guessed.
+      ".etcher-value-preview {",
+      "  position: absolute; z-index: 40; pointer-events: none;",
+      "  display: flex; align-items: center; justify-content: center;",
+      "  min-width: 96px; min-height: 44px; max-width: 220px; padding: 10px 14px; box-sizing: border-box;",
+      "  background: #fff; color: #111; border-radius: 10px;",
+      "  box-shadow: 0 6px 20px rgba(0,0,0,0.22), 0 0 0 1px rgba(0,0,0,0.08);",
+      "  opacity: 0; transform: translateX(4px); transition: opacity 120ms ease, transform 120ms ease;",
+      "}",
+      ".etcher-value-preview.is-on { opacity: 1; transform: none; }",
+      ".etcher-value-preview::after {",
+      "  content: ''; position: absolute; top: calc(var(--etcher-pv-arrow, 50%) - 7px); width: 14px; height: 14px;",
+      "  background: #fff; transform: rotate(45deg); box-shadow: 2px -2px 3px rgba(0,0,0,0.06);",
+      "}",
+      ".etcher-value-preview[data-side='left']::after { right: -6px; }",
+      ".etcher-value-preview[data-side='right']::after { left: -6px; box-shadow: -2px 2px 3px rgba(0,0,0,0.06); }",
+      ".etcher-value-preview svg { display: block; overflow: visible; }",
+      ".etcher-value-preview .etcher-pv-text { font-weight: 500; line-height: 1.1; white-space: nowrap; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; }",
+      ".etcher-value-preview .etcher-pv-note { position: absolute; bottom: 3px; right: 8px; font: 500 9px/1 ui-sans-serif, system-ui, sans-serif; color: #888; }",
       ".etcher-popup {",
       "  position: absolute; z-index: 12; display: none;",
       "  background: rgba(0, 0, 0, 0.85); border-radius: 10px;",
@@ -7124,6 +7145,10 @@
       });
       self._makeWeightTypeable(w.val, w.input, function(n) {
         self._setMarkerStyleProp("width", n, true);
+        self._showValuePreview("width", n, w.input, self._previewStrokeStyle(true));
+      });
+      self._wireValuePreview(w.input, function() {
+        self._showValuePreview("width", self._weightFromSlider(w.input.value), w.input, self._previewStrokeStyle(true));
       });
 
       // Opacity (0–100% → 0.0–1.0).
@@ -8021,6 +8046,10 @@
       });
       self._makeWeightTypeable(w.val, w.input, function(n) {
         self._setLineParam("width", n, true);
+        self._showValuePreview("width", n, w.input, self._previewStrokeStyle(false));
+      });
+      self._wireValuePreview(w.input, function() {
+        self._showValuePreview("width", self._weightFromSlider(w.input.value), w.input, self._previewStrokeStyle(false));
       });
 
       var o = sliderRow("Opacity");
@@ -8096,6 +8125,7 @@
         var next = clampFont(n + by);
         fontNum.value = String(next);
         self._setFontSize(next, true);
+        self._showValuePreview("font", next, fontNum);
       }
 
       fontDown.addEventListener("click", function() { stepFont(-1); });
@@ -8112,6 +8142,7 @@
         var n = parseInt(raw, 10);
         if (!isFinite(n)) return;
         self._setFontSize(clampFont(n), true);
+        self._showValuePreview("font", clampFont(n), fontNum);
       });
       // Typing past the limit is corrected on the way out rather than while
       // the user is still mid-number: rewriting "2" to "6" as they type "20"
@@ -10305,6 +10336,116 @@
     // applies, Escape leaves it as it was, and the slider follows. What is
     // typed is read by `_typedWeight`: held to the slider's own range, and
     // anything that isn't a number keeps the size it had.
+    // Show what a thickness or size control is doing, beside it, while it
+    // is being changed. `kind` is "width" (a stroke weight, as the panel
+    // shows it) or "font" (a label size); `style` carries the stroke's
+    // opacity and dash. The sample is drawn at the size the canvas would
+    // draw it at this zoom; one too big for the bubble is cut down and
+    // says so.
+    _showValuePreview: function(kind, value, anchor, style) {
+      if (!anchor || !this.handle || !this.handle.container || !(value > 0)) return;
+      var self = this;
+      var host = this.handle.container;
+      var pv = this._valuePreview;
+      if (!pv || pv.parentNode !== host) {
+        pv = document.createElement("div");
+        pv.className = "etcher-value-preview";
+        pv.setAttribute("aria-hidden", "true");
+        host.appendChild(pv);
+        this._valuePreview = pv;
+      }
+      var scale = 1, ink = 1;
+      try { scale = this._markerScale() || 1; } catch (_) { scale = 1; }
+      try { ink = this._inkScale() || 1; } catch (_) { ink = 1; }
+      var px = value / ink * scale;
+      var color = this.activeColor || "#111";
+      var st = style || {};
+      var capped = false, tiny = false;
+      if (kind === "font") {
+        var fpx = Math.max(4, px);
+        if (fpx > 96) { fpx = 96; capped = true; }
+        pv.innerHTML = '<span class="etcher-pv-text"></span>';
+        var t = pv.firstChild;
+        t.textContent = "Aa";
+        t.style.fontSize = fpx + "px";
+        t.style.color = color;
+        tiny = fpx < 9;
+      } else {
+        var w = Math.max(0.5, px);
+        if (w > 56) { w = 56; capped = true; }
+        var len = 120, h = Math.max(20, w + 12);
+        var dash = st.dash === "dashed" ? ' stroke-dasharray="' + (w * 2.4) + " " + (w * 1.8 + 3) + '"'
+          : st.dash === "dotted" ? ' stroke-dasharray="0.01 ' + (w * 1.8 + 3) + '"' : "";
+        var op = st.opacity == null ? 1 : st.opacity;
+        pv.innerHTML = '<svg width="' + len + '" height="' + h + '" viewBox="0 0 ' + len + " " + h + '">' +
+          '<line x1="' + (w / 2 + 4) + '" y1="' + h / 2 + '" x2="' + (len - w / 2 - 4) + '" y2="' + h / 2 +
+          '" stroke="' + color + '" stroke-opacity="' + op + '" stroke-width="' + w + '" stroke-linecap="round"' + dash + "/></svg>";
+      }
+      if (capped || tiny) {
+        var note = document.createElement("span");
+        note.className = "etcher-pv-note";
+        note.textContent = capped ? "shown smaller" : "tiny at this zoom";
+        pv.appendChild(note);
+      }
+      // Beside the panel the control sits in, on whichever side has room,
+      // its arrow pointing at the control.
+      var panel = (anchor.closest && anchor.closest(".etcher-popup")) || anchor;
+      var hr = host.getBoundingClientRect();
+      var pr = panel.getBoundingClientRect();
+      var ar = anchor.getBoundingClientRect();
+      var bw = pv.offsetWidth, bh = pv.offsetHeight;
+      var gap = 12;
+      var left = pr.left - hr.left - gap - bw;
+      var side = "left";
+      if (left < 8) { left = pr.right - hr.left + gap; side = "right"; }
+      var cy = ar.top + ar.height / 2 - hr.top;
+      var top = Math.max(8, Math.min(hr.height - bh - 8, cy - bh / 2));
+      pv.style.left = left + "px";
+      pv.style.top = top + "px";
+      pv.dataset.side = side;
+      pv.style.setProperty("--etcher-pv-arrow", Math.max(12, Math.min(bh - 12, cy - top)) + "px");
+      pv.classList.add("is-on");
+      clearTimeout(this._valuePreviewTimer);
+      if (!this._valuePreviewHeld) {
+        this._valuePreviewTimer = setTimeout(function() { self._hideValuePreview(); }, 1100);
+      }
+    },
+
+    _hideValuePreview: function() {
+      clearTimeout(this._valuePreviewTimer);
+      if (this._valuePreview) this._valuePreview.classList.remove("is-on");
+    },
+
+    // A slider shows its sample from the press to a moment after the
+    // release, held up the whole time the thumb is down, still or not.
+    _wireValuePreview: function(input, show) {
+      var self = this;
+      input.addEventListener("pointerdown", function() {
+        self._valuePreviewHeld = true;
+        show();
+      });
+      var release = function() {
+        if (!self._valuePreviewHeld) return;
+        self._valuePreviewHeld = false;
+        clearTimeout(self._valuePreviewTimer);
+        self._valuePreviewTimer = setTimeout(function() { self._hideValuePreview(); }, 900);
+      };
+      input.addEventListener("pointerup", release);
+      input.addEventListener("pointercancel", release);
+      input.addEventListener("lostpointercapture", release);
+      input.addEventListener("input", show);
+      input.addEventListener("keyup", show);
+    },
+
+    // The stroke look a weight preview draws with: the selected shape's,
+    // else the defaults new shapes get.
+    _previewStrokeStyle: function(marker) {
+      var ed = this.editingShape;
+      if (ed && ed.style && (!marker || ed.kind === "marker")) return ed.style;
+      if (marker) { try { return this._currentMarkerStyle(); } catch (_) { return {}; } }
+      return this.lineParams || {};
+    },
+
     _makeWeightTypeable: function(val, range, apply) {
       var self = this;
       val.classList.add("etcher-num-typeable");

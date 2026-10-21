@@ -14705,11 +14705,13 @@
       // Same reason as the badge: it traces the geometry this render wrote.
       self._syncHatchOutline(shape);
 
-      // An open text box editor rides its box through every resize, turn
-      // and move (point text's re-fits from `_renderPointText`).
+      // An open text box editor rides its box through every resize, turn,
+      // move and scale (point text's re-fits from `_renderPointText`) — its
+      // font and padding too, read off the text just rendered, so the
+      // scale dot grows the words being typed with the box, not on release.
       var tbEd = self._textEditor;
       if (tbEd && tbEd.fixed && tbEd.shape === shape && tbEd.fit) {
-        tbEd.fit();
+        self._repositionTextEditor();
         self._fitPointGrip(shape);
       }
 

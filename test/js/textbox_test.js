@@ -115,8 +115,8 @@ const handlePositions = lift("_handlePositions", "shape");
   const commit = src.slice(src.indexOf("    _commitText: function"), src.indexOf("    _commitText: function") + 3400);
   assert.ok(/self\._enterEditMode\(shape\);\s*self\._startTextEdit\(shape\);\s*return;/.test(commit),
     "a freshly drawn box is selected while typed into, so its handles are up");
-  assert.ok(/if \(tbEd && tbEd\.fixed && tbEd\.shape === shape && tbEd\.fit\) \{\s*tbEd\.fit\(\);/.test(src),
-    "and its editor follows every resize, turn and move");
+  assert.ok(/if \(tbEd && tbEd\.fixed && tbEd\.shape === shape && tbEd\.fit\) \{\s*self\._repositionTextEditor\(\);/.test(src),
+    "and its editor follows every resize, turn, move and scale — font and padding included");
   assert.ok(src.includes('if (e.target.closest(".etcher-text-grip, .etcher-text-editor")) return;'),
     "a drag by the outline ends in a click that does not deselect it");
 }

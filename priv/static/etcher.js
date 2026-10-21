@@ -14705,6 +14705,14 @@
       // Same reason as the badge: it traces the geometry this render wrote.
       self._syncHatchOutline(shape);
 
+      // An open text box editor rides its box through every resize, turn
+      // and move (point text's re-fits from `_renderPointText`).
+      var tbEd = self._textEditor;
+      if (tbEd && tbEd.fixed && tbEd.shape === shape && tbEd.fit) {
+        tbEd.fit();
+        self._fitPointGrip(shape);
+      }
+
       // Badge last, so it reads the geometry this render just wrote.
       self._renderBadge(shape);
     },
@@ -22899,7 +22907,7 @@
       var rect = this._pointRectEl(shape);
       if (!rect || typeof e.clientX !== "number") return false;
       // Turned: test in the text's own frame, from its layout.
-      var L = shape._pointLayout;
+      var L = this._textboxFixed(shape) ? this._textboxFrameLayout(shape) : shape._pointLayout;
       var turn = L && this._parseTurn ? this._parseTurn(L.turn) : null;
       if (turn && this.svg) {
         var o = this.svg.getBoundingClientRect();
@@ -22917,6 +22925,18 @@
       return !inside;
     },
 
+    // A text box's frame in the shape of point text's layout, for the two
+    // readers above: its box in the overlay's px, unturned, and the turn.
+    _textboxFrameLayout: function(shape) {
+      var host = this._textEditHost(shape);
+      var frame = host && host.querySelector && host.querySelector(".etcher-textbox-frame");
+      if (!frame || !frame.getBBox) return null;
+      var b;
+      try { b = frame.getBBox(); } catch (_) { return null; }
+      return { tx: b.x, ty: b.y, natW: b.width, natH: b.height, sx: 1, sy: 1,
+        turn: host.getAttribute("transform") || null };
+    },
+
     // Lay the editor's grip band over point text's outline: the same band
     // `_onPointTextFrame` reads, as a ring (box grown by the outside reach,
     // less the box shrunk by the inside one) in the overlay's own px.
@@ -22927,7 +22947,7 @@
       var x, y, w, h;
       // Turned: the ring is laid out in the text's own frame and wears its
       // turn; upright, it is read off the drawn box.
-      var L = shape._pointLayout;
+      var L = this._textboxFixed(shape) ? this._textboxFrameLayout(shape) : shape._pointLayout;
       var turn = L && this._parseTurn ? this._parseTurn(L.turn) : null;
       if (turn) {
         x = L.tx; y = L.ty; w = L.natW * L.sx; h = L.natH * L.sy;
@@ -23381,6 +23401,11 @@
             corner_size: cornerDef.size > 0 ? cornerDef.size / self._inkScale() : 0
           });
           self._renderShape(shape);
+          // Selected while typing, as point text is: its box and handles
+          // are up from the first keystroke, so it can be resized, turned
+          // or moved without leaving the words (see `_startTextEdit`).
+          self._suppressEditDismissUntil = Date.now() + 400;
+          self._enterEditMode(shape);
           self._startTextEdit(shape);
           return;
         }
@@ -24122,6 +24147,10 @@
       // being made. The walls do the wrapping; Enter still commits and
       // Shift+Enter still breaks a line by hand.
       var fixedEd = this._textboxFixed(shape);
+      // Whether its frame and handles work while it is typed into — point
+      // text's always have; a text box's work the same way, so the two
+      // tools differ only in the box (wrapping inside it, or none).
+      var live = point || fixedEd;
       if (fixedEd) {
         input.wrap = "soft";
         input.style.whiteSpace = "pre-wrap";
@@ -24382,7 +24411,7 @@
 
       fo.appendChild(input);
       // Under the handles, which are what a press on the box's edge is for.
-      var firstHandle = point && this.svg.querySelector(":scope > .etcher-grab, :scope > .etcher-handle");
+      var firstHandle = live && this.svg.querySelector(":scope > .etcher-grab, :scope > .etcher-handle");
       if (firstHandle) this.svg.insertBefore(fo, firstHandle);
       else this.svg.appendChild(fo);
       // A text box's fit measures its lines, which needs the field on the
@@ -24394,7 +24423,7 @@
       // (Safari above all) repaints the cursor when the pointer crosses
       // into another element, not when a style changes under it.
       var grip = null;
-      if (point) {
+      if (live) {
         grip = svgEl("path", {});
         grip.classList.add("etcher-text-grip");
         this.svg.insertBefore(grip, fo.nextSibling);
@@ -24408,6 +24437,7 @@
         // swap the closure's font size so the fit measures at the new one.
         fit: edFit,
         point: point,
+        fixed: fixedEd,
         setFontSize: function(s) { edFontSize = s; },
         // For _repositionTextEditor: the board moves under an open editor
         // on every pan/zoom frame, so its anchor and its metrics have to
@@ -24486,7 +24516,7 @@
         // The dashed outline of point text being typed into is a grip: a
         // press on it moves the text, and the caret comes back after. Ahead
         // of the editor check, since the editor covers the box's inside.
-        if (point && self._pointFrameUp(shape) && self._onPointTextFrame(shape, e) &&
+        if (live && self._pointFrameUp(shape) && self._onPointTextFrame(shape, e) &&
             !(e.target.closest && e.target.closest(".etcher-handle, .etcher-grab"))) {
           e.preventDefault();
           e.stopPropagation();
@@ -24512,17 +24542,22 @@
         // One of this text's own handles: scaling or stretching it is part
         // of making it, Affinity-style — the editor stays open through the
         // drag and the caret comes back after it.
-        if (point && self._pointFrameUp(shape) && e.target.closest &&
+        if (live && self._pointFrameUp(shape) && e.target.closest &&
             e.target.closest(".etcher-handle, .etcher-grab")) {
           var edR = self._textEditor;
           edR.resizing = true;
+          // …where it was: a focus alone lands it at the start in Firefox.
+          var caretR = [input.selectionStart, input.selectionEnd];
           var back = function() {
             document.removeEventListener("pointerup", back, true);
             document.removeEventListener("pointercancel", back, true);
             setTimeout(function() {
               if (self._textEditor !== edR) return;
               edR.resizing = false;
-              try { input.focus({ preventScroll: true }); } catch (_) {}
+              try {
+                input.focus({ preventScroll: true });
+                input.setSelectionRange(caretR[0], caretR[1]);
+              } catch (_) {}
             }, 0);
           };
           document.addEventListener("pointerup", back, true);
@@ -25552,6 +25587,10 @@
         // part of editing — never let it tear down edit mode. Bezier
         // handles in particular sit out in empty space off the curve.
         if (e.target.closest(".etcher-handle")) return;
+        // Nor the outline grip and the editor of the text being typed: a
+        // drag by the outline ends in a click on the grip, wherever the
+        // text has moved to.
+        if (e.target.closest(".etcher-text-grip, .etcher-text-editor")) return;
         // Clicks on Etcher's own toolbar / popups (e.g. opening the marker
         // style popup for the selected stroke, or dragging its sliders) are
         // part of editing, not a dismissal.

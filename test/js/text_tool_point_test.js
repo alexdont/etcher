@@ -392,7 +392,7 @@ function pull(handle, pt, freeform) {
     "every keystroke renders the real text");
   assert.ok(/if \(e\.shiftKey\) \{\s*if \(!point\) return;\s*e\.preventDefault\(\);[\s\S]*?input\.setRangeText\("\\n"/.test(ed),
     "Shift+Enter puts the line break in");
-  assert.ok(/if \(point && self\._pointFrameUp\(shape\) && e\.target\.closest &&\s*e\.target\.closest\("\.etcher-handle, \.etcher-grab"\)\) \{/.test(ed),
+  assert.ok(/if \(live && self\._pointFrameUp\(shape\) && e\.target\.closest &&\s*e\.target\.closest\("\.etcher-handle, \.etcher-grab"\)\) \{/.test(ed),
     "pressing one of its handles does not end the edit");
   assert.ok(ed.includes("if (self._textEditor.resizing) return;"), "nor does the blur that press may cause");
   assert.ok(ed.includes("this.svg.insertBefore(fo, firstHandle)"), "the editor lies under the handles");
@@ -410,7 +410,7 @@ console.log("text tool (point text): all checks passed");
   const onFrame = make("_onPointTextFrame");
   const rect = { getBoundingClientRect: () => ({ left: 100, top: 100, right: 200, bottom: 150 }) };
   const shape = { el: { querySelector: () => rect } };
-  const at = (x, y) => onFrame.call({ _pointRectEl: () => rect }, shape, { clientX: x, clientY: y });
+  const at = (x, y) => onFrame.call({ _pointRectEl: () => rect, _textboxFixed: () => false }, shape, { clientX: x, clientY: y });
   assert.strictEqual(at(100, 125), true, "on the left edge");
   assert.strictEqual(at(100 - POINT_FRAME_OUT_PX, 125), true, "just outside it");
   assert.strictEqual(at(100 + POINT_FRAME_IN_PX - 1, 125), true, "just inside it");
@@ -441,7 +441,7 @@ console.log("text tool (point text): all checks passed");
   const grip = fakeEl("path");
   const rect = { getBoundingClientRect: () => ({ left: 110, top: 120, width: 100, height: 50 }) };
   const shape = { el: { querySelector: () => rect } };
-  fitGrip.call({ _pointRectEl: () => rect, _textEditor: { shape, grip }, svg: { getBoundingClientRect: () => ({ left: 10, top: 20 }) } }, shape);
+  fitGrip.call({ _pointRectEl: () => rect, _textboxFixed: () => false, _textEditor: { shape, grip }, svg: { getBoundingClientRect: () => ({ left: 10, top: 20 }) } }, shape);
   const O = POINT_FRAME_OUT_PX, I = POINT_FRAME_IN_PX;
   assert.strictEqual(grip.getAttribute("d"),
     `M${100 - O} ${100 - O}h${100 + 2 * O}v${50 + 2 * O}h${-(100 + 2 * O)}Z` +

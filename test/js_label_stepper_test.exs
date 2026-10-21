@@ -70,7 +70,7 @@ defmodule Etcher.JsLabelStepperTest do
     test "the editor is opened by the tool, not by a second tap" do
       # This was already true, and is what made the phone's behaviour read as
       # a bug rather than a missing feature.
-      assert fn_body("_commitText: function", 3000) =~ "self._startTextEdit(shape);"
+      assert fn_body("_commitText: function", 3400) =~ "self._startTextEdit(shape);"
     end
   end
 

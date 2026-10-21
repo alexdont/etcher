@@ -97,6 +97,30 @@ const handlePositions = lift("_handlePositions", "shape");
     "the box and the font never derive from each other");
 }
 
+// ── worked on while typing, exactly as point text is ─────────────────────
+//
+// Reported: with the text tool the box could be scaled, turned and moved
+// mid-sentence, but a text box dropped out of editing at the first press on
+// a handle or its outline. The two tools now share the one path; only the
+// box differs.
+
+{
+  const ed = src.slice(src.indexOf("    _startTextEdit: function"),
+                       src.indexOf("    _repositionTextEditor: function"));
+  assert.ok(ed.includes("var live = point || fixedEd;"), "a text box's frame is live while typing");
+  assert.ok(/if \(live && self\._pointFrameUp\(shape\) && self\._onPointTextFrame\(shape, e\)/.test(ed),
+    "its outline moves it without closing the editor");
+  assert.ok(ed.includes("var firstHandle = live &&"), "and its editor lies under its handles");
+  assert.ok(/if \(live\) \{\s*grip = svgEl\("path"/.test(ed), "with the outline's grip band over it");
+  const commit = src.slice(src.indexOf("    _commitText: function"), src.indexOf("    _commitText: function") + 3400);
+  assert.ok(/self\._enterEditMode\(shape\);\s*self\._startTextEdit\(shape\);\s*return;/.test(commit),
+    "a freshly drawn box is selected while typed into, so its handles are up");
+  assert.ok(/if \(tbEd && tbEd\.fixed && tbEd\.shape === shape && tbEd\.fit\) \{\s*tbEd\.fit\(\);/.test(src),
+    "and its editor follows every resize, turn and move");
+  assert.ok(src.includes('if (e.target.closest(".etcher-text-grip, .etcher-text-editor")) return;'),
+    "a drag by the outline ends in a click that does not deselect it");
+}
+
 // ── the editor is the box: WYSIWYG while typing ──────────────────────────
 //
 // Reported from the field: the committed render wrapped beautifully, but
@@ -107,7 +131,7 @@ const handlePositions = lift("_handlePositions", "shape");
 {
   const ed = src.slice(src.indexOf("    _startTextEdit: function"),
                        src.indexOf("    _repositionTextEditor: function"));
-  assert.ok(/var fixedEd = this\._textboxFixed\(shape\);\s*if \(fixedEd\) \{\s*input\.wrap = "soft";\s*input\.style\.whiteSpace = "pre-wrap";/.test(ed),
+  assert.ok(/var fixedEd = this\._textboxFixed\(shape\);[\s\S]{0,400}?if \(fixedEd\) \{\s*input\.wrap = "soft";\s*input\.style\.whiteSpace = "pre-wrap";/.test(ed),
     "the box's editor wraps while typing — soft wrap, pre-wrap — like the committed render");
   assert.ok(/if \(fixedEd\) \{\s*var gF = selfEd\._textEditBoxImage\(shape\);[\s\S]{0,1800}?return;\s*\}\s*var linesEd/.test(ed),
     "and its fit pins the editor to the shape's own box (recomputed per fit, " +

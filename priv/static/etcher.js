@@ -10405,6 +10405,18 @@
       pv.dataset.side = side;
       pv.style.setProperty("--etcher-pv-arrow", Math.max(12, Math.min(bh - 12, cy - top)) + "px");
       pv.classList.add("is-on");
+      pv._panel = panel;
+      // A press anywhere outside the panel it belongs to puts it away now.
+      if (!this._valuePreviewOff) {
+        this._valuePreviewOff = function(e) {
+          var cur = self._valuePreview;
+          if (!cur || !cur.classList.contains("is-on")) return;
+          if (cur._panel && cur._panel.contains && cur._panel.contains(e.target)) return;
+          self._valuePreviewHeld = false;
+          self._hideValuePreview();
+        };
+        document.addEventListener("pointerdown", this._valuePreviewOff, true);
+      }
       clearTimeout(this._valuePreviewTimer);
       if (!this._valuePreviewHeld) {
         this._valuePreviewTimer = setTimeout(function() { self._hideValuePreview(); }, 1100);
@@ -18270,6 +18282,10 @@
         document.removeEventListener("pointermove", this._docMouseMove);
       if (this._docPointerDown)
         document.removeEventListener("pointerdown", this._docPointerDown);
+      if (this._valuePreviewOff) {
+        document.removeEventListener("pointerdown", this._valuePreviewOff, true);
+        this._valuePreviewOff = null;
+      }
       if (this._focusPressDown) {
         window.removeEventListener("pointerdown", this._focusPressDown, true);
         window.removeEventListener("pointerup", this._focusPressUp, true);

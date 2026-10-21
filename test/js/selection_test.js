@@ -342,7 +342,7 @@ function run(kind, afterCreate) {
     _tooltipDocked: () => false,
     _syncDockedTooltip: noop,
     _syncToolbarColorToShape: noop, _renderHandles: noop,
-    _hasMidpointHandles: () => false, _wireMidpointTracker: noop,
+    _hasMidpointHandles: () => false, _wireMidpointTracker: noop, _syncTransformBox: noop,
     _toImage: () => { throw new Error("no viewer"); },
     overlayWrapper: null,
     _connectorDotShape: null

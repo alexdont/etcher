@@ -1459,6 +1459,9 @@
       // The text box's scale dot: filled, so it reads as a different thing
       // from the corner dots it sits beyond.
       ".etcher-overlay svg .etcher-scale-handle { fill: currentColor; cursor: nwse-resize; }",
+      ".etcher-overlay svg .etcher-xf-frame { fill: none; stroke: #3b82f6; stroke-width: 1.25px; pointer-events: none; vector-effect: non-scaling-stroke; }",
+      ".etcher-overlay svg .etcher-xf-corner[data-corner='0'], .etcher-overlay svg .etcher-xf-corner[data-corner='2'] { cursor: nwse-resize; }",
+      ".etcher-overlay svg .etcher-xf-corner[data-corner='1'], .etcher-overlay svg .etcher-xf-corner[data-corner='3'] { cursor: nesw-resize; }",
       // A text box shows its frame (shaped corners) instead of its rect,
       // which stays the hit area: same states, same looks.
       ".etcher-text.is-textbox .etcher-text-rect { fill: transparent !important; stroke: transparent !important; }",
@@ -12903,6 +12906,8 @@
       var self = this;
       if (self.annotationMode === on) return;
       self.annotationMode = on;
+      // The selection frame only belongs to the cursor in annotation mode.
+      setTimeout(function() { self._syncTransformBox(); }, 0);
       self._syncNavPencil();
       if (self.toolbar) self.toolbar.classList.toggle("is-active", on);
       self._syncActionBar();
@@ -12959,6 +12964,7 @@
     _selectTool: function(toolKey) {
       var self = this;
       var prevTool = self.activeTool;
+      setTimeout(function() { self._syncTransformBox(); }, 0);
       if (self.activeTool !== toolKey) self._cancelDraft();
       // Leaving the eraser tool clears any in-flight hover preview
       // so a grayed shape doesn't get stuck looking "about to delete"
@@ -14714,6 +14720,9 @@
         self._repositionTextEditor();
         self._fitPointGrip(shape);
       }
+
+      // A frame round a selection follows its shapes.
+      self._xfNoteRender(shape);
 
       // Badge last, so it reads the geometry this render just wrote.
       self._renderBadge(shape);
@@ -16828,6 +16837,7 @@
         var d = this._draftActive();
         if (d) this._positionAllHandles(d);
       }
+      this._positionTransformBox();
       // Title-edit handles track the title bbox separately from shape
       // edit handles — both can technically be active in parallel only
       // for distinct shapes; we coexist with them rather than gating.
@@ -17895,6 +17905,22 @@
         // shape is swallowed by its own listener and cycles in
         // `_startShapeMove` instead, sharing the same `_tapCycle` state.
         if (hit) hit = self._cycleTapTarget(hit, e);
+        // Inside the selection's frame but off its ink: the press still
+        // takes the whole selection (as it would on one of its shapes).
+        if (!hit && !e.shiftKey && self._xf && !self._xf.drag && self.annotationMode &&
+            self.activeTool == null) {
+          var inPt = ptDirect;
+          if (!inPt) { try { inPt = self._toImage(e); } catch (_) { inPt = null; } }
+          if (self._xfContains(inPt)) {
+            var xs = self._xf.targets;
+            if (xs.length > 1 || self.editingShape !== xs[0]) {
+              self._startMultiShapeMove(xs[0], e);
+            } else {
+              self._startShapeMove(xs[0], e);
+            }
+            return;
+          }
+        }
         if (!hit) {
           // Empty press in annotation cursor mode on a canvas: begin a
           // marquee box-select. Shift extends the current group; without it
@@ -20283,6 +20309,7 @@
       this.selectedShapes.push(shape);
       shape.el.classList.add("is-multi-selected");
       this._refreshImageRing(shape);
+      this._syncTransformBox();
       // Dots raised by an earlier hover would otherwise hang around over a
       // shape that has just become part of a group — see
       // `_connectorsAvailableFor`. They come back on the next hover once the
@@ -20299,6 +20326,7 @@
       if (shape.el) shape.el.classList.remove("is-multi-selected");
       this._refreshImageRing(shape);
       this._syncArrangeButtons();
+      this._syncTransformBox();
     },
 
     _toggleInSelection: function(shape) {
@@ -20317,6 +20345,7 @@
       });
       this.selectedShapes = [];
       this._syncArrangeButtons();
+      this._syncTransformBox();
     },
 
     // Arm a tool from its shortcut key. The cursor (null) is always
@@ -20782,6 +20811,402 @@
       anchorShape.el.addEventListener("pointercancel", onUp);
     },
 
+    // ---- Transform box --------------------------------------------------
+    //
+    // A frame around what is selected — a group, or a single drawing made
+    // by hand (marker, highlighter, freehand), whose own handles are its
+    // pen anchors — with a dot on each corner that scales it all and a
+    // knob above that turns it all. A corner scales evenly about the
+    // opposite corner (Shift frees each axis); the knob turns about the
+    // middle (Shift steps 15°). A press inside the frame moves the lot.
+    // Everything works off a snapshot taken at the press, so a drag never
+    // accumulates error, and lets go into one undo step per shape — the
+    // same accounting the group move keeps.
+
+    _xfOwnsSingle: function(shape) {
+      return !!shape && !shape.readonly && (shape.kind === "marker" || shape.kind === "freehand");
+    },
+
+    _xfTargets: function() {
+      if (!this.annotationMode || this.activeTool != null) return [];
+      var self = this;
+      var sel = (this.selectedShapes || []).filter(function(s) {
+        return s && s.el && !s.readonly && self.shapes.indexOf(s) !== -1;
+      });
+      if (sel.length >= 2 || (sel.length === 1 && !this.editingShape)) return sel;
+      if (this.editingShape && this._xfOwnsSingle(this.editingShape)) return [this.editingShape];
+      return [];
+    },
+
+    // The union of the targets' boxes in image px, a stroke's own width
+    // included so the frame stands around the ink, not its centre line.
+    _xfUnion: function(targets) {
+      var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      var self = this;
+      targets.forEach(function(s) {
+        var bb = self._shapeBBoxImagePx(s);
+        if (!bb) return;
+        var half = (s.kind === "marker" || s.kind === "freehand") &&
+          s.style && s.style.width > 0 ? s.style.width / 2 : 0;
+        minX = Math.min(minX, bb.x - half); minY = Math.min(minY, bb.y - half);
+        maxX = Math.max(maxX, bb.x + bb.w + half); maxY = Math.max(maxY, bb.y + bb.h + half);
+      });
+      if (!isFinite(minX)) return null;
+      return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+    },
+
+    _syncTransformBox: function() {
+      var targets = this._xfTargets();
+      var xf = this._xf;
+      if (!targets.length) { this._removeTransformBox(); return; }
+      var same = xf && xf.targets.length === targets.length &&
+        xf.targets.every(function(s, i) { return s === targets[i]; });
+      if (!same || !xf.frame.parentNode || xf.frame.ownerSVGElement !== this.svg) {
+        this._removeTransformBox();
+        this._buildTransformBox(targets);
+      }
+      this._positionTransformBox();
+    },
+
+    _buildTransformBox: function(targets) {
+      var self = this;
+      if (!this.svg) return;
+      var frame = svgEl("path", {});
+      frame.classList.add("etcher-xf-frame");
+      this.svg.appendChild(frame);
+      var stem = svgEl("line", {});
+      stem.classList.add("etcher-rotate-stem");
+      stem.style.color = "#3b82f6";
+      this.svg.appendChild(stem);
+      var corners = [0, 1, 2, 3].map(function(i) {
+        var c = svgEl("circle", { r: 5 });
+        c.classList.add("etcher-handle", "etcher-xf-corner");
+        c.style.color = "#3b82f6";
+        c.dataset.corner = String(i);
+        self.svg.appendChild(c);
+        var onDown = function(e) { self._startTransformScale(i, c, e); };
+        c.addEventListener("pointerdown", onDown);
+        self._addGrabHalo(c, HANDLE_GRAB_RADIUS, onDown);
+        return c;
+      });
+      var knob = svgEl("circle", { r: 5 });
+      knob.classList.add("etcher-handle", "etcher-rotate-handle", "etcher-xf-knob");
+      knob.style.color = "#3b82f6";
+      knob.setAttribute("aria-label", "Rotate");
+      this.svg.appendChild(knob);
+      var onRot = function(e) { self._startTransformRotate(knob, e); };
+      knob.addEventListener("pointerdown", onRot);
+      this._addGrabHalo(knob, HANDLE_GRAB_RADIUS, onRot);
+      this._xf = { targets: targets.slice(), frame: frame, stem: stem, corners: corners, knob: knob, box: null, turn: null };
+    },
+
+    _removeTransformBox: function() {
+      var xf = this._xf;
+      if (!xf) return;
+      var self = this;
+      [xf.frame, xf.stem].forEach(function(el) { if (el && el.parentNode) el.parentNode.removeChild(el); });
+      xf.corners.concat([xf.knob]).forEach(function(el) { self._dropHandleEl(el); });
+      this._xf = null;
+    },
+
+    // Re-place the frame: on every pan and zoom, after every render of a
+    // shape inside it, and through a drag (its start box, turned by the
+    // knob's angle while one is being turned).
+    _positionTransformBox: function() {
+      var xf = this._xf;
+      if (!xf) return;
+      var box = xf.drag ? xf.drag.box : this._xfUnion(xf.targets);
+      if (!box) return;
+      xf.box = box;
+      var scale = 1;
+      try { scale = this._markerScale() || 1; } catch (_) { scale = 1; }
+      var pad = 4 / scale;
+      var b = { x: box.x - pad, y: box.y - pad, w: box.w + 2 * pad, h: box.h + 2 * pad };
+      var c = { x: box.x + box.w / 2, y: box.y + box.h / 2 };
+      var turn = xf.turn || 0;
+      var self = this;
+      var put = function(p) { return self._rotatePoint(p, c.x, c.y, turn); };
+      var pts = [
+        { x: b.x, y: b.y }, { x: b.x + b.w, y: b.y },
+        { x: b.x + b.w, y: b.y + b.h }, { x: b.x, y: b.y + b.h }
+      ].map(put);
+      var scr = pts.map(function(p) { return self._imageToContainer(p); });
+      xf.frame.setAttribute("d", "M" + scr.map(function(q) { return q.x + " " + q.y; }).join("L") + "Z");
+      pts.forEach(function(p, i) { self._positionHandle(xf.corners[i], p); });
+      var top = put({ x: c.x, y: b.y });
+      var knobAt = put({ x: c.x, y: b.y - ROTATE_KNOB_PX / scale });
+      this._positionHandle(xf.knob, knobAt);
+      var ta = this._imageToContainer(top), tb = this._imageToContainer(knobAt);
+      xf.stem.setAttribute("x1", ta.x); xf.stem.setAttribute("y1", ta.y);
+      xf.stem.setAttribute("x2", tb.x); xf.stem.setAttribute("y2", tb.y);
+      this._syncGrabRadii(xf.corners);
+    },
+
+    // One render of a shape in the frame asks for one re-place, a frame
+    // later — a group drag renders every member each move.
+    _xfNoteRender: function(shape) {
+      var xf = this._xf;
+      if (!xf || xf.drag || xf.targets.indexOf(shape) === -1 || xf.pending) return;
+      var self = this;
+      xf.pending = true;
+      var run = function() { if (self._xf === xf) { xf.pending = false; self._positionTransformBox(); } };
+      if (typeof requestAnimationFrame === "function") requestAnimationFrame(run); else setTimeout(run, 16);
+    },
+
+    // Whether a press is inside the frame (image px, unturned).
+    _xfContains: function(pt) {
+      var b = this._xf && this._xf.box;
+      if (!b || !pt) return false;
+      var scale = 1;
+      try { scale = this._markerScale() || 1; } catch (_) { scale = 1; }
+      var pad = 4 / scale;
+      return pt.x >= b.x - pad && pt.x <= b.x + b.w + pad && pt.y >= b.y - pad && pt.y <= b.y + b.h + pad;
+    },
+
+    _xfSnapshot: function(targets) {
+      var self = this;
+      return targets.map(function(s) {
+        return {
+          shape: s,
+          g: JSON.parse(JSON.stringify(s.geometry)),
+          style: Object.assign({}, s.style || {}),
+          meta: s.metadata ? Object.assign({}, s.metadata) : null,
+          rot: self._shapeRot(s),
+          turn: self._shapeTurn(s),
+          history: self._snapshotShape(s)
+        };
+      });
+    },
+
+    // Drag plumbing shared by the corners and the knob: capture, the
+    // live frame, and one undo step per shape on release.
+    _xfDrag: function(el, e, onMove) {
+      if (e.button != null && e.button !== 0) return null;
+      var xf = this._xf;
+      if (!xf || !xf.box) return null;
+      e.preventDefault();
+      e.stopPropagation();
+      var self = this;
+      try { el.setPointerCapture(e.pointerId); } catch (_) {}
+      el.classList.add("is-dragging");
+      this._hideTooltip();
+      this._suspendMidpointHighlight();
+      var snaps = this._xfSnapshot(xf.targets);
+      xf.drag = { box: Object.assign({}, xf.box), snaps: snaps, changed: false };
+      var refresh = function() {
+        snaps.forEach(function(sn) { self._renderShape(sn.shape); });
+        var ed = self.editingShape;
+        if (ed && xf.targets.indexOf(ed) !== -1) {
+          if (self.freehandEditor) self._renderFreehandEditor(ed);
+          else self._positionAllHandles(ed);
+        }
+        self._positionTransformBox();
+      };
+      var move = function(ev) {
+        onMove(ev, xf.drag);
+        xf.drag.changed = true;
+        refresh();
+      };
+      var up = function(ev) {
+        el.classList.remove("is-dragging");
+        el.removeEventListener("pointermove", move);
+        el.removeEventListener("pointerup", up);
+        el.removeEventListener("pointercancel", up);
+        try { el.releasePointerCapture(ev.pointerId); } catch (_) {}
+        if (self.svg) self.svg.classList.remove("is-rotating");
+        self._resumeMidpointHighlight();
+        var changed = xf.drag && xf.drag.changed;
+        xf.drag = null;
+        xf.turn = null;
+        if (changed) {
+          snaps.forEach(function(sn) {
+            if (sn.shape.uuid) self._pushUndo(sn.shape.uuid, sn.history, self._snapshotShape(sn.shape));
+          });
+          self._emitChanged();
+          self._syncStyleInspector();
+        }
+        if (self._xf === xf) self._positionTransformBox();
+      };
+      el.addEventListener("pointermove", move);
+      el.addEventListener("pointerup", up);
+      el.addEventListener("pointercancel", up);
+      return xf.drag;
+    },
+
+    _startTransformScale: function(i, el, e) {
+      var self = this;
+      var b = this._xf && this._xf.box;
+      if (!b) return;
+      var C = [{ x: b.x, y: b.y }, { x: b.x + b.w, y: b.y }, { x: b.x + b.w, y: b.y + b.h }, { x: b.x, y: b.y + b.h }];
+      var P = C[(i + 2) % 4], Q = C[i];
+      var v0 = { x: Q.x - P.x, y: Q.y - P.y };
+      var MIN = 0.02;
+      this._xfDrag(el, e, function(ev, d) {
+        var pt = self._toImage(ev);
+        var v = { x: pt.x - P.x, y: pt.y - P.y };
+        var sx, sy;
+        var thinX = Math.abs(v0.x) < 1e-6, thinY = Math.abs(v0.y) < 1e-6;
+        if (ev.shiftKey && !thinX && !thinY) {
+          sx = Math.max(MIN, v.x / v0.x);
+          sy = Math.max(MIN, v.y / v0.y);
+        } else {
+          var k = (v.x * v0.x + v.y * v0.y) / (v0.x * v0.x + v0.y * v0.y || 1);
+          sx = sy = Math.max(MIN, k);
+        }
+        d.box = { x: Math.min(P.x, P.x + v0.x * sx), y: Math.min(P.y, P.y + v0.y * sy),
+          w: Math.abs(v0.x * sx), h: Math.abs(v0.y * sy) };
+        d.snaps.forEach(function(sn) { self._xfScaleShape(sn, P, sx, sy); });
+      });
+    },
+
+    _startTransformRotate: function(el, e) {
+      var self = this;
+      var b = this._xf && this._xf.box;
+      if (!b) return;
+      var c = { x: b.x + b.w / 2, y: b.y + b.h / 2 };
+      var p0 = this._toImage(e);
+      var a0 = Math.atan2(p0.y - c.y, p0.x - c.x);
+      var xf = this._xf;
+      if (this._xfDrag(el, e, function(ev, d) {
+        var p = self._toImage(ev);
+        var deg = (Math.atan2(p.y - c.y, p.x - c.x) - a0) * 180 / Math.PI;
+        if (ev.shiftKey) deg = Math.round(deg / 15) * 15;
+        xf.turn = deg;
+        d.snaps.forEach(function(sn) { self._xfRotateShape(sn, c, deg); });
+      }) && this.svg) this.svg.classList.add("is-rotating");
+    },
+
+    _xfNorm: function(a) {
+      a = ((a % 360) + 540) % 360 - 180;
+      return Math.abs(a) < 0.01 ? 0 : a;
+    },
+
+    // One shape of the selection scaled by (sx, sy) about P, from its
+    // snapshot: its points or its box, and what is measured in its units
+    // — stroke, text size, corners, its label's box — by the even part.
+    _xfScaleShape: function(sn, P, sx, sy) {
+      var self = this;
+      var s = sn.shape, g = sn.g;
+      var k = Math.sqrt(Math.abs(sx * sy));
+      var M = function(p) { return [P.x + (p[0] - P.x) * sx, P.y + (p[1] - P.y) * sy]; };
+      var Mo = function(o) { return { x: P.x + (o.x - P.x) * sx, y: P.y + (o.y - P.y) * sy }; };
+      var V = function(v) { return v ? [v[0] * sx, v[1] * sy] : v; };
+      var out = JSON.parse(JSON.stringify(g));
+      var style = Object.assign({}, sn.style);
+      var centre = null;
+      switch (s.kind) {
+        case "polygon": case "freehand": case "marker":
+        case "arrow": case "line": case "dimension":
+          if (g.points) out.points = g.points.map(M);
+          if (g.nodes) {
+            out.nodes = g.nodes.map(function(n) {
+              return Object.assign({}, n, { p: M(n.p), hIn: V(n.hIn), hOut: V(n.hOut) });
+            });
+          }
+          if (g.a) out.a = M(g.a);
+          if (g.b) out.b = M(g.b);
+          break;
+        case "circle": {
+          var cc = Mo({ x: g.cx, y: g.cy });
+          out.cx = cc.x; out.cy = cc.y; out.r = g.r * k;
+          break;
+        }
+        case "callout": {
+          var tb = self._calloutTextBoxImage(g);
+          if (g.anchor) out.anchor = M(g.anchor);
+          var tc = Mo({ x: tb.x + tb.w / 2, y: tb.y + tb.h / 2 });
+          var tw = tb.w * Math.abs(sx), th = tb.h * Math.abs(sy);
+          out.text_box = { x: tc.x - tw / 2, y: tc.y - th / 2, w: tw, h: th };
+          break;
+        }
+        default: {
+          // A box (rectangle, image, text, card): its middle goes where the
+          // scale takes it; its sides scale along the frame's axes when it
+          // is square to them, evenly when it is turned between.
+          var r = ((Math.round(sn.rot) % 180) + 180) % 180;
+          var upright = Math.abs(sn.rot - Math.round(sn.rot / 90) * 90) < 0.5;
+          var fx = !upright ? k : (r === 90 ? Math.abs(sy) : Math.abs(sx));
+          var fy = !upright ? k : (r === 90 ? Math.abs(sx) : Math.abs(sy));
+          centre = Mo({ x: g.x + g.w / 2, y: g.y + g.h / 2 });
+          out.w = g.w * fx; out.h = g.h * fy;
+          out.x = centre.x - out.w / 2; out.y = centre.y - out.h / 2;
+          if (self._isPointText(s) && Math.abs(fx - fy) > 1e-6) {
+            // Point text stretches rather than skews: the even part is its
+            // size, the rest its stretch along each axis.
+            var ke = Math.sqrt(fx * fy);
+            style.scale_x = (sn.style.scale_x || 1) * fx / ke;
+            style.scale_y = (sn.style.scale_y || 1) * fy / ke;
+          }
+        }
+      }
+      if (sn.style.width > 0) style.width = sn.style.width * k;
+      if (sn.style.font_size > 0) style.font_size = sn.style.font_size * k;
+      if (sn.style.corner_size > 0) style.corner_size = sn.style.corner_size * k;
+      s.geometry = out;
+      s.style = style;
+      if (sn.meta && sn.meta.title_box) {
+        var lb = sn.meta.title_box;
+        var lc = Mo({ x: lb.x + lb.w / 2, y: lb.y + lb.h / 2 });
+        var lw = lb.w * k, lh = lb.h * k;
+        s.metadata = Object.assign({}, sn.meta, { title_box: { x: lc.x - lw / 2, y: lc.y - lh / 2, w: lw, h: lh } });
+      }
+      // Point text writes its own box from its size: render it, then set
+      // it back about the middle the scale asked for.
+      if (centre && this._isPointText(s)) {
+        this._renderShape(s);
+        var gg = s.geometry;
+        s.geometry = Object.assign({}, gg, { x: centre.x - gg.w / 2, y: centre.y - gg.h / 2 });
+      }
+    },
+
+    // One shape of the selection turned by `deg` about C: a point-built
+    // shape's points turn (and its turn count with them, as the knob keeps
+    // it); a box's middle swings round and the box turns on it.
+    _xfRotateShape: function(sn, C, deg) {
+      var self = this;
+      var s = sn.shape, g = sn.g;
+      var R = function(o) { return self._rotatePoint(o, C.x, C.y, deg); };
+      var style = Object.assign({}, sn.style);
+      var out;
+      switch (s.kind) {
+        case "polygon": case "freehand": case "marker":
+        case "arrow": case "line": case "dimension":
+          out = this._rotateGeometry(s.kind, g, C, deg);
+          style.turn = this._xfNorm(sn.turn + deg);
+          if (!this._labelRidesShaft(s.kind)) {
+            style.title_rotation = this._xfNorm((typeof sn.style.title_rotation === "number" ? sn.style.title_rotation : 0) + deg);
+          }
+          break;
+        case "circle": {
+          var cc = R({ x: g.cx, y: g.cy });
+          out = Object.assign({}, g, { cx: cc.x, cy: cc.y });
+          break;
+        }
+        case "callout": {
+          var tb = this._calloutTextBoxImage(g);
+          var a = g.anchor ? R({ x: g.anchor[0], y: g.anchor[1] }) : null;
+          var tc = R({ x: tb.x + tb.w / 2, y: tb.y + tb.h / 2 });
+          out = Object.assign({}, g, {
+            anchor: a ? [a.x, a.y] : g.anchor,
+            text_box: { x: tc.x - tb.w / 2, y: tc.y - tb.h / 2, w: tb.w, h: tb.h }
+          });
+          break;
+        }
+        default: {
+          var bc = R({ x: g.x + g.w / 2, y: g.y + g.h / 2 });
+          out = Object.assign({}, g, { x: bc.x - g.w / 2, y: bc.y - g.h / 2 });
+          if (this._isBoxRotatable(s)) style.rotation = this._xfNorm(sn.rot + deg);
+        }
+      }
+      s.geometry = out;
+      s.style = style;
+      if (sn.meta && sn.meta.title_box) {
+        var lb = sn.meta.title_box;
+        var lc = R({ x: lb.x + lb.w / 2, y: lb.y + lb.h / 2 });
+        s.metadata = Object.assign({}, sn.meta, { title_box: { x: lc.x - lb.w / 2, y: lc.y - lb.h / 2, w: lb.w, h: lb.h } });
+      }
+    },
+
     // Batch-delete every multi-selected shape under a single
     // `bulk_delete` undo entry. One `etcher:annotations-changed` emit
     // covers the whole group so the consumer LV doesn't see a flurry
@@ -20805,6 +21230,7 @@
         self.shapes.splice(idx, 1);
       });
       self.selectedShapes = [];
+      self._syncTransformBox();
       self._hideTooltip();
       self._emitChanged();
     },
@@ -25569,6 +25995,7 @@
       if (this._hasMidpointHandles(shape.kind)) {
         this._wireMidpointTracker();
       }
+      this._syncTransformBox();
 
       // Dismiss on any click outside the shape, its handles, the
       // tooltip, or the toolbar. Capture phase so we run before stop-
@@ -25637,6 +26064,7 @@
         this._outsideClickHandler = null;
       }
       this._syncArrangeButtons();
+      this._syncTransformBox();
       if (wasDocked) this._syncDockedTooltip();
     },
 
@@ -25832,7 +26260,8 @@
     _renderExtraHandles: function(shape) {
       var self = this;
       this._removeExtraHandles();
-      if (this._canRotate(shape)) {
+      // A hand-drawn stroke is turned (and scaled) by its selection frame.
+      if (this._canRotate(shape) && !this._xfOwnsSingle(shape)) {
         var stem = svgEl("line", {});
         stem.classList.add("etcher-rotate-stem");
         stem.style.color = POINT_HANDLE_COLOR;

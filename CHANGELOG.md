@@ -4,6 +4,56 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.23.0] — 2026-10-22
+
+### Added
+
+- **A selection frame that scales and turns.** A box-selected or
+  Shift-clicked group — and a single marker, highlighter or freehand
+  stroke, whose own handles are its pen anchors — gets a frame with a
+  dot on each corner and a knob above it. A corner scales everything
+  evenly about the opposite corner (Shift frees each axis): points,
+  boxes, text size, stroke width, text box corners and labels alike. The
+  knob turns everything about the frame's middle (Shift steps 15°),
+  boxes turning on their own middles as they swing round. A press
+  anywhere inside the frame moves the lot. Each change is one undo step
+  per shape, as the group move already was. A hand-drawn stroke's old
+  rotation knob is folded into the frame's.
+- **A live sample beside the thickness and size controls.** Dragging the
+  thickness slider, typing a weight or stepping the label size brings up
+  a bubble beside the panel, its arrow on the control, with a stroke at
+  that weight — in the colour, opacity and dash it will draw with — or
+  letters at that size, both as big as the canvas will draw them at the
+  current zoom ("shown smaller" past what the bubble holds, "tiny at this
+  zoom" under 9 px). It stays up while the thumb is held and goes a
+  moment after, or at once on a press outside the panel.
+
+### Changed
+
+- **A text box works like point text while it is typed into.** A freshly
+  drawn box is selected from the first keystroke; its corners, sides,
+  rotation knob and dashed outline resize, turn and move it without
+  ending the edit, the editor riding along and the caret coming back
+  where it was. Its scale dot grows the words being typed with the box,
+  frame by frame, instead of on release. Before, the first press on a
+  handle or the outline closed the editor, and a new box had no handles
+  until Enter.
+- **Double-clicking a text puts the caret where the double-click
+  landed**, on point text, text boxes, labels and callouts alike, rather
+  than at the start of the words.
+- **Ink past the picture's edges is framed with it where the host asks**
+  (Fresco 0.15's `pan_centre: :bounds`): the pan bounds are the picture
+  and the ink as drawn, stroke width included, so a flat copy of the
+  drawing and the live layer frame it the same. Other hosts keep the
+  bounds mirrored about the picture, as before.
+
+### Fixed
+
+- **A drag by a text's outline no longer deselects it** on the click
+  that ends the drag.
+
+Allows Fresco 0.15.
+
 ## [0.22.0] — 2026-10-15
 
 ### Changed

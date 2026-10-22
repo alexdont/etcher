@@ -347,8 +347,8 @@ function pull(handle, pt, freeform) {
     "a black dashed box when selected and while it is being typed into");
   assert.ok(body("_renderPointText").includes('el.classList.add("is-point")'));
   assert.ok(body("_startTextEdit").includes('typingHost.classList.add("is-typing")'));
-  assert.ok(/if \(point \|\| fixedEd\) input\.setSelectionRange\(0, 0\);\s*else input\.select\(\);/.test(body("_startTextEdit")),
-    "opened with a caret at the start, not the text selected");
+  assert.ok(/if \(point \|\| fixedEd\) \{\s*var at = dblFresh \? self\._caretOffsetAt\(input, dbl\.x, dbl\.y\) : null;\s*at = at == null \? 0 : at;\s*input\.setSelectionRange\(at, at\);\s*\} else input\.select\(\);/.test(body("_startTextEdit")),
+    "opened with a caret — where the double-click landed, else at the start — not the text selected");
   assert.ok(body("_endTextEdit").includes('ed.shape.el.classList.remove("is-typing")'));
 }
 

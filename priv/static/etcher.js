@@ -10458,6 +10458,48 @@
       return this.lineParams || {};
     },
 
+    // The character offset in a textarea nearest a client point, or null.
+    // Browsers only answer that question for ordinary text, so a twin of
+    // the field — its computed look, its words — is laid exactly over it
+    // for the moment of asking.
+    _caretOffsetAt: function(input, x, y) {
+      if (!input || !input.isConnected || !input.parentNode) return null;
+      var twin = document.createElement("div");
+      var cs = window.getComputedStyle(input);
+      for (var i = 0; i < cs.length; i++) twin.style.setProperty(cs[i], cs.getPropertyValue(cs[i]));
+      twin.style.position = "absolute";
+      twin.style.left = input.offsetLeft + "px";
+      twin.style.top = input.offsetTop + "px";
+      twin.style.margin = "0";
+      twin.style.overflow = "hidden";
+      twin.style.pointerEvents = "auto";
+      twin.style.zIndex = "2147483647";
+      twin.style.color = "transparent";
+      twin.style.background = "transparent";
+      twin.style.caretColor = "transparent";
+      // A newline at the very end makes no line of its own in a div.
+      twin.textContent = input.value + "\u200b";
+      input.parentNode.appendChild(twin);
+      var off = null;
+      try {
+        // Nudged onto where the field really is, should the two differ.
+        var ir = input.getBoundingClientRect(), tr = twin.getBoundingClientRect();
+        if (Math.abs(ir.left - tr.left) > 0.5 || Math.abs(ir.top - tr.top) > 0.5) {
+          twin.style.left = (input.offsetLeft + ir.left - tr.left) + "px";
+          twin.style.top = (input.offsetTop + ir.top - tr.top) + "px";
+        }
+        if (document.caretPositionFromPoint) {
+          var p = document.caretPositionFromPoint(x, y);
+          if (p && twin.contains(p.offsetNode)) off = p.offset;
+        } else if (document.caretRangeFromPoint) {
+          var r = document.caretRangeFromPoint(x, y);
+          if (r && twin.contains(r.startContainer)) off = r.startOffset;
+        }
+      } catch (_) { off = null; }
+      if (twin.parentNode) twin.parentNode.removeChild(twin);
+      return off == null ? null : Math.max(0, Math.min(off, input.value.length));
+    },
+
     _makeWeightTypeable: function(val, range, apply) {
       var self = this;
       val.classList.add("etcher-num-typeable");
@@ -18293,6 +18335,12 @@
       document.addEventListener("pointermove", self._docPointerMove);
       document.addEventListener("pointerup", self._docPointerUp);
       document.addEventListener("dblclick", self._docDblClick);
+      // Where the last double-click landed, for the caret of the editor it
+      // opens (see `_startTextEdit`).
+      self._noteDblClick = function(e) {
+        self._lastDblClick = { x: e.clientX, y: e.clientY, t: Date.now() };
+      };
+      document.addEventListener("dblclick", self._noteDblClick, true);
     },
 
     _unwireGlobalShapeListeners: function() {
@@ -18302,6 +18350,10 @@
         document.removeEventListener("pointermove", this._docMouseMove);
       if (this._docPointerDown)
         document.removeEventListener("pointerdown", this._docPointerDown);
+      if (this._noteDblClick) {
+        document.removeEventListener("dblclick", this._noteDblClick, true);
+        this._noteDblClick = null;
+      }
       if (this._valuePreviewOff) {
         document.removeEventListener("pointerdown", this._valuePreviewOff, true);
         this._valuePreviewOff = null;
@@ -25244,10 +25296,18 @@
       // adds to it instead of wiping it. Other labels keep select-all.
       // A text box opens the same way: caret at the start, arrows or a
       // click to move it, nothing selected to be typed over.
+      //
+      // Opened by a double-click on the words, the caret goes where the
+      // double-click landed, as in any text editor.
+      var dbl = self._lastDblClick;
+      var dblFresh = dbl && Date.now() - dbl.t < 800;
       var placeCaret = function() {
         input.focus();
-        if (point || fixedEd) input.setSelectionRange(0, 0);
-        else input.select();
+        if (point || fixedEd) {
+          var at = dblFresh ? self._caretOffsetAt(input, dbl.x, dbl.y) : null;
+          at = at == null ? 0 : at;
+          input.setSelectionRange(at, at);
+        } else input.select();
       };
       try { placeCaret(); } catch (_) {}
       setTimeout(function() { try { placeCaret(); } catch (_) {} }, 0);

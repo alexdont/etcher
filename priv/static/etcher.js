@@ -12896,10 +12896,17 @@
       if (!size || !(size.width > 0) || !(size.height > 0)) return;
       var minX = 0, minY = 0, maxX = size.width, maxY = size.height;
       var self = this;
+      // Framed as one with the ink (see below), the ink is measured as
+      // drawn: a stroke's own width round its centre line.
+      var inkWidth = false;
+      try { inkWidth = !!(h.getPanCentre && h.getPanCentre() === "bounds"); } catch (_) {}
       (this.shapes || []).forEach(function(sh) {
         var boxes = [];
         try {
           var b = self._shapeBBoxImagePx(sh);
+          var half = inkWidth && !self._isTextKind(sh.kind) && sh.style && sh.style.width > 0
+            ? sh.style.width / 2 : 0;
+          if (b && half) b = { x: b.x - half, y: b.y - half, w: b.w + 2 * half, h: b.h + 2 * half };
           if (b) boxes.push(b);
         } catch (_) {}
         // Labels hang off their shapes, and a label can be the very thing
@@ -12964,6 +12971,19 @@
         width: size.width + padX * 2,
         height: size.height + padY * 2
       };
+      // A host that centres the bounds themselves (`pan_centre: :bounds`)
+      // has no seam to hide — zoomed in or out, the same rect places the
+      // view — so the rect is the picture and the ink as they are, with
+      // the same room round both ends of a spilled axis: centred, it frames
+      // them as one, the way a flat copy of the drawing does.
+      var centresBounds = false;
+      try { centresBounds = !!(h.getPanCentre && h.getPanCentre() === "bounds"); } catch (_) {}
+      if (centresBounds) {
+        var lo = { x: Math.min(0, minX), y: Math.min(0, minY) };
+        var hi = { x: Math.max(size.width, maxX), y: Math.max(size.height, maxY) };
+        var rx = spillX > 0 ? PAN_BOUNDS_PAD : 0, ry = spillY > 0 ? PAN_BOUNDS_PAD : 0;
+        rect = { x: lo.x - rx, y: lo.y - ry, width: hi.x - lo.x + 2 * rx, height: hi.y - lo.y + 2 * ry };
+      }
       this._panBoundsActive = true;
       try { h.setPanBounds(rect); } catch (_) {}
 

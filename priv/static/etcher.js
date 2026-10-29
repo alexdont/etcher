@@ -2581,6 +2581,15 @@
   var CHROME_MARGIN = 12;
   var CHROME_GAP = 8;
 
+  // A pasted, dropped or inserted image is drawn this share of what the person
+  // can see right now (each way, aspect kept), so it is usable at whatever zoom
+  // they happen to be at. A fixed size in canvas units cannot be: 800 units is
+  // most of a 1600-wide picture and a speck on a 12000-wide board at its
+  // default zoom.
+  var INSERT_VIEW_SHARE = 0.5;
+  // Used only where nothing can be measured (no viewport yet): the longest side
+  // in canvas units, and never above the picture's own size.
+  var INSERT_FALLBACK_MAX_SIDE = 800;
   var PREVIEW_MAX_SIDE = 1600;
   var PREVIEW_QUALITY = 0.85;
   var PREVIEW_BYTE_BUDGET = 400 * 1024;
@@ -3510,8 +3519,9 @@
           // Image insertion --------------------------------------------
           // Place an image shape from a URL / data URL. `opts.at = {x, y}`
           // (image coords, default viewport center); `opts.width`/`height`
-          // force a size (else natural size is measured and scaled to
-          // `opts.maxSide`, default 800 canvas px). Returns the uuid when a
+          // force a size (else natural size is measured and the image is
+          // sized to half of what is visible; `opts.maxSide` caps the longest
+          // side in canvas px instead). Returns the uuid when a
           // size is supplied, else null (shape still appears on decode).
           // This is the entry point a `image_source: "custom"` host calls
           // after its own uploader/modal resolves to a URL.
@@ -10834,16 +10844,16 @@
       // is a shape to put the URL on.
       this._makeImagePreview(file, function(objectUrl, thumbnail, natW, natH) {
         // Size from the ORIGINAL, not the thumbnail — otherwise a 256px
-        // preview would place a 256px shape. Same 800-canvas-px cap
-        // `_insertImageHref` applies when it measures for itself; passed
+        // preview would place a 256px shape. Fitted to the visible area exactly
+        // as `_insertImageHref` does when it measures for itself; passed
         // explicitly here because we hand it the thumbnail to display.
-        var scale = Math.min(1, 800 / Math.max(natW || 1, natH || 1));
+        var size = self._insertedImageSize(natW, natH, null);
         var uuid = self._insertImageHref(thumbnail || "", {
           at: imagePt,
           previewHref: objectUrl,
           metadata: opts.metadata,
-          width: Math.max(1, Math.round((natW || 400) * scale)),
-          height: Math.max(1, Math.round((natH || 300) * scale))
+          width: size.w,
+          height: size.h
         });
         if (!uuid) {
           try { URL.revokeObjectURL(objectUrl); } catch (_) {}
@@ -12324,10 +12334,56 @@
       return null;
     },
 
+    // The part of the canvas (or picture) the person can see right now, as a
+    // width and height in image coordinates; null when it cannot be measured.
+    // Clamped to the canvas, so zooming out past its edge does not make the
+    // visible area — and what is inserted into it — larger than the board.
+    _visibleSpan: function() {
+      var h = this.handle;
+      if (!h || typeof h.screenToImage !== "function") return null;
+      var c = h.container;
+      if (!c || typeof c.getBoundingClientRect !== "function") return null;
+      var r = c.getBoundingClientRect();
+      if (!(r.width > 0) || !(r.height > 0)) return null;
+      var a = h.screenToImage({ x: r.left, y: r.top });
+      var b = h.screenToImage({ x: r.right, y: r.bottom });
+      if (!a || !b) return null;
+      var w = Math.abs(b.x - a.x);
+      var hh = Math.abs(b.y - a.y);
+      var size = this.imageSize;
+      if (size && size.x > 0 && size.y > 0) {
+        w = Math.min(w, size.x);
+        hh = Math.min(hh, size.y);
+      }
+      return w > 0 && hh > 0 ? { w: w, h: hh } : null;
+    },
+
+    // How big a newly inserted image is drawn: as large as fits in
+    // `INSERT_VIEW_SHARE` of what is visible, both ways, in the picture's own
+    // proportions. A small image is scaled UP to that — at the default zoom of
+    // a big board a picture at its natural size is a few pixels, and making
+    // someone resize every paste is the thing this is for. An explicit
+    // `maxSide` keeps the old rule (shrink to fit, never enlarge).
+    _insertedImageSize: function(natW, natH, maxSide) {
+      var w = natW > 0 ? natW : 400;
+      var h = natH > 0 ? natH : 300;
+      var scale;
+      if (typeof maxSide === "number") {
+        scale = Math.min(1, maxSide / Math.max(w, h));
+      } else {
+        var span = this._visibleSpan();
+        scale = span
+          ? Math.min(span.w * INSERT_VIEW_SHARE / w, span.h * INSERT_VIEW_SHARE / h)
+          : Math.min(1, INSERT_FALLBACK_MAX_SIDE / Math.max(w, h));
+      }
+      return { w: Math.max(1, Math.round(w * scale)), h: Math.max(1, Math.round(h * scale)) };
+    },
+
     // Place an image shape from a URL / data URL. `opts.at` = { x, y } in
     // image coords (defaults to viewport center); `opts.width`/`opts.height`
-    // force a size, else the natural size is measured and scaled so its
-    // longest side fits `opts.maxSide` (default 800) canvas px. Returns the
+    // force a size, else the natural size is measured and the image is sized
+    // to the visible area (`_insertedImageSize`); `opts.maxSide` instead caps
+    // the longest side in canvas px. Returns the
     // new shape uuid when a size is given up front, else null (the shape
     // still appears once the image decodes — pass width/height if you need
     // the uuid synchronously).
@@ -12340,14 +12396,16 @@
       // that's the only copy of the image there is at this point.
       var measureHref = opts.previewHref || href;
       if (typeof measureHref !== "string" || !measureHref) return null;
-      var maxSide = typeof opts.maxSide === "number" ? opts.maxSide : 800;
+      var maxSide = typeof opts.maxSide === "number" ? opts.maxSide : null;
 
-      function place(natW, natH) {
-        var w = natW > 0 ? natW : 400;
-        var h = natH > 0 ? natH : 300;
-        var scale = Math.min(1, maxSide / Math.max(w, h));
-        w = Math.round(w * scale);
-        h = Math.round(h * scale);
+      // `sized`: the caller already worked the size out, so it is used as given
+      // rather than fitted a second time.
+      function place(natW, natH, sized) {
+        var size = sized
+          ? { w: Math.max(1, Math.round(natW)), h: Math.max(1, Math.round(natH)) }
+          : self._insertedImageSize(natW, natH, maxSide);
+        var w = size.w;
+        var h = size.h;
         var center = (opts.at && typeof opts.at.x === "number")
           ? opts.at
           : self._viewportCenterImage();
@@ -12383,7 +12441,7 @@
       }
 
       if (typeof opts.width === "number" && typeof opts.height === "number") {
-        return place(opts.width, opts.height);
+        return place(opts.width, opts.height, true);
       }
       var probe = new Image();
       probe.onload = function() { place(probe.naturalWidth, probe.naturalHeight); };

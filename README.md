@@ -192,7 +192,7 @@ colour. Images win when the clipboard carries both, which is the usual case
 when copying from a web page. Pastes over ~500 characters are clipped, so a
 stray copy of a whole article doesn't become a wall of text on the canvas.
 
-Inserted images auto-size — the longest side is scaled to 800 canvas px — and center on the viewport (or on the point you pass to `insertImage`).
+Inserted images auto-size to fit half of what is visible (each way, keeping their proportions — a small picture is scaled up, so it is usable at any zoom) and center on the viewport (or on the point you pass to `insertImage`).
 
 Images draw with **rounded corners**, matching the link preview cards a pasted
 URL turns into. The radius is a fraction of the shorter rendered side rather
@@ -727,7 +727,7 @@ layer.patchShape("uuid-…", {
 layer.insertImage(href);                       // place at viewport center, auto-sized
 layer.insertImage(href, { at: { x, y } });     // place at an image-space point
 layer.insertImage(href, { width, height });    // force a size (returns the uuid)
-layer.insertImage(href, { maxSide: 1200 });    // cap the longest side (default 800)
+layer.insertImage(href, { maxSide: 1200 });    // cap the longest side in canvas px instead (never enlarges)
 layer.openImagePicker();                        // run the built-in OS file picker + insert
 layer.setImageUploader(fn);                     // upload files instead of embedding them
 layer.setImageUploader(null);                   // back to embedding as a data URL

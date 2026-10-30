@@ -4,6 +4,26 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.24.0] — 2026-10-30
+
+### Changed
+
+- **A pasted, dropped or inserted image comes in at a usable size.** It was
+  drawn at its own size, shrunk to at most 800 canvas units and never
+  enlarged — a fixed number that means nothing on a large canvas: on a
+  12 000-wide board at its default zoom a screenshot was about ninety
+  screen pixels across, and every paste had to be scaled up by hand
+  before it could be used. It is now drawn as large as fits in **half of
+  what the person can see right now**, each way, in its own proportions.
+  A small picture is scaled up to that, a large one down, so it looks
+  about as big on screen whatever the zoom; zoomed out past the edge of
+  the canvas it is limited to half of the canvas. This covers a paste, a
+  file dropped on the canvas, a picture picked in the image tool and
+  `insertImage` without a size. `insertImage(href, { maxSide })` keeps its
+  meaning — cap the longest side in canvas units, never enlarge — and an
+  explicit `width`/`height` is still used as given. Where nothing can be
+  measured yet (no viewport) the old 800-unit cap is the fallback.
+
 ## [0.23.0] — 2026-10-22
 
 ### Added

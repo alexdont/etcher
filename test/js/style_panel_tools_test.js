@@ -130,7 +130,9 @@ function fakeSelf(raw) {
 {
   // …and the nav keeps the pencil first, the chevron beside it and the eye
   // after, by Fresco slot — whichever attaches first.
-  assert.ok(src.includes("var NAV_SLOTS = { chevronMirrored: -1, pencil: 0, chevron: 1, eye: 2 };"));
+  // (`modeView` — the View half of the `:modes` switch — sits between the
+  // pencil and the chevron.)
+  assert.ok(src.includes("var NAV_SLOTS = { chevronMirrored: -1, pencil: 0, modeView: 0.5, chevron: 1, eye: 2 };"));
   assert.ok(src.includes("}, { slot: NAV_SLOTS.pencil });"), "the pencil asks for slot 0");
   assert.ok(
     src.includes("}, { slot: self._navMirrored() ? NAV_SLOTS.chevronMirrored : NAV_SLOTS.chevron });"),

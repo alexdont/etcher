@@ -478,7 +478,13 @@ defmodule Etcher.Layer do
     default: nil,
     doc: """
     Allowlist of Etcher's nav-column buttons (appended to Fresco's
-    nav). Atom list: `[:pencil, :visibility]`.
+    nav). Atom list: `[:pencil, :visibility, :modes]`.
+
+    `:modes` replaces the pencil with a View / Annotate switch — the
+    viewer's two modes side by side, the current one lit, the way Affinity
+    switches personas. Only when listed by name. Pair it with Fresco's
+    `nav_style: :bar` and the viewer's controls, the switch and the tool bar
+    all read as one interface.
 
     - `nil` (default) — both enabled.
     - `[]` — both hidden. Consumers shipping their own chrome wire

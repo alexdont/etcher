@@ -16,6 +16,12 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   style instead of the last tool's. Kept in the `tool_styles` preference, so
   it follows the user from board to board. The marker and highlighter keep
   the memory they already had.
+- **A View / Annotate switch** (`nav_buttons: [:modes]`). The viewer's two
+  modes side by side in its nav, the current one lit — the way Affinity
+  switches personas — instead of the single pencil toggle. Only when listed
+  by name; a host without an allowlist keeps the pencil. With Fresco's
+  `nav_style: :bar` the viewer's controls, the switch and the tool bar read
+  as one interface.
 - **A right-click menu.** While annotating, right-clicking a shape selects
   it and offers Duplicate, Delete and the four layer moves (Bring to front,
   Bring forward, Send backward, Send to back), each with its shortcut;

@@ -192,7 +192,9 @@
   var POINT_FRAME_IN_PX = 4;
   var POINT_EDGE_MIN_PX = 44;
 
-  var NAV_SLOTS = { chevronMirrored: -1, pencil: 0, chevron: 1, eye: 2 };
+  // `modeView` sits just after the pencil: phoenix_kit mirrors its nav row,
+  // so the switch reads "View | Annotate" left to right there.
+  var NAV_SLOTS = { chevronMirrored: -1, pencil: 0, modeView: 0.5, chevron: 1, eye: 2 };
 
   var ICONS = {
     pencil:   '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125"/></svg>',
@@ -3855,6 +3857,7 @@
         this._styleInspectorFrame = null;
       }
       if (this.removeNavBtn) { try { this.removeNavBtn(); } catch (_) {} }
+      if (this.removeModeViewBtn) { try { this.removeModeViewBtn(); } catch (_) {} }
       if (this.visibilityBtn) { try { this.visibilityBtn(); } catch (_) {} }
       if (this.removePanelToggleBtn) {
         try { this.removePanelToggleBtn(); } catch (_) {}
@@ -4033,7 +4036,8 @@
       // their own chrome can hide them and wire `handle.toggleMode()`
       // / `handle.toggleVisible()` to their own buttons.
       if (self._chromeEnabled("visibility")) self._buildVisibilityButton();
-      if (self._chromeEnabled("pencil")) self._buildNavButton();
+      if (self._modeSwitchOn()) self._buildModeSwitch();
+      else if (self._chromeEnabled("pencil")) self._buildNavButton();
       // Preferences are read once the chrome they drive exists.
       self._applyPrefs();
       self._wireUndoKeyboard();
@@ -4123,7 +4127,8 @@
       self._buildStripTooltip();
       if (self.showToolbar) { self._buildToolbar(); self._buildActionBar(); self._buildStylePanel(); self._wireContextMenu(); }
       if (self._chromeEnabled("visibility")) self._buildVisibilityButton();
-      if (self._chromeEnabled("pencil")) self._buildNavButton();
+      if (self._modeSwitchOn()) self._buildModeSwitch();
+      else if (self._chromeEnabled("pencil")) self._buildNavButton();
       // Preferences are read once the chrome they drive exists.
       self._applyPrefs();
       self._wireUndoKeyboard();
@@ -10510,8 +10515,35 @@
     // kind of decoration.
     _syncNavPencil: function() {
       var btn = this.removeNavBtn && this.removeNavBtn.el;
+      var view = this.removeModeViewBtn && this.removeModeViewBtn.el;
+      if (view && view.classList) {
+        // The mode switch: whichever mode is on is the lit one.
+        view.classList.toggle("etcher-nav-on", !this.annotationMode);
+        view.setAttribute("aria-pressed", this.annotationMode ? "false" : "true");
+        if (btn) btn.setAttribute("aria-pressed", this.annotationMode ? "true" : "false");
+      }
       if (!btn || !btn.classList) return;
       btn.classList.toggle("etcher-pencil-active", !!this.annotationMode);
+    },
+
+    // `nav_buttons: [:modes]` — the viewer's two modes as a switch, the way
+    // Affinity switches personas (2026-11-11, head dev): View and Annotate
+    // side by side in the viewer's nav, the current one lit. Asked for by
+    // name only (a host with no allowlist keeps the single pencil), and it
+    // replaces the pencil rather than joining it.
+    _modeSwitchOn: function() {
+      return !!(this._navButtonAllowlist && this._navButtonAllowlist.has("modes"));
+    },
+
+    _buildModeSwitch: function() {
+      var self = this;
+      self.removeModeViewBtn = self.handle.appendNavButton(ICONS.image, "View", function() {
+        self._setAnnotationMode(false);
+      }, { slot: NAV_SLOTS.modeView });
+      self.removeNavBtn = self.handle.appendNavButton(ICONS.pencil, "Annotate", function() {
+        self._setAnnotationMode(true);
+      }, { slot: NAV_SLOTS.pencil });
+      self._syncNavPencil();
     },
 
     // Eye toggle — show/hide all annotations on the image. Lives

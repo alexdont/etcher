@@ -42,7 +42,14 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   as the shortcuts). On empty board: "Insert image…" (where the image tool
   is offered), placing the picture where the menu was opened, and the
   view's own controls — Reset view, the background dots and, where the
-  viewer can export, Export as PDF.
+  viewer can export, Export as PDF. "Add text here" (where the text tool is
+  offered) starts a point text at the click, typing.
+- **Lock.** "Lock" in a shape's right-click menu (the whole selection when
+  the shape is in it) keeps it from being selected, moved, edited or erased;
+  right-clicking a locked shape offers "Unlock". Stored in the shape's
+  `metadata.locked`, so it saves and reaches peers like any edit, and it is
+  undoable. A host's own lock (`readonly`) is kept apart from it and is not
+  the user's to lift; `data-locked` on the element marks the user's.
 - **The tool bar can be moved.** A grip at its left end drags it anywhere on
   the board when it covers what you are marking up; double-click the grip
   (or Home, with the grip focused) puts it back, and the arrow keys move it.
@@ -57,6 +64,13 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   needs no host code — the default `image_source: :file_picker` opens the
   OS file picker — and a host that does not want it leaves `:image` out of
   `tools`. A bar someone has already customised keeps its own tools.
+
+### Fixed
+
+- **An abandoned new text no longer stays on the board.** Escape out of a
+  text just placed (or Enter with nothing typed) removed it from the screen
+  but never told the host, which kept an empty, invisible text that came
+  back on reload.
 
 ## [0.24.0] — 2026-10-30
 

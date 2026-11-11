@@ -5423,6 +5423,68 @@
       return pt ? this._shapeAt(pt) : null;
     },
 
+    // -------------------------------------------------------------------------
+    // Lock — the user's own, kept in `metadata.locked`
+    // -------------------------------------------------------------------------
+
+    // Stored with the shape, so it saves and reaches peers like any edit. A
+    // locked shape behaves as a host's read-only one (`readonly`): it draws
+    // and shows its tooltip, but is never selected, moved, edited or erased.
+    // Only the right-click menu still finds it, to offer Unlock.
+    _isUserLocked: function(shape) {
+      return !!(shape && shape.metadata && shape.metadata.locked === true);
+    },
+
+    // `readonly` from the two locks. Cheap and idempotent: run on every draw.
+    _syncLock: function(shape) {
+      var locked = this._isUserLocked(shape);
+      var want = !!shape._hostReadonly || locked;
+      if (shape.readonly === want && shape._lockSeen === locked) return;
+      shape.readonly = want;
+      shape._lockSeen = locked;
+      if (!shape.el) return;
+      if (want) shape.el.setAttribute("data-readonly", "true");
+      else shape.el.removeAttribute("data-readonly");
+      if (locked) shape.el.setAttribute("data-locked", "true");
+      else shape.el.removeAttribute("data-locked");
+    },
+
+    // Lock or unlock `shapes` as one edit each (undoable), and save.
+    _setLocked: function(shapes, on) {
+      var self = this;
+      var changed = false;
+      (shapes || []).forEach(function(shape) {
+        if (!shape || !shape.uuid || shape._hostReadonly) return;
+        if (self._isUserLocked(shape) === !!on) return;
+        var before = self._snapshotShape(shape);
+        var meta = Object.assign({}, shape.metadata || {});
+        if (on) meta.locked = true;
+        else delete meta.locked;
+        shape.metadata = Object.keys(meta).length ? meta : null;
+        if (on) {
+          if (self.editingShape === shape) self._exitEditMode();
+          if (self._isInSelection(shape)) self._removeFromSelection(shape);
+        }
+        self._syncLock(shape);
+        self._renderShape(shape);
+        self._pushUndo(shape.uuid, before, self._snapshotShape(shape));
+        changed = true;
+      });
+      if (changed) {
+        this._syncActionBar();
+        this._emitChanged();
+      }
+    },
+
+    // A point text at `pt` (image px), typing — what a click with the text
+    // tool does, without the tool having been picked first.
+    _addTextAt: function(pt) {
+      if (!pt) return;
+      if (this.activeTool !== "text") this._selectTool("text");
+      this._startText(pt, { target: {}, pointerId: 0 }, false);
+      this._commitText(pt);
+    },
+
     // What the menu offers here: a list of items and separators.
     // `pt`: where the menu was opened, in image px (null when unknown).
     _contextMenuItems: function(shape, pt) {
@@ -5432,8 +5494,15 @@
       // they write the clipboard exactly as the shortcut does
       // (`_onShapeCopy`) — the click is the user gesture the browser asks for.
       var clip = function(cmd) { try { document.execCommand(cmd); } catch (_) {} };
+      // A shape the user locked: the one thing to do with it is unlock it.
+      if (shape && shape.readonly) {
+        return [{ label: "Unlock", run: function() { self._setLocked([shape], false); } }];
+      }
       if (shape) {
         var arrange = self._canArrange();
+        // The whole selection when the shape is part of it, as every other
+        // item does.
+        var group = (self.selectedShapes || []).indexOf(shape) !== -1 ? self.selectedShapes.slice() : [shape];
         return [
           { label: "Cut", key: mod + "X", run: function() { clip("cut"); } },
           { label: "Copy", key: mod + "C", run: function() { clip("copy"); } },
@@ -5443,13 +5512,18 @@
           { label: "Bring to front", key: mod + "]", disabled: !arrange, run: function() { self._arrange("front"); } },
           { label: "Bring forward", key: "]", disabled: !arrange, run: function() { self._arrange("forward"); } },
           { label: "Send backward", key: "[", disabled: !arrange, run: function() { self._arrange("backward"); } },
-          { label: "Send to back", key: mod + "[", disabled: !arrange, run: function() { self._arrange("back"); } }
+          { label: "Send to back", key: mod + "[", disabled: !arrange, run: function() { self._arrange("back"); } },
+          "-",
+          { label: "Lock", run: function() { self._setLocked(group, true); } }
         ];
       }
       var hasShapes = (self.shapes || []).some(function(s) { return s && s.el && !s.readonly; });
       var h = self.handle || {};
       var items = [];
       // Only where the board offers pictures at all (the `:image` tool).
+      if (pt && (self.tools || []).indexOf("text") !== -1) {
+        items.push({ label: "Add text here", run: function() { self._addTextAt(pt); } });
+      }
       if ((self.tools || []).indexOf("image") !== -1) {
         items.push({ label: "Insert image\u2026", run: function() {
           if (self.imageSource === "custom") self._emitImageInsertRequested();
@@ -5489,8 +5563,8 @@
       self._closeContextMenu();
 
       var shape = self._shapeAtClient(x, y);
-      if (shape && shape.readonly) shape = null;
-      if (shape) {
+      if (shape && shape._hostReadonly) shape = null;
+      if (shape && !shape.readonly) {
         var inGroup = (self.selectedShapes || []).indexOf(shape) !== -1;
         if (!inGroup) {
           if (self.activeTool != null) self._selectTool(null);
@@ -14731,6 +14805,8 @@
     // `metadata.title_offset` if the user has dragged it).
     _renderShape: function(shape) {
       if (!shape || !shape.el) return;
+      // A lock that arrived with the shape's metadata (a peer's, an undo).
+      if (shape.uuid) this._syncLock(shape);
       var self = this;
       var g = shape.geometry;
       var el = shape.el;
@@ -21583,7 +21659,9 @@
     _setShapeReadonly: function(uuid, bool) {
       var shape = (this.shapes || []).find(function(s) { return s.uuid === uuid; });
       if (!shape) return false;
-      shape.readonly = !!bool;
+      shape._hostReadonly = !!bool;
+      // A shape the user locked stays locked when the host lifts its own.
+      shape.readonly = !!bool || this._isUserLocked(shape);
       if (shape.el) {
         if (shape.readonly) shape.el.setAttribute("data-readonly", "true");
         else shape.el.removeAttribute("data-readonly");
@@ -26450,6 +26528,10 @@
     _discardEmptyTextShape: function(shape) {
       if (!shape) return;
       this._removeShape(shape.uuid);
+      // The new text was already reported when it was placed; without this
+      // the host kept it, an empty, invisible text that came back on reload
+      // (Escape out of a fresh text, or Enter with nothing typed).
+      this._emitChanged();
     },
 
     // -------------------------------------------------------------------------
@@ -26940,9 +27022,13 @@
         // `etcher:annotations-changed` — the consumer recomputes it from its
         // own ownership data each render. See `data-readonly` for styling.
         readonly: ann.readonly === true,
+        // The host's lock, kept apart from the user's own (`metadata.locked`,
+        // see `_syncLock`): only the user's can be undone from the menu.
+        _hostReadonly: ann.readonly === true,
         el: el
       };
       if (shape.readonly) el.setAttribute("data-readonly", "true");
+      this._syncLock(shape);
       // Strip mode: keep `image_idx` on the shape so future emits round-
       // trip cleanly and so `_shapeAt` can filter hit-tests by page.
       if (this.handleKind === "strip" && typeof ann.image_idx === "number") {

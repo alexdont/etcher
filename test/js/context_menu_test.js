@@ -47,6 +47,9 @@ function board(over) {
     tools: ["image", "rectangle"],
     _openImagePicker: (pt) => calls.push("picker:" + JSON.stringify(pt)),
     _emitImageInsertRequested: () => calls.push("hostImage"),
+    _setLocked: (list, on) => calls.push((on ? "lock:" : "unlock:") + list.map((x) => x.uuid).join(",")),
+    _addTextAt: (pt) => calls.push("text:" + JSON.stringify(pt)),
+    selectedShapes: [],
     _gridTitle: () => "Hide background dots",
     _getPref: () => true,
     _setPref: (k, v) => calls.push("pref:" + k + "=" + v),
@@ -65,15 +68,27 @@ const find = (list, l) => list.find((i) => i !== "-" && i.label === l);
   const b = board();
   const list = items.call(b, { uuid: "s1" });
   assert.deepStrictEqual(labels(list), ["Cut", "Copy", "Duplicate", "Delete", "-", "Bring to front",
-    "Bring forward", "Send backward", "Send to back"]);
+    "Bring forward", "Send backward", "Send to back", "-", "Lock"]);
   list.filter((i) => i !== "-").forEach((i) => i.run());
   assert.deepStrictEqual(b.calls, ["duplicate", "delete", "arrange:front", "arrange:forward",
-    "arrange:backward", "arrange:back"], "each item is the action bar's own method");
+    "arrange:backward", "arrange:back", "lock:s1"], "each item is the action bar's own method");
   assert.deepStrictEqual(execs, ["cut", "copy"], "cut and copy go through the clipboard events, as the shortcuts do");
   assert.strictEqual(find(list, "Copy").key, "Ctrl+C");
   assert.ok(find(list, "Delete").danger, "delete reads as destructive");
   assert.strictEqual(find(list, "Bring forward").key, "]", "the hint is the real shortcut");
   assert.strictEqual(find(list, "Send to back").key, "Ctrl+[");
+
+  // Lock takes the whole selection when the shape is in it.
+  const sel = board({ selectedShapes: [{ uuid: "s1" }, { uuid: "s2" }] });
+  find(items.call(sel, sel.selectedShapes[0]), "Lock").run();
+  assert.deepStrictEqual(sel.calls, ["lock:s1,s2"]);
+
+  // A locked shape offers Unlock and nothing else.
+  const locked = board();
+  const lockedList = items.call(locked, { uuid: "s9", readonly: true });
+  assert.deepStrictEqual(labels(lockedList), ["Unlock"]);
+  lockedList[0].run();
+  assert.deepStrictEqual(locked.calls, ["unlock:s9"]);
 
   const stuck = items.call(board({ _canArrange: () => false }), { uuid: "s1" });
   assert.ok(find(stuck, "Bring to front").disabled, "no layer move when nothing can move");
@@ -93,6 +108,14 @@ const find = (list, l) => list.find((i) => i !== "-" && i.label === l);
   ["Insert image\u2026", "Reset view", "Hide background dots", "Export as PDF"].forEach((l) => find(list, l).run());
   assert.deepStrictEqual(b.calls, ['picker:{"x":120,"y":340}', "fit", "pref:grid=false", "pdf"],
     "the picture goes where the menu was opened; the rest are the view's own controls");
+
+  // Text where the text tool is offered, at the point.
+  const texty = board({ tools: ["text", "image"] });
+  const tl = items.call(texty, null, { x: 5, y: 6 });
+  assert.strictEqual(labels(tl)[0], "Add text here");
+  tl[0].run();
+  assert.deepStrictEqual(texty.calls, ['text:{"x":5,"y":6}']);
+  assert.ok(!find(items.call(texty, null, null), "Add text here"), "no point, no text here");
 
   // A host that supplies its own pictures is asked, as the tool does.
   const host = board({ imageSource: "custom" });

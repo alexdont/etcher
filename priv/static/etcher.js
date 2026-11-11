@@ -2611,6 +2611,19 @@
   // 5 means "5 as it would look on a 1000px canvas", on every image. See
   // _canvasInkScale.
   var REFERENCE_CANVAS_PX = 1000;
+
+  // PDF export (`_exportLayer`): the copy's longest side, as Fresco caps the
+  // page's picture; and what a shape's look is made of, written onto the
+  // copy because an SVG used as a picture sees no stylesheet.
+  var EXPORT_MAX_SIDE = 4000;
+  var EXPORT_STYLE_PROPS = [
+    "fill", "fill-opacity", "fill-rule", "stroke", "stroke-width", "stroke-opacity",
+    "stroke-dasharray", "stroke-dashoffset", "stroke-linecap", "stroke-linejoin",
+    "stroke-miterlimit", "opacity", "paint-order", "vector-effect", "clip-path",
+    "mix-blend-mode", "color", "font-family", "font-size", "font-weight", "font-style",
+    "letter-spacing", "text-anchor", "dominant-baseline", "alignment-baseline",
+    "text-decoration", "white-space", "marker-start", "marker-mid", "marker-end", "filter"
+  ];
   var FONT_SIZE_MIN = 6;
   var FONT_SIZE_MAX = 200;
   // What a new label starts at when the user has not chosen a size. There
@@ -3265,7 +3278,7 @@
 
       window.Fresco.onReady(self.frescoId, function(handle) {
         self.handle = handle;
-        self._whenCanvasReady(function() { self._init(); });
+        self._whenCanvasReady(function() { self._init(); self._ready = true; });
       });
 
       // Register this layer in the public `window.Etcher.layerFor`
@@ -3276,6 +3289,8 @@
       layerRegistry[self.frescoId] = {
         api: {
           // Mode + visibility ----------------------------------------
+          // True once the layer has its board and has drawn it.
+          isReady: function() { return self._ready === true; },
           getMode: function() { return self.annotationMode; },
           setMode: function(on) { self._setAnnotationMode(!!on); },
           toggleMode: function() { self._setAnnotationMode(!self.annotationMode); },
@@ -3886,6 +3901,7 @@
         try { cancelAnimationFrame(this._styleInspectorFrame); } catch (_) {}
         this._styleInspectorFrame = null;
       }
+      if (this._removeExportLayer) { try { this._removeExportLayer(); } catch (_) {} this._removeExportLayer = null; }
       if (this.removeNavBtn) { try { this.removeNavBtn(); } catch (_) {} }
       if (this.removeModeViewBtn) { try { this.removeModeViewBtn(); } catch (_) {} }
       if (this.visibilityBtn) { try { this.visibilityBtn(); } catch (_) {} }
@@ -4059,6 +4075,10 @@
       self.imageSize = { x: size.width, y: size.height };
 
       self._buildOverlay();
+      // The shapes go into Fresco's "Export as PDF" (see `_exportLayer`).
+      if (typeof self.handle.addExportLayer === "function") {
+        self._removeExportLayer = self.handle.addExportLayer(function(o) { return self._exportLayer(o); });
+      }
       if (self.showToolbar) { self._buildToolbar(); self._buildActionBar(); self._buildStylePanel(); self._wireContextMenu(); }
       // Visibility toggle goes above the annotation-mode pencil so
       // it reads "look first, edit second" top-to-bottom. Both are
@@ -17590,6 +17610,232 @@
         head.setAttribute("stroke", "rgba(255,255,255,0.85)");
         head.setAttribute("stroke-width", "2");
       }
+    },
+
+    // -------------------------------------------------------------------------
+    // PDF export — the shapes as one picture for Fresco's "Export as PDF"
+    // -------------------------------------------------------------------------
+
+    // Every shape, whole — not just what is on screen — as an SVG data: URL
+    // placed in image px, for Fresco to draw over its pictures. Resolves
+    // `[]` when there is nothing to add (no shapes, annotations hidden, a
+    // strip).
+    //
+    // Shapes are drawn in container px, through `_imageToContainer`. For the
+    // copy, that mapping is swapped for the identity (and the board's turn
+    // for none, which Fresco applies to the whole page), every shape is
+    // drawn again, copied with its computed style written in (an SVG used
+    // as a picture sees no stylesheet), and the screen drawing is put back —
+    // all in one synchronous run, so nothing is painted in between.
+    _exportLayer: function() {
+      var self = this;
+      if (this.handleKind === "strip" || !this.svg) return Promise.resolve([]);
+      if (this.annotationsVisible === false) return Promise.resolve([]);
+      var copy;
+      try {
+        copy = this._exportShapesSvg();
+      } catch (err) {
+        this._renderAll();
+        return Promise.reject(err);
+      }
+      if (!copy) return Promise.resolve([]);
+      return this._inlineExportImages(copy.svg).then(function() {
+        var xml = new XMLSerializer().serializeToString(copy.svg);
+        return [{
+          src: "data:image/svg+xml;charset=utf-8," + encodeURIComponent(xml),
+          x: copy.box.x, y: copy.box.y, width: copy.box.w, height: copy.box.h
+        }];
+      });
+    },
+
+    // The synchronous half of `_exportLayer`: { svg, box } or null.
+    _exportShapesSvg: function() {
+      var self = this;
+      var shapes = this.shapes.filter(function(s) { return s && s.el && s.uuid; });
+      if (!shapes.length) return null;
+
+      var STATE = ["is-selected", "is-multi-selected", "is-hovered", "is-editing", "is-erasing"];
+      var stripped = [];
+      var keep = new Map();
+      shapes.forEach(function(s) {
+        [s.el, s.titleGroup].forEach(function(el) {
+          if (!el) return;
+          keep.set(el, true);
+          STATE.forEach(function(c) {
+            if (el.classList && el.classList.contains(c)) { el.classList.remove(c); stripped.push([el, c]); }
+          });
+        });
+      });
+
+      var toC = this._imageToContainer, fromC = this._containerToImage, rot = this._canvasRotation;
+      this._imageToContainer = function(pt) { return { x: pt.x, y: pt.y }; };
+      this._containerToImage = function(pt) { return { x: pt.x, y: pt.y }; };
+      this._canvasRotation = function() { return 0; };
+      var out = null;
+      try {
+        shapes.forEach(function(s) { self._renderShape(s); });
+
+        // The drawing's extent, in image px (the identity makes the
+        // container's user space the image's).
+        var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+        keep.forEach(function(_, el) {
+          var b;
+          try { b = el.getBBox(); } catch (_) { return; }
+          if (!b || !(b.width > 0 || b.height > 0)) return;
+          // A turned shape: its box after its own transform.
+          var m = el.transform && el.transform.baseVal && el.transform.baseVal.consolidate();
+          var pts = [[b.x, b.y], [b.x + b.width, b.y], [b.x, b.y + b.height], [b.x + b.width, b.y + b.height]];
+          pts.forEach(function(p) {
+            var x = p[0], y = p[1];
+            if (m) { var mm = m.matrix; var tx = mm.a * x + mm.c * y + mm.e; y = mm.b * x + mm.d * y + mm.f; x = tx; }
+            x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y);
+          });
+        });
+        if (isFinite(x0) && isFinite(y0) && x1 > x0 && y1 > y0) {
+          // Room for strokes, which getBBox leaves out.
+          var pad = Math.max(8, Math.max(x1 - x0, y1 - y0) * 0.02);
+          var box = { x: x0 - pad, y: y0 - pad, w: (x1 - x0) + 2 * pad, h: (y1 - y0) + 2 * pad };
+          // Vector, so drawn as fine as the PDF's cap allows.
+          var k = Math.min(4, EXPORT_MAX_SIDE / Math.max(box.w, box.h));
+          var svg = document.createElementNS(SVG_NS, "svg");
+          svg.setAttribute("xmlns", SVG_NS);
+          svg.setAttribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
+          svg.setAttribute("viewBox", box.x + " " + box.y + " " + box.w + " " + box.h);
+          svg.setAttribute("width", String(Math.max(1, Math.round(box.w * k))));
+          svg.setAttribute("height", String(Math.max(1, Math.round(box.h * k))));
+          // DOM order is z-order: copy the kept elements in it.
+          Array.prototype.forEach.call(this.svg.childNodes, function(node) {
+            if (!keep.has(node)) return;
+            svg.appendChild(self._exportClone(node));
+          });
+          this._exportDefs(svg);
+          out = { svg: svg, box: box };
+        }
+      } finally {
+        this._imageToContainer = toC;
+        this._containerToImage = fromC;
+        this._canvasRotation = rot;
+        // Own properties shadowed the prototype's; drop them, don't keep them.
+        if (this._imageToContainer === Object.getPrototypeOf(this)._imageToContainer) delete this._imageToContainer;
+        if (this._containerToImage === Object.getPrototypeOf(this)._containerToImage) delete this._containerToImage;
+        if (this._canvasRotation === Object.getPrototypeOf(this)._canvasRotation) delete this._canvasRotation;
+        stripped.forEach(function(p) { p[0].classList.add(p[1]); });
+        this._renderAll();
+      }
+      return out;
+    },
+
+    // A deep copy of `node` with what the stylesheet gave each element
+    // written onto it.
+    _exportClone: function(node) {
+      var clone = node.cloneNode(true);
+      var src = [node].concat(Array.prototype.slice.call(node.querySelectorAll ? node.querySelectorAll("*") : []));
+      var dst = [clone].concat(Array.prototype.slice.call(clone.querySelectorAll ? clone.querySelectorAll("*") : []));
+      for (var i = 0; i < src.length; i++) {
+        var cs;
+        try { cs = window.getComputedStyle(src[i]); } catch (_) { cs = null; }
+        if (!cs || !dst[i].style) continue;
+        if (cs.display === "none" || cs.visibility === "hidden") {
+          dst[i].setAttribute("display", "none");
+          continue;
+        }
+        EXPORT_STYLE_PROPS.forEach(function(prop) {
+          var v = cs.getPropertyValue(prop);
+          // Some engines report `url("https://host/page#id")`: the copy is
+          // its own document, so point at the bare fragment.
+          if (v && v.indexOf("url(") !== -1) v = v.replace(/url\(\s*["']?[^"')#]*#([^"')]+)["']?\s*\)/g, "url(#$1)");
+          if (v) dst[i].style.setProperty(prop, v);
+        });
+        // Interaction-only state has no place in a picture.
+        dst[i].style.removeProperty("cursor");
+        dst[i].style.removeProperty("pointer-events");
+      }
+      return clone;
+    },
+
+    // Hatch patterns, masks and clips live in <defs> elsewhere on the page
+    // (`url(#…)` resolves document-wide), so the copy takes along every one
+    // it points at — and what those point at. A reference that resolves to
+    // nothing (the selection glow's filter) is dropped: an unresolved
+    // filter or mask hides the shape it is on.
+    _exportDefs: function(svg) {
+      var RE = /url\(\s*["']?#([^"')\s]+)["']?\s*\)/g;
+      var defs = document.createElementNS(SVG_NS, "defs");
+      var have = {};
+      var queue = [svg];
+      var refAttrs = ["fill", "stroke", "mask", "clip-path", "filter", "marker-start", "marker-mid", "marker-end", "style"];
+      while (queue.length) {
+        var root = queue.shift();
+        var els = [root].concat(Array.prototype.slice.call(root.querySelectorAll("*")));
+        els.forEach(function(el) {
+          refAttrs.forEach(function(a) {
+            var v = el.getAttribute && el.getAttribute(a);
+            if (!v || v.indexOf("url(") === -1) return;
+            v.replace(RE, function(_, id) {
+              if (have[id] !== undefined) return "";
+              var def = document.getElementById(id);
+              if (def && def.namespaceURI === SVG_NS && !svg.contains(def)) {
+                var c = def.cloneNode(true);
+                defs.appendChild(c);
+                have[id] = true;
+                queue.push(c);
+              } else {
+                have[id] = false;
+              }
+              return "";
+            });
+          });
+        });
+      }
+      // What could not be brought along is taken off.
+      Array.prototype.forEach.call(svg.querySelectorAll("*"), function(el) {
+        refAttrs.forEach(function(a) {
+          var v = el.getAttribute(a);
+          if (!v || v.indexOf("url(") === -1) return;
+          var dead = false;
+          v.replace(RE, function(_, id) { if (!have[id]) dead = true; return ""; });
+          if (!dead) return;
+          if (a === "style") {
+            ["fill", "stroke", "mask", "clip-path", "filter", "marker-start", "marker-mid", "marker-end"].forEach(function(p) {
+              var pv = el.style.getPropertyValue(p);
+              var bad = false;
+              if (pv) pv.replace(RE, function(_, id) { if (!have[id]) bad = true; return ""; });
+              if (bad) el.style.removeProperty(p);
+            });
+          } else {
+            el.removeAttribute(a);
+          }
+        });
+      });
+      if (defs.childNodes.length) svg.insertBefore(defs, svg.firstChild);
+    },
+
+    // An SVG drawn as a picture loads nothing: every <image> it points at
+    // is read in now and written in as a data: URL. One that can't be read
+    // (another origin without CORS) is left out rather than failing the
+    // whole export.
+    _inlineExportImages: function(svg) {
+      var imgs = Array.prototype.slice.call(svg.querySelectorAll("image"));
+      return Promise.all(imgs.map(function(im) {
+        var href = im.getAttribute("href") || im.getAttributeNS("http://www.w3.org/1999/xlink", "href") || "";
+        if (!href || /^data:/i.test(href)) return null;
+        return fetch(href, { credentials: "same-origin" })
+          .then(function(r) { if (!r.ok) throw new Error(String(r.status)); return r.blob(); })
+          .then(function(blob) {
+            return new Promise(function(resolve, reject) {
+              var fr = new FileReader();
+              fr.onload = function() { resolve(fr.result); };
+              fr.onerror = function() { reject(fr.error); };
+              fr.readAsDataURL(blob);
+            });
+          })
+          .then(function(data) {
+            im.setAttribute("href", data);
+            im.removeAttributeNS("http://www.w3.org/1999/xlink", "href");
+          }, function() {
+            if (im.parentNode) im.parentNode.removeChild(im);
+          });
+      }));
     },
 
     _renderAll: function() {

@@ -24,6 +24,14 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   as one interface. The two buttons are drawn as one segmented control —
   joined, with a divider on each side — so they read as a single switch
   and not as two more tools in the row.
+- **Shapes in the PDF export.** With Fresco's export layers
+  (`handle.addExportLayer`), "Export as PDF" now carries the drawing: every
+  shape, note, text and picture of the board — the whole board, not just the
+  part on screen — drawn over the pictures. The copy is made in image px with
+  each shape's computed style written in, and its hatch patterns and masks
+  taken along; the screen is redrawn exactly as it was. Hidden annotations
+  stay out. `Etcher.layerFor(id).isReady()` says when a layer has drawn its
+  board, for a host that exports one it mounted for the purpose.
 - **A right-click menu.** While annotating, right-clicking a shape selects
   it and offers Duplicate, Delete and the four layer moves (Bring to front,
   Bring forward, Send backward, Send to back), each with its shortcut;

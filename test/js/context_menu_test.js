@@ -23,6 +23,8 @@ function extract(name) {
 }
 
 global.navigator = { platform: "Linux" };
+const execs = [];
+global.document = { execCommand: (c) => { execs.push(c); return true; } };
 const items = extract("_contextMenuItems");
 
 function board(over) {
@@ -42,6 +44,17 @@ function board(over) {
     _selectTool: (t) => calls.push("tool:" + t),
     _undo: () => calls.push("undo"),
     _redo: () => calls.push("redo"),
+    tools: ["image", "rectangle"],
+    _openImagePicker: (pt) => calls.push("picker:" + JSON.stringify(pt)),
+    _emitImageInsertRequested: () => calls.push("hostImage"),
+    _gridTitle: () => "Hide background dots",
+    _getPref: () => true,
+    _setPref: (k, v) => calls.push("pref:" + k + "=" + v),
+    handle: {
+      requestHome: () => calls.push("fit"),
+      setGridVisible: () => {},
+      exportPdf: () => { calls.push("pdf"); return Promise.resolve(); }
+    },
   }, over || {});
 }
 const labels = (list) => list.map((i) => (i === "-" ? "-" : i.label));
@@ -51,11 +64,13 @@ const find = (list, l) => list.find((i) => i !== "-" && i.label === l);
 {
   const b = board();
   const list = items.call(b, { uuid: "s1" });
-  assert.deepStrictEqual(labels(list), ["Duplicate", "Delete", "-", "Bring to front",
+  assert.deepStrictEqual(labels(list), ["Cut", "Copy", "Duplicate", "Delete", "-", "Bring to front",
     "Bring forward", "Send backward", "Send to back"]);
   list.filter((i) => i !== "-").forEach((i) => i.run());
   assert.deepStrictEqual(b.calls, ["duplicate", "delete", "arrange:front", "arrange:forward",
     "arrange:backward", "arrange:back"], "each item is the action bar's own method");
+  assert.deepStrictEqual(execs, ["cut", "copy"], "cut and copy go through the clipboard events, as the shortcuts do");
+  assert.strictEqual(find(list, "Copy").key, "Ctrl+C");
   assert.ok(find(list, "Delete").danger, "delete reads as destructive");
   assert.strictEqual(find(list, "Bring forward").key, "]", "the hint is the real shortcut");
   assert.strictEqual(find(list, "Send to back").key, "Ctrl+[");
@@ -68,11 +83,25 @@ const find = (list, l) => list.find((i) => i !== "-" && i.label === l);
 // ── on empty board ────────────────────────────────────────────────────────
 {
   const b = board({ activeTool: "rectangle" });
-  const list = items.call(b, null);
-  assert.deepStrictEqual(labels(list), ["Paste", "Select all", "-", "Undo", "Redo"]);
+  const list = items.call(b, null, { x: 120, y: 340 });
+  assert.deepStrictEqual(labels(list), ["Insert image\u2026", "Paste", "Select all", "-", "Undo", "Redo",
+    "-", "Reset view", "Hide background dots", "Export as PDF"]);
   find(list, "Select all").run();
   assert.deepStrictEqual(b.calls, ["tool:null", "selectAll"],
     "select all puts the drawing tool down first, as ⌘A needs the cursor");
+  b.calls.length = 0;
+  ["Insert image\u2026", "Reset view", "Hide background dots", "Export as PDF"].forEach((l) => find(list, l).run());
+  assert.deepStrictEqual(b.calls, ['picker:{"x":120,"y":340}', "fit", "pref:grid=false", "pdf"],
+    "the picture goes where the menu was opened; the rest are the view's own controls");
+
+  // A host that supplies its own pictures is asked, as the tool does.
+  const host = board({ imageSource: "custom" });
+  find(items.call(host, null, null), "Insert image\u2026").run();
+  assert.deepStrictEqual(host.calls, ["hostImage"]);
+
+  // No image tool, no picture; a viewer without these controls, no view section.
+  const bare = items.call(board({ tools: ["rectangle"], handle: {} }), null, null);
+  assert.deepStrictEqual(labels(bare), ["Paste", "Select all", "-", "Undo", "Redo"]);
   assert.ok(!find(list, "Undo").disabled);
   assert.ok(find(list, "Redo").disabled, "nothing to redo");
 

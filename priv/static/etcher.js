@@ -5424,12 +5424,19 @@
     },
 
     // What the menu offers here: a list of items and separators.
-    _contextMenuItems: function(shape) {
+    // `pt`: where the menu was opened, in image px (null when unknown).
+    _contextMenuItems: function(shape, pt) {
       var self = this;
       var mod = /Mac|iPhone|iPad/.test(navigator.platform || "") ? "\u2318" : "Ctrl+";
+      // Copy and cut go through the document's own copy / cut events, so
+      // they write the clipboard exactly as the shortcut does
+      // (`_onShapeCopy`) — the click is the user gesture the browser asks for.
+      var clip = function(cmd) { try { document.execCommand(cmd); } catch (_) {} };
       if (shape) {
         var arrange = self._canArrange();
         return [
+          { label: "Cut", key: mod + "X", run: function() { clip("cut"); } },
+          { label: "Copy", key: mod + "C", run: function() { clip("copy"); } },
           { label: "Duplicate", key: mod + "D", run: function() { self._duplicateSelection(); } },
           { label: "Delete", key: "\u232b", danger: true, run: function() { self._deleteSelection(); } },
           "-",
@@ -5440,7 +5447,16 @@
         ];
       }
       var hasShapes = (self.shapes || []).some(function(s) { return s && s.el && !s.readonly; });
-      return [
+      var h = self.handle || {};
+      var items = [];
+      // Only where the board offers pictures at all (the `:image` tool).
+      if ((self.tools || []).indexOf("image") !== -1) {
+        items.push({ label: "Insert image\u2026", run: function() {
+          if (self.imageSource === "custom") self._emitImageInsertRequested();
+          else self._openImagePicker(pt);
+        } });
+      }
+      items.push(
         { label: "Paste", key: mod + "V", run: function() { self._pasteFromClipboard(); } },
         { label: "Select all", key: mod + "A", disabled: !hasShapes, run: function() {
           if (self.activeTool != null) self._selectTool(null);
@@ -5449,7 +5465,23 @@
         "-",
         { label: "Undo", key: mod + "Z", disabled: !(self._undoStack || []).length, run: function() { self._undo(); } },
         { label: "Redo", key: mod + "\u21e7Z", disabled: !(self._redoStack || []).length, run: function() { self._redo(); } }
-      ];
+      );
+      // The view, and the board as a whole.
+      var view = [];
+      // What the nav's own Reset view does (a host's `setHomeAction` included).
+      var home = typeof h.requestHome === "function" ? h.requestHome
+        : (typeof h.fitToView === "function" ? h.fitToView : null);
+      if (home) {
+        view.push({ label: "Reset view", run: function() { home.call(h); } });
+      }
+      if (typeof h.setGridVisible === "function") {
+        view.push({ label: self._gridTitle(), run: function() { self._setPref("grid", self._getPref("grid") === false); } });
+      }
+      if (typeof h.exportPdf === "function") {
+        view.push({ label: "Export as PDF", run: function() { h.exportPdf().catch(function() {}); } });
+      }
+      if (view.length) items = items.concat(["-"], view);
+      return items;
     },
 
     _openContextMenu: function(x, y) {
@@ -5472,7 +5504,11 @@
       menu.className = "etcher-popup etcher-contextmenu is-open";
       menu.setAttribute("role", "menu");
       menu.setAttribute("data-fresco-no-capture", "");
-      self._contextMenuItems(shape).forEach(function(item) {
+      var at = null;
+      try {
+        if (self.handle && typeof self.handle.screenToImage === "function") at = self.handle.screenToImage({ x: x, y: y });
+      } catch (_) { at = null; }
+      self._contextMenuItems(shape, at).forEach(function(item) {
         if (item === "-") {
           var sep = document.createElement("div");
           sep.className = "etcher-cm-sep";
@@ -11243,7 +11279,9 @@
 
     // Built-in OS file picker → data URL → insert. Uses a transient hidden
     // <input> so nothing lingers in the DOM.
-    _openImagePicker: function() {
+    // `imagePt` (image px, optional): where to put it — the context menu's
+    // "Insert image…" places it where the menu was opened.
+    _openImagePicker: function(imagePt) {
       var self = this;
       var input = document.createElement("input");
       input.type = "file";
@@ -11252,7 +11290,7 @@
       document.body.appendChild(input);
       input.addEventListener("change", function() {
         var file = input.files && input.files[0];
-        if (file) self._insertMediaFile(file);
+        if (file) self._insertMediaFile(file, imagePt || undefined);
         if (input.parentNode) input.parentNode.removeChild(input);
       });
       input.click();

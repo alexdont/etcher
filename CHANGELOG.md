@@ -38,7 +38,11 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   right-clicking empty board offers Paste, Select all, Undo and Redo. Each
   item does exactly what its button or shortcut does. Outside annotation
   mode, over Etcher's own controls and in a text field the browser keeps its
-  own menu.
+  own menu. Also on a shape: Cut and Copy (through the clipboard, exactly
+  as the shortcuts). On empty board: "Insert image…" (where the image tool
+  is offered), placing the picture where the menu was opened, and the
+  view's own controls — Reset view, the background dots and, where the
+  viewer can export, Export as PDF.
 - **The tool bar can be moved.** A grip at its left end drags it anywhere on
   the board when it covers what you are marking up; double-click the grip
   (or Home, with the grip focused) puts it back, and the arrow keys move it.

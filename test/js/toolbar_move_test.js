@@ -125,4 +125,14 @@ function board(savedOffset) {
     "the transform has one writer, _setToolbarShift");
 }
 
+// ── the grip outranks the bar's button rule, so it spans the bar's height ──
+{
+  assert.ok(src.includes('".etcher-toolbar .etcher-toolbar-grip {"'),
+    "grip rule qualified by the bar (beats .etcher-toolbar button's 36px square)");
+  assert.ok(!src.includes('"  .etcher-toolbar-grip {"') && !/"\.etcher-toolbar-grip \{"/.test(src),
+    "no bare grip rule left for the button rule to override");
+  assert.ok(src.includes('".etcher-toolbar .etcher-toolbar-grip svg { width: 6px; height: 14px; }"'),
+    "grip dots keep their own size");
+}
+
 console.log("Toolbar move: all checks passed");

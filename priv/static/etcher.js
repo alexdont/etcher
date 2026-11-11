@@ -400,15 +400,18 @@
       // two meet as one shape. Alone, the bar keeps its full radius.
       ".etcher-toolbar.is-stacked { border-radius: 4px 4px 10px 10px; }",
       // The bar's grip: drag it to move the bar off whatever it covers.
-      ".etcher-toolbar-grip {",
-      "  flex: 0 0 auto; width: 14px; align-self: stretch;",
+      // Qualified by the bar so it outranks `.etcher-toolbar button` (a fixed
+      // 36px square, which with the negative margins sat the grip 6px high).
+      ".etcher-toolbar .etcher-toolbar-grip {",
+      "  flex: 0 0 auto; width: 14px; height: auto; align-self: stretch;",
       "  display: flex; align-items: center; justify-content: center;",
       "  margin: -6px 0 -6px -4px; padding: 0; border: 0; background: none;",
       "  color: rgba(255, 255, 255, 0.45); cursor: grab; touch-action: none;",
       "  border-radius: 8px 0 0 8px;",
       "}",
-      ".etcher-toolbar-grip:hover, .etcher-toolbar-grip:focus-visible { color: rgba(255, 255, 255, 0.85); }",
-      ".etcher-toolbar-grip.is-dragging { cursor: grabbing; color: #fff; }",
+      ".etcher-toolbar .etcher-toolbar-grip:hover, .etcher-toolbar .etcher-toolbar-grip:focus-visible { color: rgba(255, 255, 255, 0.85); background: rgba(255, 255, 255, 0.08); }",
+      ".etcher-toolbar .etcher-toolbar-grip.is-dragging { cursor: grabbing; color: #fff; }",
+      ".etcher-toolbar .etcher-toolbar-grip svg { width: 6px; height: 14px; }",
       // Strip mode: the scroll container IS the scrolling element, so
       // anchor the toolbar to the viewport instead of the container.
       // Otherwise it scrolls out of view with the content.

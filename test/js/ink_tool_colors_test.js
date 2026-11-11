@@ -54,6 +54,7 @@ function colorBoard(armedTool) {
     _pickerPreview: null,
     _layoutToolbar() {},
     _restyleDrafts() {},
+    _rememberToolStyle() {},
     _applyColorToTargets() {},
   };
 }
@@ -411,6 +412,7 @@ console.log("ink tool colors: all checks passed");
       _paramsTargetShapes: () => [],
       _freshTargets: () => false,
       _restyleDrafts() {},
+      _rememberToolStyle() {},
       _emitLineParamsChanged() {},
     };
   }

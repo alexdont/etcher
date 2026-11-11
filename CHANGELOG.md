@@ -4,6 +4,33 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Each shape tool remembers its own style.** The rectangle, circle,
+  polygon, freehand, callout, text, text box, dimension, arrow and line each
+  keep their own colour, thickness, opacity, dash, fill and font size: a thin
+  red arrow and a thick blue rectangle stay that way when you switch between
+  them, and a tool picked for the first time starts from the board's base
+  style instead of the last tool's. Kept in the `tool_styles` preference, so
+  it follows the user from board to board. The marker and highlighter keep
+  the memory they already had.
+- **The tool bar can be moved.** A grip at its left end drags it anywhere on
+  the board when it covers what you are marking up; double-click the grip
+  (or Home, with the grip focused) puts it back, and the arrow keys move it.
+  The place is kept in the `toolbar_offset` preference and pulled back on
+  screen when the board is smaller. The action bar and the style button
+  above and beside it go with it.
+
+### Changed
+
+- **Inserting an image is on the toolbar by default.** The image tool is in
+  the default `tools` and on the bar (after Text) instead of behind `⋯`. It
+  needs no host code — the default `image_source: :file_picker` opens the
+  OS file picker — and a host that does not want it leaves `:image` out of
+  `tools`. A bar someone has already customised keeps its own tools.
+
 ## [0.24.0] — 2026-10-30
 
 ### Changed

@@ -71,8 +71,11 @@ for (const key of offered) {
 // label. Dimension joined the bar on 2026-09-20 — it had been filed with
 // polygon as precise work reached for on purpose, and measuring a
 // photograph turns out to be common enough to meet without hunting.
+// The image tool joined on 2026-11-11 (head dev): a screenshot or a scan next
+// to what is being marked up is common, and it needs no host wiring — the
+// default image source is the OS file picker.
 for (const key of ["grabber", "marker", "highlighter", "eraser",
-                   "arrow", "dimension", "line", "text"]) {
+                   "arrow", "dimension", "line", "text", "image"]) {
   assert.ok(essentials.indexOf(key) !== -1,
     `"${key}" should be on the bar without customising`);
 }
@@ -85,7 +88,6 @@ for (const [key, why] of [
   ["polygon", "precise work, reached for on purpose"],
   ["freehand", "the marker's exact cousin — an editable curve, graduated to"],
   ["callout", "a leader and a label welded together; an arrow and a text label already are"],
-  ["image", "needs host wiring, and a picture inside a picture is not the common job"],
   ["pointer", "draws nothing on its own — it is for presenting"],
 ]) {
   assert.strictEqual(essentials.indexOf(key), -1, `"${key}" is niche for the bar: ${why}`);
@@ -93,7 +95,8 @@ for (const [key, why] of [
 
 // A bar that holds everything is not a bar. If this ever needs raising,
 // raise it deliberately — the `⋯` grid is not a demotion.
-assert.ok(essentials.length <= 8,
+// Raised from 8 to 9 deliberately, for the image tool (2026-11-11).
+assert.ok(essentials.length <= 9,
   `the default bar is up to ${essentials.length} tools; it has to stay scannable`);
 
 // ── the order reads as a sentence ─────────────────────────────────────────
@@ -113,7 +116,8 @@ assert.ok(at("marker") === 1 && at("highlighter") === 2 && at("eraser") === 3,
   assert.strictEqual(at("arrow"), run[0], "and the arrow leads them");
 }
 assert.ok(at("arrow") > at("eraser"), "the pointed lines follow");
-assert.ok(at("text") === essentials.length - 1, "labelling closes the bar");
+assert.ok(at("text") === essentials.length - 2 && at("image") === essentials.length - 1,
+  "labelling closes the bar, the picture beside it");
 
 // ── nothing is unreachable ────────────────────────────────────────────────
 

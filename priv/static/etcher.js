@@ -397,6 +397,16 @@
       // Squared off only where the auxiliary tier is resting on it, so the
       // two meet as one shape. Alone, the bar keeps its full radius.
       ".etcher-toolbar.is-stacked { border-radius: 4px 4px 10px 10px; }",
+      // The bar's grip: drag it to move the bar off whatever it covers.
+      ".etcher-toolbar-grip {",
+      "  flex: 0 0 auto; width: 14px; align-self: stretch;",
+      "  display: flex; align-items: center; justify-content: center;",
+      "  margin: -6px 0 -6px -4px; padding: 0; border: 0; background: none;",
+      "  color: rgba(255, 255, 255, 0.45); cursor: grab; touch-action: none;",
+      "  border-radius: 8px 0 0 8px;",
+      "}",
+      ".etcher-toolbar-grip:hover, .etcher-toolbar-grip:focus-visible { color: rgba(255, 255, 255, 0.85); }",
+      ".etcher-toolbar-grip.is-dragging { cursor: grabbing; color: #fff; }",
       // Strip mode: the scroll container IS the scrolling element, so
       // anchor the toolbar to the viewport instead of the container.
       // Otherwise it scrolls out of view with the content.
@@ -2252,8 +2262,6 @@
   //   callout             — a leader and a label welded together, which an
   //                         arrow and a text label already are separately.
   //                         Worth having, not worth meeting first.
-  //   image               — needs host wiring to do anything, and inserting
-  //                         a picture INTO a picture is not the common job.
   //   pointer             — draws nothing and stores nothing on its own: it
   //                         is for presenting, and only does something when
   //                         the host relays it to other people. It used to
@@ -2262,11 +2270,32 @@
   //                         still leaves it dead weight on every board that
   //                         is not being presented. A host that presents can
   //                         put it back in one line.
+  //
+  // The image tool is on the bar (2026-11-11, asked for by the head dev):
+  // putting a picture, a screenshot or a document scan next to what is being
+  // marked up is a common enough job to meet first — and it needs no host
+  // wiring, since its default is the OS file picker. Last, after the text it
+  // sits beside in the "label the thing" end of the sentence.
+  // Tools that draw in the shared shape style (a colour and the line params:
+  // width, opacity, dash, fill, font size). Each keeps its OWN copy of that
+  // style (2026-11-11, head dev: "every shape could have its own thickness
+  // and colors") — a thin red arrow and a thick blue rectangle stay that way
+  // when you go back and forth between them. Saved in the `tool_styles`
+  // preference, so it follows the user across boards. The ink tools (marker,
+  // highlighter) keep the memory they already had (`<tool>_color`,
+  // `<tool>_width`, `<tool>_colors`); the grabber, eraser, pointer and image
+  // tools draw no styled stroke.
+  var STYLE_MEMORY_TOOLS = [
+    "rectangle", "circle", "polygon", "freehand", "callout",
+    "text", "textbox", "dimension", "arrow", "line"
+  ];
+  var STYLE_MEMORY_PARAMS = ["width", "opacity", "dash", "fill", "font_size"];
+
   var ESSENTIAL_TOOLS = [
     "grabber",
     "marker", "highlighter", "eraser",
     "arrow", "dimension", "line",
-    "text"
+    "text", "image"
   ];
 
   // Corner radius on image shapes, as a fraction of the shorter rendered
@@ -5064,6 +5093,9 @@
       // and the gesture handler captures the pointer.
       bar.setAttribute("data-fresco-no-capture", "");
 
+      // The grip that moves the bar (see `_wireToolbarGrip`).
+      bar.appendChild(self._makeToolbarGrip());
+
       // Cursor (deselect any active drawing tool). Lives in the
       // tools group and follows the same active/hidden rule in
       // compact mode (visible only while it's the selected
@@ -5240,6 +5272,9 @@
       this._computeToolbarOverflow();
       this._syncToolsPopup();
       this._syncColorsPopup();
+      // Where the user moved the bar (re-clamped: the container may have
+      // shrunk under it), before what is parked against it is placed.
+      this._setToolbarShift(this._toolbarShift || 0);
       // The tool bar just changed width or height, and both the action bar
       // and the style trigger are parked against its edges.
       this._positionActionBar();
@@ -6211,8 +6246,7 @@
       // as if it were the only thing on the row, pushing its right edge into
       // the space the trigger needs — so shift it half the trigger's
       // footprint left and the pair ends up centred as one group.
-      self.toolbar.style.transform =
-        "translateX(calc(-50% - " + Math.round((gap + h) / 2) + "px))";
+      self._setToolbarShift(Math.round((gap + h) / 2));
 
       // Re-measure: the shift just moved it.
       t = self.toolbar.getBoundingClientRect();
@@ -6345,7 +6379,7 @@
         this.stylePanel.style.right = "";
         this.stylePanel.style.top = "";
         this.stylePanel.style.bottom = "";
-        if (this.toolbar) this.toolbar.style.transform = "";
+        if (this.toolbar) this._setToolbarShift(0);
         this._toggleStylePanel(false);
         this._positionDockedPanel();
       }
@@ -6397,6 +6431,151 @@
     _chromeHeight: function() {
       if (this.handleKind === "strip") return window.innerHeight;
       return this.handle.container.getBoundingClientRect().height;
+    },
+
+    // ── Moving the tool bar (2026-11-11, head dev: "if it's covering
+    // something") ─────────────────────────────────────────────────────────
+    //
+    // The bar centres itself at the bottom of the container. A grip at its
+    // left end drags it anywhere inside the container; double-click (or
+    // Home) puts it back. The move is an OFFSET from that home, kept in the
+    // `toolbar_offset` preference, so it follows the user across boards —
+    // and is clamped against the container every time the bar is laid out,
+    // so a bar parked at the edge of a wide board is still on screen on a
+    // narrow one. Everything parked against the bar (the action bar, the
+    // style trigger and its popup, the viewer's zoom lift) measures the
+    // bar's live box, so it follows without knowing about this.
+
+    _makeToolbarGrip: function() {
+      var grip = document.createElement("button");
+      grip.type = "button";
+      grip.className = "etcher-toolbar-grip";
+      grip.setAttribute("aria-label", "Move the toolbar");
+      grip.title = "Drag to move the toolbar · double-click to put it back";
+      grip.innerHTML =
+        '<svg width="6" height="14" viewBox="0 0 6 14" aria-hidden="true" fill="currentColor">' +
+        '<circle cx="1.5" cy="2" r="1.2"/><circle cx="4.5" cy="2" r="1.2"/>' +
+        '<circle cx="1.5" cy="7" r="1.2"/><circle cx="4.5" cy="7" r="1.2"/>' +
+        '<circle cx="1.5" cy="12" r="1.2"/><circle cx="4.5" cy="12" r="1.2"/></svg>';
+      this._wireToolbarGrip(grip);
+      this.toolbarGrip = grip;
+      return grip;
+    },
+
+    _wireToolbarGrip: function(grip) {
+      var self = this;
+      var drag = null;
+      grip.addEventListener("pointerdown", function(e) {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+        var o = self._toolbarOffset();
+        drag = { id: e.pointerId, x: e.clientX, y: e.clientY, ox: o.x, oy: o.y };
+        try { grip.setPointerCapture(e.pointerId); } catch (_) {}
+        grip.classList.add("is-dragging");
+      });
+      grip.addEventListener("pointermove", function(e) {
+        if (!drag || e.pointerId !== drag.id) return;
+        e.preventDefault();
+        self._moveToolbarTo(drag.ox + e.clientX - drag.x, drag.oy + e.clientY - drag.y, false);
+      });
+      var end = function(e) {
+        if (!drag || (e && e.pointerId !== drag.id)) return;
+        drag = null;
+        grip.classList.remove("is-dragging");
+        try { grip.releasePointerCapture(e.pointerId); } catch (_) {}
+        self._moveToolbarTo(self._toolbarOffset().x, self._toolbarOffset().y, true);
+      };
+      grip.addEventListener("pointerup", end);
+      grip.addEventListener("pointercancel", end);
+      // A click on the grip is a drag that went nowhere — never a press on
+      // whatever is under the bar.
+      grip.addEventListener("click", function(e) { e.preventDefault(); e.stopPropagation(); });
+      grip.addEventListener("dblclick", function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        self._moveToolbarTo(0, 0, true);
+      });
+      // From the keyboard: arrows move it, Home brings it back.
+      grip.addEventListener("keydown", function(e) {
+        var step = e.shiftKey ? 64 : 16;
+        var o = self._toolbarOffset();
+        var to = null;
+        if (e.key === "ArrowLeft") to = [o.x - step, o.y];
+        else if (e.key === "ArrowRight") to = [o.x + step, o.y];
+        else if (e.key === "ArrowUp") to = [o.x, o.y - step];
+        else if (e.key === "ArrowDown") to = [o.x, o.y + step];
+        else if (e.key === "Home") to = [0, 0];
+        if (!to) return;
+        e.preventDefault();
+        e.stopPropagation();
+        self._moveToolbarTo(to[0], to[1], true);
+      });
+    },
+
+    // The user's offset from the bar's home, in px (`{x, y}`, y down).
+    _toolbarOffset: function() {
+      if (!this._toolbarOff) {
+        var saved = this._getPref("toolbar_offset");
+        this._toolbarOff = saved && typeof saved === "object" &&
+          isFinite(saved.x) && isFinite(saved.y)
+          ? { x: Number(saved.x), y: Number(saved.y) }
+          : { x: 0, y: 0 };
+      }
+      return this._toolbarOff;
+    },
+
+    // Move the bar to an offset (clamped to the container), re-park what
+    // sits against it, and — at the end of a gesture — save it.
+    _moveToolbarTo: function(x, y, save) {
+      this._toolbarOff = { x: Math.round(x), y: Math.round(y) };
+      this._setToolbarShift(this._toolbarShift || 0);
+      if (this.stylePanel && this.stylePanel.hasAttribute("data-compact")) {
+        this._positionStyleChrome();
+      }
+      this._positionActionBar();
+      if (typeof this._liftViewerZoom === "function") this._liftViewerZoom();
+      if (save) {
+        var o = this._toolbarOffset();
+        this._setPref("toolbar_offset", o.x === 0 && o.y === 0 ? null : { x: o.x, y: o.y });
+      }
+    },
+
+    // The bar's one transform: centred on the container, shifted `shift` px
+    // left to make room for the style trigger beside it (compact layout),
+    // then the user's offset — pulled back inside the container if the
+    // container is now smaller than where it was left.
+    _setToolbarShift: function(shift) {
+      var bar = this.toolbar;
+      if (!bar) return;
+      this._toolbarShift = shift || 0;
+      var o = this._toolbarOffset();
+      var apply = function(x, y) {
+        bar.style.transform =
+          "translate(calc(-50% - " + (shift || 0) + "px + " + x + "px), " + y + "px)";
+      };
+      apply(o.x, o.y);
+      if (!o.x && !o.y) {
+        if (!shift) bar.style.transform = "";
+        return;
+      }
+      var c = this.handle && this.handle.container &&
+        (this.handleKind === "strip"
+          ? { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight }
+          : this.handle.container.getBoundingClientRect());
+      var t = bar.getBoundingClientRect();
+      if (!c || !t.width) return;
+      var m = CHROME_MARGIN;
+      var dx = 0;
+      var dy = 0;
+      if (t.left < c.left + m) dx = c.left + m - t.left;
+      else if (t.right > c.right - m) dx = c.right - m - t.right;
+      if (t.top < c.top + m) dy = c.top + m - t.top;
+      else if (t.bottom > c.bottom - m) dy = c.bottom - m - t.bottom;
+      if (dx || dy) {
+        this._toolbarOff = { x: Math.round(o.x + dx), y: Math.round(o.y + dy) };
+        apply(this._toolbarOff.x, this._toolbarOff.y);
+      }
     },
 
     // Parked just above the tool bar and flush with its left edge, the way
@@ -7696,6 +7875,7 @@
         else this.lineParams.font_size = value;
         this._fontFreshMirror = true;
       }
+      if (!shapes.length || this._fontFreshMirror) this._rememberToolStyle();
       // A panel edit while the inline editor is open dresses the editor
       // too — the user is styling the text they are typing.
       this._refreshTextEditorStyle();
@@ -9243,6 +9423,8 @@
       if (prop === "width" && this._armedInkTool()) {
         this._setPref(this.activeTool + "_width", value);
       }
+      // A shape tool remembers every param, under its own name.
+      if (!shapes.length || this._lineParamFreshMirror) this._rememberToolStyle();
       if (commit) {
         if (this._lineParamBefore && this._lineParamBefore.length) {
           // Edited selected shapes → per-shape style persists via the
@@ -13353,6 +13535,14 @@
         self._setInkWidth(bank.width);
       }
 
+      // A shape tool comes up in its OWN style — its last colour and line
+      // params — or, the first time it is armed, in the board's base style
+      // rather than whatever the previous tool was left in. After the ink
+      // bank above, which this then overrides for the tool being armed.
+      if (STYLE_MEMORY_TOOLS.indexOf(toolKey) !== -1 && toolKey !== prevTool) {
+        self._applyToolStyle(toolKey);
+      }
+
       // Sync `.is-selected` across the main toolbar AND the
       // compact-mode tools popup. The popup is an alternate UI; its
       // buttons must reflect the same selected state so re-opening
@@ -13521,6 +13711,66 @@
       this._syncParamsPopup();
     },
 
+    // ── Per-tool style memory (see STYLE_MEMORY_TOOLS) ──────────────────────
+
+    // The shape tool whose style the controls are editing right now, or null.
+    _styleMemoryTool: function() {
+      var t = this.activeTool;
+      return STYLE_MEMORY_TOOLS.indexOf(t) !== -1 ? t : null;
+    },
+
+    // The current colour and line params, as a tool's memory holds them.
+    _currentToolStyle: function() {
+      var lp = this.lineParams || {};
+      var out = { color: this.activeColor || null };
+      STYLE_MEMORY_PARAMS.forEach(function(k) { if (lp[k] != null) out[k] = lp[k]; });
+      return out;
+    },
+
+    // Store what the controls show under the armed shape tool. Called after
+    // every colour, thickness, opacity, dash, fill or font-size change; a
+    // no-op with no shape tool armed, and while a tool's memory is being
+    // put on screen (that is a read, not a choice).
+    _rememberToolStyle: function() {
+      var tool = this._styleMemoryTool();
+      if (!tool || this._applyingToolStyle) return;
+      var all = Object.assign({}, this._getPref("tool_styles") || {});
+      all[tool] = this._currentToolStyle();
+      this._setPref("tool_styles", all);
+    },
+
+    // Put a tool's own style on the controls: its memory, else the board's
+    // base style (what the controls showed the first time any shape tool was
+    // armed — the host's seeded params and starting colour, plus anything
+    // the user set before picking a tool). A colour from the palette selects
+    // its swatch; one from outside it (the wheel) stands with none selected,
+    // the same as the shared palette treats it.
+    _applyToolStyle: function(tool) {
+      if (!this._toolStyleBase) this._toolStyleBase = this._currentToolStyle();
+      var all = this._getPref("tool_styles");
+      var mem = all && typeof all === "object" && all[tool];
+      if (!mem || typeof mem !== "object") mem = this._toolStyleBase;
+
+      this._applyingToolStyle = true;
+      try {
+        var self = this;
+        this.lineParams = this.lineParams || {};
+        STYLE_MEMORY_PARAMS.forEach(function(k) { delete self.lineParams[k]; });
+        this._setLineParamsDirect(mem);
+        if (typeof mem.color === "string" && mem.color) {
+          this._activeSlot = (this._colorSlots || []).indexOf(mem.color);
+          this._refreshToolbarSwatches();
+          this._selectColor(mem.color);
+        }
+        this._restyleDrafts();
+        if (this.paramsPopup && this.paramsPopup.classList.contains("is-open")) {
+          this._syncParamsPopup();
+        }
+      } finally {
+        this._applyingToolStyle = false;
+      }
+    },
+
     _selectColor: function(color) {
       this.activeColor = color;
       // While an ink tool is armed, the palette is standing in for THAT
@@ -13531,6 +13781,8 @@
       if (this._armedInkTool()) {
         this._setPref(this.activeTool + "_color", color);
       }
+      // …and for a shape tool, under that tool's own style.
+      this._rememberToolStyle();
       this._dispatch("etcher:color-changed", { color: color });
 
       // Sync `.is-selected` across the main toolbar swatches AND

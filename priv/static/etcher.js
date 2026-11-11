@@ -660,7 +660,8 @@
       // each outer side setting the pair apart from the viewer's buttons.
       // Fresco lays the nav out as a row (possibly mirrored) or a column;
       // the pencil (`-a`) comes first in the nav's order, View (`-b`) second.
-      // An outer divider is only drawn where a neighbour is.
+      // An outer divider is only drawn where a VISIBLE neighbour is: the style
+      // panel toggle stays in the nav, hidden, outside annotation mode.
       ".fresco-nav .etcher-mode-seg { position: relative; }",
       ".fresco-nav .etcher-mode-seg:not(.etcher-nav-on):not(.etcher-pencil-active) { background: rgba(255, 255, 255, 0.10); }",
       ".fresco-nav .etcher-mode-seg::after {",
@@ -669,18 +670,18 @@
       // A row, in order: Annotate | View.
       ".fresco-nav[data-layout=\"row\"]:not([data-reverse]) .etcher-mode-a { border-top-right-radius: 0; border-bottom-right-radius: 0; }",
       ".fresco-nav[data-layout=\"row\"]:not([data-reverse]) .etcher-mode-b { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: -5px; }",
-      ".fresco-nav[data-layout=\"row\"]:not([data-reverse]) .etcher-mode-a:not(:first-child)::after { content: \"\"; left: -4px; top: 7px; bottom: 7px; width: 1px; }",
-      ".fresco-nav[data-layout=\"row\"]:not([data-reverse]) .etcher-mode-b:not(:last-child)::after { content: \"\"; right: -4px; top: 7px; bottom: 7px; width: 1px; }",
+      ".fresco-nav[data-layout=\"row\"]:not([data-reverse]) :not([hidden]) ~ .etcher-mode-a::after { content: \"\"; left: -4px; top: 7px; bottom: 7px; width: 1px; }",
+      ".fresco-nav[data-layout=\"row\"]:not([data-reverse]) .etcher-mode-b:has(~ :not([hidden]))::after { content: \"\"; right: -4px; top: 7px; bottom: 7px; width: 1px; }",
       // A mirrored row (phoenix_kit's): View | Annotate.
       ".fresco-nav[data-layout=\"row\"][data-reverse] .etcher-mode-a { border-top-left-radius: 0; border-bottom-left-radius: 0; }",
       ".fresco-nav[data-layout=\"row\"][data-reverse] .etcher-mode-b { border-top-right-radius: 0; border-bottom-right-radius: 0; margin-right: -5px; }",
-      ".fresco-nav[data-layout=\"row\"][data-reverse] .etcher-mode-a:not(:first-child)::after { content: \"\"; right: -4px; top: 7px; bottom: 7px; width: 1px; }",
-      ".fresco-nav[data-layout=\"row\"][data-reverse] .etcher-mode-b:not(:last-child)::after { content: \"\"; left: -4px; top: 7px; bottom: 7px; width: 1px; }",
+      ".fresco-nav[data-layout=\"row\"][data-reverse] :not([hidden]) ~ .etcher-mode-a::after { content: \"\"; right: -4px; top: 7px; bottom: 7px; width: 1px; }",
+      ".fresco-nav[data-layout=\"row\"][data-reverse] .etcher-mode-b:has(~ :not([hidden]))::after { content: \"\"; left: -4px; top: 7px; bottom: 7px; width: 1px; }",
       // A column: Annotate above View.
       ".fresco-nav:not([data-layout=\"row\"]) .etcher-mode-a { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }",
       ".fresco-nav:not([data-layout=\"row\"]) .etcher-mode-b { border-top-left-radius: 0; border-top-right-radius: 0; margin-top: -5px; }",
-      ".fresco-nav:not([data-layout=\"row\"]) .etcher-mode-a:not(:first-child)::after { content: \"\"; top: -4px; left: 7px; right: 7px; height: 1px; }",
-      ".fresco-nav:not([data-layout=\"row\"]) .etcher-mode-b:not(:last-child)::after { content: \"\"; bottom: -4px; left: 7px; right: 7px; height: 1px; }",
+      ".fresco-nav:not([data-layout=\"row\"]) :not([hidden]) ~ .etcher-mode-a::after { content: \"\"; top: -4px; left: 7px; right: 7px; height: 1px; }",
+      ".fresco-nav:not([data-layout=\"row\"]) .etcher-mode-b:has(~ :not([hidden]))::after { content: \"\"; bottom: -4px; left: 7px; right: 7px; height: 1px; }",
       ".etcher-pencil-active, .etcher-pencil-active:hover,",
       ".etcher-nav-on, .etcher-nav-on:hover {",
       "  background: #3b82f6 !important; color: #fff !important;",

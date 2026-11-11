@@ -90,8 +90,8 @@ assert.strictEqual(
 // ── drawn as one control in every nav layout, with outer dividers ─────────
 for (const sel of ['[data-layout=\\"row\\"]:not([data-reverse])', '[data-layout=\\"row\\"][data-reverse]', ':not([data-layout=\\"row\\"])']) {
   assert.ok(src.includes(`.fresco-nav${sel} .etcher-mode-b {`), `halves joined in ${sel}`);
-  assert.ok(src.includes(`.fresco-nav${sel} .etcher-mode-a:not(:first-child)::after`), `outer divider in ${sel}`);
-  assert.ok(src.includes(`.fresco-nav${sel} .etcher-mode-b:not(:last-child)::after`), `outer divider in ${sel}`);
+  assert.ok(src.includes(`.fresco-nav${sel} :not([hidden]) ~ .etcher-mode-a::after`), `outer divider in ${sel}`);
+  assert.ok(src.includes(`.fresco-nav${sel} .etcher-mode-b:has(~ :not([hidden]))::after`), `outer divider in ${sel}`);
 }
 
 console.log("Mode switch: all checks passed");

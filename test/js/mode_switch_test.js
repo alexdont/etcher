@@ -25,7 +25,8 @@ const ICONS = { image: "<svg i/>", pencil: "<svg p/>" };
 
 function btn() {
   const classes = new Set();
-  return { attrs: {}, classList: { toggle: (c, on) => (on ? classes.add(c) : classes.delete(c)), has: (c) => classes.has(c) },
+  return { attrs: {}, classList: { toggle: (c, on) => (on ? classes.add(c) : classes.delete(c)), has: (c) => classes.has(c),
+                                   add: (...cs) => cs.forEach((c) => classes.add(c)) },
            setAttribute(k, v) { this.attrs[k] = v; } };
 }
 
@@ -64,6 +65,9 @@ assert.strictEqual(layer(["modes"]).l._modeSwitchOn(), true);
   assert.ok(view.slot > annotate.slot && view.slot < NAV_SLOTS.chevron,
     "right after the pencil's slot: View | Annotate in phoenix_kit's mirrored row");
   assert.ok(view.el.classList.has("etcher-nav-on"), "the viewer opens in View");
+  // One segmented control: both halves tagged, the pencil first in order.
+  assert.ok(annotate.el.classList.has("etcher-mode-seg") && annotate.el.classList.has("etcher-mode-a"));
+  assert.ok(view.el.classList.has("etcher-mode-seg") && view.el.classList.has("etcher-mode-b"));
   assert.strictEqual(view.el.attrs["aria-pressed"], "true");
 
   annotate.onClick();
@@ -82,5 +86,12 @@ assert.strictEqual(layer(["modes"]).l._modeSwitchOn(), true);
 // ── it replaces the pencil wherever the nav is built ──────────────────────
 assert.strictEqual(
   (src.match(/if \(self\._modeSwitchOn\(\)\) self\._buildModeSwitch\(\);\n\s+else if \(self\._chromeEnabled\("pencil"\)\) self\._buildNavButton\(\);/g) || []).length, 2);
+
+// ── drawn as one control in every nav layout, with outer dividers ─────────
+for (const sel of ['[data-layout=\\"row\\"]:not([data-reverse])', '[data-layout=\\"row\\"][data-reverse]', ':not([data-layout=\\"row\\"])']) {
+  assert.ok(src.includes(`.fresco-nav${sel} .etcher-mode-b {`), `halves joined in ${sel}`);
+  assert.ok(src.includes(`.fresco-nav${sel} .etcher-mode-a:not(:first-child)::after`), `outer divider in ${sel}`);
+  assert.ok(src.includes(`.fresco-nav${sel} .etcher-mode-b:not(:last-child)::after`), `outer divider in ${sel}`);
+}
 
 console.log("Mode switch: all checks passed");

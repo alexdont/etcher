@@ -655,6 +655,32 @@
       // Fresco's chrome; this class is Etcher's, toggled by _syncNavPencil.
       // The style panel's switch in the nav while the panel shows — lit the
       // same way, so "on" looks like "on" across the row.
+      // The View | Annotate switch (`:modes`) as ONE control: the two halves
+      // flush on a shared tint, a hairline between them, and a divider on
+      // each outer side setting the pair apart from the viewer's buttons.
+      // Fresco lays the nav out as a row (possibly mirrored) or a column;
+      // the pencil (`-a`) comes first in the nav's order, View (`-b`) second.
+      // An outer divider is only drawn where a neighbour is.
+      ".fresco-nav .etcher-mode-seg { position: relative; }",
+      ".fresco-nav .etcher-mode-seg:not(.etcher-nav-on):not(.etcher-pencil-active) { background: rgba(255, 255, 255, 0.10); }",
+      ".fresco-nav .etcher-mode-seg::after {",
+      "  content: none; position: absolute; pointer-events: none; background: rgba(255, 255, 255, 0.3);",
+      "}",
+      // A row, in order: Annotate | View.
+      ".fresco-nav[data-layout=\"row\"]:not([data-reverse]) .etcher-mode-a { border-top-right-radius: 0; border-bottom-right-radius: 0; }",
+      ".fresco-nav[data-layout=\"row\"]:not([data-reverse]) .etcher-mode-b { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: -5px; }",
+      ".fresco-nav[data-layout=\"row\"]:not([data-reverse]) .etcher-mode-a:not(:first-child)::after { content: \"\"; left: -4px; top: 7px; bottom: 7px; width: 1px; }",
+      ".fresco-nav[data-layout=\"row\"]:not([data-reverse]) .etcher-mode-b:not(:last-child)::after { content: \"\"; right: -4px; top: 7px; bottom: 7px; width: 1px; }",
+      // A mirrored row (phoenix_kit's): View | Annotate.
+      ".fresco-nav[data-layout=\"row\"][data-reverse] .etcher-mode-a { border-top-left-radius: 0; border-bottom-left-radius: 0; }",
+      ".fresco-nav[data-layout=\"row\"][data-reverse] .etcher-mode-b { border-top-right-radius: 0; border-bottom-right-radius: 0; margin-right: -5px; }",
+      ".fresco-nav[data-layout=\"row\"][data-reverse] .etcher-mode-a:not(:first-child)::after { content: \"\"; right: -4px; top: 7px; bottom: 7px; width: 1px; }",
+      ".fresco-nav[data-layout=\"row\"][data-reverse] .etcher-mode-b:not(:last-child)::after { content: \"\"; left: -4px; top: 7px; bottom: 7px; width: 1px; }",
+      // A column: Annotate above View.
+      ".fresco-nav:not([data-layout=\"row\"]) .etcher-mode-a { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }",
+      ".fresco-nav:not([data-layout=\"row\"]) .etcher-mode-b { border-top-left-radius: 0; border-top-right-radius: 0; margin-top: -5px; }",
+      ".fresco-nav:not([data-layout=\"row\"]) .etcher-mode-a:not(:first-child)::after { content: \"\"; top: -4px; left: 7px; right: 7px; height: 1px; }",
+      ".fresco-nav:not([data-layout=\"row\"]) .etcher-mode-b:not(:last-child)::after { content: \"\"; bottom: -4px; left: 7px; right: 7px; height: 1px; }",
       ".etcher-pencil-active, .etcher-pencil-active:hover,",
       ".etcher-nav-on, .etcher-nav-on:hover {",
       "  background: #3b82f6 !important; color: #fff !important;",
@@ -10543,6 +10569,15 @@
       self.removeNavBtn = self.handle.appendNavButton(ICONS.pencil, "Annotate", function() {
         self._setAnnotationMode(true);
       }, { slot: NAV_SLOTS.pencil });
+      // Drawn as one segmented control (see the `.etcher-mode-seg` rules).
+      [[self.removeNavBtn, "etcher-mode-a"], [self.removeModeViewBtn, "etcher-mode-b"]].forEach(function(p) {
+        var el = p[0] && p[0].el;
+        if (el && el.classList) el.classList.add("etcher-mode-seg", p[1]);
+      });
+      if (self.removeNavBtn && self.removeNavBtn.el && self.removeNavBtn.el.setAttribute) {
+        self.removeNavBtn.el.setAttribute("data-etcher-mode", "annotate");
+        self.removeModeViewBtn.el.setAttribute("data-etcher-mode", "view");
+      }
       self._syncNavPencil();
     },
 

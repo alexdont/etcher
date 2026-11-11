@@ -4,7 +4,12 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.25.0] — 2026-11-11
+
+Admits Fresco 0.16. The shapes in "Export as PDF" need it (Fresco's export
+layers), and the View / Annotate switch is drawn to match Fresco's
+`nav_style: :bar`; with an older Fresco the rest works and those two quietly
+do without.
 
 ### Added
 

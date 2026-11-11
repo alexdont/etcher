@@ -16,6 +16,13 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   style instead of the last tool's. Kept in the `tool_styles` preference, so
   it follows the user from board to board. The marker and highlighter keep
   the memory they already had.
+- **A right-click menu.** While annotating, right-clicking a shape selects
+  it and offers Duplicate, Delete and the four layer moves (Bring to front,
+  Bring forward, Send backward, Send to back), each with its shortcut;
+  right-clicking empty board offers Paste, Select all, Undo and Redo. Each
+  item does exactly what its button or shortcut does. Outside annotation
+  mode, over Etcher's own controls and in a text field the browser keeps its
+  own menu.
 - **The tool bar can be moved.** A grip at its left end drags it anywhere on
   the board when it covers what you are marking up; double-click the grip
   (or Home, with the grip focused) puts it back, and the arrow keys move it.

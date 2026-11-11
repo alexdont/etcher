@@ -1046,6 +1046,19 @@
       "  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);",
       "}",
       ".etcher-popup.is-open { display: flex; flex-wrap: wrap; }",
+      // The right-click menu: a column of actions, each with its shortcut.
+      ".etcher-popup.etcher-contextmenu { position: fixed; z-index: 1000; min-width: 190px; padding: 4px; }",
+      ".etcher-popup.etcher-contextmenu.is-open { display: flex; flex-direction: column; flex-wrap: nowrap; gap: 0; }",
+      ".etcher-cm-item {",
+      "  display: flex; align-items: center; justify-content: space-between; gap: 18px;",
+      "  padding: 6px 10px; border: 0; border-radius: 6px; background: none;",
+      "  color: #fff; font: 13px/1.2 ui-sans-serif, system-ui, sans-serif; text-align: left; cursor: pointer;",
+      "}",
+      ".etcher-cm-item:hover:not(:disabled), .etcher-cm-item:focus-visible { background: rgba(255, 255, 255, 0.14); outline: none; }",
+      ".etcher-cm-item:disabled { color: rgba(255, 255, 255, 0.35); cursor: default; }",
+      ".etcher-cm-item.is-danger:not(:disabled) { color: #fca5a5; }",
+      ".etcher-cm-key { color: rgba(255, 255, 255, 0.45); font-size: 12px; }",
+      ".etcher-cm-sep { height: 1px; margin: 4px 6px; background: rgba(255, 255, 255, 0.15); }",
       // Tools popup: 5-col grid so 9 tools + cursor fit in 2 rows.
       // Tools popup: a 4-column grid, the shape-picker shape users expect
       // from every other canvas app. Sized so the extras land in tidy rows
@@ -4013,7 +4026,7 @@
       self.imageSize = { x: size.width, y: size.height };
 
       self._buildOverlay();
-      if (self.showToolbar) { self._buildToolbar(); self._buildActionBar(); self._buildStylePanel(); }
+      if (self.showToolbar) { self._buildToolbar(); self._buildActionBar(); self._buildStylePanel(); self._wireContextMenu(); }
       // Visibility toggle goes above the annotation-mode pencil so
       // it reads "look first, edit second" top-to-bottom. Both are
       // gated by the `:nav_buttons` allowlist so consumers shipping
@@ -4108,7 +4121,7 @@
 
       self._buildStripOverlays();
       self._buildStripTooltip();
-      if (self.showToolbar) { self._buildToolbar(); self._buildActionBar(); self._buildStylePanel(); }
+      if (self.showToolbar) { self._buildToolbar(); self._buildActionBar(); self._buildStylePanel(); self._wireContextMenu(); }
       if (self._chromeEnabled("visibility")) self._buildVisibilityButton();
       if (self._chromeEnabled("pencil")) self._buildNavButton();
       // Preferences are read once the chrome they drive exists.
@@ -5316,6 +5329,171 @@
     // (always enabled-or-not, never selection-dependent); delete and
     // duplicate act on the selection; `⋮` holds the arrange actions, which
     // are selection-scoped and too niche to spend permanent bar space on.
+    // ── Right-click menu (2026-11-11, head dev) ──────────────────────────────
+    //
+    // While annotating, a right-click on the board opens Etcher's own menu
+    // instead of the browser's. On a shape: it is selected the way a click
+    // selects it (a shape already in a multi-selection keeps the group), and
+    // the menu offers what the action bar does to a selection — duplicate,
+    // delete, the four layer moves. On empty board: paste, select all, undo,
+    // redo. Every item calls the same method as its button or shortcut, so
+    // undo and the server round trip behave the same however it was done.
+    //
+    // Left to the browser: a right-click outside annotation mode, on Etcher's
+    // own controls, and in a text field (spelling, the OS paste).
+
+    _wireContextMenu: function() {
+      var self = this;
+      if (self._contextMenuWired || !self.handle || !self.handle.container) return;
+      self._contextMenuWired = true;
+      self.handle.container.addEventListener("contextmenu", function(e) {
+        if (!self.annotationMode) return;
+        var t = e.target;
+        if (t && t.closest) {
+          if (t.closest("input, textarea, [contenteditable='true'], [contenteditable='']")) return;
+          if (t.closest(CHROME_SELECTOR)) return;
+        }
+        e.preventDefault();
+        e.stopPropagation();
+        self._openContextMenu(e.clientX, e.clientY);
+      });
+    },
+
+    // The shape under a client point, through the same hit-test a click uses.
+    _shapeAtClient: function(x, y) {
+      var h = this.handle;
+      if (!h || typeof h.screenToImage !== "function") return null;
+      var pt = null;
+      try { pt = h.screenToImage({ x: x, y: y }); } catch (_) { pt = null; }
+      return pt ? this._shapeAt(pt) : null;
+    },
+
+    // What the menu offers here: a list of items and separators.
+    _contextMenuItems: function(shape) {
+      var self = this;
+      var mod = /Mac|iPhone|iPad/.test(navigator.platform || "") ? "\u2318" : "Ctrl+";
+      if (shape) {
+        var arrange = self._canArrange();
+        return [
+          { label: "Duplicate", key: mod + "D", run: function() { self._duplicateSelection(); } },
+          { label: "Delete", key: "\u232b", danger: true, run: function() { self._deleteSelection(); } },
+          "-",
+          { label: "Bring to front", key: mod + "]", disabled: !arrange, run: function() { self._arrange("front"); } },
+          { label: "Bring forward", key: "]", disabled: !arrange, run: function() { self._arrange("forward"); } },
+          { label: "Send backward", key: "[", disabled: !arrange, run: function() { self._arrange("backward"); } },
+          { label: "Send to back", key: mod + "[", disabled: !arrange, run: function() { self._arrange("back"); } }
+        ];
+      }
+      var hasShapes = (self.shapes || []).some(function(s) { return s && s.el && !s.readonly; });
+      return [
+        { label: "Paste", key: mod + "V", run: function() { self._pasteFromClipboard(); } },
+        { label: "Select all", key: mod + "A", disabled: !hasShapes, run: function() {
+          if (self.activeTool != null) self._selectTool(null);
+          self._selectAll();
+        } },
+        "-",
+        { label: "Undo", key: mod + "Z", disabled: !(self._undoStack || []).length, run: function() { self._undo(); } },
+        { label: "Redo", key: mod + "\u21e7Z", disabled: !(self._redoStack || []).length, run: function() { self._redo(); } }
+      ];
+    },
+
+    _openContextMenu: function(x, y) {
+      var self = this;
+      self._closeContextMenu();
+
+      var shape = self._shapeAtClient(x, y);
+      if (shape && shape.readonly) shape = null;
+      if (shape) {
+        var inGroup = (self.selectedShapes || []).indexOf(shape) !== -1;
+        if (!inGroup) {
+          if (self.activeTool != null) self._selectTool(null);
+          self._clearSelection();
+          self._enterEditMode(shape);
+        }
+        self._syncActionBar();
+      }
+
+      var menu = document.createElement("div");
+      menu.className = "etcher-popup etcher-contextmenu is-open";
+      menu.setAttribute("role", "menu");
+      menu.setAttribute("data-fresco-no-capture", "");
+      self._contextMenuItems(shape).forEach(function(item) {
+        if (item === "-") {
+          var sep = document.createElement("div");
+          sep.className = "etcher-cm-sep";
+          sep.setAttribute("role", "separator");
+          menu.appendChild(sep);
+          return;
+        }
+        var b = document.createElement("button");
+        b.type = "button";
+        b.className = "etcher-cm-item" + (item.danger ? " is-danger" : "");
+        b.setAttribute("role", "menuitem");
+        b.disabled = !!item.disabled;
+        var label = document.createElement("span");
+        label.textContent = item.label;
+        var key = document.createElement("span");
+        key.className = "etcher-cm-key";
+        key.textContent = item.key || "";
+        b.appendChild(label);
+        b.appendChild(key);
+        b.addEventListener("click", function(e) {
+          e.preventDefault();
+          e.stopPropagation();
+          self._closeContextMenu();
+          if (!item.disabled) item.run();
+        });
+        menu.appendChild(b);
+      });
+      document.body.appendChild(menu);
+      self.contextMenu = menu;
+
+      // At the pointer, flipped to stay on screen.
+      var r = menu.getBoundingClientRect();
+      var left = x + r.width > window.innerWidth - 4 ? Math.max(4, x - r.width) : x;
+      var top = y + r.height > window.innerHeight - 4 ? Math.max(4, y - r.height) : y;
+      menu.style.left = Math.round(left) + "px";
+      menu.style.top = Math.round(top) + "px";
+      var first = menu.querySelector(".etcher-cm-item:not(:disabled)");
+      if (first) first.focus({ preventScroll: true });
+
+      // Gone on the next press elsewhere, Escape, a scroll or a resize.
+      self._contextMenuDismiss = function(e) {
+        if (e && e.type === "pointerdown" && menu.contains(e.target)) return;
+        if (e && e.type === "keydown") {
+          if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+            var items = [].slice.call(menu.querySelectorAll(".etcher-cm-item:not(:disabled)"));
+            var at = items.indexOf(document.activeElement);
+            var next = items[(at + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length];
+            if (next) { e.preventDefault(); next.focus(); }
+            return;
+          }
+          if (e.key !== "Escape") return;
+          e.preventDefault();
+          e.stopPropagation();
+        }
+        self._closeContextMenu();
+      };
+      document.addEventListener("pointerdown", self._contextMenuDismiss, true);
+      document.addEventListener("keydown", self._contextMenuDismiss, true);
+      window.addEventListener("wheel", self._contextMenuDismiss, { capture: true, passive: true });
+      window.addEventListener("resize", self._contextMenuDismiss);
+    },
+
+    _closeContextMenu: function() {
+      if (this.contextMenu) {
+        this.contextMenu.remove();
+        this.contextMenu = null;
+      }
+      if (this._contextMenuDismiss) {
+        document.removeEventListener("pointerdown", this._contextMenuDismiss, true);
+        document.removeEventListener("keydown", this._contextMenuDismiss, true);
+        window.removeEventListener("wheel", this._contextMenuDismiss, { capture: true, passive: true });
+        window.removeEventListener("resize", this._contextMenuDismiss);
+        this._contextMenuDismiss = null;
+      }
+    },
+
     _buildActionBar: function() {
       var self = this;
       var container = self.handle.container;

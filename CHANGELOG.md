@@ -4,6 +4,35 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.26.0] — Unreleased
+
+### Added
+
+- **Laser measure (`:measure`, opt-in).** Connect a Bosch GLM / PLR laser
+  distance meter over Web Bluetooth and its readings land on the drawing as
+  labels. The tool's button is the connection — dimmed until a meter is
+  connected, a click opens the device picker, then a green dot. Armed, drag a
+  dimension or click a shape: it pulses until a reading arrives, from the
+  meter's own button, Enter, or **Measure** in the strip at the top. A
+  rectangle takes width then height (`600 × 900 mm`), a circle gets `Ø`, a
+  text becomes the number; a reading with nothing waiting is held and goes to
+  the next shape. One undo step, saved like a typed label, exact value kept as
+  `metadata.measured_m`. Format via the new `measure` attr (`unit`,
+  `precision`, `suffix`; millimetres by default). Device errors show a message
+  and write nothing. Not in the default `tools`; a board without it never
+  touches Bluetooth.
+- **`layer.setLabel(uuid, text)`** sets a shape's label the way typing one
+  does. Also `connectLaser()`, `measure()`, `laserState()` and
+  `measureInto(uuid)`, and an `etcher:measurement` DOM event per reading.
+- **`window.Etcher.laser`**, the meter driver on its own (frames, CRC,
+  decoding, connect), and `window.Etcher.laserDebug` to log every frame.
+
+### Browser support
+
+Web Bluetooth only: Chrome / Edge on desktop and Android, on https (or
+localhost). Safari, Firefox and iOS browsers show the button as unavailable.
+Chrome needs one click per page load to reconnect.
+
 ## [0.25.0] — 2026-11-11
 
 Admits Fresco 0.16. The shapes in "Export as PDF" need it (Fresco's export

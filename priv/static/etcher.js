@@ -93,6 +93,303 @@
     return entry ? entry.api : null;
   };
 
+  // ===========================================================================
+  // Laser meter driver — Bosch GLM / PLR distance meters over Web Bluetooth.
+  //
+  // Self-contained on purpose: it knows bytes and Bluetooth, nothing about
+  // shapes or layers, so the frame code is tested with plain byte arrays
+  // (test/js/laser_driver_test.js) and a host can drive a meter without a
+  // layer at all. Exposed as `window.Etcher.laser`.
+  //
+  // Nothing here runs until a layer that offers the `measure` tool asks it
+  // to connect. A board without that tool never touches `navigator.bluetooth`.
+  //
+  // Protocol (verified 2026-11-12 against a newer-generation GLM, model
+  // string "PTM 1.0"):
+  //
+  //   request   C0 <cmd> <len> <payload…> <crc>
+  //   response  <status> <len> <payload…> <crc>     status 00 = OK
+  //   crc       CRC-8, poly 0xA6, init 0xAA, MSB first, over every byte
+  //             before it
+  //
+  // A measurement comes back two ways:
+  //
+  //   - the reply to "measure" (C0 40): `00 04 <uint32 LE>`, in 0.05 mm units
+  //   - a data container (16 bytes) — pushed as `C0 55 10 …` when the
+  //     device's own button is pressed with autosync on, and returned as
+  //     `00 10 …` by the autosync request. Its result is a float32 LE in
+  //     metres at offset 4. The pushed form is from Bosch's protocol PDF and
+  //     the reference demo; it has not been captured from the tested device,
+  //     so containers are read in BOTH framings, and a zero result (the
+  //     autosync acknowledgement carries one) is not a measurement.
+  //
+  // `window.Etcher.laserDebug = true` logs every frame to the console, and
+  // the last 50 are kept in `window.Etcher.laser.frames` either way — what
+  // confirming the button-press layout on a real device needs.
+  // ===========================================================================
+  var Laser = (function() {
+    var LAYOUTS = [
+      // Newer GLM (the tested device). Advertises no name — only this service.
+      { service: "02a6c0d0-0451-4000-b000-fb3210111989",
+        characteristic: "02a6c0d1-0451-4000-b000-fb3210111989" },
+      // Older PLR / GLM (e.g. PLR 50 C).
+      { service: "00005301-0000-0041-5253-534f46540000",
+        characteristic: "00004301-0000-0041-5253-534f46540000" }
+    ];
+
+    var CMD = { keepalive: 0x11, measure: 0x40, laserOn: 0x41, autosync: 0x55 };
+    var UNITS_PER_METRE = 20000; // 0.05 mm
+
+    function crc8(bytes, end) {
+      var c = 0xAA;
+      var n = end == null ? bytes.length : end;
+      for (var i = 0; i < n; i++) {
+        c ^= bytes[i];
+        for (var b = 0; b < 8; b++) c = (c & 0x80) ? ((c << 1) ^ 0xA6) & 0xFF : (c << 1) & 0xFF;
+      }
+      return c;
+    }
+
+    function frame(cmd, payload) {
+      payload = payload || [];
+      var out = [0xC0, cmd, payload.length].concat(Array.prototype.slice.call(payload));
+      out.push(crc8(out));
+      return new Uint8Array(out);
+    }
+
+    var FRAMES = {
+      autosync: function() { return frame(CMD.autosync, [0x01, 0x00]); },
+      measure:  function() { return frame(CMD.measure, [0x00]); },
+      laserOn:  function() { return frame(CMD.laserOn, []); }
+    };
+
+    function toBytes(v) {
+      if (v instanceof Uint8Array) return v;
+      if (v && v.buffer instanceof ArrayBuffer) return new Uint8Array(v.buffer, v.byteOffset || 0, v.byteLength);
+      if (v instanceof ArrayBuffer) return new Uint8Array(v);
+      return new Uint8Array(v || []);
+    }
+
+    function view(bytes, offset, len) {
+      return new DataView(bytes.buffer, bytes.byteOffset + offset, len);
+    }
+
+    // The 16-byte data container, starting at `off`.
+    function container(bytes, off) {
+      var mode = bytes[off];
+      var flags = bytes[off + 1];
+      return {
+        mode: mode >> 2,
+        reference: mode & 0x03,
+        laserOn: !!(flags & 0x01),
+        temperatureWarning: !!(flags & 0x02),
+        lowBattery: !!(flags & 0x04),
+        metric: !!(flags & 0x08),
+        id: view(bytes, off + 2, 2).getUint16(0, true),
+        metres: view(bytes, off + 4, 4).getFloat32(0, true)
+      };
+    }
+
+    function fromContainer(c, source) {
+      if (!(c.metres > 0) || !isFinite(c.metres)) {
+        return { type: "status", lowBattery: c.lowBattery, container: c };
+      }
+      // A float32 carries noise past the meter's resolution (2.287 arrives
+      // as 2.28699994…); snap to its 0.05 mm steps.
+      var metres = Math.round(c.metres * UNITS_PER_METRE) / UNITS_PER_METRE;
+      return { type: "measurement", metres: metres, source: source,
+               lowBattery: c.lowBattery, container: c };
+    }
+
+    // One frame in → what it means. Never throws.
+    //   { type: "measurement", metres, source: "reply" | "device", lowBattery? }
+    //   { type: "error", status }     a reply with a non-zero status
+    //   { type: "status", … }         an acknowledgement, nothing measured
+    //   { type: "keepalive" }         the GLM's C0 11 every couple of seconds
+    //   { type: "invalid", reason }   bad checksum, truncated, unknown
+    function decode(input) {
+      var b = toBytes(input);
+      if (b.length < 3) return { type: "invalid", reason: "short" };
+      if (crc8(b, b.length - 1) !== b[b.length - 1]) return { type: "invalid", reason: "crc" };
+
+      if (b[0] === 0xC0) {
+        var cmd = b[1], len = b[2];
+        if (b.length !== len + 4) return { type: "invalid", reason: "length" };
+        if (cmd === CMD.keepalive) return { type: "keepalive" };
+        if (cmd === CMD.autosync && len === 16) return fromContainer(container(b, 3), "device");
+        return { type: "invalid", reason: "unknown command 0x" + cmd.toString(16) };
+      }
+
+      var status = b[0], plen = b[1];
+      if (status !== 0) return { type: "error", status: status };
+      if (b.length !== plen + 3) return { type: "invalid", reason: "length" };
+      if (plen === 4) {
+        var units = view(b, 2, 4).getUint32(0, true);
+        if (!units) return { type: "status" };
+        return { type: "measurement", metres: units / UNITS_PER_METRE, source: "reply" };
+      }
+      if (plen === 16) return fromContainer(container(b, 2), "device");
+      return { type: "status" };
+    }
+
+    function hex(bytes) {
+      return Array.prototype.map.call(toBytes(bytes), function(x) {
+        return (x < 16 ? "0" : "") + x.toString(16).toUpperCase();
+      }).join(" ");
+    }
+
+    // Web Bluetooth needs a secure context (localhost counts).
+    function supported() {
+      return typeof navigator !== "undefined" && !!navigator.bluetooth &&
+             typeof window !== "undefined" && window.isSecureContext !== false;
+    }
+
+    function unsupportedReason() {
+      if (typeof navigator === "undefined" || !navigator.bluetooth) {
+        return "This browser can't connect to a laser meter. Use Chrome or Edge on a computer or Android.";
+      }
+      return "Laser meters need a secure page (https).";
+    }
+
+    // ---- the one connection a page has ---------------------------------
+    // A meter is one physical device, so every layer on the page shares it.
+    var state = "off"; // off | connecting | on
+    var device = null, characteristic = null, lowBattery = false;
+    var listeners = [];
+    var writeChain = Promise.resolve();
+    var api;
+
+    function emit(event) {
+      listeners.slice().forEach(function(fn) { try { fn(event); } catch (_) {} });
+    }
+
+    function setState(s) {
+      if (state === s) return;
+      state = s;
+      emit({ type: "state", state: s, lowBattery: lowBattery });
+    }
+
+    function record(dir, bytes) {
+      var line = { dir: dir, hex: hex(bytes), at: Date.now() };
+      api.frames.push(line);
+      if (api.frames.length > 50) api.frames.shift();
+      if (window.Etcher && window.Etcher.laserDebug) {
+        try { console.log("[etcher laser] " + dir + " " + line.hex); } catch (_) {}
+      }
+    }
+
+    // GATT takes one operation at a time; writes queue.
+    function write(bytes) {
+      if (!characteristic) return Promise.reject(new Error("not connected"));
+      var ch = characteristic;
+      writeChain = writeChain.catch(function() {}).then(function() {
+        record("out", bytes);
+        if (typeof ch.writeValueWithResponse === "function") return ch.writeValueWithResponse(bytes);
+        return ch.writeValue(bytes);
+      });
+      return writeChain;
+    }
+
+    function onValue(e) {
+      var bytes = toBytes(e.target.value);
+      record("in", bytes);
+      var msg = decode(bytes);
+      if (msg.lowBattery != null && msg.lowBattery !== lowBattery) {
+        lowBattery = msg.lowBattery;
+        emit({ type: "state", state: state, lowBattery: lowBattery });
+      }
+      if (msg.type === "measurement" || msg.type === "error") emit(msg);
+    }
+
+    function onDisconnected() {
+      characteristic = null;
+      setState("off");
+    }
+
+    function openCharacteristic(server) {
+      var i = 0;
+      function next() {
+        if (i >= LAYOUTS.length) return Promise.reject(new Error("This device has no laser-meter service."));
+        var layout = LAYOUTS[i++];
+        return server.getPrimaryService(layout.service).then(function(svc) {
+          return svc.getCharacteristic(layout.characteristic);
+        }, next);
+      }
+      return next();
+    }
+
+    // Must be called from a click: requestDevice needs the user's gesture,
+    // so nothing asynchronous may run before it.
+    function connect() {
+      if (!supported()) return Promise.reject(new Error(unsupportedReason()));
+      if (state === "on") return Promise.resolve();
+      if (state === "connecting") return Promise.reject(new Error("Already connecting."));
+      setState("connecting");
+      var services = LAYOUTS.map(function(l) { return l.service; });
+      var picked;
+      try {
+        picked = navigator.bluetooth.requestDevice({
+          filters: services.map(function(s) { return { services: [s] }; }).concat([
+            { namePrefix: "Bosch PLR" }, { namePrefix: "Bosch GLM" }
+          ]),
+          optionalServices: services
+        });
+      } catch (err) {
+        setState("off");
+        return Promise.reject(err);
+      }
+      return picked.then(function(d) {
+        if (device && device !== d) device.removeEventListener("gattserverdisconnected", onDisconnected);
+        device = d;
+        device.addEventListener("gattserverdisconnected", onDisconnected);
+        return device.gatt.connect();
+      }).then(openCharacteristic).then(function(ch) {
+        characteristic = ch;
+        ch.addEventListener("characteristicvaluechanged", onValue);
+        return ch.startNotifications();
+      }).then(function() {
+        // The device's own button only reports once autosync is on.
+        return write(FRAMES.autosync());
+      }).then(function() {
+        setState("on");
+      }).catch(function(err) {
+        characteristic = null;
+        try { if (device && device.gatt.connected) device.gatt.disconnect(); } catch (_) {}
+        setState("off");
+        throw err;
+      });
+    }
+
+    function disconnect() {
+      try { if (device && device.gatt.connected) device.gatt.disconnect(); } catch (_) {}
+      onDisconnected();
+    }
+
+    api = {
+      LAYOUTS: LAYOUTS,
+      crc8: crc8,
+      frame: frame,
+      frames: [],
+      FRAMES: FRAMES,
+      decode: decode,
+      hex: hex,
+      supported: supported,
+      unsupportedReason: unsupportedReason,
+      connect: connect,
+      disconnect: disconnect,
+      measure: function() { return write(FRAMES.measure()); },
+      state: function() { return state; },
+      lowBattery: function() { return lowBattery; },
+      deviceName: function() { return (device && device.name) || null; },
+      subscribe: function(fn) {
+        listeners.push(fn);
+        return function() { listeners = listeners.filter(function(f) { return f !== fn; }); };
+      }
+    };
+    return api;
+  })();
+  window.Etcher.laser = Laser;
+
   // Selectors for DOM nodes that own their own input. When a click /
   // pointerdown / dblclick lands inside one of these, Etcher's
   // doc-level hit-test handlers bail — otherwise the gesture would
@@ -276,6 +573,7 @@
     // the architectural dimension-line annotation the tool draws (line
     // + 2 arrows + black label sliding along the shaft).
     dimension:'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12 L19 12 M5 12 L8 9 M5 12 L8 15 M19 12 L16 9 M19 12 L16 15"/></svg>',
+    measure:  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="7" width="9" height="12" rx="1.6"/><path d="M5 10.5h4M5 13.5h4"/><circle cx="7" cy="16.5" r="0.4"/><path d="M11.5 10h1.5M15 10h1.5M18.5 10H21"/><path d="M21 7.5v5"/></svg>',
     // Line — bare diagonal stroke. The line annotation is the
     // arrow-and-label-free sibling of dimension: same two-endpoint
     // geometry, title rendered via the standard sibling-above-shape
@@ -827,6 +1125,45 @@
       ".etcher-toast.is-open {",
       "  opacity: 1; transform: translateX(-50%) translateY(0);",
       "}",
+      // Laser measure: the button dims until a meter is connected and wears
+      // a dot for the link (green; amber while connecting or on low battery).
+      ".etcher-toolbar button[data-laser], .etcher-popup button[data-laser] { position: relative; }",
+      "button[data-laser=\"off\"] svg, button[data-laser=\"unsupported\"] svg { opacity: 0.45; }",
+      "button[data-laser=\"on\"]::after, button[data-laser=\"connecting\"]::after {",
+      "  content: \"\"; position: absolute; right: 5px; top: 5px; width: 6px; height: 6px;",
+      "  border-radius: 50%; background: #22c55e; box-shadow: 0 0 0 1.5px rgba(0,0,0,0.55);",
+      "}",
+      "button[data-laser=\"connecting\"]::after { background: #f59e0b; animation: etcher-measure-blink 0.9s ease-in-out infinite; }",
+      "button[data-laser=\"on\"][data-laser-battery=\"low\"]::after { background: #f59e0b; }",
+      "@keyframes etcher-measure-blink { 50% { opacity: 0.25; } }",
+      // The shape waiting for a reading.
+      ".etcher-measure-target { animation: etcher-measure-pulse 1.1s ease-in-out infinite; }",
+      "@keyframes etcher-measure-pulse {",
+      "  0%, 100% { filter: drop-shadow(0 0 0 rgba(34, 211, 238, 0)); }",
+      "  50% { filter: drop-shadow(0 0 5px rgba(34, 211, 238, 1)) drop-shadow(0 0 2px rgba(34, 211, 238, 1)); }",
+      "}",
+      "@media (prefers-reduced-motion: reduce) {",
+      "  .etcher-measure-target { animation: none; filter: drop-shadow(0 0 4px rgba(34, 211, 238, 1)); }",
+      "  button[data-laser=\"connecting\"]::after { animation: none; }",
+      "}",
+      ".etcher-measure-chip {",
+      "  position: absolute; top: 16px; left: 50%; z-index: 13; transform: translateX(-50%);",
+      "  display: none; align-items: center; gap: 10px; max-width: calc(100% - 32px);",
+      "  padding: 6px 6px 6px 14px; border-radius: 999px;",
+      "  background: rgba(17, 17, 20, 0.86); color: #f5f5f7;",
+      "  font: 500 13px ui-sans-serif, system-ui, -apple-system, sans-serif;",
+      "  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3); pointer-events: auto;",
+      "}",
+      ".etcher-measure-chip.is-open { display: inline-flex; }",
+      // A toast steps down below an open chip instead of covering it.
+      ".etcher-has-measure-chip > .etcher-toast { top: 60px; }",
+      ".etcher-measure-chip-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }",
+      ".etcher-measure-chip-action {",
+      "  flex: none; min-width: 28px; height: 28px; padding: 0 12px; border: 0; border-radius: 999px;",
+      "  background: rgba(255, 255, 255, 0.16); color: inherit; font: inherit; cursor: pointer;",
+      "}",
+      ".etcher-measure-chip-action:hover { background: rgba(255, 255, 255, 0.26); }",
+      ".etcher-measure-chip-action[hidden] { display: none; }",
       // Link card chrome: the `⋯` in the card's top-right and its menu.
       ".etcher-link-menu {",
       "  position: absolute; z-index: 12; width: 30px; height: 30px;",
@@ -2343,6 +2680,21 @@
     "text", "image"
   ];
 
+  // The laser measure tool (see "Laser measure" in the layer). Unit → how
+  // many of it make a metre, and the precision a label gets by default.
+  var MEASURE_UNITS = {
+    mm: { factor: 1000, precision: 0 },
+    cm: { factor: 100, precision: 1 },
+    m:  { factor: 1, precision: 3 },
+    in: { factor: 39.37007874015748, precision: 2 },
+    ft: { factor: 3.280839895013123, precision: 2 }
+  };
+  // Kinds a reading never labels: pictures, media, cards and ink.
+  var MEASURE_SKIP_KINDS = ["image", "audio", "video", "file", "marker", "highlighter"];
+  // The layer the meter is being worked from — readings go to it alone when
+  // a page has more than one.
+  var laserOwner = null;
+
   // Corner radius on image shapes, as a fraction of the shorter rendered
   // side, clamped. Proportional rather than a fixed px because a constant
   // radius is a different look at every zoom — 8px on a board zoomed out far
@@ -2764,7 +3116,11 @@
     // clicking fires an action and leaves the current tool selection alone
     // (see `_invokeMomentaryTool`). Image insertion opens the OS file picker
     // (or hands off to the host) rather than arming a draw gesture.
-    image:     { icon: ICONS.image,     title: "Insert image", momentary: true }
+    image:     { icon: ICONS.image,     title: "Insert image", momentary: true },
+    // Laser measure: a drawing mode once a meter is connected; before that
+    // its button IS the connect button (see _onMeasureButton). Offered only
+    // when a host lists it — it needs a Bosch meter and Web Bluetooth.
+    measure:   { icon: ICONS.measure,   title: "Connect a laser meter", styleless: true }
   };
 
   // Single-key tool shortcuts, tldraw/Figma dialect where the tools
@@ -2860,6 +3216,7 @@
     grabber:   '<path stroke-linecap="round" stroke-linejoin="round" d="M18 11V6a2 2 0 0 0-2-2 2 2 0 0 0-2 2"/><path stroke-linecap="round" stroke-linejoin="round" d="M14 10V4a2 2 0 0 0-2-2 2 2 0 0 0-2 2v2"/><path stroke-linecap="round" stroke-linejoin="round" d="M10 10.5V6a2 2 0 0 0-2-2 2 2 0 0 0-2 2v8"/><path stroke-linecap="round" stroke-linejoin="round" d="m7 15-1.76-1.76a2 2 0 0 0-2.83 2.82l3.6 3.6C7.5 21.14 9.2 22 12 22h2a8 8 0 0 0 8-8V7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v3"/>',
     callout:   '<circle cx="3.5" cy="20" r="2"/><path d="M4 19.5 8.5 14 21 14"/>',
     text:      '<path d="M5 6h14M12 6v12"/>',
+    measure:   '<rect x="3" y="7" width="8" height="10" rx="1.5"/><path d="M13 12h2M17 12h2M21 12h1"/>',
     dimension: '<path d="M5 12h14M5 12l3-3M5 12l3 3M19 12l-3-3M19 12l-3 3"/>',
     line:      '<path d="M5 19 19 5"/>',
     arrow:     '<path d="M5 19 19 5M19 5 12.4 7.4M19 5 16.6 11.6"/>',
@@ -3229,6 +3586,7 @@
       try {
         self.tools = JSON.parse(self.el.dataset.tools || "[]");
       } catch (_) { self.tools = ["rectangle", "circle", "polygon", "freehand"]; }
+      self._measureFormat = self._readMeasureFormat(self.el.dataset.measure);
 
       // Chrome-allowlist parsing — same `"none"` sentinel convention
       // as Fresco's `:nav_buttons` / `:gestures`. `null` here means
@@ -3842,12 +4200,32 @@
           setShapeOrder: function(uuids) { self._applyShapeOrder(uuids); },
           // Open the built-in OS file picker and insert the chosen file —
           // the same action the image tool performs in file_picker mode.
-          openImagePicker: function() { self._openImagePicker(); }
+          openImagePicker: function() { self._openImagePicker(); },
+          // Labels ---------------------------------------------------
+          // Set a shape's label as if it had been typed: one undo step,
+          // saved through `etcher:annotations-changed`. False when the
+          // shape is missing or locked.
+          setLabel: function(uuid, text) {
+            return self._setShapeLabel(self._shapeByUuid(uuid), text);
+          },
+          // Laser measure (needs `measure` in tools) ------------------
+          // `connectLaser` must run inside a click handler.
+          connectLaser: function() { self._connectLaser(); },
+          measure: function() { self._triggerMeasure(); },
+          laserState: function() { return Laser.supported() ? Laser.state() : "unsupported"; },
+          // Make this shape the one the next reading labels.
+          measureInto: function(uuid) {
+            var s = self._shapeByUuid(uuid);
+            if (!self._measureTargetable(s)) return false;
+            self._setMeasureTarget(s);
+            return true;
+          }
         }
       };
     },
 
     destroyed: function() {
+      this._unwireLaser();
       this._closeActionMenu();
       if (this.actionBar && this.actionBar.parentNode) {
         this.actionBar.parentNode.removeChild(this.actionBar);
@@ -4080,6 +4458,7 @@
         self._removeExportLayer = self.handle.addExportLayer(function(o) { return self._exportLayer(o); });
       }
       if (self.showToolbar) { self._buildToolbar(); self._buildActionBar(); self._buildStylePanel(); self._wireContextMenu(); }
+      if (self._measureOffered()) { self._wireLaser(); self._syncMeasureButtons(); }
       // Visibility toggle goes above the annotation-mode pencil so
       // it reads "look first, edit second" top-to-bottom. Both are
       // gated by the `:nav_buttons` allowlist so consumers shipping
@@ -4176,6 +4555,7 @@
       self._buildStripOverlays();
       self._buildStripTooltip();
       if (self.showToolbar) { self._buildToolbar(); self._buildActionBar(); self._buildStylePanel(); self._wireContextMenu(); }
+      if (self._measureOffered()) { self._wireLaser(); self._syncMeasureButtons(); }
       if (self._chromeEnabled("visibility")) self._buildVisibilityButton();
       if (self._modeSwitchOn()) self._buildModeSwitch();
       else if (self._chromeEnabled("pencil")) self._buildNavButton();
@@ -4714,6 +5094,15 @@
         // the capture phase and stops propagation.)
         if (e.key === "Escape") {
           if (self._escapeLadder()) e.preventDefault();
+          return;
+        }
+
+        // Enter takes a reading while the laser measure is armed — for when
+        // the meter's own button is out of reach.
+        if (e.key === "Enter" && self.activeTool === "measure" && Laser.state() === "on" &&
+            !e.metaKey && !e.ctrlKey && !e.altKey) {
+          e.preventDefault();
+          self._triggerMeasure();
           return;
         }
 
@@ -6045,6 +6434,10 @@
     },
 
     _isEssentialTool: function(key) {
+      // The laser measure is opt-in: a host that lists it wants it in reach,
+      // and its button is also where the meter is connected — so it is on
+      // the bar whenever it is offered, not one press of ⋯ away.
+      if (key === "measure") return true;
       return this._essentialTools().indexOf(key) !== -1;
     },
 
@@ -7366,6 +7759,7 @@
         b.innerHTML = entry.icon;
         b.addEventListener("click", function(e) {
           e.preventDefault();
+          if (entry.key === "measure" && self._onMeasureButton()) { self._closePopup(); return; }
           var def = TOOL_DEFS[entry.key];
           if (def && def.momentary) {
             self._invokeMomentaryTool(entry.key);
@@ -10587,6 +10981,7 @@
       btn.innerHTML = icon;
       btn.addEventListener("click", function(e) {
         e.preventDefault();
+        if (toolKey === "measure" && self._onMeasureButton()) return;
         var def = TOOL_DEFS[toolKey];
         if (def && def.momentary) { self._invokeMomentaryTool(toolKey); return; }
         self._selectTool(toolKey === "cursor" ? null : toolKey);
@@ -10606,6 +11001,7 @@
         e.preventDefault();
         var toolKey = btn.dataset.tool;
         if (!toolKey) return;
+        if (toolKey === "measure" && self._onMeasureButton()) return;
         var def = TOOL_DEFS[toolKey];
         if (def && def.momentary) { self._invokeMomentaryTool(toolKey); return; }
         self._selectTool(toolKey);
@@ -11329,6 +11725,395 @@
     // the host (`image_source: "custom"`). Pasting an image onto the canvas
     // routes through the same placement path. See `insertImage` on the public
     // API for the programmatic entry point.
+
+    // -------------------------------------------------------------------------
+    // Laser measure — the `measure` tool. Only reached when the host lists
+    // `measure` in `tools`; the driver (`Laser`, top of file) is idle
+    // otherwise.
+    //
+    // The button is the connection: dimmed until a meter is connected, and
+    // clicking it then opens the browser's device picker (the click is the
+    // user gesture requestDevice needs). Once connected it arms like any
+    // tool. Armed, a drag draws a dimension and a click on a shape picks it;
+    // either way that shape PULSES — it is waiting for a reading — and the
+    // next reading from the meter becomes its label. A rectangle takes two,
+    // width then height. A reading with nothing waiting is held in the chip
+    // and goes to the next shape drawn or clicked.
+    // -------------------------------------------------------------------------
+
+    _measureOffered: function() {
+      return !!(this.tools && this.tools.indexOf("measure") !== -1);
+    },
+
+    // `data-measure`: { unit: "mm"|"cm"|"m"|"in"|"ft", precision, suffix }.
+    _readMeasureFormat: function(raw) {
+      var cfg = {};
+      try { cfg = raw ? JSON.parse(raw) || {} : {}; } catch (_) { cfg = {}; }
+      var unit = MEASURE_UNITS[cfg.unit] ? cfg.unit : "mm";
+      var p = parseInt(cfg.precision, 10);
+      return {
+        unit: unit,
+        precision: isFinite(p) && p >= 0 && p <= 6 ? p : MEASURE_UNITS[unit].precision,
+        suffix: cfg.suffix !== false
+      };
+    },
+
+    // `bare` leaves the unit off (the first half of "600 × 900 mm").
+    _formatMeasure: function(metres, bare) {
+      var f = this._measureFormat || { unit: "mm", precision: 0, suffix: true };
+      var u = MEASURE_UNITS[f.unit] || MEASURE_UNITS.mm;
+      // Half-up at the last place shown. The meter counts in 0.05 mm steps,
+      // so a half is common, and binary floats would round 2286.95 down.
+      var scale = Math.pow(10, f.precision);
+      var v = metres * u.factor * scale;
+      var text = (Math.round(v + Math.abs(v) * 1e-12) / scale).toFixed(f.precision);
+      return f.suffix && !bare ? text + " " + f.unit : text;
+    },
+
+    // Which shapes a reading may label. Pictures, media and ink strokes
+    // carry no label of their own; a locked or host-locked shape is left
+    // alone.
+    _measureTargetable: function(shape) {
+      if (!shape || !shape.uuid || shape.readonly) return false;
+      return MEASURE_SKIP_KINDS.indexOf(shape.kind) === -1;
+    },
+
+    _wireLaser: function() {
+      var self = this;
+      if (!self._measureOffered() || self._laserUnsub) return;
+      self._laserUnsub = Laser.subscribe(function(msg) {
+        if (msg.type === "state") {
+          if (msg.state === "off" && self._laserWasOn && laserOwner === self) {
+            self._showToast("Laser meter disconnected");
+          }
+          self._laserWasOn = msg.state === "on";
+          self._syncMeasureButtons();
+          self._syncMeasureChip();
+          return;
+        }
+        // One meter, possibly several layers on the page: the reading goes
+        // to the one the user last worked the meter from.
+        if (laserOwner && laserOwner !== self) return;
+        if (!laserOwner && !self.annotationMode) return;
+        self._onLaserReading(msg);
+      });
+      self._laserWasOn = Laser.state() === "on";
+    },
+
+    _unwireLaser: function() {
+      if (this._laserUnsub) this._laserUnsub();
+      this._laserUnsub = null;
+      if (laserOwner === this) laserOwner = null;
+      if (this._measureChip && this._measureChip.parentNode) {
+        this._measureChip.parentNode.removeChild(this._measureChip);
+      }
+      this._measureChip = null;
+    },
+
+    // A press on the Measure button. True when it was handled here (an
+    // explanation, or a connect) rather than arming the tool.
+    _onMeasureButton: function() {
+      if (!Laser.supported()) {
+        this._showToast(Laser.unsupportedReason(), { ms: 4000 });
+        return true;
+      }
+      if (Laser.state() === "on") {
+        laserOwner = this;
+        return false;
+      }
+      this._connectLaser();
+      return true;
+    },
+
+    _connectLaser: function() {
+      var self = this;
+      laserOwner = self;
+      if (Laser.state() === "connecting") return;
+      Laser.connect().then(function() {
+        self._showToast("Laser meter connected");
+        if (self.annotationMode) self._selectTool("measure");
+      }, function(err) {
+        // Closing the picker is a choice, not a failure.
+        if (err && err.name === "NotFoundError") return;
+        self._showToast((err && err.message) || "Couldn't connect to the laser meter", { ms: 4000 });
+      });
+      self._syncMeasureButtons();
+    },
+
+    _syncMeasureButtons: function() {
+      if (!this._measureOffered() || !this.handle || !this.handle.container) return;
+      var supported = Laser.supported();
+      var st = supported ? Laser.state() : "unsupported";
+      var low = supported && Laser.lowBattery();
+      var title = st === "on" ? "Laser measure (press the meter's button to measure)" + (low ? " — low battery" : "")
+                : st === "connecting" ? "Connecting to the laser meter…"
+                : st === "unsupported" ? "Laser measure — not available in this browser"
+                : "Connect a laser meter";
+      this.handle.container.querySelectorAll('button[data-tool="measure"]').forEach(function(b) {
+        b.setAttribute("data-laser", st);
+        if (low) b.setAttribute("data-laser-battery", "low");
+        else b.removeAttribute("data-laser-battery");
+        b.title = title;
+        b.setAttribute("aria-label", title);
+      });
+    },
+
+    // A press on the canvas while the tool is armed: a shape takes the
+    // reading, empty canvas starts a dimension.
+    _measurePointerDown: function(pt, e) {
+      var hit = this._shapeAt(pt);
+      if (hit && this._measureTargetable(hit)) {
+        this._setMeasureTarget(hit);
+        if (e && e.preventDefault) e.preventDefault();
+        return;
+      }
+      if (this._hasSelection()) {
+        this._exitEditMode();
+        this._clearSelection();
+      }
+      this._startDimension(pt, e);
+      if (this.draftState) this.draftState.measure = true;
+    },
+
+    _setMeasureTarget: function(shape) {
+      var prev = this._measureTarget;
+      if (this._measurePartial && this._measurePartial.uuid !== shape.uuid) this._measurePartial = null;
+      this._measureTarget = shape;
+      laserOwner = this;
+      if (prev && prev !== shape) this._syncMeasureMark(prev);
+      this._syncMeasureMark(shape);
+      // A reading taken before there was anywhere to put it lands now.
+      if (this._heldReading != null) {
+        var held = this._heldReading;
+        this._heldReading = null;
+        this._applyMeasureTo(shape, held);
+      }
+      this._syncMeasureChip();
+    },
+
+    _clearMeasureTarget: function() {
+      var t = this._measureTarget;
+      this._measureTarget = null;
+      this._measurePartial = null;
+      if (t) this._syncMeasureMark(t);
+      this._syncMeasureChip();
+    },
+
+    // The pulse: a class on the shape's own element, put back on every
+    // render (a render may rebuild the element's contents). Never saved,
+    // never sent to peers, and lifted for the PDF export.
+    _syncMeasureMark: function(shape) {
+      if (!shape || !shape.el || !shape.el.classList) return;
+      var on = this._measureTarget === shape && !this._measureMarkSuspended;
+      shape.el.classList.toggle("etcher-measure-target", on);
+    },
+
+    // The label a reading gives each kind of shape. A rectangle takes two
+    // readings — width, then height — and stays the target in between.
+    _applyMeasureTo: function(shape, metres) {
+      var label, measured;
+      if (shape.kind === "rectangle") {
+        var part = this._measurePartial;
+        if (!part || part.uuid !== shape.uuid) {
+          this._measurePartial = { uuid: shape.uuid, width: metres };
+          if (this._measureTarget !== shape) {
+            var prev = this._measureTarget;
+            this._measureTarget = shape;
+            if (prev) this._syncMeasureMark(prev);
+            this._syncMeasureMark(shape);
+          }
+          this._syncMeasureChip();
+          return "partial";
+        }
+        label = this._formatMeasure(part.width, true) + " × " + this._formatMeasure(metres);
+        measured = [part.width, metres];
+        this._measurePartial = null;
+      } else if (shape.kind === "circle") {
+        label = "Ø " + this._formatMeasure(metres);
+        measured = metres;
+      } else {
+        label = this._formatMeasure(metres);
+        measured = metres;
+      }
+      var ok = this._setShapeLabel(shape, label, { measured_m: measured });
+      if (this._measureTarget === shape) this._clearMeasureTarget();
+      else this._syncMeasureChip();
+      return ok ? "placed" : "refused";
+    },
+
+    _onLaserReading: function(msg) {
+      if (msg.type === "error") {
+        this._showToast("The meter couldn't measure (error " + msg.status + "). Check the target is in range and try again.", { ms: 4000 });
+        return;
+      }
+      if (msg.type !== "measurement") return;
+      var metres = msg.metres;
+      var placed = null;
+
+      // 1. A label being typed: the reading is what gets typed.
+      var ed = this._textEditor;
+      if (ed && ed.shape && this._measureTargetable(ed.shape)) {
+        placed = ed.shape;
+        if (ed.shape.kind === "rectangle" && !(this._measurePartial && this._measurePartial.uuid === ed.shape.uuid)) {
+          this._measurePartial = { uuid: ed.shape.uuid, width: metres };
+          ed.input.value = this._formatMeasure(metres, true) + " × ";
+          if (ed.input.dispatchEvent) ed.input.dispatchEvent(new Event("input", { bubbles: true }));
+          this._syncMeasureChip();
+        } else {
+          var text, measured;
+          if (ed.shape.kind === "rectangle") {
+            text = this._formatMeasure(this._measurePartial.width, true) + " × " + this._formatMeasure(metres);
+            measured = [this._measurePartial.width, metres];
+            this._measurePartial = null;
+          } else {
+            text = (ed.shape.kind === "circle" ? "Ø " : "") + this._formatMeasure(metres);
+            measured = metres;
+          }
+          ed.input.value = text;
+          ed.measured = measured;
+          this._commitTextEdit();
+          if (this._measureTarget === placed) this._clearMeasureTarget();
+        }
+      } else {
+        // 2. The shape that is pulsing. 3. Failing that, the one shape
+        // selected. 4. Failing that, hold it.
+        var target = this._measureTarget;
+        if (target && this.shapes.indexOf(target) === -1) { this._clearMeasureTarget(); target = null; }
+        if (!target) {
+          var sel = this.editingShape ||
+            (this.selectedShapes && this.selectedShapes.length === 1 ? this.selectedShapes[0] : null);
+          if (this._measureTargetable(sel)) target = sel;
+        }
+        if (target) {
+          if (this._applyMeasureTo(target, metres) !== "refused") placed = target;
+        } else {
+          this._heldReading = metres;
+          this._syncMeasureChip();
+        }
+      }
+
+      this._dispatch("etcher:measurement", {
+        frescoId: this.frescoId || null,
+        metres: metres,
+        text: this._formatMeasure(metres),
+        source: msg.source || null,
+        uuid: placed ? placed.uuid : null,
+        held: !placed
+      });
+    },
+
+    _triggerMeasure: function() {
+      var self = this;
+      if (Laser.state() !== "on") { self._showToast("Connect the laser meter first"); return; }
+      laserOwner = self;
+      Laser.measure().catch(function(err) {
+        self._showToast((err && err.message) || "The meter didn't answer");
+      });
+    },
+
+    // Set a shape's label the way typing one does: one undo step, saved,
+    // re-rendered. The public `setLabel` and the meter both come through
+    // here. `extra` merges further metadata (the meter's `measured_m`); a
+    // label set without one drops a stale measured value.
+    _setShapeLabel: function(shape, text, extra) {
+      if (!shape || shape.readonly) return false;
+      text = text == null ? "" : String(text);
+      if (text === "" && this._isTextKind(shape.kind)) return false;
+      var before = this._snapshotShape(shape);
+      var meta = shape.metadata || {};
+      var prevTitle = meta.title || "";
+      var patch = { title: text };
+      if (text && !prevTitle && !this._isTextKind(shape.kind) &&
+          !this._labelRidesShaft(shape.kind) &&
+          !normalizeTitleAlign(meta.title_align)) {
+        patch.title_align = { h: "center", v: "middle" };
+      }
+      if (extra) Object.keys(extra).forEach(function(k) { patch[k] = extra[k]; });
+      var next = Object.assign({}, meta, patch);
+      if (!extra || !("measured_m" in extra)) delete next.measured_m;
+      Object.keys(next).forEach(function(k) { if (next[k] === undefined) delete next[k]; });
+      if (JSON.stringify(next) === JSON.stringify(meta)) return true;
+      shape.metadata = next;
+      this._renderShape(shape);
+      if (this.editingShape === shape) this._renderHandles(shape);
+      if (this.editingTitleShape === shape) {
+        if (shape.titleGroup) this._positionAllTitleHandles(shape);
+        else this._exitTitleEditMode();
+      }
+      this._syncLabelSection();
+      this._emitChanged();
+      this._pushUndo(shape.uuid, before, this._snapshotShape(shape));
+      return true;
+    },
+
+    // The strip above the canvas that says what the meter is doing, holds a
+    // reading with nowhere to go, and offers a "Measure" press for when the
+    // meter's own button is out of reach.
+    _syncMeasureChip: function() {
+      var self = this;
+      if (!self._measureOffered() || !self.handle || !self.handle.container) return;
+      var armed = self.activeTool === "measure";
+      var held = self._heldReading;
+      var part = self._measurePartial;
+      var on = Laser.state() === "on";
+      var text = null, action = null;
+      if (held != null) {
+        text = self._formatMeasure(held) + " — click a shape to put it there";
+        action = "discard";
+      } else if (part && armed) {
+        text = "Width " + self._formatMeasure(part.width) + " — now measure the height";
+        action = on ? "measure" : "connect";
+      } else if (armed && !on) {
+        text = Laser.state() === "connecting" ? "Connecting to the laser meter…" : "Laser meter disconnected";
+        action = Laser.state() === "connecting" ? null : "connect";
+      } else if (armed && self._measureTarget) {
+        text = "Point the laser and press the meter's button";
+        action = "measure";
+      } else if (armed) {
+        text = "Draw a line or click a shape to measure it";
+      }
+      if (!self.annotationMode) text = null;
+
+      var chip = self._measureChip;
+      self.handle.container.classList.toggle("etcher-has-measure-chip", !!text);
+      if (!text) {
+        if (chip) chip.classList.remove("is-open");
+        return;
+      }
+      if (!chip) {
+        chip = document.createElement("div");
+        chip.className = "etcher-measure-chip";
+        chip.setAttribute("role", "status");
+        chip.setAttribute("data-fresco-no-capture", "");
+        var label = document.createElement("span");
+        label.className = "etcher-measure-chip-text";
+        chip.appendChild(label);
+        var btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "etcher-measure-chip-action";
+        btn.addEventListener("click", function(e) {
+          e.preventDefault();
+          e.stopPropagation();
+          var act = btn.getAttribute("data-action");
+          if (act === "measure") self._triggerMeasure();
+          else if (act === "connect") self._connectLaser();
+          else if (act === "discard") { self._heldReading = null; self._syncMeasureChip(); }
+        });
+        chip.appendChild(btn);
+        self.handle.container.appendChild(chip);
+        self._measureChip = chip;
+      }
+      chip.firstChild.textContent = text;
+      var b = chip.lastChild;
+      b.hidden = !action;
+      if (action) {
+        b.setAttribute("data-action", action);
+        b.textContent = action === "measure" ? "Measure" : action === "connect" ? "Connect" : "×";
+        b.title = action === "discard" ? "Discard this reading" : b.textContent;
+        b.setAttribute("aria-label", b.title);
+      }
+      chip.classList.add("is-open");
+    },
 
     _invokeMomentaryTool: function(toolKey) {
       if (toolKey === "image") this._invokeImageTool();
@@ -13794,6 +14579,7 @@
       // to Fresco's own CSS. The line that used to sit here ran AFTER
       // both and wrote a plain `default` over the toolbar arrow.
 
+      if (self._measureOffered()) self._syncMeasureChip();
       self._dispatch("etcher:mode-changed", { annotationMode: on });
     },
 
@@ -13813,6 +14599,11 @@
       // has stopped presenting is worse than never having had one.
       if (self.activeTool === "pointer" && toolKey !== "pointer") {
         self._endPointer();
+      }
+      // Leaving the laser measure stops the waiting pulse.
+      if (self.activeTool === "measure" && toolKey !== "measure") {
+        self.activeTool = toolKey;
+        self._clearMeasureTarget();
       }
       self.activeTool = toolKey;
       // Connector dots are a cursor-tool affordance. Any other tool means
@@ -13989,6 +14780,7 @@
       // Active tool changed → re-pin in the overflow layout so the
       // newly-active button never sits in the collapsed set.
       self._layoutToolbar();
+      if (self._measureOffered()) { self._syncMeasureButtons(); self._syncMeasureChip(); }
 
       // Lock Fresco's drag-pan while the cursor tool is active (canvas mode)
       // so a drag does box-select instead of panning — the grabber tool is
@@ -14807,6 +15599,7 @@
       if (!shape || !shape.el) return;
       // A lock that arrived with the shape's metadata (a peer's, an undo).
       if (shape.uuid) this._syncLock(shape);
+      if (this._measureTarget) this._syncMeasureMark(shape);
       var self = this;
       var g = shape.geometry;
       var el = shape.el;
@@ -17746,11 +18539,20 @@
       if (this.handleKind === "strip" || !this.svg) return Promise.resolve([]);
       if (this.annotationsVisible === false) return Promise.resolve([]);
       var copy;
+      // The pulse on a shape waiting for a laser reading is a filter, and
+      // filters are copied into the export — so it is lifted while the copy
+      // is taken.
+      var waiting = this._measureTarget;
+      this._measureMarkSuspended = true;
+      if (waiting) this._syncMeasureMark(waiting);
       try {
         copy = this._exportShapesSvg();
       } catch (err) {
         this._renderAll();
         return Promise.reject(err);
+      } finally {
+        this._measureMarkSuspended = false;
+        if (waiting) this._syncMeasureMark(waiting);
       }
       if (!copy) return Promise.resolve([]);
       return this._inlineExportImages(copy.svg).then(function() {
@@ -18314,6 +19116,13 @@
         // its default action would move focus to where it landed and blur
         // that editor shut (an empty new text box is then thrown away).
         e.preventDefault();
+        return;
+      }
+
+      // Laser measure: a shape takes the next reading, empty canvas draws a
+      // dimension that will.
+      if (this.activeTool === "measure") {
+        this._measurePointerDown(pt, e);
         return;
       }
 
@@ -21557,6 +22366,11 @@
         this._cancelDraft();
         return true;
       }
+      // A shape waiting for a reading stops waiting before the tool goes.
+      if (this.activeTool === "measure" && (this._measureTarget || this._measurePartial)) {
+        this._clearMeasureTarget();
+        return true;
+      }
       if (this.activeTool != null) {
         this._selectTool(null);
         return true;
@@ -23281,7 +24095,13 @@
       // kinds that ARE their text. A measurement usually wants its value
       // written on it; a plain pointer line usually doesn't, so lines and
       // arrows stay promptless and take a label by double-click.
-      if (kind === "dimension") {
+      if (kind === "dimension" && this.draftState.measure) {
+        // Drawn by the laser measure: no typing prompt — the line pulses
+        // until the meter answers.
+        var measured = null;
+        this._finalizeShape(kind, geom, el, function(s) { measured = s; });
+        if (measured) this._setMeasureTarget(measured);
+      } else if (kind === "dimension") {
         this._finalizeLabeled(kind, geom, el);
       } else {
         this._finalizeShape(kind, geom, el);
@@ -26362,6 +27182,10 @@
       // Mirror the new title locally so the <text> renders with it
       // immediately, before the server round-trip.
       var patch = { title: newTitle };
+      // A reading from the laser meter keeps its exact value beside the
+      // label; a label typed by hand drops a value it no longer shows.
+      if (ed.measured != null) patch.measured_m = ed.measured;
+      else if (newTitle !== prevTitle && shape.metadata && shape.metadata.measured_m != null) patch.measured_m = undefined;
       // A label typed onto a shape starts centered inside it. The floating-
       // above-with-a-leader default belongs to labels the HOST supplies —
       // those annotate something already on the canvas and shouldn't cover
@@ -26393,6 +27217,7 @@
         }
       }
       shape.metadata = Object.assign({}, shape.metadata || {}, patch);
+      if (shape.metadata.measured_m === undefined) delete shape.metadata.measured_m;
       this._endTextEdit();
       // The shape stays selected, handles up — see _keepOrDropSelection.
       // Here rather than at either commit site, because there are three of
@@ -29615,6 +30440,7 @@
       var idx = this.shapes.findIndex(function(s) { return s.uuid === uuid; });
       if (idx === -1) return;
       var shape = this.shapes[idx];
+      if (this._measureTarget === shape) this._clearMeasureTarget();
       if (this.editingShape === shape) this._exitEditMode();
       if (shape.el && shape.el.parentNode) shape.el.parentNode.removeChild(shape.el);
       if (shape.titleGroup && shape.titleGroup.parentNode) {

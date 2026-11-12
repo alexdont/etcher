@@ -186,6 +186,20 @@ defmodule Etcher.Layer do
   presentation tool wanting the pointer to hand, a survey tool wanting
   dimension — should expect to reorder it, and their users can too.
 
+  ## Laser measure
+
+  `:measure` (opt-in) reads a Bosch GLM / PLR laser distance meter over Web
+  Bluetooth. Its button connects the meter, then arms like a tool: drag a
+  dimension or click a shape, it pulses, and the next reading from the meter
+  becomes its label — one undo step, saved through `etcher:annotations-changed`,
+  with the exact value in `metadata.measured_m`. A rectangle takes two
+  readings (width × height), a circle gets `Ø`. `:measure` sets the format.
+
+  Needs Chrome or Edge on an `https://` page; elsewhere the button explains
+  that it is unavailable and typed labels work as always. Inside an iframe,
+  the frame needs `allow="bluetooth"`. Every reading is also dispatched as a
+  bubbling `etcher:measurement` DOM event. See the README for the details.
+
   ## Annotation hydration
 
   Initial annotations come from the viewer's `extensions.etcher` map.
@@ -355,6 +369,21 @@ defmodule Etcher.Layer do
     drawn as a red dot with a trail and emitted as `etcher:pointer-moved`,
     for a host to relay to everyone else on the board. It draws nothing and
     stores nothing. See "Red pointer" below.
+
+    `:measure` is the laser measure: it reads a Bosch GLM / PLR distance
+    meter over Web Bluetooth and writes each reading onto a shape as its
+    label. Not offered by default — add it to the list. See "Laser measure"
+    below, and `:measure` for the label format.
+    """
+  )
+
+  attr(:measure, :map,
+    default: nil,
+    doc: """
+    How the `:measure` tool writes a reading: `%{unit: :mm, precision: 0,
+    suffix: true}`. `unit` is `:mm` (default), `:cm`, `:m`, `:in` or `:ft`;
+    `precision` is decimal places (defaults: mm 0, cm 1, m 3, in/ft 2);
+    `suffix: false` writes the bare number (`2287` instead of `2287 mm`).
     """
   )
 
@@ -558,6 +587,8 @@ defmodule Etcher.Layer do
     line_params_json =
       if assigns[:line_params], do: Jason.encode!(assigns.line_params), else: nil
 
+    measure_json = if assigns[:measure], do: Jason.encode!(assigns.measure), else: nil
+
     panel_offset_json =
       if assigns[:panel_offset], do: Jason.encode!(assigns.panel_offset), else: nil
 
@@ -569,6 +600,7 @@ defmodule Etcher.Layer do
       |> assign(:panel_offset_json, panel_offset_json)
       |> assign(:colors_json, colors_json)
       |> assign(:line_params_json, line_params_json)
+      |> assign(:measure_json, measure_json)
 
     ~H"""
     <div
@@ -584,6 +616,7 @@ defmodule Etcher.Layer do
       data-paste-images={@paste_images == false && "false"}
       data-colors={@colors_json}
       data-line-params={@line_params_json}
+      data-measure={@measure_json}
       data-panel-offset={@panel_offset_json}
       data-panel-toggle={@panel_toggle == :nav && "nav"}
       data-tooltip-dock={@tooltip_dock == :panel && "panel"}

@@ -737,6 +737,16 @@ layer.setImageUploader(null);                   // back to embedding as a data U
 layer.screenToImage({ x: clientX, y: clientY }); // → { x, y } in canvas px
 layer.imageToScreen({ x, y });                   // inverse
 layer.viewportCenterImage();                     // → { x, y } at the viewport center
+
+// Labels — set one as if it had been typed (one undo step, saved through
+// etcher:annotations-changed). False when the shape is missing or locked.
+layer.setLabel(uuid, "2287 mm");
+
+// Laser measure (needs :measure in tools — see "Laser measure")
+layer.connectLaser();         // call from a click: opens the device picker
+layer.laserState();           // → "off" | "connecting" | "on" | "unsupported"
+layer.measure();              // take a reading (the meter's own button works too)
+layer.measureInto(uuid);      // that shape takes the next reading
 ```
 
 `insertImage` returns the new shape's uuid when you pass `width`/`height` (the size is known immediately); otherwise it measures the image asynchronously and returns `null` — the shape still appears once the image decodes.
@@ -763,10 +773,34 @@ document.addEventListener("etcher:tooltip-show", (e) => {
 | `etcher:visibility-changed` | `{ visible: bool }`            | Annotations hidden / shown |
 | `etcher:history-changed`    | `{ canUndo: bool, canRedo: bool }` | Undo/redo stack updated — useful for keeping a custom toolbar in sync |
 | `etcher:image-insert-requested` | `{ frescoId: string }`     | Image tool clicked while `image_source={:custom}` — open your picker, then call `layer.insertImage(href)` (also pushed as a LiveView event) |
+| `etcher:measurement` | `{ frescoId, metres, text, source, uuid, held }` | A laser meter reading arrived. `uuid` is the shape it labelled, or `null` with `held: true` when nothing was waiting for it |
 
 ### `window.Etcher.escapeHtml(value)` — escape helper
 
 Stable helper exposed for use inside consumer slot functions. HTML-escapes `&`, `<`, `>`, `"`, `'`.
+
+## Laser measure
+
+Add `:measure` to `tools` and a Bosch GLM / PLR laser distance meter can write its readings straight onto the drawing:
+
+```heex
+<Etcher.layer fresco_id="plan" tools={[:measure, :dimension, :rectangle, :text]} measure={%{unit: :mm}} />
+```
+
+- **The button is the connection.** It is dimmed until a meter is connected; clicking it opens the browser's Bluetooth device picker. Once connected it wears a green dot (amber on low battery) and arms like any tool.
+- **Armed, drag to draw a dimension, or click any shape.** That shape pulses: it is waiting for a reading. Press the meter's own button (or Enter, or **Measure** in the strip at the top) and the reading becomes its label. The tool stays armed, so a room is drag, press, drag, press.
+- **What each shape gets:** a dimension, line, arrow, polygon or freehand gets the reading (`2287 mm`); a circle gets `Ø 600 mm`; a rectangle takes two readings, width then height (`600 × 900 mm`); a text or callout becomes the reading. Pictures, media and ink strokes are never targets, and neither is a locked shape.
+- **A label being typed takes the reading** as if it had been typed. With nothing pulsing, a single selected shape takes it.
+- **A reading with nowhere to go is held** in the strip ("2287 mm — click a shape to put it there") and goes to the next shape drawn or clicked.
+- **It is a label like any other:** one undo step, saved through `etcher:annotations-changed`. The exact value is kept beside it as `metadata.measured_m` (metres; a `[width, height]` pair on a rectangle), and is dropped if the label is later edited by hand. The dimension line is never resized — there is no scale inference.
+- **Device errors** (target out of range, …) show a message and write nothing; the shape keeps waiting.
+- `measure` sets the label format: `unit` (`:mm` default, `:cm`, `:m`, `:in`, `:ft`), `precision` (decimal places; defaults mm 0, cm 1, m 3, in/ft 2) and `suffix: false` for the bare number.
+
+**Browsers.** It needs Web Bluetooth: Chrome or Edge on desktop or Android, on an `https://` page (`localhost` is exempt). Safari, Firefox and every iOS browser have none — there the button says so, and typing a label works as always. Chrome cannot reconnect by itself after a page load, so each visit takes one click on the button. Inside an `<iframe>`, the frame needs `allow="bluetooth"`. A board without `:measure` never touches Bluetooth.
+
+**Devices.** Both Bosch GATT layouts are supported — the newer GLM (service `02a6c0d0-…`, which advertises no name) and the older PLR / GLM (`00005301-…`). On connect Etcher turns on the meter's autosync, so a press of the meter's own button sends its reading.
+
+**Debugging a device.** `window.Etcher.laserDebug = true` logs every frame in and out to the console; the last 50 are always in `window.Etcher.laser.frames`. `window.Etcher.laser` is the driver itself (`connect`, `measure`, `decode`, `crc8`, `subscribe`) for hosts that want a meter without a layer.
 
 ## How it fits with Fresco
 

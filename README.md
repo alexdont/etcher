@@ -784,17 +784,18 @@ Stable helper exposed for use inside consumer slot functions. HTML-escapes `&`, 
 Add `:measure` to `tools` and a Bosch GLM / PLR laser distance meter can write its readings straight onto the drawing:
 
 ```heex
-<Etcher.layer fresco_id="plan" tools={[:measure, :dimension, :rectangle, :text]} measure={%{unit: :mm}} />
+<Etcher.layer fresco_id="plan" tools={[:measure, :dimension, :rectangle, :text]} />
 ```
 
 - **The button is the connection.** It is dimmed until a meter is connected; clicking it opens the browser's Bluetooth device picker. Once connected it wears a green dot (amber on low battery) and arms like any tool.
 - **Armed, drag to draw a dimension, or click any shape.** That shape pulses: it is waiting for a reading. Press the meter's own button (or Enter, or **Measure** in the strip at the top) and the reading becomes its label. The tool stays armed, so a room is drag, press, drag, press.
-- **What each shape gets:** a dimension, line, arrow, polygon or freehand gets the reading (`2287 mm`); a circle gets `Ø 600 mm`; a rectangle takes two readings, width then height (`600 × 900 mm`); a text or callout becomes the reading. Pictures, media and ink strokes are never targets, and neither is a locked shape.
+- **What each shape gets:** a dimension, line, arrow, polygon or freehand gets the reading (`1.677 m`); a circle gets `Ø 0.600 m`; a rectangle takes two readings, width then height (`0.600 × 0.900 m`); a text or callout becomes the reading. Pictures, media and ink strokes are never targets, and neither is a locked shape.
 - **A label being typed takes the reading** as if it had been typed. With nothing pulsing, a single selected shape takes it.
-- **A reading with nowhere to go is held** in the strip ("2287 mm — click a shape to put it there") and goes to the next shape drawn or clicked.
+- **A reading with nowhere to go is held** in the strip ("1.677 m — click a shape to put it there") and goes to the next shape drawn or clicked.
 - **It is a label like any other:** one undo step, saved through `etcher:annotations-changed`. The exact value is kept beside it as `metadata.measured_m` (metres; a `[width, height]` pair on a rectangle), and is dropped if the label is later edited by hand. The dimension line is never resized — there is no scale inference.
 - **Device errors** (target out of range, …) show a message and write nothing; the shape keeps waiting.
-- `measure` sets the label format: `unit` (`:mm` default, `:cm`, `:m`, `:in`, `:ft`), `precision` (decimal places; defaults mm 0, cm 1, m 3, in/ft 2) and `suffix: false` for the bare number.
+- **Units: m | cm | mm**, switched in the strip at the top while the tool is on. Metres by default, as the meter's own screen shows them. The choice is the user's, saved with their other Etcher preferences, and switching rewrites every label the meter wrote that still reads exactly what it wrote (from `measured_m`) — one undo step; a label typed over is left alone.
+- `measure` sets the host's default: `unit` (`:m` default, `:cm`, `:mm`, `:in`, `:ft` — an imperial unit joins the switch), `precision` (decimal places; defaults m 3, cm 1, mm 0, in/ft 2) and `suffix: false` for the bare number. A unit the user picked wins over it.
 
 **Browsers.** It needs Web Bluetooth: Chrome or Edge on desktop or Android, on an `https://` page (`localhost` is exempt). Safari, Firefox and every iOS browser have none — there the button says so, and typing a label works as always. Chrome cannot reconnect by itself after a page load, so each visit takes one click on the button. Inside an `<iframe>`, the frame needs `allow="bluetooth"`. A board without `:measure` never touches Bluetooth.
 

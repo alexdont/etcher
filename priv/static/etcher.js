@@ -1164,6 +1164,13 @@
       "}",
       ".etcher-measure-chip-action:hover { background: rgba(255, 255, 255, 0.26); }",
       ".etcher-measure-chip-action[hidden] { display: none; }",
+      ".etcher-measure-units { display: inline-flex; flex: none; padding: 2px; border-radius: 999px; background: rgba(255, 255, 255, 0.1); }",
+      ".etcher-measure-units button {",
+      "  min-width: 30px; height: 24px; padding: 0 8px; border: 0; border-radius: 999px;",
+      "  background: transparent; color: rgba(245, 245, 247, 0.7); font: inherit; font-size: 12px; cursor: pointer;",
+      "}",
+      ".etcher-measure-units button:hover { color: #f5f5f7; }",
+      ".etcher-measure-units button.is-selected { background: rgba(255, 255, 255, 0.24); color: #fff; }",
       // Link card chrome: the `⋯` in the card's top-right and its menu.
       ".etcher-link-menu {",
       "  position: absolute; z-index: 12; width: 30px; height: 30px;",
@@ -2689,6 +2696,7 @@
     in: { factor: 39.37007874015748, precision: 2 },
     ft: { factor: 3.280839895013123, precision: 2 }
   };
+  var MEASURE_UNIT_NAMES = { mm: "millimetres", cm: "centimetres", m: "metres", in: "inches", ft: "feet" };
   // Kinds a reading never labels: pictures, media, cards and ink.
   var MEASURE_SKIP_KINDS = ["image", "audio", "video", "file", "marker", "highlighter"];
   // The layer the meter is being worked from — readings go to it alone when
@@ -11746,10 +11754,12 @@
     },
 
     // `data-measure`: { unit: "mm"|"cm"|"m"|"in"|"ft", precision, suffix }.
+    // Metres by default: it is what the meter's own screen shows, so the
+    // label reads the same as the device.
     _readMeasureFormat: function(raw) {
       var cfg = {};
       try { cfg = raw ? JSON.parse(raw) || {} : {}; } catch (_) { cfg = {}; }
-      var unit = MEASURE_UNITS[cfg.unit] ? cfg.unit : "mm";
+      var unit = MEASURE_UNITS[cfg.unit] ? cfg.unit : "m";
       var p = parseInt(cfg.precision, 10);
       return {
         unit: unit,
@@ -11758,9 +11768,28 @@
       };
     },
 
+    // The format in force: the host's, unless the user picked a unit in the
+    // strip — that choice is theirs, saved with their other preferences, and
+    // takes that unit's usual precision.
+    _activeMeasureFormat: function() {
+      var base = this._measureFormat || { unit: "m", precision: 3, suffix: true };
+      var picked = typeof this._getPref === "function" ? this._getPref("measure_unit") : null;
+      if (!MEASURE_UNITS[picked] || picked === base.unit) return base;
+      return { unit: picked, precision: MEASURE_UNITS[picked].precision, suffix: base.suffix };
+    },
+
+    // The units the strip offers: metric always, plus the host's own when
+    // it is imperial.
+    _measureUnitChoices: function() {
+      var list = ["m", "cm", "mm"];
+      var host = (this._measureFormat || {}).unit;
+      if (host && list.indexOf(host) === -1) list.push(host);
+      return list;
+    },
+
     // `bare` leaves the unit off (the first half of "600 × 900 mm").
-    _formatMeasure: function(metres, bare) {
-      var f = this._measureFormat || { unit: "mm", precision: 0, suffix: true };
+    _formatMeasure: function(metres, bare, fmt) {
+      var f = fmt || this._activeMeasureFormat();
       var u = MEASURE_UNITS[f.unit] || MEASURE_UNITS.mm;
       // Half-up at the last place shown. The meter counts in 0.05 mm steps,
       // so a half is common, and binary floats would round 2286.95 down.
@@ -11908,6 +11937,47 @@
       shape.el.classList.toggle("etcher-measure-target", on);
     },
 
+    // The label a shape gets for its measured value (metres, or a rectangle's
+    // [width, height]) in a given format.
+    _measureLabel: function(kind, measured, fmt) {
+      if (Array.isArray(measured)) {
+        return this._formatMeasure(measured[0], true, fmt) + " × " + this._formatMeasure(measured[1], false, fmt);
+      }
+      return (kind === "circle" ? "Ø " : "") + this._formatMeasure(measured, false, fmt);
+    },
+
+    // Picking a unit rewrites the labels the meter wrote — the ones still
+    // reading exactly what it wrote, in the unit that was in force — from
+    // the exact value kept beside them. A label someone has since typed over
+    // is theirs and is left alone. One undo step for the lot.
+    _setMeasureUnit: function(unit) {
+      var self = this;
+      var before = self._activeMeasureFormat();
+      self._setPref("measure_unit", unit);
+      var after = self._activeMeasureFormat();
+      if (before.unit === after.unit && before.precision === after.precision) return 0;
+      var items = [];
+      (self.shapes || []).forEach(function(shape) {
+        var meta = shape.metadata;
+        if (!meta || meta.measured_m == null || shape.readonly) return;
+        if (meta.title !== self._measureLabel(shape.kind, meta.measured_m, before)) return;
+        var snap = self._snapshotShape(shape);
+        shape.metadata = Object.assign({}, meta, { title: self._measureLabel(shape.kind, meta.measured_m, after) });
+        self._renderShape(shape);
+        items.push({ uuid: shape.uuid, before: snap, after: self._snapshotShape(shape) });
+      });
+      if (items.length) {
+        self._undoStack = self._undoStack || [];
+        self._redoStack = [];
+        self._undoStack.push({ type: "updates", items: items });
+        if (self._undoStack.length > self._undoStackLimit) self._undoStack.shift();
+        self._refreshUndoButtons();
+        self._syncLabelSection();
+        self._emitChanged();
+      }
+      return items.length;
+    },
+
     // The label a reading gives each kind of shape. A rectangle takes two
     // readings — width, then height — and stays the target in between.
     _applyMeasureTo: function(shape, metres) {
@@ -11925,15 +11995,12 @@
           this._syncMeasureChip();
           return "partial";
         }
-        label = this._formatMeasure(part.width, true) + " × " + this._formatMeasure(metres);
         measured = [part.width, metres];
+        label = this._measureLabel(shape.kind, measured);
         this._measurePartial = null;
-      } else if (shape.kind === "circle") {
-        label = "Ø " + this._formatMeasure(metres);
-        measured = metres;
       } else {
-        label = this._formatMeasure(metres);
         measured = metres;
+        label = this._measureLabel(shape.kind, measured);
       }
       var ok = this._setShapeLabel(shape, label, { measured_m: measured });
       if (this._measureTarget === shape) this._clearMeasureTarget();
@@ -11961,14 +12028,9 @@
           this._syncMeasureChip();
         } else {
           var text, measured;
-          if (ed.shape.kind === "rectangle") {
-            text = this._formatMeasure(this._measurePartial.width, true) + " × " + this._formatMeasure(metres);
-            measured = [this._measurePartial.width, metres];
-            this._measurePartial = null;
-          } else {
-            text = (ed.shape.kind === "circle" ? "Ø " : "") + this._formatMeasure(metres);
-            measured = metres;
-          }
+          measured = ed.shape.kind === "rectangle" ? [this._measurePartial.width, metres] : metres;
+          if (ed.shape.kind === "rectangle") this._measurePartial = null;
+          text = this._measureLabel(ed.shape.kind, measured);
           ed.input.value = text;
           ed.measured = measured;
           this._commitTextEdit();
@@ -12100,11 +12162,46 @@
           else if (act === "discard") { self._heldReading = null; self._syncMeasureChip(); }
         });
         chip.appendChild(btn);
+        // m | cm | mm — which unit the next reading is written in.
+        var units = document.createElement("span");
+        units.className = "etcher-measure-units";
+        units.setAttribute("role", "group");
+        units.setAttribute("aria-label", "Unit");
+        chip.appendChild(units);
         self.handle.container.appendChild(chip);
         self._measureChip = chip;
+        self._measureChipText = label;
+        self._measureChipAction = btn;
+        self._measureChipUnits = units;
       }
-      chip.firstChild.textContent = text;
-      var b = chip.lastChild;
+      self._measureChipText.textContent = text;
+      var current = self._activeMeasureFormat().unit;
+      var unitsEl = self._measureChipUnits;
+      var choices = self._measureUnitChoices();
+      if (unitsEl.getAttribute("data-units") !== choices.join(",")) {
+        unitsEl.textContent = "";
+        unitsEl.setAttribute("data-units", choices.join(","));
+        choices.forEach(function(u) {
+          var ub = document.createElement("button");
+          ub.type = "button";
+          ub.textContent = u;
+          ub.setAttribute("data-unit", u);
+          ub.title = "Write readings in " + MEASURE_UNIT_NAMES[u];
+          ub.addEventListener("click", function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            self._setMeasureUnit(u);
+            self._syncMeasureChip();
+          });
+          unitsEl.appendChild(ub);
+        });
+      }
+      unitsEl.querySelectorAll("button").forEach(function(ub) {
+        var on = ub.getAttribute("data-unit") === current;
+        ub.classList.toggle("is-selected", on);
+        ub.setAttribute("aria-pressed", on ? "true" : "false");
+      });
+      var b = self._measureChipAction;
       b.hidden = !action;
       if (action) {
         b.setAttribute("data-action", action);
@@ -30603,6 +30700,9 @@
         op.item.liveUuid = null;
         this._emitChanged();
         this._redoStack.push(op);
+      } else if (op.type === "updates") {
+        this._redoStack.push(op);
+        for (var ui = 0; ui < op.items.length; ui++) this._applyHistorySnapshot(op.items[ui].uuid, op.items[ui].before);
       } else if (op.type === "update") {
         this._redoStack.push(op);
         this._applyHistorySnapshot(op.uuid, op.before);
@@ -30643,6 +30743,9 @@
       } else if (op.type === "create") {
         op.item.liveUuid = this._recreateFromSnapshot(op.item.snapshot);
         this._undoStack.push(op);
+      } else if (op.type === "updates") {
+        this._undoStack.push(op);
+        for (var ri = 0; ri < op.items.length; ri++) this._applyHistorySnapshot(op.items[ri].uuid, op.items[ri].after);
       } else if (op.type === "update") {
         this._undoStack.push(op);
         this._applyHistorySnapshot(op.uuid, op.after);

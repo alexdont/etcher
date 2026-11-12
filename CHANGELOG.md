@@ -14,11 +14,15 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   connected, a click opens the device picker, then a green dot. Armed, drag a
   dimension or click a shape: it pulses until a reading arrives, from the
   meter's own button, Enter, or **Measure** in the strip at the top. A
-  rectangle takes width then height (`600 × 900 mm`), a circle gets `Ø`, a
+  rectangle takes width then height (`0.600 × 0.900 m`), a circle gets `Ø`, a
   text becomes the number; a reading with nothing waiting is held and goes to
   the next shape. One undo step, saved like a typed label, exact value kept as
-  `metadata.measured_m`. Format via the new `measure` attr (`unit`,
-  `precision`, `suffix`; millimetres by default). Device errors show a message
+  `metadata.measured_m`.
+- **m | cm | mm switch** in the measure strip. Metres by default, as the
+  meter's screen shows them; the user's pick is saved with their preferences.
+  Switching rewrites the labels the meter wrote (those not typed over since)
+  from their exact values, as one undo step. The new `measure` attr sets the
+  host's default (`unit`, `precision`, `suffix`). Device errors show a message
   and write nothing. Not in the default `tools`; a board without it never
   touches Bluetooth.
 - **`layer.setLabel(uuid, text)`** sets a shape's label the way typing one

@@ -380,10 +380,12 @@ defmodule Etcher.Layer do
   attr(:measure, :map,
     default: nil,
     doc: """
-    How the `:measure` tool writes a reading: `%{unit: :mm, precision: 0,
-    suffix: true}`. `unit` is `:mm` (default), `:cm`, `:m`, `:in` or `:ft`;
-    `precision` is decimal places (defaults: mm 0, cm 1, m 3, in/ft 2);
-    `suffix: false` writes the bare number (`2287` instead of `2287 mm`).
+    How the `:measure` tool writes a reading by default: `%{unit: :m,
+    precision: 3, suffix: true}`. `unit` is `:m` (default — what the meter's
+    screen shows), `:cm`, `:mm`, `:in` or `:ft`; `precision` is decimal
+    places (defaults: m 3, cm 1, mm 0, in/ft 2); `suffix: false` writes the
+    bare number (`1.677` instead of `1.677 m`). Users switch m | cm | mm in
+    the tool's strip; their pick is saved with their preferences and wins.
     """
   )
 

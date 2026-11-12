@@ -41,7 +41,8 @@ function classList() {
   return { set, toggle: (c, on) => (on ? set.add(c) : set.delete(c)), contains: (c) => set.has(c) };
 }
 
-function layer(fmt) {
+function layer(fmt = { unit: "mm" }) {
+  const prefs = {};
   const self = {
     tools: ["dimension", "measure"],
     shapes: [], selectedShapes: [], editingShape: null, editingTitleShape: null,
@@ -58,11 +59,17 @@ function layer(fmt) {
     _syncMeasureChip: () => {},
     _showToast: (t) => self.toasts.push(t),
     _dispatch: (name, detail) => self.events.push(detail),
-    _commitTextEdit: () => { throw new Error("no editor in these tests"); }
+    _commitTextEdit: () => { throw new Error("no editor in these tests"); },
+    _getPref: (k) => prefs[k],
+    _setPref: (k, v) => { prefs[k] = v; },
+    _refreshUndoButtons: () => {},
+    _undoStackLimit: 100,
+    prefs
   };
   ["_measureOffered", "_readMeasureFormat", "_formatMeasure", "_measureTargetable",
    "_setMeasureTarget", "_clearMeasureTarget", "_syncMeasureMark", "_applyMeasureTo",
-   "_onLaserReading", "_setShapeLabel"].forEach((n) => { self[n] = lift(n); });
+   "_onLaserReading", "_setShapeLabel", "_activeMeasureFormat", "_measureLabel",
+   "_setMeasureUnit", "_measureUnitChoices"].forEach((n) => { self[n] = lift(n); });
   self._measureFormat = self._readMeasureFormat(fmt ? JSON.stringify(fmt) : undefined);
   return self;
 }
@@ -84,7 +91,8 @@ const reading = (metres) => ({ type: "measurement", metres, source: "device" });
   assert.strictEqual(layer({ unit: "mm", precision: 1, suffix: false })._formatMeasure(2.28695), "2287.0", "half rounds up");
   assert.strictEqual(l._formatMeasure(0.00005 * 45739), "2287 mm");
   assert.strictEqual(l._formatMeasure(1.0005), "1001 mm", "x.5 mm rounds up");
-  assert.strictEqual(layer({ unit: "furlong" })._formatMeasure(1), "1000 mm", "unknown unit falls back");
+  assert.strictEqual(layer({ unit: "furlong" })._formatMeasure(1), "1.000 m", "unknown unit falls back to metres");
+  assert.strictEqual(layer(null)._formatMeasure(1.677), "1.677 m", "metres by default, as the meter shows it");
 }
 
 // --- A pulsing dimension takes the reading: label, measured_m, one undo ----
@@ -124,7 +132,7 @@ const reading = (metres) => ({ type: "measurement", metres, source: "device" });
 
 // --- Circle gets a diameter mark; text becomes the reading ----------------
 {
-  const l = layer({ suffix: false });
+  const l = layer({ unit: "mm", suffix: false });
   const c = shape("circle");
   const t = shape("text", { metadata: { title: "x" } });
   l.shapes.push(c, t);
@@ -217,6 +225,48 @@ const reading = (metres) => ({ type: "measurement", metres, source: "device" });
   assert.strictEqual(l._setShapeLabel(shape("dimension", { readonly: true }), "x"), false, "locked");
   assert.strictEqual(l._setShapeLabel(shape("text", { metadata: { title: "a" } }), ""), false, "text can't be emptied");
   assert.strictEqual(l._setShapeLabel(null, "x"), false);
+}
+
+// --- The unit switch ------------------------------------------------------
+{
+  const l = layer(null);
+  assert.deepStrictEqual(l._measureUnitChoices(), ["m", "cm", "mm"]);
+  assert.deepStrictEqual(layer({ unit: "in" })._measureUnitChoices(), ["m", "cm", "mm", "in"], "an imperial host keeps its unit");
+
+  const d = shape("dimension");
+  const r = shape("rectangle");
+  const typed = shape("dimension");
+  const locked = shape("dimension", { readonly: true, metadata: { title: "1.000 m", measured_m: 1 } });
+  l.shapes.push(d, r, typed, locked);
+  l._setMeasureTarget(d); l._onLaserReading(reading(1.677));
+  l._setMeasureTarget(r); l._onLaserReading(reading(0.6)); l._onLaserReading(reading(0.9));
+  l._setMeasureTarget(typed); l._onLaserReading(reading(2));
+  l._setShapeLabel(typed, "about 2 m");
+  typed.metadata.measured_m = 2; // as if typed over a reading
+  assert.strictEqual(d.metadata.title, "1.677 m");
+  assert.strictEqual(r.metadata.title, "0.600 × 0.900 m");
+  const steps = l.undo.length;
+
+  assert.strictEqual(l._setMeasureUnit("mm"), 2, "rewrites the two the meter wrote");
+  assert.strictEqual(l.prefs.measure_unit, "mm", "remembered");
+  assert.strictEqual(d.metadata.title, "1677 mm");
+  assert.strictEqual(r.metadata.title, "600 × 900 mm");
+  assert.strictEqual(typed.metadata.title, "about 2 m", "a label typed over is left alone");
+  assert.strictEqual(locked.metadata.title, "1.000 m", "a locked one too");
+  assert.strictEqual(d.metadata.measured_m, 1.677, "the exact value is kept");
+  assert.strictEqual(l.undo.length, steps, "not one step per shape on the update stack");
+  assert.strictEqual(l._undoStack.length, 1);
+  assert.strictEqual(l._undoStack[0].type, "updates");
+  assert.strictEqual(l._undoStack[0].items.length, 2, "one undo step for the lot");
+  assert.strictEqual(l._undoStack[0].items[0].before.metadata.title, "1.677 m");
+
+  l._setMeasureUnit("cm");
+  assert.strictEqual(d.metadata.title, "167.7 cm");
+  l._onLaserReading(reading(0.5));
+  assert.strictEqual(l._heldReading, 0.5);
+  l._setMeasureTarget(shape("line")); // takes the held reading in the new unit
+  assert.strictEqual(l.events[l.events.length - 1].text, "50.0 cm");
+  assert.strictEqual(l._setMeasureUnit("cm"), 0, "same unit, nothing to do");
 }
 
 console.log("laser_measure_test: ok");

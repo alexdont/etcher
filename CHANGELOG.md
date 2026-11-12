@@ -11,7 +11,8 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 - **Laser measure (`:measure`, opt-in).** Connect a Bosch GLM / PLR laser
   distance meter over Web Bluetooth and its readings land on the drawing as
   labels. The tool's button is the connection — dimmed until a meter is
-  connected, a click opens the device picker, then a green dot. Armed, drag a
+  connected, a click opens the device picker, then its Bluetooth mark turns
+  blue (amber on low battery). Armed, drag a
   dimension or click a shape: it pulses until a reading arrives, from the
   meter's own button, Enter, or **Measure** in the strip at the top. A
   rectangle takes width then height (`0.600 × 0.900 m`), a circle gets `Ø`, a

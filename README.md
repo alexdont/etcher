@@ -787,7 +787,7 @@ Add `:measure` to `tools` and a Bosch GLM / PLR laser distance meter can write i
 <Etcher.layer fresco_id="plan" tools={[:measure, :dimension, :rectangle, :text]} />
 ```
 
-- **The button is the connection.** It is dimmed until a meter is connected; clicking it opens the browser's Bluetooth device picker. Once connected it wears a green dot (amber on low battery) and arms like any tool.
+- **The button is the connection.** Its icon is the meter with a Bluetooth mark. It is dimmed until a meter is connected; clicking it opens the browser's Bluetooth device picker. Once connected the Bluetooth mark turns blue (amber on low battery) and the button arms like any tool.
 - **Armed, drag to draw a dimension, or click any shape.** That shape pulses: it is waiting for a reading. Press the meter's own button (or Enter, or **Measure** in the strip at the top) and the reading becomes its label. The tool stays armed, so a room is drag, press, drag, press.
 - **What each shape gets:** a dimension, line, arrow, polygon or freehand gets the reading (`1.677 m`); a circle gets `Ø 0.600 m`; a rectangle takes two readings, width then height (`0.600 × 0.900 m`); a text or callout becomes the reading. Pictures, media and ink strokes are never targets, and neither is a locked shape.
 - **A label being typed takes the reading** as if it had been typed. With nothing pulsing, a single selected shape takes it.

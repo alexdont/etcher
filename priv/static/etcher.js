@@ -573,7 +573,7 @@
     // the architectural dimension-line annotation the tool draws (line
     // + 2 arrows + black label sliding along the shaft).
     dimension:'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12 L19 12 M5 12 L8 9 M5 12 L8 15 M19 12 L16 9 M19 12 L16 15"/></svg>',
-    measure:  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="7" width="9" height="12" rx="1.6"/><path d="M5 10.5h4M5 13.5h4"/><circle cx="7" cy="16.5" r="0.4"/><path d="M11.5 10h1.5M15 10h1.5M18.5 10H21"/><path d="M21 7.5v5"/></svg>',
+    measure:  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="4" width="10" height="16" rx="1.8"/><path d="M5.5 8h4M5.5 11h4"/><circle cx="7.5" cy="16" r="1"/><path class="etcher-bt" d="M15 8.75l6.5 6.5-3.25 3.25v-13l3.25 3.25-6.5 6.5"/></svg>',
     // Line — bare diagonal stroke. The line annotation is the
     // arrow-and-label-free sibling of dimension: same two-endpoint
     // geometry, title rendered via the standard sibling-above-shape
@@ -1125,16 +1125,13 @@
       ".etcher-toast.is-open {",
       "  opacity: 1; transform: translateX(-50%) translateY(0);",
       "}",
-      // Laser measure: the button dims until a meter is connected and wears
-      // a dot for the link (green; amber while connecting or on low battery).
-      ".etcher-toolbar button[data-laser], .etcher-popup button[data-laser] { position: relative; }",
+      // Laser measure: the button dims until a meter is connected, and its
+      // Bluetooth mark shows the link — blue when connected, blinking while
+      // connecting, amber on low battery.
       "button[data-laser=\"off\"] svg, button[data-laser=\"unsupported\"] svg { opacity: 0.45; }",
-      "button[data-laser=\"on\"]::after, button[data-laser=\"connecting\"]::after {",
-      "  content: \"\"; position: absolute; right: 5px; top: 5px; width: 6px; height: 6px;",
-      "  border-radius: 50%; background: #22c55e; box-shadow: 0 0 0 1.5px rgba(0,0,0,0.55);",
-      "}",
-      "button[data-laser=\"connecting\"]::after { background: #f59e0b; animation: etcher-measure-blink 0.9s ease-in-out infinite; }",
-      "button[data-laser=\"on\"][data-laser-battery=\"low\"]::after { background: #f59e0b; }",
+      "button[data-laser=\"on\"] .etcher-bt { stroke: #60a5fa; stroke-width: 1.9; }",
+      "button[data-laser=\"connecting\"] .etcher-bt { stroke: #60a5fa; animation: etcher-measure-blink 0.9s ease-in-out infinite; }",
+      "button[data-laser=\"on\"][data-laser-battery=\"low\"] .etcher-bt { stroke: #f59e0b; }",
       "@keyframes etcher-measure-blink { 50% { opacity: 0.25; } }",
       // The shape waiting for a reading.
       ".etcher-measure-target { animation: etcher-measure-pulse 1.1s ease-in-out infinite; }",
@@ -1144,7 +1141,7 @@
       "}",
       "@media (prefers-reduced-motion: reduce) {",
       "  .etcher-measure-target { animation: none; filter: drop-shadow(0 0 4px rgba(34, 211, 238, 1)); }",
-      "  button[data-laser=\"connecting\"]::after { animation: none; }",
+      "  button[data-laser=\"connecting\"] .etcher-bt { animation: none; }",
       "}",
       ".etcher-measure-chip {",
       "  position: absolute; top: 16px; left: 50%; z-index: 13; transform: translateX(-50%);",
@@ -3224,7 +3221,7 @@
     grabber:   '<path stroke-linecap="round" stroke-linejoin="round" d="M18 11V6a2 2 0 0 0-2-2 2 2 0 0 0-2 2"/><path stroke-linecap="round" stroke-linejoin="round" d="M14 10V4a2 2 0 0 0-2-2 2 2 0 0 0-2 2v2"/><path stroke-linecap="round" stroke-linejoin="round" d="M10 10.5V6a2 2 0 0 0-2-2 2 2 0 0 0-2 2v8"/><path stroke-linecap="round" stroke-linejoin="round" d="m7 15-1.76-1.76a2 2 0 0 0-2.83 2.82l3.6 3.6C7.5 21.14 9.2 22 12 22h2a8 8 0 0 0 8-8V7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v3"/>',
     callout:   '<circle cx="3.5" cy="20" r="2"/><path d="M4 19.5 8.5 14 21 14"/>',
     text:      '<path d="M5 6h14M12 6v12"/>',
-    measure:   '<rect x="3" y="7" width="8" height="10" rx="1.5"/><path d="M13 12h2M17 12h2M21 12h1"/>',
+    measure:   '<rect x="2.5" y="4" width="10" height="16" rx="1.8"/><path d="M15 8.75l6.5 6.5-3.25 3.25v-13l3.25 3.25-6.5 6.5"/>',
     dimension: '<path d="M5 12h14M5 12l3-3M5 12l3 3M19 12l-3-3M19 12l-3 3"/>',
     line:      '<path d="M5 19 19 5"/>',
     arrow:     '<path d="M5 19 19 5M19 5 12.4 7.4M19 5 16.6 11.6"/>',

@@ -15534,8 +15534,32 @@
       if (!shape || shape.readonly) return false;
       if (this._isBoxRotatable(shape)) return true;
       var k = shape.kind;
+      // A dimension is not turned: it measures between two points, and moving
+      // either end is how its angle changes.
       return k === "polygon" || k === "freehand" || k === "marker" ||
-        k === "line" || k === "arrow" || k === "dimension";
+        k === "line" || k === "arrow";
+    },
+
+    // Where a line's (or an arrow's) knob goes, in container px: straight
+    // out from the middle of the line, on the side facing up on screen. The
+    // top of its bounding box is wrong for these — on a diagonal that point
+    // is out in the empty corner of the box, far above the line itself.
+    // { from, knob }, or null when the shape has no length to stand on.
+    _shaftKnobPlace: function(shape) {
+      var g = shape && shape.geometry;
+      if (!g || !g.a || !g.b) return null;
+      var mid = this._shaftPointAt(g, 0.5);
+      var p0 = this._shaftPointAt(g, 0.45), p1 = this._shaftPointAt(g, 0.55);
+      if (!mid || !p0 || !p1) return null;
+      var m = this._imageToContainer(mid);
+      var c0 = this._imageToContainer(p0), c1 = this._imageToContainer(p1);
+      var dx = c1.x - c0.x, dy = c1.y - c0.y;
+      var len = Math.hypot(dx, dy);
+      if (!(len > 0)) return null;
+      var nx = -dy / len, ny = dx / len;
+      // Up on screen; a vertical line puts it to the right.
+      if (ny > 1e-6 || (Math.abs(ny) <= 1e-6 && nx < 0)) { nx = -nx; ny = -ny; }
+      return { from: m, knob: { x: m.x + nx * ROTATE_KNOB_PX, y: m.y + ny * ROTATE_KNOB_PX } };
     },
 
     // How far a shape's label is turned: a turned box's own angle; for a
@@ -28397,7 +28421,13 @@
       if (!box) return;
       var self = this;
       var put = function(local) { return self._rotPts(shape, [local])[0]; };
-      if (this.rotateHandle) {
+      var shaft = this.rotateHandle && (shape.kind === "line" || shape.kind === "arrow")
+        ? this._shaftKnobPlace(shape) : null;
+      if (shaft) {
+        this._positionHandle(this.rotateHandle, this._containerToImage(shaft.knob));
+        this.rotateStem.setAttribute("x1", shaft.from.x); this.rotateStem.setAttribute("y1", shaft.from.y);
+        this.rotateStem.setAttribute("x2", shaft.knob.x); this.rotateStem.setAttribute("y2", shaft.knob.y);
+      } else if (this.rotateHandle) {
         var top = put({ x: box.x + box.w / 2, y: box.y });
         var knobAt = put({ x: box.x + box.w / 2, y: box.y - ROTATE_KNOB_PX / scale });
         this._positionHandle(this.rotateHandle, knobAt);

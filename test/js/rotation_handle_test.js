@@ -83,4 +83,36 @@ assert.ok(body("_renderExtraHandles").includes('if (shape.kind === "text" && thi
   assert.ok(body("_startRotateDrag").includes("title_rotation:"), "the knob turns a point shape's label along");
 }
 
+// eslint-disable-next-line no-unused-vars
+var ROTATE_KNOB_PX = Number(src.match(/var ROTATE_KNOB_PX = (\d+);/)[1]);
+
+// A dimension is not turned by a knob; a line and an arrow are, by a knob
+// set straight out from the middle of the line — not above the top of its
+// bounding box, which on a diagonal is far off in the empty corner.
+{
+  assert.ok(!ctx._canRotate({ kind: "dimension" }), "a dimension has no knob");
+  assert.ok(ctx._canRotate({ kind: "line" }) && ctx._canRotate({ kind: "arrow" }));
+
+  const kctx = {
+    _shaftPointAt: fn("_shaftPointAt"), _arrowRoute: fn("_arrowRoute"), _arrowPath: fn("_arrowPath"),
+    _imageToContainer: (p) => ({ x: p.x, y: p.y })
+  };
+  const place = (a, b) => fn("_shaftKnobPlace").call(kctx, { kind: "line", geometry: { a, b } });
+  const dist = (p, q) => Math.hypot(p.x - q.x, p.y - q.y);
+
+  const diag = place([100, 400], [400, 100]);
+  near(diag.from.x, 250, "from the middle x"); near(diag.from.y, 250, "from the middle y");
+  near(dist(diag.from, diag.knob), ROTATE_KNOB_PX, "the usual distance, not the box's height");
+  near((diag.knob.x - 250) * 300 + (diag.knob.y - 250) * -300, 0, "square to the line");
+  assert.ok(diag.knob.y < 250, "on the side facing up");
+
+  const flat = place([100, 200], [500, 200]);
+  near(flat.knob.x, 300, "a level line: over its middle"); near(flat.knob.y, 200 - ROTATE_KNOB_PX, "just above it");
+  const reversed = place([500, 200], [100, 200]);
+  near(reversed.knob.y, 200 - ROTATE_KNOB_PX, "drawn right to left, still above");
+  const upright = place([300, 100], [300, 500]);
+  assert.ok(upright.knob.x > 300 && Math.abs(upright.knob.y - 300) < 1e-9, "a vertical line: to the right");
+  assert.strictEqual(place([10, 10], [10, 10]), null, "no length, no place");
+}
+
 console.log("rotation + scale dot: all checks passed");

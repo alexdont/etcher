@@ -32,6 +32,15 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 - **`window.Etcher.laser`**, the meter driver on its own (frames, CRC,
   decoding, connect), and `window.Etcher.laserDebug` to log every frame.
 
+### Fixed
+
+- **A line's or an arrow's rotate knob sits by the line.** It was placed above
+  the top of the shape's bounding box, which on a diagonal is far off in the
+  empty corner; it now stands just off the middle of the line, on the side
+  facing up.
+- **A dimension has no rotate knob.** It measures between two points; moving
+  an end is how its angle changes.
+
 ### Browser support
 
 Web Bluetooth only: Chrome / Edge on desktop and Android, on https (or

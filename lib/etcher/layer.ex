@@ -578,6 +578,41 @@ defmodule Etcher.Layer do
     """
   )
 
+  attr(:offline, :string,
+    default: nil,
+    doc: """
+    Keep this board working offline, under this key (one per board, e.g.
+    `"board:" <> uuid`). Every save is also kept in the browser (IndexedDB);
+    a save the server has not acknowledged is sent again — merged shape by
+    shape with what the server has by then — on the next load or reconnect.
+
+    With `offline_sw` the page itself is kept too: opened with no
+    connection, it starts the board from this device's copy without the
+    LiveView. The host marks the element to rebuild with
+    `data-offline-root` and, in its disconnected render, where it goes with
+    `data-offline-slot`.
+    """
+  )
+
+  attr(:offline_sw, :string,
+    default: nil,
+    doc: """
+    URL of the offline service worker (`etcher-offline-sw.js`, which the
+    host serves; see `Etcher.offline_worker/0`). Without it, saves are
+    still kept and re-sent, but a reload with no connection has no page.
+    """
+  )
+
+  attr(:offline_scope, :string,
+    default: "/",
+    doc: """
+    The service worker's scope. The worker only answers for the pages and
+    files a layer asked it to keep; everything else goes to the network.
+    A scope wider than the worker's own directory needs the
+    `Service-Worker-Allowed` response header.
+    """
+  )
+
   attr(:rest, :global)
 
   @doc """
@@ -627,6 +662,9 @@ defmodule Etcher.Layer do
       data-connectors={connectors_data(@connectors)}
       data-snap={@snap == true && "true"}
       data-loupe={@loupe == false && "false"}
+      data-offline-key={@offline}
+      data-offline-sw={@offline && @offline_sw}
+      data-offline-scope={@offline && @offline_sw && @offline_scope}
       data-image-source={@image_source == :custom && "custom"}
       data-paste-images={@paste_images == false && "false"}
       data-colors={@colors_json}

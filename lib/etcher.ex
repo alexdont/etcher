@@ -102,4 +102,18 @@ defmodule Etcher do
   """
 
   defdelegate layer(assigns), to: Etcher.Layer
+
+  @offline_worker_path Path.join(:code.priv_dir(:etcher), "static/etcher-offline-sw.js")
+  @external_resource @offline_worker_path
+  @offline_worker File.read!(@offline_worker_path)
+
+  @doc """
+  The offline service worker's source, for the host to serve.
+
+  Serve it as `text/javascript` with `cache-control: no-cache` (the browser
+  checks a worker for updates on every navigation), and with
+  `service-worker-allowed: /` when its URL is deeper than the scope it is
+  registered for. Pass its URL to `Etcher.layer`'s `offline_sw`.
+  """
+  def offline_worker, do: @offline_worker
 end

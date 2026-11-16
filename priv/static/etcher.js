@@ -390,6 +390,449 @@
   })();
   window.Etcher.laser = Laser;
 
+  // ===========================================================================
+  // Offline — keep a board working with no connection, and send what was done
+  // when the connection comes back.
+  //
+  // A layer given `data-offline-key` (the host's `offline` attr) keeps, in the
+  // browser's IndexedDB:
+  //
+  //   docs    { key, base, local, dirty, seq }  base = the shapes the server
+  //           last confirmed, local = the shapes on screen. `dirty` until the
+  //           server has acknowledged the latest list.
+  //   shells  { key, html }  the markup of the canvas area as the server first
+  //           rendered it (Fresco's pristine copy), to rebuild the page from
+  //           when there is no server to render it.
+  //   paths   { path, key }  which page URL shows which key.
+  //
+  // Online, every save also lands in `docs`; the LiveView reply clears
+  // `dirty`. On the next online load a dirty doc is merged three ways — base,
+  // what this device did, what the server has now — shape by shape, and the
+  // result is saved through the ordinary `etcher:annotations-changed`.
+  //
+  // Offline, a service worker (etcher-offline-sw.js, served by the host)
+  // answers the page and its files from its cache. The LiveView cannot
+  // connect, so nothing renders the board: `boot()` finds the page's
+  // `[data-offline-slot]`, puts the saved markup in it and starts the Fresco
+  // and Etcher hooks itself. Edits keep landing in `docs`. When the server
+  // answers again the page reloads, and the online path above sends them.
+  // ===========================================================================
+  var Offline = (function() {
+    var DB_NAME = "etcher-offline";
+    var CONNECT_WAIT_MS = 8000;      // how long the LiveView gets before we boot without it
+    var OFFLINE_WAIT_MS = 1500;      // …when the browser already says it is offline
+    var PROBE_MS = 5000;             // how often a standalone page checks for the server
+    var FIELDS = ["uuid", "kind", "geometry", "image_idx", "image_id", "style", "metadata"];
+    var states = {};                 // key → { doc, chain }
+    var dbPromise = null;
+
+    function idbAvailable() {
+      try { return typeof indexedDB !== "undefined" && indexedDB !== null; } catch (_) { return false; }
+    }
+
+    function db() {
+      if (dbPromise) return dbPromise;
+      dbPromise = new Promise(function(resolve, reject) {
+        var req = indexedDB.open(DB_NAME, 1);
+        req.onupgradeneeded = function() {
+          var d = req.result;
+          if (!d.objectStoreNames.contains("docs")) d.createObjectStore("docs", { keyPath: "key" });
+          if (!d.objectStoreNames.contains("shells")) d.createObjectStore("shells", { keyPath: "key" });
+          if (!d.objectStoreNames.contains("paths")) d.createObjectStore("paths", { keyPath: "path" });
+        };
+        req.onsuccess = function() { resolve(req.result); };
+        req.onerror = function() { reject(req.error); };
+      });
+      dbPromise.catch(function() { dbPromise = null; });
+      return dbPromise;
+    }
+
+    function get(store, key) {
+      return db().then(function(d) {
+        return new Promise(function(resolve, reject) {
+          var req = d.transaction(store, "readonly").objectStore(store).get(key);
+          req.onsuccess = function() { resolve(req.result || null); };
+          req.onerror = function() { reject(req.error); };
+        });
+      });
+    }
+
+    function put(store, value) {
+      return db().then(function(d) {
+        return new Promise(function(resolve, reject) {
+          var tx = d.transaction(store, "readwrite");
+          tx.objectStore(store).put(value);
+          tx.oncomplete = function() { resolve(); };
+          tx.onerror = function() { reject(tx.error); };
+        });
+      });
+    }
+
+    // ---- shape lists -----------------------------------------------------
+
+    // The fields a save carries, and nothing else, so a list read from the
+    // server and one Etcher emitted compare equal when they mean the same.
+    function norm(list) {
+      return (Array.isArray(list) ? list : []).filter(function(s) {
+        return s && typeof s.uuid === "string";
+      }).map(function(s) {
+        var out = {};
+        FIELDS.forEach(function(f) { if (s[f] != null) out[f] = s[f]; });
+        return out;
+      });
+    }
+
+    // JSON with sorted keys: two equal shapes give one string.
+    function canon(v) {
+      if (Array.isArray(v)) return "[" + v.map(canon).join(",") + "]";
+      if (v && typeof v === "object") {
+        return "{" + Object.keys(v).sort().map(function(k) {
+          return JSON.stringify(k) + ":" + canon(v[k]);
+        }).join(",") + "}";
+      }
+      return JSON.stringify(v === undefined ? null : v);
+    }
+
+    function byUuid(list) {
+      var m = {};
+      list.forEach(function(s) { m[s.uuid] = s; });
+      return m;
+    }
+
+    // Three-way, shape by shape. What this device changed wins; what it left
+    // alone takes the server's version (which may be a deletion). A shape this
+    // device deleted stays deleted unless the server changed it meanwhile —
+    // then the change is kept rather than thrown away.
+    //
+    // Order: this device's, with shapes only the server has added at the end.
+    function merge(base, local, server) {
+      base = norm(base); local = norm(local); server = norm(server);
+      var B = byUuid(base), L = byUuid(local), S = byUuid(server);
+      var take = {};
+      var uuids = {};
+      [base, local, server].forEach(function(list) { list.forEach(function(s) { uuids[s.uuid] = true; }); });
+      Object.keys(uuids).forEach(function(u) {
+        var b = B[u], l = L[u], s = S[u];
+        var localSame = canon(l) === canon(b);
+        if (localSame) { if (s) take[u] = s; return; }
+        if (!l) {
+          if (s && b && canon(s) !== canon(b)) take[u] = s;
+          return;
+        }
+        take[u] = l;
+      });
+      var out = [];
+      local.forEach(function(s) { if (take[s.uuid]) { out.push(take[s.uuid]); delete take[s.uuid]; } });
+      server.forEach(function(s) { if (take[s.uuid]) { out.push(take[s.uuid]); delete take[s.uuid]; } });
+      return out;
+    }
+
+    // How many shapes differ between two lists — for the "synced" message.
+    function changes(a, b) {
+      var A = byUuid(norm(a)), B = byUuid(norm(b)), n = 0, seen = {};
+      Object.keys(A).forEach(function(u) { seen[u] = true; if (canon(A[u]) !== canon(B[u])) n++; });
+      Object.keys(B).forEach(function(u) { if (!seen[u]) n++; });
+      return n;
+    }
+
+    function pathKey(loc) {
+      loc = loc || window.location;
+      return loc.pathname + (loc.search || "");
+    }
+
+    // ---- per-layer state ---------------------------------------------------
+
+    function state(key) {
+      return states[key] || (states[key] = { doc: null, chain: Promise.resolve() });
+    }
+
+    // Writes for one key run in order, each after the last has landed.
+    function queue(key, fn) {
+      var st = state(key);
+      st.chain = st.chain.then(fn).catch(function(err) {
+        try { console.warn("[Etcher offline]", err); } catch (_) {}
+      });
+      return st.chain;
+    }
+
+    function serverList(layer) {
+      var ext = layer.handle && typeof layer.handle.getExtension === "function"
+        ? layer.handle.getExtension("etcher") : null;
+      return norm(ext && ext.annotations);
+    }
+
+    // Put a list on screen as if the server had sent it: Fresco reads
+    // `data-extensions` live, and Etcher's rehydrate re-renders from it and
+    // reports the result through the ordinary save.
+    function show(layer, list) {
+      var el = layer.handle && layer.handle.container;
+      if (!el) return;
+      var ext = {};
+      try { ext = JSON.parse(el.dataset.extensions || "{}") || {}; } catch (_) {}
+      ext.etcher = Object.assign({}, ext.etcher || {}, { annotations: list });
+      el.dataset.extensions = JSON.stringify(ext);
+      layer._rehydrateFromExtension();
+    }
+
+    // The canvas area as the server rendered it: the offline root with
+    // Fresco's pristine copy in place of the live viewer, other hooks
+    // silenced and emptied.
+    function shellHtml(layer) {
+      var fresco = layer.handle && layer.handle.container;
+      if (!fresco || !fresco.__frescoPristine) return null;
+      var root = fresco.closest("[data-offline-root]") || fresco.parentNode;
+      if (!root) return null;
+      var copy = root.cloneNode(true);
+      var live = copy.querySelector("#" + cssEscape(fresco.id));
+      if (!live) return null;
+      live.parentNode.replaceChild(fresco.__frescoPristine.cloneNode(true), live);
+      var hooked = [copy].concat(Array.prototype.slice.call(copy.querySelectorAll("[phx-hook]")));
+      hooked.forEach(function(el) {
+        var name = el.getAttribute("phx-hook");
+        if (!name) return;
+        el.removeAttribute("phx-hook");
+        if (/^Fresco/.test(name) || name === "EtcherLayer") {
+          el.setAttribute("data-offline-hook", name);
+        } else if (el !== copy) {
+          while (el.firstChild) el.removeChild(el.firstChild);
+        }
+      });
+      return copy.outerHTML;
+    }
+
+    function cssEscape(s) {
+      return (window.CSS && CSS.escape) ? CSS.escape(s) : String(s).replace(/[^a-zA-Z0-9_-]/g, "\\$&");
+    }
+
+    // Everything the page loaded — scripts, styles, fonts, images — plus the
+    // pictures on the board, for the service worker to keep.
+    function pageUrls(layer) {
+      var urls = {};
+      function add(u) {
+        if (!u || typeof u !== "string" || /^(data|blob):/.test(u)) return;
+        try { urls[new URL(u, window.location.href).href] = true; } catch (_) {}
+      }
+      try {
+        (performance.getEntriesByType("resource") || []).forEach(function(e) {
+          if (/^(script|link|css|img|image|other)$/.test(e.initiatorType) || /\.(js|css|woff2?|ttf|png|jpe?g|webp|gif|svg)(\?|$)/.test(e.name)) add(e.name);
+        });
+      } catch (_) {}
+      Array.prototype.forEach.call(document.querySelectorAll("script[src]"), function(s) { add(s.src); });
+      Array.prototype.forEach.call(document.querySelectorAll("link[rel=stylesheet][href]"), function(l) { add(l.href); });
+      var root = layer.handle && layer.handle.container;
+      if (root) Array.prototype.forEach.call(root.querySelectorAll("img"), function(i) { add(i.currentSrc || i.src); });
+      (layer.shapes || []).forEach(function(s) { if (s.geometry && s.geometry.href) add(s.geometry.href); });
+      return Object.keys(urls);
+    }
+
+    function registerWorker(layer) {
+      var sw = layer.el.dataset.offlineSw;
+      if (!sw || !("serviceWorker" in navigator)) return;
+      var scope = layer.el.dataset.offlineScope || "/";
+      var urls = pageUrls(layer);
+      var page = window.location.href.split("#")[0];
+      navigator.serviceWorker.register(sw, { scope: scope }).then(function() {
+        return navigator.serviceWorker.ready;
+      }).then(function(reg) {
+        var w = reg.active || navigator.serviceWorker.controller;
+        if (w) w.postMessage({ type: "etcher-offline:keep", page: page, urls: urls });
+      }).catch(function(err) {
+        try { console.warn("[Etcher offline] service worker:", err); } catch (_) {}
+      });
+    }
+
+    // ---- the layer side --------------------------------------------------
+
+    // Called once the layer has its board on screen.
+    function attach(layer) {
+      var key = layer._offlineKey;
+      if (!key || !idbAvailable()) return;
+      var st = state(key);
+      if (layer._standalone) {
+        // Started from this device's copy: the doc it came from is the one
+        // edits go on adding to, still unconfirmed by any server.
+        layer._showToast("Offline. Changes are saved on this device.", { sticky: true });
+        queue(key, function() {
+          return get("docs", key).then(function(doc) {
+            var local = serverList(layer);
+            st.doc = doc || { key: key, base: local, local: local, dirty: false, seq: 0 };
+            st.attached = true;
+          });
+        });
+        return;
+      }
+      queue(key, function() {
+        var server = serverList(layer);
+        return get("docs", key).then(function(doc) {
+          if (doc && doc.dirty) {
+            var merged = merge(doc.base, doc.local, server);
+            var n = changes(merged, server);
+            st.doc = { key: key, base: server, local: merged, dirty: n > 0, seq: (doc.seq || 0) + 1 };
+            st.attached = true;
+            if (n > 0) {
+              show(layer, merged); // saves through annotations-changed; the reply clears dirty
+              layer._showToast(n === 1 ? "Synced 1 change made offline." : "Synced " + n + " changes made offline.", { ms: 4000 });
+            }
+            return put("docs", st.doc);
+          }
+          st.doc = { key: key, base: server, local: server, dirty: false, seq: (doc && doc.seq) || 0 };
+          st.attached = true;
+          return put("docs", st.doc);
+        }).then(function() {
+          var html = shellHtml(layer);
+          if (!html) return;
+          return put("shells", { key: key, html: html, savedAt: Date.now() }).then(function() {
+            return put("paths", { path: pathKey(), key: key });
+          });
+        }).then(function() { registerWorker(layer); });
+      });
+    }
+
+    // Every save. `pushed` is what pushEventTo returned: settled results once
+    // the server has answered, or nothing at all (standalone).
+    function emitted(layer, payload, pushed) {
+      var key = layer._offlineKey;
+      var st = key && states[key];
+      if (!st || !st.attached || !st.doc) return;
+      var list = norm(payload);
+      var seq = (st.doc.seq || 0) + 1;
+      st.doc = Object.assign({}, st.doc, { local: list, dirty: true, seq: seq });
+      var snapshot = st.doc;
+      queue(key, function() { return put("docs", snapshot); });
+      if (pushed && typeof pushed.then === "function") {
+        pushed.then(function(results) {
+          var ok = Array.isArray(results) && results.length > 0 &&
+            results.every(function(r) { return r && r.status === "fulfilled"; });
+          if (!ok || !st.doc || st.doc.seq !== seq) return;
+          st.doc = Object.assign({}, st.doc, { base: list, dirty: false });
+          var clean = st.doc;
+          queue(key, function() { return put("docs", clean); });
+        }, function() {});
+      }
+    }
+
+    // The LiveView came back without a reload: send what it missed.
+    function reconnected(layer) {
+      var st = layer._offlineKey && states[layer._offlineKey];
+      if (st && st.doc && st.doc.dirty) layer._emitChanged();
+    }
+
+    // ---- standalone boot -------------------------------------------------
+
+    function connected() {
+      return !!document.querySelector("[data-phx-main].phx-connected, .phx-connected[data-phx-session]");
+    }
+
+    function boot() {
+      if (!idbAvailable() || typeof document === "undefined") return;
+      var started = Date.now();
+      var lookup = get("paths", pathKey()).then(function(p) {
+        return p || get("paths", window.location.pathname);
+      }).catch(function() { return null; });
+      lookup.then(function(entry) {
+        if (!entry) return;
+        // The service worker marks a page it answered from its cache: no
+        // server is behind it, so there is nothing to wait for.
+        var copy = !!document.querySelector('meta[name="etcher-offline-copy"]');
+        (function wait() {
+          if (connected()) return;
+          var waited = Date.now() - started;
+          var offline = typeof navigator !== "undefined" && navigator.onLine === false;
+          if (copy || waited >= CONNECT_WAIT_MS || (offline && waited >= OFFLINE_WAIT_MS)) {
+            standalone(entry.key);
+            return;
+          }
+          setTimeout(wait, 300);
+        })();
+      });
+    }
+
+    function standalone(key) {
+      var slot = document.querySelector("[data-offline-slot]");
+      if (!slot || slot.__etcherOffline) return;
+      Promise.all([get("shells", key), get("docs", key)]).then(function(r) {
+        var shell = r[0], doc = r[1];
+        if (!shell || !shell.html || connected()) return;
+        slot.__etcherOffline = true;
+
+        // The LiveView has nothing to offer until the server answers, and if
+        // it joined now it would render over this page. Stop it; a reload
+        // brings it back once the server is reachable.
+        try { if (window.liveSocket && window.liveSocket.disconnect) window.liveSocket.disconnect(); } catch (_) {}
+        // …and its loading bar would run forever.
+        try { window.dispatchEvent(new CustomEvent("phx:page-loading-stop", { detail: { kind: "initial" } })); } catch (_) {}
+
+        var holder = document.createElement("div");
+        holder.innerHTML = shell.html;
+        var root = holder.firstElementChild;
+        if (!root) return;
+        if (doc && Array.isArray(doc.local)) {
+          var fresco = root.querySelector("[data-offline-hook^=Fresco]");
+          if (fresco) {
+            var ext = {};
+            try { ext = JSON.parse(fresco.getAttribute("data-extensions") || "{}") || {}; } catch (_) {}
+            ext.etcher = Object.assign({}, ext.etcher || {}, { annotations: doc.local });
+            fresco.setAttribute("data-extensions", JSON.stringify(ext));
+          }
+        }
+        while (slot.firstChild) slot.removeChild(slot.firstChild);
+        slot.style.display = "flex";
+        slot.style.flexDirection = "column";
+        slot.style.alignItems = "stretch";
+        slot.style.justifyContent = "stretch";
+        slot.appendChild(root);
+        if (!root.style.flex) root.style.flex = "1 1 auto";
+        slot.classList.add("etcher-offline-page");
+
+        Array.prototype.forEach.call(root.querySelectorAll("[data-offline-hook]"), function(el) {
+          var name = el.getAttribute("data-offline-hook");
+          var def = (window.FrescoHooks && window.FrescoHooks[name]) ||
+                    (window.EtcherHooks && window.EtcherHooks[name]);
+          if (!def) return;
+          el.__etcherStandalone = true;
+          var hook = Object.create(def);
+          hook.el = el;
+          hook.__standalone = true;
+          hook.pushEvent = hook.pushEventTo = function() {};
+          hook.handleEvent = function() {};
+          hook.removeHandleEvent = function() {};
+          hook.upload = hook.uploadTo = function() {};
+          try { hook.mounted(); } catch (err) { try { console.warn("[Etcher offline] " + name, err); } catch (_) {} }
+        });
+
+        watchForServer();
+      });
+    }
+
+    // Back online: reload, and the online path sends the changes. Not in the
+    // middle of a drag — the gesture would be lost.
+    function watchForServer() {
+      var pressed = false;
+      document.addEventListener("pointerdown", function() { pressed = true; }, true);
+      document.addEventListener("pointerup", function() { pressed = false; }, true);
+      document.addEventListener("pointercancel", function() { pressed = false; }, true);
+      var busy = false;
+      function probe() {
+        if (busy || pressed) return;
+        busy = true;
+        fetch(window.location.href, { method: "HEAD", cache: "no-store", credentials: "same-origin" })
+          .then(function(res) {
+            busy = false;
+            if (res && res.ok && !pressed) window.location.reload();
+          }, function() { busy = false; });
+      }
+      setInterval(probe, PROBE_MS);
+      window.addEventListener("online", function() { setTimeout(probe, 500); });
+    }
+
+    return {
+      merge: merge, norm: norm, canon: canon, changes: changes,
+      attach: attach, emitted: emitted, reconnected: reconnected, boot: boot,
+      _shellHtml: shellHtml
+    };
+  })();
+  window.Etcher.offline = Offline;
+
   // Selectors for DOM nodes that own their own input. When a click /
   // pointerdown / dblclick lands inside one of these, Etcher's
   // doc-level hit-test handlers bail — otherwise the gesture would
@@ -3629,6 +4072,10 @@
       self._navButtonAllowlist = parseAllowlistAttr(self.el.dataset.navButtons);
       self.showToolbar = self.el.dataset.toolbar !== "false";
       self._loupeOn = self.el.dataset.loupe !== "false";
+      // Offline: see the `Offline` block. Standalone = started by
+      // `Offline.boot` with no LiveView behind it.
+      self._offlineKey = self.el.dataset.offlineKey || null;
+      self._standalone = !!self.el.__etcherStandalone;
 
       // Image tool + paste behavior.
       //   image_source: "file_picker" (default) — the image tool opens the OS
@@ -3670,7 +4117,11 @@
 
       window.Fresco.onReady(self.frescoId, function(handle) {
         self.handle = handle;
-        self._whenCanvasReady(function() { self._init(); self._ready = true; });
+        self._whenCanvasReady(function() {
+          self._init();
+          self._ready = true;
+          if (self._offlineKey) Offline.attach(self);
+        });
       });
 
       // Register this layer in the public `window.Etcher.layerFor`
@@ -4256,6 +4707,12 @@
           }
         }
       };
+    },
+
+    // The LiveView rejoined after a drop: saves made while it was away were
+    // refused, so send the board again.
+    reconnected: function() {
+      if (this._offlineKey) Offline.reconnected(this);
     },
 
     destroyed: function() {
@@ -14629,10 +15086,11 @@
         if (s.metadata != null) entry.metadata = s.metadata;
         return entry;
       });
-      this.pushEventTo(this.el, "etcher:annotations-changed", {
+      var pushed = this.pushEventTo(this.el, "etcher:annotations-changed", {
         fresco_id: this.frescoId || null,
         annotations: payload
       });
+      if (this._offlineKey) Offline.emitted(this, payload, pushed);
     },
 
     // Dispatch a bubbling CustomEvent on the layer host so consumer JS
@@ -31015,4 +31473,15 @@
       this._dispatch("etcher:history-changed", { canUndo: u > 0, canRedo: r > 0 });
     }
   };
+
+  // A page this device has kept for offline use, opened with no server to
+  // render it: start the board without the LiveView. Once per page.
+  if (typeof window !== "undefined" && !window.__etcherOfflineBoot) {
+    window.__etcherOfflineBoot = true;
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", function() { Offline.boot(); });
+    } else {
+      Offline.boot();
+    }
+  }
 })();

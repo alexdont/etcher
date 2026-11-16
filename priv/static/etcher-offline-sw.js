@@ -1,0 +1,134 @@
+// Etcher's offline service worker.
+//
+// Keeps the pages a board was opened on, and the files they loaded, so the
+// board opens with no connection. Only what a page asked it to keep: every
+// other request goes to the network untouched.
+//
+//   keep    a page posts { type: "etcher-offline:keep", page, urls } after it
+//           has loaded online. The worker fetches each one fresh and stores
+//           it, and remembers the list.
+//   fetch   for a kept URL: the network first (and the copy refreshed), the
+//           stored copy when the network fails or takes too long.
+//
+// The host serves this file (`Etcher.offline_worker/0`) and the layer
+// registers it (`offline_sw` attr).
+"use strict";
+
+var CACHE = "etcher-offline-v1";
+var INDEX = "/__etcher_offline_index__";
+var NETWORK_WAIT_MS = 6000;
+var kept = null; // Set of kept URLs, loaded lazily (a worker can be restarted at any time)
+
+self.addEventListener("install", function() { self.skipWaiting(); });
+self.addEventListener("activate", function(event) { event.waitUntil(self.clients.claim()); });
+
+function strip(url) {
+  return String(url).split("#")[0];
+}
+
+function index() {
+  if (kept) return Promise.resolve(kept);
+  return caches.open(CACHE).then(function(cache) {
+    return cache.match(INDEX);
+  }).then(function(res) {
+    return res ? res.json() : [];
+  }).then(function(list) {
+    kept = new Set(Array.isArray(list) ? list : []);
+    return kept;
+  }, function() {
+    kept = new Set();
+    return kept;
+  });
+}
+
+function saveIndex(cache) {
+  return cache.put(INDEX, new Response(JSON.stringify(Array.from(kept)), {
+    headers: { "content-type": "application/json" }
+  }));
+}
+
+function store(cache, url) {
+  var sameOrigin = new URL(url).origin === self.location.origin;
+  var req = new Request(url, sameOrigin
+    ? { credentials: "same-origin", cache: "no-cache" }
+    : { mode: "no-cors", credentials: "omit" });
+  return fetch(req).then(function(res) {
+    if (res && (res.ok || res.type === "opaque")) {
+      kept.add(strip(url));
+      return cache.put(strip(url), res);
+    }
+  }).catch(function() {});
+}
+
+self.addEventListener("message", function(event) {
+  var data = event.data || {};
+  if (data.type !== "etcher-offline:keep") return;
+  event.waitUntil(index().then(function() {
+    return caches.open(CACHE);
+  }).then(function(cache) {
+    var urls = (Array.isArray(data.urls) ? data.urls : []).filter(function(u) {
+      return /^https?:/.test(u);
+    });
+    var jobs = urls.map(function(u) { return store(cache, u); });
+    if (data.page) {
+      kept.add(strip(data.page));
+      jobs.push(fetch(new Request(data.page, { credentials: "same-origin" })).then(function(res) {
+        if (res && res.ok) return cache.put(strip(data.page), res);
+      }).catch(function() {}));
+    }
+    return Promise.all(jobs).then(function() { return saveIndex(cache); });
+  }));
+});
+
+function fromNetwork(request, key) {
+  return new Promise(function(resolve, reject) {
+    var timer = setTimeout(function() { reject(new Error("timeout")); }, NETWORK_WAIT_MS);
+    fetch(request).then(function(res) {
+      clearTimeout(timer);
+      if (res && (res.ok || res.type === "opaque")) {
+        var copy = res.clone();
+        caches.open(CACHE).then(function(cache) { return cache.put(key, copy); }).catch(function() {});
+      }
+      resolve(res);
+    }, function(err) {
+      clearTimeout(timer);
+      reject(err);
+    });
+  });
+}
+
+// A page answered from this cache says so, so it can start the board at
+// once instead of waiting for a LiveView that cannot connect.
+function marked(res) {
+  return res.text().then(function(html) {
+    var tag = '<meta name="etcher-offline-copy" content="1">';
+    var out = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, function(h) { return h + tag; }) : tag + html;
+    var headers = new Headers(res.headers);
+    headers.delete("content-length");
+    return new Response(out, { status: 200, statusText: "OK", headers: headers });
+  });
+}
+
+self.addEventListener("fetch", function(event) {
+  var request = event.request;
+  if (request.method !== "GET") return;
+  var key = strip(request.url);
+  if (key.indexOf(INDEX) !== -1) return;
+  // Known not to be kept: leave it to the browser entirely.
+  if (kept && !kept.has(key)) return;
+
+  // Answering asynchronously means deciding synchronously: the index is
+  // checked inside respondWith, and a URL that is not kept goes straight to
+  // the network as it would have without the worker.
+  event.respondWith(index().then(function(set) {
+    if (!set.has(key)) return fetch(request);
+    return fromNetwork(request, key).catch(function(err) {
+      return caches.open(CACHE).then(function(cache) {
+        return cache.match(key, { ignoreVary: true });
+      }).then(function(hit) {
+        if (!hit) throw err;
+        return request.mode === "navigate" ? marked(hit) : hit;
+      });
+    });
+  }));
+});

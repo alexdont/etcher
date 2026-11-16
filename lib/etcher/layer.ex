@@ -566,6 +566,18 @@ defmodule Etcher.Layer do
     """
   )
 
+  attr(:loupe, :boolean,
+    default: true,
+    doc: """
+    The placing loupe. While a point is dragged — a handle, or the far
+    end of a dimension, line, arrow, rectangle or circle being drawn —
+    holding it still for a moment brings up a round magnified view of
+    what is under it, above the finger or cursor, with a crosshair on the
+    exact spot it will land. It follows the drag until the release. `false`
+    turns it off.
+    """
+  )
+
   attr(:rest, :global)
 
   @doc """
@@ -614,6 +626,7 @@ defmodule Etcher.Layer do
       data-toolbar={@toolbar == false && "false"}
       data-connectors={connectors_data(@connectors)}
       data-snap={@snap == true && "true"}
+      data-loupe={@loupe == false && "false"}
       data-image-source={@image_source == :custom && "custom"}
       data-paste-images={@paste_images == false && "false"}
       data-colors={@colors_json}

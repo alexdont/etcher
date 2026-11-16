@@ -1143,6 +1143,21 @@
       "  .etcher-measure-target { animation: none; filter: drop-shadow(0 0 4px rgba(34, 211, 238, 1)); }",
       "  button[data-laser=\"connecting\"] .etcher-bt { animation: none; }",
       "}",
+      ".etcher-loupe {",
+      "  position: absolute; z-index: 30; width: 128px; height: 128px; border-radius: 50%;",
+      "  overflow: hidden; pointer-events: none; background: #1a1a1d;",
+      "  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.95), 0 0 0 3px rgba(0, 0, 0, 0.35), 0 8px 24px rgba(0, 0, 0, 0.4);",
+      "  opacity: 0; transform: scale(0.6); transition: opacity 120ms ease-out, transform 120ms ease-out;",
+      "}",
+      ".etcher-loupe.is-open { opacity: 1; transform: none; }",
+      ".etcher-loupe-view { position: absolute; left: 0; top: 0; transform-origin: 0 0; margin: 0; padding: 0; }",
+      // The handle under the finger would cover the very spot being placed;
+      // the crosshair stands in for it.
+      ".etcher-loupe .etcher-handle, .etcher-loupe .etcher-handle-line, .etcher-loupe .etcher-tooltip { display: none !important; }",
+      ".etcher-loupe-cross { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: visible; }",
+      ".etcher-loupe-cross line { stroke: #22d3ee; stroke-width: 1.5; stroke-linecap: round; }",
+      ".etcher-loupe-cross .etcher-loupe-cross-halo { stroke: rgba(0, 0, 0, 0.5); stroke-width: 3.5; }",
+      "@media (prefers-reduced-motion: reduce) { .etcher-loupe { transition: none; } }",
       ".etcher-measure-chip {",
       "  position: absolute; top: 16px; left: 50%; z-index: 13; transform: translateX(-50%);",
       "  display: none; align-items: center; gap: 10px; max-width: calc(100% - 32px);",
@@ -2762,6 +2777,19 @@
   var HANDLE_GRAB_RADIUS = 22;
   var HANDLE_GRAB_RADIUS_MIN = 8;
 
+  // The placing loupe: hold a dragged point still for LOUPE_DWELL_MS
+  // (within LOUPE_STILL screen px, more for a finger) and a magnified view of
+  // what is under it comes up above the pointer, so the point can be put
+  // down exactly. Once up it follows the drag until the release.
+  var LOUPE_DWELL_MS = 700;
+  var LOUPE_STILL = 6;
+  var LOUPE_STILL_TOUCH = 12;
+  var LOUPE_SIZE = 128;
+  var LOUPE_ZOOM = 3;
+  // Drafts whose dragged end is a point: the loupe helps there. A stroke is
+  // not placed, it is drawn, and a text box is sized, not aimed.
+  var LOUPE_KINDS = { dimension: true, line: true, arrow: true, rectangle: true, circle: true };
+
   // How far outside a shape's box (screen px) the pointer can wander while
   // that shape still counts as a snap candidate and shows its anchors. Wider
   // than the snap radius so the dots appear *before* the end jumps to one,
@@ -3600,6 +3628,7 @@
       // Set for per-button gates.
       self._navButtonAllowlist = parseAllowlistAttr(self.el.dataset.navButtons);
       self.showToolbar = self.el.dataset.toolbar !== "false";
+      self._loupeOn = self.el.dataset.loupe !== "false";
 
       // Image tool + paste behavior.
       //   image_source: "file_picker" (default) — the image tool opens the OS
@@ -4230,6 +4259,7 @@
     },
 
     destroyed: function() {
+      this._loupeEnd();
       this._unwireLaser();
       this._closeActionMenu();
       if (this.actionBar && this.actionBar.parentNode) {
@@ -19492,9 +19522,14 @@
         case "arrow":     this._updateDimension(pt); break;
       }
       if (pulledNow) this._syncDraftHandles();
+      // The far end of a shape being dragged out is a point being placed
+      // too. Only while pressed: an armed draft following a bare mouse is
+      // hovering, not placing.
+      if ((e.buttons & 1) && LOUPE_KINDS[this.draftState.kind]) this._loupeTrack(e);
     },
 
     _onPointerUp: function(e) {
+      if (this._loupe) this._loupeEnd();
       // Released without travelling: the press was only ever the click
       // that set the label, so there is nothing to draw or clean up.
       this._pendingDraw = null;
@@ -29688,6 +29723,132 @@
       }
     },
 
+    // ---- The placing loupe ------------------------------------------------
+    // Fed every move of a point drag. Arms a dwell timer while the pointer
+    // keeps still; once the loupe is up it just follows. The release (any
+    // path: the drag's own handler, or the document-level backstop wired
+    // here) takes it down.
+    _loupeTrack: function(e) {
+      if (!this._loupeOn || !this.handle || !this.handle.container) return;
+      if (e.clientX == null) return;
+      var self = this;
+      var L = this._loupe;
+      if (!L) {
+        L = this._loupe = { anchor: null, timer: null, shown: false, el: null, raf: 0 };
+        L.end = function() { self._loupeEnd(); };
+        document.addEventListener("pointerup", L.end, true);
+        document.addEventListener("pointercancel", L.end, true);
+      }
+      L.clientX = e.clientX;
+      L.clientY = e.clientY;
+      L.touch = e.pointerType === "touch" || e.pointerType === "pen";
+      if (L.shown) { this._loupeSchedule(); return; }
+      var still = L.touch ? LOUPE_STILL_TOUCH : LOUPE_STILL;
+      if (L.anchor) {
+        var dx = e.clientX - L.anchor.x, dy = e.clientY - L.anchor.y;
+        if (dx * dx + dy * dy <= still * still) return;
+      }
+      L.anchor = { x: e.clientX, y: e.clientY };
+      clearTimeout(L.timer);
+      L.timer = setTimeout(function() {
+        if (self._loupe !== L) return;
+        L.shown = true;
+        self._loupeRender();
+      }, LOUPE_DWELL_MS);
+    },
+
+    _loupeEnd: function() {
+      var L = this._loupe;
+      if (!L) return;
+      this._loupe = null;
+      clearTimeout(L.timer);
+      if (L.raf) cancelAnimationFrame(L.raf);
+      document.removeEventListener("pointerup", L.end, true);
+      document.removeEventListener("pointercancel", L.end, true);
+      if (L.el && L.el.parentNode) L.el.parentNode.removeChild(L.el);
+    },
+
+    _loupeSchedule: function() {
+      var L = this._loupe, self = this;
+      if (!L || L.raf) return;
+      L.raf = requestAnimationFrame(function() {
+        L.raf = 0;
+        if (self._loupe === L) self._loupeRender();
+      });
+    },
+
+    // A copy of what the canvas shows — the image stage and the drawing
+    // overlay, which the drag has just re-rendered — scaled up around the
+    // pointer. Rebuilt per frame: the dragged shape is changing under it,
+    // and a copy is cheaper than keeping a second renderer in step.
+    _loupeRender: function() {
+      var L = this._loupe;
+      var root = this.handle && this.handle.container;
+      if (!L || !root) return;
+      var r = root.getBoundingClientRect();
+      var px = L.clientX - r.left, py = L.clientY - r.top;
+      var D = LOUPE_SIZE, Z = LOUPE_ZOOM;
+
+      if (!L.el) {
+        L.el = document.createElement("div");
+        L.el.className = "etcher-loupe";
+        L.el.setAttribute("aria-hidden", "true");
+        L.el.setAttribute("data-fresco-no-capture", "");
+        // The crosshair, drawn over the copy: four ticks around the exact
+        // landing spot, with a gap so the spot itself stays visible.
+        var c = D / 2, NS = "http://www.w3.org/2000/svg";
+        var cross = document.createElementNS(NS, "svg");
+        cross.setAttribute("class", "etcher-loupe-cross");
+        cross.setAttribute("viewBox", "0 0 " + D + " " + D);
+        ["etcher-loupe-cross-halo", ""].forEach(function(cls) {
+          [[c - 14, c, c - 4, c], [c + 4, c, c + 14, c], [c, c - 14, c, c - 4], [c, c + 4, c, c + 14]].forEach(function(t) {
+            var ln = document.createElementNS(NS, "line");
+            ln.setAttribute("x1", t[0]); ln.setAttribute("y1", t[1]);
+            ln.setAttribute("x2", t[2]); ln.setAttribute("y2", t[3]);
+            if (cls) ln.setAttribute("class", cls);
+            cross.appendChild(ln);
+          });
+        });
+        L.el.appendChild(cross);
+        root.appendChild(L.el);
+        // Next frame, so the open transition runs from the closed state.
+        var el = L.el;
+        requestAnimationFrame(function() { el.classList.add("is-open"); });
+      }
+
+      var view = document.createElement("div");
+      // The root's classes, so stylesheet rules scoped under the viewer
+      // (stage and overlay positioning) still match inside the copy.
+      view.className = String(root.className || "") + " etcher-loupe-view";
+      view.style.width = root.clientWidth + "px";
+      view.style.height = root.clientHeight + "px";
+      view.style.position = "absolute";
+      view.style.transform = "translate(" + (D / 2 - px * Z) + "px," + (D / 2 - py * Z) + "px) scale(" + Z + ")";
+      Array.prototype.forEach.call(root.children, function(child) {
+        var cl = child.classList;
+        if (!cl || !(cl.contains("fresco-stage") || cl.contains("etcher-overlay"))) return;
+        var copy = child.cloneNode(true);
+        // Canvases copy empty; paint their pixels across.
+        var src = child.querySelectorAll("canvas"), dst = copy.querySelectorAll("canvas");
+        for (var i = 0; i < src.length && i < dst.length; i++) {
+          try { if (src[i].width && src[i].height) dst[i].getContext("2d").drawImage(src[i], 0, 0); } catch (_) {}
+        }
+        view.appendChild(copy);
+      });
+      if (L.view) L.el.replaceChild(view, L.view);
+      else L.el.insertBefore(view, L.el.firstChild);
+      L.view = view;
+
+      // Above the pointer, clear of a fingertip; below it when there is no
+      // room above. Kept inside the canvas sideways.
+      var gap = L.touch ? 64 : 24;
+      var top = py - gap - D;
+      if (top < 4) top = py + gap;
+      var left = Math.max(4, Math.min(root.clientWidth - D - 4, px - D / 2));
+      L.el.style.left = left + "px";
+      L.el.style.top = top + "px";
+    },
+
     _startHandleDrag: function(shape, idx, handleEl, e) {
       // Left button only. These handles sit above the canvas and swallow
       // the event, so without this a middle-press on one would start a
@@ -29773,6 +29934,7 @@
         self._renderShape(shape);
         self._positionAllHandles(shape);
         if (pointStart) self._syncPointSize();
+        self._loupeTrack(ev);
       }
       function onUp(ev) {
         handleEl.classList.remove("is-dragging");
@@ -29780,6 +29942,7 @@
         handleEl.removeEventListener("pointerup", onUp);
         handleEl.removeEventListener("pointercancel", onUp);
         try { handleEl.releasePointerCapture(ev.pointerId); } catch (_) {}
+        self._loupeEnd();
         self._resumeMidpointHighlight();
         // An arrow endpoint drag paints the target's anchors as it goes;
         // they're a drag-time readout and shouldn't outlive the release.

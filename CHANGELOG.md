@@ -4,6 +4,17 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Placing loupe.** Drag a point — a shape's handle, or the far end of a
+  dimension, line, arrow, rectangle or circle being drawn — and hold it still
+  for a moment: a round 3× magnified view of what is under it comes up above
+  the finger or cursor, with a crosshair on the exact spot the point will land.
+  It follows the drag and goes away on release. On by default; `loupe={false}`
+  on `Etcher.layer` turns it off.
+
 ## [0.26.0] — 2026-11-12
 
 ### Added

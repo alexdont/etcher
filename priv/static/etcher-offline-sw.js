@@ -7,8 +7,10 @@
 //   keep    a page posts { type: "etcher-offline:keep", page, urls } after it
 //           has loaded online. The worker fetches each one fresh and stores
 //           it, and remembers the list.
-//   fetch   for a kept URL: the network first (and the copy refreshed), the
-//           stored copy when the network fails or takes too long.
+//   fetch   for a kept URL: the network first, the stored copy when the
+//           network fails or takes too long. Only `keep` writes: a page and the
+//           files it loaded are stored together, from one load, so an ordinary
+//           visit can never leave a newer page beside an older script it needs.
 //
 // The host serves this file (`Etcher.offline_worker/0`) and the layer
 // registers it (`offline_sw` attr).
@@ -55,9 +57,10 @@ function store(cache, url) {
   return fetch(req).then(function(res) {
     if (res && (res.ok || res.type === "opaque")) {
       kept.add(strip(url));
-      return cache.put(strip(url), res);
+      return cache.put(strip(url), res).then(function() { return true; });
     }
-  }).catch(function() {});
+    return false;
+  }).catch(function() { return false; });
 }
 
 self.addEventListener("message", function(event) {
@@ -73,10 +76,18 @@ self.addEventListener("message", function(event) {
     if (data.page) {
       kept.add(strip(data.page));
       jobs.push(fetch(new Request(data.page, { credentials: "same-origin" })).then(function(res) {
-        if (res && res.ok) return cache.put(strip(data.page), res);
-      }).catch(function() {}));
+        if (res && res.ok) return cache.put(strip(data.page), res).then(function() { return true; });
+        return false;
+      }).catch(function() { return false; }));
     }
-    return Promise.all(jobs).then(function() { return saveIndex(cache); });
+    return Promise.all(jobs).then(function(results) {
+      return saveIndex(cache).then(function() {
+        var failed = results.filter(function(r) { return r === false; }).length;
+        if (event.source && event.source.postMessage) {
+          event.source.postMessage({ type: "etcher-offline:kept", page: data.page, count: jobs.length, failed: failed });
+        }
+      });
+    });
   }));
 });
 
@@ -85,10 +96,6 @@ function fromNetwork(request, key) {
     var timer = setTimeout(function() { reject(new Error("timeout")); }, NETWORK_WAIT_MS);
     fetch(request).then(function(res) {
       clearTimeout(timer);
-      if (res && (res.ok || res.type === "opaque")) {
-        var copy = res.clone();
-        caches.open(CACHE).then(function(cache) { return cache.put(key, copy); }).catch(function() {});
-      }
       resolve(res);
     }, function(err) {
       clearTimeout(timer);

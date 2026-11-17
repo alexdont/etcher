@@ -631,6 +631,21 @@
       var scope = layer.el.dataset.offlineScope || "/";
       var urls = pageUrls(layer);
       var page = window.location.href.split("#")[0];
+      // The worker says when the page and its files are stored: the moment
+      // it is safe to lose the connection, so it is shown.
+      if (!registerWorker._listening) {
+        registerWorker._listening = true;
+        navigator.serviceWorker.addEventListener("message", function(e) {
+          var d = e.data || {};
+          if (d.type !== "etcher-offline:kept" || d.page !== page) return;
+          if (!layer.handle || !layer._ready) return;
+          // "Synced N changes" is the news that matters; let it be read first.
+          var wait = Math.max(0, (layer._offlineSyncedAt || 0) + 4000 - Date.now());
+          setTimeout(function() { layer._showToast(d.failed
+            ? "Saved for offline use, but " + d.failed + " of " + d.count + " files could not be kept."
+            : "Ready to use offline.", { ms: 2500 }); }, wait);
+        });
+      }
       navigator.serviceWorker.register(sw, { scope: scope }).then(function() {
         return navigator.serviceWorker.ready;
       }).then(function(reg) {
@@ -675,6 +690,7 @@
             st.attached = true;
             if (n > 0) {
               show(layer, merged); // saves through annotations-changed; the reply clears dirty
+              layer._offlineSyncedAt = Date.now();
               layer._showToast(n === 1 ? "Synced 1 change made offline." : "Synced " + n + " changes made offline.", { ms: 4000 });
             }
             return put("docs", st.doc);
@@ -688,7 +704,10 @@
           return put("shells", { key: key, html: html, savedAt: Date.now() }).then(function() {
             return put("paths", { path: pathKey(), key: key });
           });
-        }).then(function() { registerWorker(layer); });
+        }).then(function() { registerWorker(layer); }, function(err) {
+          try { console.warn("[Etcher offline]", err); } catch (_) {}
+          registerWorker(layer);
+        });
       });
     }
 

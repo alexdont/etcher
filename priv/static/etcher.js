@@ -657,6 +657,10 @@
             var local = serverList(layer);
             st.doc = doc || { key: key, base: local, local: local, dirty: false, seq: 0 };
             st.attached = true;
+            // Open the way it was left. Online, the host often switches the
+            // board into drawing as it loads (boards does); offline nothing
+            // does, and a board in View mode has no tools to draw with.
+            if (doc && doc.mode && !layer.annotationMode) layer._setAnnotationMode(true);
           });
         });
         return;
@@ -667,7 +671,7 @@
           if (doc && doc.dirty) {
             var merged = merge(doc.base, doc.local, server);
             var n = changes(merged, server);
-            st.doc = { key: key, base: server, local: merged, dirty: n > 0, seq: (doc.seq || 0) + 1 };
+            st.doc = { key: key, base: server, local: merged, dirty: n > 0, seq: (doc.seq || 0) + 1, mode: !!layer.annotationMode };
             st.attached = true;
             if (n > 0) {
               show(layer, merged); // saves through annotations-changed; the reply clears dirty
@@ -675,7 +679,7 @@
             }
             return put("docs", st.doc);
           }
-          st.doc = { key: key, base: server, local: server, dirty: false, seq: (doc && doc.seq) || 0 };
+          st.doc = { key: key, base: server, local: server, dirty: false, seq: (doc && doc.seq) || 0, mode: !!layer.annotationMode };
           st.attached = true;
           return put("docs", st.doc);
         }).then(function() {
@@ -709,6 +713,17 @@
           queue(key, function() { return put("docs", clean); });
         }, function() {});
       }
+    }
+
+    // View / Annotate, remembered so an offline start opens the same way.
+    function modeChanged(layer, on) {
+      var key = layer._offlineKey;
+      var st = key && states[key];
+      if (!st || !st.attached || !st.doc || layer._standalone) return;
+      if (!!st.doc.mode === !!on) return;
+      st.doc = Object.assign({}, st.doc, { mode: !!on });
+      var snapshot = st.doc;
+      queue(key, function() { return put("docs", snapshot); });
     }
 
     // The LiveView came back without a reload: send what it missed.
@@ -827,7 +842,7 @@
 
     return {
       merge: merge, norm: norm, canon: canon, changes: changes,
-      attach: attach, emitted: emitted, reconnected: reconnected, boot: boot,
+      attach: attach, emitted: emitted, reconnected: reconnected, boot: boot, modeChanged: modeChanged,
       _shellHtml: shellHtml
     };
   })();
@@ -15109,6 +15124,7 @@
       var self = this;
       if (self.annotationMode === on) return;
       self.annotationMode = on;
+      if (self._offlineKey) Offline.modeChanged(self, on);
       // The selection frame only belongs to the cursor in annotation mode.
       setTimeout(function() { self._syncTransformBox(); }, 0);
       self._syncNavPencil();

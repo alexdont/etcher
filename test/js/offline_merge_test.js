@@ -103,4 +103,17 @@ const ids = (list) => list.map((s) => s.uuid + (s.geometry ? "@" + s.geometry.x 
   assert.strictEqual(O.changes([sh("a", 5), sh("c", 3)], [sh("a", 1), sh("b", 2)]), 3);
 }
 
+// A save counts as stored only when the server answered, and not with
+// `saved: false` (boards' answer to a failed write).
+{
+  const ok = { status: "fulfilled", value: { reply: {}, ref: 1 } };
+  assert.strictEqual(O.acknowledged([ok]), true, "an ordinary reply");
+  assert.strictEqual(O.acknowledged([{ status: "fulfilled", value: { reply: { saved: false } } }]), false, "saved: false");
+  assert.strictEqual(O.acknowledged([{ status: "fulfilled", value: { reply: { saved: true } } }]), true);
+  assert.strictEqual(O.acknowledged([{ status: "rejected", reason: new Error("not connected") }]), false, "not connected");
+  assert.strictEqual(O.acknowledged([ok, { status: "rejected" }]), false, "every target must answer");
+  assert.strictEqual(O.acknowledged([]), false, "no target, no answer");
+  assert.strictEqual(O.acknowledged(undefined), false, "standalone: nothing was sent");
+}
+
 console.log("offline_merge_test: ok");

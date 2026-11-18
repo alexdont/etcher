@@ -585,6 +585,8 @@ defmodule Etcher.Layer do
     `"board:" <> uuid`). Every save is also kept in the browser (IndexedDB);
     a save the server has not acknowledged is sent again — merged shape by
     shape with what the server has by then — on the next load or reconnect.
+    Any reply to `etcher:annotations-changed` counts as stored, except
+    `{:reply, %{saved: false}, socket}`: answer that when the write failed.
 
     With `offline_sw` the page itself is kept too: opened with no
     connection, it starts the board from this device's copy without the

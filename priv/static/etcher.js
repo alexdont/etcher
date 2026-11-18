@@ -586,16 +586,28 @@
       var live = copy.querySelector("#" + cssEscape(fresco.id));
       if (!live) return null;
       live.parentNode.replaceChild(fresco.__frescoPristine.cloneNode(true), live);
+      // What is live news online (who is here) the host marks
+      // `data-offline-hide`; scripts would not run from innerHTML anyway.
+      Array.prototype.slice.call(copy.querySelectorAll("[data-offline-hide], script")).forEach(function(el) {
+        if (el.parentNode) el.parentNode.removeChild(el);
+      });
+      var ours = function(name) { return /^Fresco/.test(name) || name === "EtcherLayer"; };
       var hooked = [copy].concat(Array.prototype.slice.call(copy.querySelectorAll("[phx-hook]")));
       hooked.forEach(function(el) {
         var name = el.getAttribute("phx-hook");
         if (!name) return;
         el.removeAttribute("phx-hook");
-        if (/^Fresco/.test(name) || name === "EtcherLayer") {
+        if (ours(name)) {
           el.setAttribute("data-offline-hook", name);
-        } else if (el !== copy) {
-          while (el.firstChild) el.removeChild(el.firstChild);
+          return;
         }
+        // Another hook's element: what it drew is its own, and nothing will
+        // run it offline. Kept only as the frame around the canvas.
+        if (el === copy) return;
+        var holdsCanvas = Array.prototype.some.call(el.querySelectorAll("[phx-hook], [data-offline-hook]"), function(c) {
+          return ours(c.getAttribute("phx-hook") || c.getAttribute("data-offline-hook") || "");
+        });
+        if (!holdsCanvas) while (el.firstChild) el.removeChild(el.firstChild);
       });
       return copy.outerHTML;
     }
@@ -711,6 +723,17 @@
       });
     }
 
+    // Whether the server stored a save: every target answered, and none with
+    // `saved: false` — how a host says it could not store the list (boards
+    // does on a failed write). `results` is pushEventTo's settled promises.
+    function acknowledged(results) {
+      return Array.isArray(results) && results.length > 0 &&
+        results.every(function(r) {
+          var reply = r && r.value && r.value.reply;
+          return !!r && r.status === "fulfilled" && !(reply && reply.saved === false);
+        });
+    }
+
     // Every save. `pushed` is what pushEventTo returned: settled results once
     // the server has answered, or nothing at all (standalone).
     function emitted(layer, payload, pushed) {
@@ -724,9 +747,7 @@
       queue(key, function() { return put("docs", snapshot); });
       if (pushed && typeof pushed.then === "function") {
         pushed.then(function(results) {
-          var ok = Array.isArray(results) && results.length > 0 &&
-            results.every(function(r) { return r && r.status === "fulfilled"; });
-          if (!ok || !st.doc || st.doc.seq !== seq) return;
+          if (!acknowledged(results) || !st.doc || st.doc.seq !== seq) return;
           st.doc = Object.assign({}, st.doc, { base: list, dirty: false });
           var clean = st.doc;
           queue(key, function() { return put("docs", clean); });
@@ -860,7 +881,7 @@
     }
 
     return {
-      merge: merge, norm: norm, canon: canon, changes: changes,
+      merge: merge, norm: norm, canon: canon, changes: changes, acknowledged: acknowledged,
       attach: attach, emitted: emitted, reconnected: reconnected, boot: boot, modeChanged: modeChanged,
       _shellHtml: shellHtml
     };

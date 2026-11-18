@@ -592,7 +592,19 @@ defmodule Etcher.Layer do
     connection, it starts the board from this device's copy without the
     LiveView. The host marks the element to rebuild with
     `data-offline-root` and, in its disconnected render, where it goes with
-    `data-offline-slot`.
+    `data-offline-slot`. A page whose disconnected render already holds the
+    canvas and this layer needs neither: it is started in place.
+    """
+  )
+
+  attr(:offline_protect, :string,
+    default: nil,
+    doc: """
+    A metadata key that protects a shape from an offline delete. When a device
+    that was offline deleted a shape whose current server copy has this key
+    set (say `"comment_count"`, on a shape with a comment thread), the merge on
+    reconnect keeps the shape instead: deleting it would take what other
+    people attached to it.
     """
   )
 
@@ -666,6 +678,7 @@ defmodule Etcher.Layer do
       data-loupe={@loupe == false && "false"}
       data-offline-key={@offline}
       data-offline-sw={@offline && @offline_sw}
+      data-offline-protect={@offline && @offline_protect}
       data-offline-scope={@offline && @offline_sw && @offline_scope}
       data-image-source={@image_source == :custom && "custom"}
       data-paste-images={@paste_images == false && "false"}

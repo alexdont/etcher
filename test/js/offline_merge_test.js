@@ -68,6 +68,20 @@ const ids = (list) => list.map((s) => s.uuid + (s.geometry ? "@" + s.geometry.x 
   assert.deepStrictEqual(ids(O.merge(base, [sh("b", 2)], [sh("b", 2)])), ["b@2"]);
 }
 
+// A protected shape (the host's `offline_protect` key set on the server's
+// copy — a shape with comments) survives an offline delete; an unprotected one
+// does not, and without the option nothing is protected.
+{
+  const withThread = sh("a", 1, { metadata: { comment_count: 2 } });
+  const base = [withThread, sh("b", 2)];
+  const local = [];                                   // both deleted offline
+  const server = [withThread, sh("b", 2)];
+  assert.deepStrictEqual(ids(O.merge(base, local, server, "comment_count")), ["a@1"], "the commented shape is kept");
+  assert.deepStrictEqual(ids(O.merge(base, local, server)), [], "no option, no protection");
+  const zero = [sh("a", 1, { metadata: { comment_count: 0 } })];
+  assert.deepStrictEqual(ids(O.merge(zero, [], zero, "comment_count")), [], "a zero count protects nothing");
+}
+
 // Order: this device's order, then shapes only the server added.
 {
   const base = [sh("a", 1), sh("b", 2)];

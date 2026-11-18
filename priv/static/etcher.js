@@ -505,7 +505,7 @@
     // then the change is kept rather than thrown away.
     //
     // Order: this device's, with shapes only the server has added at the end.
-    function merge(base, local, server) {
+    function merge(base, local, server, protect) {
       base = norm(base); local = norm(local); server = norm(server);
       var B = byUuid(base), L = byUuid(local), S = byUuid(server);
       var take = {};
@@ -517,6 +517,10 @@
         if (localSame) { if (s) take[u] = s; return; }
         if (!l) {
           if (s && b && canon(s) !== canon(b)) take[u] = s;
+          // A shape the host protects (`offline_protect`: say, one with a
+          // comment thread) is not deleted by a device that was offline —
+          // that delete would take what others wrote with it.
+          else if (s && protect && s.metadata && s.metadata[protect]) take[u] = s;
           return;
         }
         take[u] = l;
@@ -696,7 +700,7 @@
         var server = serverList(layer);
         return get("docs", key).then(function(doc) {
           if (doc && doc.dirty) {
-            var merged = merge(doc.base, doc.local, server);
+            var merged = merge(doc.base, doc.local, server, layer.el.dataset.offlineProtect || null);
             var n = changes(merged, server);
             st.doc = { key: key, base: server, local: merged, dirty: n > 0, seq: (doc.seq || 0) + 1, mode: !!layer.annotationMode };
             st.attached = true;
@@ -711,11 +715,13 @@
           st.attached = true;
           return put("docs", st.doc);
         }).then(function() {
+          // Which page shows this key — always. The copy to rebuild it from
+          // only when the page needs one (its canvas sits in a
+          // `[data-offline-root]`); a page whose first render already holds
+          // the canvas is started in place.
           var html = shellHtml(layer);
-          if (!html) return;
-          return put("shells", { key: key, html: html, savedAt: Date.now() }).then(function() {
-            return put("paths", { path: pathKey(), key: key });
-          });
+          var shell = html ? put("shells", { key: key, html: html, savedAt: Date.now() }) : Promise.resolve();
+          return shell.then(function() { return put("paths", { path: pathKey(), key: key }); });
         }).then(function() { registerWorker(layer); }, function(err) {
           try { console.warn("[Etcher offline]", err); } catch (_) {}
           registerWorker(layer);
@@ -802,59 +808,120 @@
       });
     }
 
+    // The hooks a page needs to show and draw on a canvas, in the order they
+    // depend on each other: the viewer, its zoom layer, the drawing.
+    function ourHook(name) {
+      return /^Fresco/.test(name) || /^Tessera/.test(name) || name === "EtcherLayer";
+    }
+    function hookRank(name) {
+      return /^Fresco/.test(name) ? 0 : /^Tessera/.test(name) ? 1 : 2;
+    }
+
+    // Started by hand, with nothing behind it: pushes go nowhere (Etcher keeps
+    // its edits in `docs` meanwhile), server events never come.
+    function mountHook(el, name) {
+      var def = (window.FrescoHooks && window.FrescoHooks[name]) ||
+                (window.TesseraHooks && window.TesseraHooks[name]) ||
+                (window.EtcherHooks && window.EtcherHooks[name]);
+      if (!def || el.__etcherHook) return;
+      el.__etcherStandalone = true;
+      var hook = Object.create(def);
+      hook.el = el;
+      hook.__standalone = true;
+      hook.pushEvent = hook.pushEventTo = function() {};
+      hook.handleEvent = function() {};
+      hook.removeHandleEvent = function() {};
+      hook.upload = hook.uploadTo = function() {};
+      el.__etcherHook = hook;
+      try { hook.mounted(); } catch (err) { try { console.warn("[Etcher offline] " + name, err); } catch (_) {} }
+    }
+
+    function mountAll(list) {
+      list.sort(function(x, y) { return hookRank(x.name) - hookRank(y.name); })
+        .forEach(function(h) { mountHook(h.el, h.name); });
+    }
+
+    // This device's shapes in place of the ones the page was rendered with.
+    function putShapes(fresco, doc, attr) {
+      if (!fresco || !doc || !Array.isArray(doc.local)) return;
+      var ext = {};
+      try { ext = JSON.parse(fresco.getAttribute("data-extensions") || "{}") || {}; } catch (_) {}
+      ext.etcher = Object.assign({}, ext.etcher || {}, { annotations: doc.local });
+      fresco.setAttribute("data-extensions", JSON.stringify(ext));
+    }
+
+    function stopLiveView() {
+      // The LiveView has nothing to offer until the server answers, and if
+      // it joined now it would render over this page. Stop it; a reload
+      // brings it back once the server is reachable.
+      try { if (window.liveSocket && window.liveSocket.disconnect) window.liveSocket.disconnect(); } catch (_) {}
+      // …and its loading bar would run forever.
+      try { window.dispatchEvent(new CustomEvent("phx:page-loading-stop", { detail: { kind: "initial" } })); } catch (_) {}
+    }
+
+    // Two ways a page comes back offline.
+    //
+    //   rebuilt   the page's disconnected render holds no canvas (boards
+    //             renders a spinner), so the copy saved online (`shells`) is
+    //             put in its `[data-offline-slot]`.
+    //   in place  the disconnected render already holds the canvas and its
+    //             layer (the media viewer renders the open file), so the hooks
+    //             are started on it as it is.
     function standalone(key) {
+      var layerEl = document.querySelector('[phx-hook="EtcherLayer"][data-offline-key="' + cssEscape(key) + '"]');
+      if (layerEl) return inPlace(key, layerEl);
       var slot = document.querySelector("[data-offline-slot]");
       if (!slot || slot.__etcherOffline) return;
       Promise.all([get("shells", key), get("docs", key)]).then(function(r) {
         var shell = r[0], doc = r[1];
         if (!shell || !shell.html || connected()) return;
         slot.__etcherOffline = true;
-
-        // The LiveView has nothing to offer until the server answers, and if
-        // it joined now it would render over this page. Stop it; a reload
-        // brings it back once the server is reachable.
-        try { if (window.liveSocket && window.liveSocket.disconnect) window.liveSocket.disconnect(); } catch (_) {}
-        // …and its loading bar would run forever.
-        try { window.dispatchEvent(new CustomEvent("phx:page-loading-stop", { detail: { kind: "initial" } })); } catch (_) {}
+        stopLiveView();
 
         var holder = document.createElement("div");
         holder.innerHTML = shell.html;
         var root = holder.firstElementChild;
         if (!root) return;
-        if (doc && Array.isArray(doc.local)) {
-          var fresco = root.querySelector("[data-offline-hook^=Fresco]");
-          if (fresco) {
-            var ext = {};
-            try { ext = JSON.parse(fresco.getAttribute("data-extensions") || "{}") || {}; } catch (_) {}
-            ext.etcher = Object.assign({}, ext.etcher || {}, { annotations: doc.local });
-            fresco.setAttribute("data-extensions", JSON.stringify(ext));
-          }
-        }
+        putShapes(root.querySelector("[data-offline-hook^=Fresco]"), doc);
         while (slot.firstChild) slot.removeChild(slot.firstChild);
-        slot.style.display = "flex";
-        slot.style.flexDirection = "column";
-        slot.style.alignItems = "stretch";
-        slot.style.justifyContent = "stretch";
+        // A slot with no box of its own (`display: contents`, the media
+        // viewer's) leaves the layout to its parent; any other is made a
+        // column the copy fills (boards' spinner).
+        var boxless = false;
+        try { boxless = window.getComputedStyle(slot).display === "contents"; } catch (_) {}
+        if (!boxless) {
+          slot.style.display = "flex";
+          slot.style.flexDirection = "column";
+          slot.style.alignItems = "stretch";
+          slot.style.justifyContent = "stretch";
+        }
         slot.appendChild(root);
-        if (!root.style.flex) root.style.flex = "1 1 auto";
+        if (!boxless && !root.style.flex) root.style.flex = "1 1 auto";
         slot.classList.add("etcher-offline-page");
 
-        Array.prototype.forEach.call(root.querySelectorAll("[data-offline-hook]"), function(el) {
-          var name = el.getAttribute("data-offline-hook");
-          var def = (window.FrescoHooks && window.FrescoHooks[name]) ||
-                    (window.EtcherHooks && window.EtcherHooks[name]);
-          if (!def) return;
-          el.__etcherStandalone = true;
-          var hook = Object.create(def);
-          hook.el = el;
-          hook.__standalone = true;
-          hook.pushEvent = hook.pushEventTo = function() {};
-          hook.handleEvent = function() {};
-          hook.removeHandleEvent = function() {};
-          hook.upload = hook.uploadTo = function() {};
-          try { hook.mounted(); } catch (err) { try { console.warn("[Etcher offline] " + name, err); } catch (_) {} }
-        });
+        mountAll(Array.prototype.map.call(root.querySelectorAll("[data-offline-hook]"), function(el) {
+          return { el: el, name: el.getAttribute("data-offline-hook") };
+        }));
+        watchForServer();
+      });
+    }
 
+    function inPlace(key, layerEl) {
+      if (layerEl.__etcherOffline) return;
+      var fid = layerEl.getAttribute("data-fresco-id");
+      var fresco = fid && document.getElementById(fid);
+      if (!fresco) return;
+      get("docs", key).then(function(doc) {
+        if (connected() || layerEl.__etcherOffline) return;
+        layerEl.__etcherOffline = true;
+        stopLiveView();
+        putShapes(fresco, doc);
+        var hooks = [{ el: fresco, name: fresco.getAttribute("phx-hook") || "" }];
+        Array.prototype.forEach.call(document.querySelectorAll('[phx-hook][data-fresco-id="' + cssEscape(fid) + '"]'), function(el) {
+          var name = el.getAttribute("phx-hook");
+          if (ourHook(name)) hooks.push({ el: el, name: name });
+        });
+        mountAll(hooks.filter(function(h) { return ourHook(h.name); }));
         watchForServer();
       });
     }

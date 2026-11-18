@@ -4,6 +4,26 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Offline mode starts a canvas in place.** A page whose first render
+  already holds the canvas and its layer (phoenix_kit's media viewer renders
+  the open file) is started offline on that markup, with this device's
+  shapes put in, instead of needing a rebuilt copy. Tessera's zoom layer is
+  started with it. A `display: contents` slot keeps its layout when a copy is
+  put in it.
+- **`offline_protect`** on `Etcher.layer`: a metadata key (say
+  `"comment_count"`) that protects a shape from an offline delete. When a
+  device that was offline deleted a shape whose server copy has the key set,
+  the merge keeps the shape.
+
+### Fixed
+
+- A page that needs no rebuilt copy is still recorded as kept, so it opens
+  offline.
+
 ## [0.28.0] — 2026-11-18
 
 ### Added

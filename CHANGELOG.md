@@ -4,21 +4,32 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.28.0] — 2026-11-18
 
 ### Added
 
-- **Offline mode (prototype).** `offline="<key>"` on `Etcher.layer` keeps
-  every save in the browser (IndexedDB) as well; a save the server has not
-  acknowledged is sent again on the next load or reconnect, merged shape by
-  shape with what the server has by then (this device's change wins on the
-  same shape; a shape deleted here but changed on the server is kept). With
-  `offline_sw` (the service worker in `priv/static/etcher-offline-sw.js`,
-  `Etcher.offline_worker/0`) the page itself is kept: opened with no
-  connection, it rebuilds the board from this device's copy without the
-  LiveView, and reloads to sync once the server answers. The host marks the
-  area to rebuild with `data-offline-root` and, in its disconnected render,
-  the place for it with `data-offline-slot`.
+- **Offline mode.** `offline="<key>"` on `Etcher.layer` (one key per board)
+  keeps every save in the browser (IndexedDB) as well. A save the server has
+  not acknowledged is sent again on the next load or reconnect, merged shape
+  by shape with what the server has by then: this device's change wins on
+  the same shape, and a shape deleted here but changed on the server is
+  kept. Any reply counts as stored except `{:reply, %{saved: false}, socket}`,
+  which a host answers when its write failed.
+- With `offline_sw` the page itself works offline: the service worker in
+  `priv/static/etcher-offline-sw.js` (`Etcher.offline_worker/0`, served by
+  the host) keeps the page and the files it loaded, stored together from one
+  load, and the board says "Ready to use offline." when they are. Opened with
+  no connection, the board is rebuilt from this device's copy without the
+  LiveView, in the View / Annotate mode it was left in, and the page reloads
+  to sync once the server answers ("Synced N changes made offline."). The
+  host marks the part of the page to rebuild with `data-offline-root`, the
+  place for it in its disconnected render with `data-offline-slot`, and
+  anything that is live news (presence) with `data-offline-hide`. The
+  rebuild needs Fresco 0.17, which keeps the server-rendered canvas element.
+
+### Changed
+
+- The fresco requirement admits 0.17.
 
 ## [0.27.0] — 2026-11-16
 

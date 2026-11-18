@@ -38,7 +38,7 @@ Add `:fresco` (the viewer) and `:etcher` to your `mix.exs`:
 def deps do
   [
     {:fresco, "~> 0.5"},
-    {:etcher, "~> 0.27"}
+    {:etcher, "~> 0.28"}
   ]
 end
 ```

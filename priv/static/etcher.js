@@ -430,6 +430,18 @@
       try { return typeof indexedDB !== "undefined" && indexedDB !== null; } catch (_) { return false; }
     }
 
+    // Whether this device keeps anything at all, asked without opening the
+    // database: opening creates it, and every page Etcher is loaded on looks —
+    // so a device that was signed out (and wiped) would get it straight back.
+    // Browsers that cannot list databases are answered "maybe".
+    function exists() {
+      if (!idbAvailable()) return Promise.resolve(false);
+      if (typeof indexedDB.databases !== "function") return Promise.resolve(true);
+      return indexedDB.databases().then(function(list) {
+        return list.some(function(d) { return d && d.name === DB_NAME; });
+      }, function() { return true; });
+    }
+
     function db() {
       if (dbPromise) return dbPromise;
       dbPromise = new Promise(function(resolve, reject) {
@@ -440,7 +452,13 @@
           if (!d.objectStoreNames.contains("shells")) d.createObjectStore("shells", { keyPath: "key" });
           if (!d.objectStoreNames.contains("paths")) d.createObjectStore("paths", { keyPath: "path" });
         };
-        req.onsuccess = function() { resolve(req.result); };
+        req.onsuccess = function() {
+          var d = req.result;
+          // Another tab deleting the database (a logout there) must not be
+          // held up by this connection: let go, and open afresh next time.
+          d.onversionchange = function() { try { d.close(); } catch (_) {} dbPromise = null; };
+          resolve(d);
+        };
         req.onerror = function() { reject(req.error); };
       });
       dbPromise.catch(function() { dbPromise = null; });
@@ -787,8 +805,11 @@
     function boot() {
       if (!idbAvailable() || typeof document === "undefined") return;
       var started = Date.now();
-      var lookup = get("paths", pathKey()).then(function(p) {
-        return p || get("paths", window.location.pathname);
+      var lookup = exists().then(function(yes) {
+        if (!yes) return null;
+        return get("paths", pathKey()).then(function(p) {
+          return p || get("paths", window.location.pathname);
+        });
       }).catch(function() { return null; });
       lookup.then(function(entry) {
         if (!entry) return;
@@ -947,8 +968,83 @@
       window.addEventListener("online", function() { setTimeout(probe, 500); });
     }
 
+    // ---- signing out ------------------------------------------------------
+    // What this device keeps for offline use is the signed-in person's: the
+    // pages, the pictures on them (private files among them), the shapes.
+    // None of it may outlive the sign-out.
+
+    function allDocs() {
+      return db().then(function(d) {
+        return new Promise(function(resolve, reject) {
+          var req = d.transaction("docs", "readonly").objectStore("docs").getAll();
+          req.onsuccess = function() { resolve(req.result || []); };
+          req.onerror = function() { reject(req.error); };
+        });
+      });
+    }
+
+    // How many kept boards / files hold changes no server has confirmed.
+    function pending() {
+      return exists().then(function(yes) { return yes ? allDocs() : []; }).then(function(docs) {
+        return docs.filter(function(d) { return d && d.dirty; }).length;
+      }, function() { return 0; });
+    }
+
+    // Everything: the worker's stored pages and files, the database, and the
+    // worker itself. Resolves when done, or when the browser would not say
+    // (a tab still holding the database deletes it when it lets go).
+    function forget() {
+      states = {};
+      var jobs = [];
+      if (typeof caches !== "undefined") {
+        jobs.push(caches.keys().then(function(keys) {
+          return Promise.all(keys.filter(function(k) { return /^etcher-offline/.test(k); })
+            .map(function(k) { return caches.delete(k); }));
+        }).catch(function() {}));
+      }
+      if (typeof navigator !== "undefined" && navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+        jobs.push(navigator.serviceWorker.getRegistrations().then(function(regs) {
+          return Promise.all(regs.filter(function(r) {
+            var w = r.active || r.waiting || r.installing;
+            return w && /etcher-offline-sw/.test(w.scriptURL || "");
+          }).map(function(r) { return r.unregister(); }));
+        }).catch(function() {}));
+      }
+      if (idbAvailable()) {
+        jobs.push((dbPromise || Promise.resolve(null)).then(function(d) {
+          if (d) try { d.close(); } catch (_) {}
+        }, function() {}).then(function() {
+          dbPromise = null;
+          return new Promise(function(resolve) {
+            var req = indexedDB.deleteDatabase(DB_NAME);
+            req.onsuccess = req.onerror = function() { resolve(); };
+            req.onblocked = function() { setTimeout(resolve, 300); };
+          });
+        }));
+      }
+      return Promise.all(jobs).then(function() {});
+    }
+
+    // Before signing out: changes made offline and not yet sent would be lost
+    // with the rest, so the person is asked first. Resolves true to go ahead
+    // (everything forgotten), false to stay signed in.
+    function beforeLogout() {
+      return pending().then(function(n) {
+        if (n > 0) {
+          var msg = n === 1
+            ? "Changes made offline on 1 board or picture are not saved yet. Log out and delete them?\n\nCancel, go online and let them sync first to keep them."
+            : "Changes made offline on " + n + " boards or pictures are not saved yet. Log out and delete them?\n\nCancel, go online and let them sync first to keep them.";
+          var ok = true;
+          try { ok = window.confirm(msg); } catch (_) {}
+          if (!ok) return false;
+        }
+        return forget().then(function() { return true; }, function() { return true; });
+      });
+    }
+
     return {
       merge: merge, norm: norm, canon: canon, changes: changes, acknowledged: acknowledged,
+      pending: pending, forget: forget, beforeLogout: beforeLogout,
       attach: attach, emitted: emitted, reconnected: reconnected, boot: boot, modeChanged: modeChanged,
       _shellHtml: shellHtml
     };

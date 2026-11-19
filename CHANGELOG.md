@@ -4,6 +4,24 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Forgetting offline copies.** `Etcher.offline.forget()` removes everything
+  offline mode keeps on the device — the service worker's stored pages and
+  files, the browser database and the worker's registration;
+  `Etcher.offline.pending()` counts the boards / files holding changes no
+  server has confirmed; `Etcher.offline.beforeLogout()` asks before deleting
+  such changes and then forgets everything (resolves `false` when the person
+  cancels). phoenix_kit calls it when someone logs out.
+
+### Fixed
+
+- A page Etcher is loaded on no longer creates the offline database just by
+  checking whether this device keeps a copy of it, so a wiped device stays
+  wiped.
+
 ## [0.29.0] — 2026-11-19
 
 ### Added

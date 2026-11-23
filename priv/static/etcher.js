@@ -656,7 +656,41 @@
       var root = layer.handle && layer.handle.container;
       if (root) Array.prototype.forEach.call(root.querySelectorAll("img"), function(i) { add(i.currentSrc || i.src); });
       (layer.shapes || []).forEach(function(s) { if (s.geometry && s.geometry.href) add(s.geometry.href); });
+      // Every rung of the picture's zoom ladder (Tessera), not only the one
+      // on screen now: zooming in offline should reach the sharpest one.
+      zoomLayers(layer).forEach(function(el) {
+        try {
+          (JSON.parse(el.getAttribute("data-sources") || "[]") || []).forEach(function(src) {
+            add(src && (src.url || src.src));
+          });
+        } catch (_) {}
+        add(el.getAttribute("data-dzi-url"));
+      });
       return Object.keys(urls);
+    }
+
+    function zoomLayers(layer) {
+      var fid = layer.frescoId || (layer.el && layer.el.getAttribute("data-fresco-id"));
+      if (!fid) return [];
+      return Array.prototype.slice.call(
+        document.querySelectorAll('[phx-hook="TesseraLayer"][data-fresco-id="' + cssEscape(fid) + '"], [data-offline-hook="TesseraLayer"][data-fresco-id="' + cssEscape(fid) + '"]')
+      );
+    }
+
+    // Where a deep-zoom picture's tiles live (`<name>_files/…` beside its
+    // `.dzi`). Too many to fetch up front — a gigapixel picture has
+    // thousands — so the worker keeps each one as it is loaded online.
+    function tilePrefixes(layer) {
+      var out = [];
+      zoomLayers(layer).forEach(function(el) {
+        var dzi = el.getAttribute("data-dzi-url");
+        if (!dzi) return;
+        try {
+          var u = new URL(dzi, window.location.href);
+          out.push(u.origin + u.pathname.replace(/\.dzi$/i, "_files/"));
+        } catch (_) {}
+      });
+      return out;
     }
 
     function registerWorker(layer) {
@@ -684,9 +718,80 @@
         return navigator.serviceWorker.ready;
       }).then(function(reg) {
         var w = reg.active || navigator.serviceWorker.controller;
-        if (w) w.postMessage({ type: "etcher-offline:keep", page: page, urls: urls });
+        if (w) w.postMessage({ type: "etcher-offline:keep", page: page, urls: urls, prefixes: tilePrefixes(layer) });
       }).catch(function(err) {
         try { console.warn("[Etcher offline] service worker:", err); } catch (_) {}
+      });
+    }
+
+    // ---- pictures added offline -------------------------------------------
+    //
+    // A picture added with no connection has no uploader to go to, so it is
+    // kept inside its shape as a data URL. Sent that way, a phone photo makes
+    // the board one message of a dozen megabytes, which the connection drops —
+    // the sync would never land. So before syncing, each such picture goes
+    // through the host's uploader (the one it uses online), and the shape
+    // carries the stored URL instead. With no uploader the picture stays
+    // embedded, as it always has.
+
+    function embeddedPicture(shape) {
+      var href = shape && shape.geometry && shape.geometry.href;
+      return typeof href === "string" && /^data:image\//.test(href);
+    }
+
+    function dataUrlToFile(dataUrl, name) {
+      var m = /^data:([^;,]+)(;base64)?,(.*)$/.exec(dataUrl);
+      if (!m) return null;
+      var bytes;
+      if (m[2]) {
+        var bin = atob(m[3]);
+        bytes = new Uint8Array(bin.length);
+        for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      } else {
+        bytes = new TextEncoder().encode(decodeURIComponent(m[3]));
+      }
+      var ext = (m[1].split("/")[1] || "png").replace("jpeg", "jpg").replace(/\+.*$/, "");
+      return new File([bytes], name + "." + ext, { type: m[1] });
+    }
+
+    // The host's uploader, waited for briefly: hosts set it as their own hooks
+    // mount, which can be just after the layer's.
+    function uploaderFor(layer) {
+      return new Promise(function(resolve) {
+        var tries = 0;
+        (function look() {
+          var up = layer._imageUploader && layer._imageUploader();
+          if (up || tries++ >= 25) return resolve(up || null);
+          setTimeout(look, 200);
+        })();
+      });
+    }
+
+    // `list` with its offline pictures uploaded where an uploader takes them.
+    // One at a time: a dozen photos at once would compete for the connection
+    // that just came back.
+    function uploadPictures(layer, list, server) {
+      var serverHref = {};
+      server.forEach(function(s) { if (s.geometry) serverHref[s.uuid] = s.geometry.href; });
+      var todo = list.filter(function(s) { return embeddedPicture(s) && serverHref[s.uuid] !== s.geometry.href; });
+      if (!todo.length) return Promise.resolve(list);
+      return uploaderFor(layer).then(function(upload) {
+        if (!upload) return list;
+        var stored = {};
+        return todo.reduce(function(chain, shape) {
+          return chain.then(function() {
+            var file = dataUrlToFile(shape.geometry.href, "offline-" + shape.uuid);
+            if (!file) return;
+            return Promise.resolve(upload(file, { frescoId: layer.frescoId, offline: true })).then(function(url) {
+              if (typeof url === "string" && url && !/^data:/.test(url)) stored[shape.uuid] = url;
+            }, function() {});
+          });
+        }, Promise.resolve()).then(function() {
+          return list.map(function(s) {
+            if (!stored[s.uuid]) return s;
+            return Object.assign({}, s, { geometry: Object.assign({}, s.geometry, { href: stored[s.uuid] }) });
+          });
+        });
       });
     }
 
@@ -722,12 +827,16 @@
             var n = changes(merged, server);
             st.doc = { key: key, base: server, local: merged, dirty: n > 0, seq: (doc.seq || 0) + 1, mode: !!layer.annotationMode };
             st.attached = true;
-            if (n > 0) {
-              show(layer, merged); // saves through annotations-changed; the reply clears dirty
-              layer._offlineSyncedAt = Date.now();
-              layer._showToast(n === 1 ? "Synced 1 change made offline." : "Synced " + n + " changes made offline.", { ms: 4000 });
-            }
-            return put("docs", st.doc);
+            if (n === 0) return put("docs", st.doc);
+            layer._offlineSyncedAt = Date.now();
+            layer._showToast(n === 1 ? "Syncing 1 change made offline…" : "Syncing " + n + " changes made offline…", { sticky: true });
+            return put("docs", st.doc).then(function() {
+              return uploadPictures(layer, merged, server);
+            }).then(function(ready) {
+              // Said when the server has the board, not before (`emitted`).
+              st.syncing = n;
+              show(layer, ready); // saves through annotations-changed; the reply clears dirty
+            });
           }
           st.doc = { key: key, base: server, local: server, dirty: false, seq: (doc && doc.seq) || 0, mode: !!layer.annotationMode };
           st.attached = true;
@@ -771,7 +880,16 @@
       queue(key, function() { return put("docs", snapshot); });
       if (pushed && typeof pushed.then === "function") {
         pushed.then(function(results) {
-          if (!acknowledged(results) || !st.doc || st.doc.seq !== seq) return;
+          var ok = acknowledged(results);
+          if (st.syncing) {
+            var n = st.syncing;
+            st.syncing = 0;
+            layer._offlineSyncedAt = Date.now();
+            layer._showToast(ok
+              ? (n === 1 ? "Synced 1 change made offline." : "Synced " + n + " changes made offline.")
+              : "The changes made offline could not be saved yet. They are kept on this device.", { ms: 5000 });
+          }
+          if (!ok || !st.doc || st.doc.seq !== seq) return;
           st.doc = Object.assign({}, st.doc, { base: list, dirty: false });
           var clean = st.doc;
           queue(key, function() { return put("docs", clean); });

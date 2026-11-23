@@ -4,6 +4,28 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Offline zoom.** A kept page keeps every rung of its picture's zoom ladder
+  (Tessera's `data-sources`), not only the one on screen, so zooming in with
+  no connection reaches the sharpest one. A deep-zoom picture's tiles
+  (`<name>_files/…` beside its `.dzi`) are kept as they load online — too
+  many to fetch up front — and served offline.
+
+### Fixed
+
+- **A photo added offline reaches the server.** A picture added with no
+  connection is kept inside its shape; synced that way a phone photo made
+  the board one message of a dozen megabytes, which the connection dropped,
+  so the sync never landed. On reconnect each such picture now goes through
+  the host's uploader first (`setImageUploader`), and the board is sent with
+  the stored URL. With no uploader it stays embedded, as before.
+- "Synced N changes made offline." is said once the server has confirmed the
+  save ("Syncing…" until then), and a save that fails says the changes are
+  still kept on this device.
+
 ## [0.29.1] — 2026-11-19
 
 ### Added

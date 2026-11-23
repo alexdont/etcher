@@ -20,6 +20,9 @@ var CACHE = "etcher-offline-v1";
 var INDEX = "/__etcher_offline_index__";
 var NETWORK_WAIT_MS = 6000;
 var kept = null; // Set of kept URLs, loaded lazily (a worker can be restarted at any time)
+// URL prefixes kept as they are loaded: a deep-zoom picture's tiles, too many
+// to fetch up front. Each one fetched online is stored; offline, it is served.
+var keptPrefixes = [];
 
 self.addEventListener("install", function() { self.skipWaiting(); });
 self.addEventListener("activate", function(event) { event.waitUntil(self.clients.claim()); });
@@ -35,7 +38,10 @@ function index() {
   }).then(function(res) {
     return res ? res.json() : [];
   }).then(function(list) {
-    kept = new Set(Array.isArray(list) ? list : []);
+    // Older indexes were a bare list of URLs.
+    var urls = Array.isArray(list) ? list : (list && list.urls) || [];
+    keptPrefixes = (list && Array.isArray(list.prefixes)) ? list.prefixes : [];
+    kept = new Set(urls);
     return kept;
   }, function() {
     kept = new Set();
@@ -43,8 +49,15 @@ function index() {
   });
 }
 
+function byPrefix(url) {
+  for (var i = 0; i < keptPrefixes.length; i++) {
+    if (url.indexOf(keptPrefixes[i]) === 0) return true;
+  }
+  return false;
+}
+
 function saveIndex(cache) {
-  return cache.put(INDEX, new Response(JSON.stringify(Array.from(kept)), {
+  return cache.put(INDEX, new Response(JSON.stringify({ urls: Array.from(kept), prefixes: keptPrefixes }), {
     headers: { "content-type": "application/json" }
   }));
 }
@@ -71,6 +84,9 @@ self.addEventListener("message", function(event) {
   }).then(function(cache) {
     var urls = (Array.isArray(data.urls) ? data.urls : []).filter(function(u) {
       return /^https?:/.test(u);
+    });
+    (Array.isArray(data.prefixes) ? data.prefixes : []).forEach(function(p) {
+      if (/^https?:/.test(p) && keptPrefixes.indexOf(p) === -1) keptPrefixes.push(p);
     });
     var jobs = urls.map(function(u) { return store(cache, u); });
     if (data.page) {
@@ -122,14 +138,23 @@ self.addEventListener("fetch", function(event) {
   var key = strip(request.url);
   if (key.indexOf(INDEX) !== -1) return;
   // Known not to be kept: leave it to the browser entirely.
-  if (kept && !kept.has(key)) return;
+  if (kept && !kept.has(key) && !byPrefix(key)) return;
 
   // Answering asynchronously means deciding synchronously: the index is
   // checked inside respondWith, and a URL that is not kept goes straight to
   // the network as it would have without the worker.
   event.respondWith(index().then(function(set) {
-    if (!set.has(key)) return fetch(request);
-    return fromNetwork(request, key).catch(function(err) {
+    var tile = !set.has(key) && byPrefix(key);
+    if (!set.has(key) && !tile) return fetch(request);
+    return fromNetwork(request, key).then(function(res) {
+      // A tile is immutable (its address names its level and place) and is
+      // stored as it comes; the rest is written by `keep` only.
+      if (tile && res && (res.ok || res.type === "opaque")) {
+        var copy = res.clone();
+        caches.open(CACHE).then(function(cache) { return cache.put(key, copy); }).catch(function() {});
+      }
+      return res;
+    }).catch(function(err) {
       return caches.open(CACHE).then(function(cache) {
         return cache.match(key, { ignoreVary: true });
       }).then(function(hit) {

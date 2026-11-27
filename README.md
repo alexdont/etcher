@@ -803,6 +803,28 @@ Add `:measure` to `tools` and a Bosch GLM / PLR laser distance meter can write i
 
 **Debugging a device.** `window.Etcher.laserDebug = true` logs every frame in and out to the console; the last 50 are always in `window.Etcher.laser.frames`. `window.Etcher.laser` is the driver itself (`connect`, `measure`, `decode`, `crc8`, `subscribe`) for hosts that want a meter without a layer.
 
+## Content-Security-Policy
+
+Etcher works under a nonce-based policy with no `'unsafe-inline'`
+(`script-src 'self' 'nonce-…'; style-src 'self' 'nonce-…'`). Its component
+renders no inline styles or scripts. Two elements are created by
+`etcher.js`, and both take the page's nonce by themselves:
+
+- **Its stylesheet** takes the nonce of a nonced `<style>` on the page, else
+  of the `<script>` that loaded the bundle, else of any nonced script.
+- **The `<script>` that loads SortableJS** for the Customise dialog takes
+  the loading script's nonce. It still comes from jsDelivr unless you change
+  that (see [`sortableUrl` / `loadSortableFromCdn`](#windowetchersortableurl--loadsortablefromcdn--where-sortablejs-comes-from)).
+  A policy without that origin blocks it, and the dialog reorders with
+  native drag-and-drop instead. Point `sortableUrl` at your own copy, or set
+  `loadSortableFromCdn = false`, to avoid the blocked request.
+
+To set the nonces yourself, put
+`window.Etcher = { styleNonce: "…", scriptNonce: "…" }` before the bundle
+loads.
+
+Fresco and Leaf have the same support; see their READMEs.
+
 ## How it fits with Fresco
 
 Etcher 0.3 uses Fresco 0.5's `handle.appendNavButton/3` (for the pencil button) and `handle.getExtension/1` (to hydrate annotations from `extensions.etcher` on mount). Drawing input is delivered as plain `pointerdown` / `pointermove` / `pointerup` events on an SVG overlay anchored to Fresco's canvas-pixel coordinate space, so shapes stay locked to the image through pan and zoom. No OpenSeadragon, no canvas redraw — Fresco 0.5 dropped both.

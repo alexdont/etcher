@@ -27,8 +27,9 @@ function page(etcherCfg, sortable) {
     createElement: () => ({}),
     head: { appendChild: (s) => scripts.push(s) }
   };
-  const withSortable = new Function("window", "document", "SORTABLE_CDN", "return (" + body + ");")(
-    window, document, CDN);
+  // cspNonce: the page has no nonce here (csp_nonce_test.js covers it).
+  const withSortable = new Function("window", "document", "SORTABLE_CDN", "cspNonce", "return (" + body + ");")(
+    window, document, CDN, () => "");
   const layer = { _withSortable: withSortable };
   const results = [];
   const ask = () => layer._withSortable((lib) => results.push(lib));

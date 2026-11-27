@@ -4,6 +4,22 @@ All notable changes to **Etcher** are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.29.3] — 2026-11-28
+
+### Fixed
+
+- **Etcher's stylesheet and the SortableJS `<script>` now carry the page's
+  nonce** (#2). Under a nonce-based `style-src` the browser dropped the
+  stylesheet, and Etcher lost all its rules. The nonce comes from a nonced
+  `<style>` on the page (for the stylesheet), else the `<script>` that
+  loaded the bundle, else any nonced element, or from
+  `window.Etcher.styleNonce` / `.scriptNonce`.
+
+### Docs
+
+- A "Content-Security-Policy" section in the README, including how to keep
+  the Customise dialog from requesting SortableJS from jsDelivr.
+
 ## [0.29.2] — 2026-11-23
 
 ### Added
